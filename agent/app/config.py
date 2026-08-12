@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "soutlead"
-    environment: Literal["local", "test", "staging", "production"] = "local"
+    environment: Literal["local", "dev", "test", "staging", "production"] = "local"
     log_level: str = "INFO"
     database_url: str = "sqlite:///./data/soutlead.db"
     port: int = 8000

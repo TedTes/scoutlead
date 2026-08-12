@@ -15,3 +15,11 @@ def test_settings_accepts_json_cors_origins(monkeypatch) -> None:
     settings = Settings()
 
     assert settings.cors_origins == ["https://web.example.com"]
+
+
+def test_settings_accepts_dev_environment(monkeypatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+
+    settings = Settings()
+
+    assert settings.environment == "dev"
