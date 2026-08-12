@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import json
+from typing import Any, Protocol
+
+import httpx
+from pydantic import BaseModel
+
+from campaigns.schemas import CampaignRead
+from products.schemas import DiscoverySource, DiscoverySourceType, ProductRead
+
+
+class SearchResult(BaseModel):
+    title: str
+    url: str | None = None
+    snippet: str | None = None
+    geography: str | None = None
+    contact_email: str | None = None
+    source: str = "search"
+    raw: dict[str, Any] = {}
+
+
+class SearchToolProtocol(Protocol):
+    def search(
+        self, *, product: ProductRead, campaign: CampaignRead, source: DiscoverySource, limit: int
+    ) -> list[SearchResult]:
+        raise NotImplementedError
+
+
+class SearchTool:
+    name = "search"
+
+    def __init__(
+        self,
+        *,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: float = 20.0,
+    ) -> None:
+        self.endpoint = endpoint
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+
+    def execute(self, args: dict[str, Any]) -> list[dict[str, Any]]:
+        product = ProductRead.model_validate(args["product"])
+        campaign = CampaignRead.model_validate(args["campaign"])
+        source = DiscoverySource.model_validate(args["source"])
+        limit = int(args["limit"])
+        return [
+            result.model_dump(mode="json")
+            for result in self.search(product=product, campaign=campaign, source=source, limit=limit)
+        ]
+
+    def search(
+        self, *, product: ProductRead, campaign: CampaignRead, source: DiscoverySource, limit: int
+    ) -> list[SearchResult]:
+        if source.type == DiscoverySourceType.SEED:
+            return [self._parse_seed(source.value, product.target_geography)]
+
+        if self.endpoint is None:
+            return []
+
+        query = " ".join(
+            [
+                source.value,
+                product.target_customer,
+                product.target_geography,
+                product.problem_being_solved,
+            ]
+        )
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        response = httpx.post(
+            self.endpoint,
+            headers=headers,
+            timeout=self.timeout_seconds,
+            json={
+                "query": query,
+                "source": source.model_dump(mode="json"),
+                "product": product.model_dump(mode="json"),
+                "campaign": campaign.model_dump(mode="json"),
+                "limit": limit,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get("results", payload) if isinstance(payload, dict) else payload
+        return [SearchResult.model_validate(row) for row in rows[:limit]]
+
+    @staticmethod
+    def _parse_seed(value: str, fallback_geography: str) -> SearchResult:
+        try:
+            parsed = json.loads(value)
+            return SearchResult.model_validate(parsed)
+        except Exception:
+            parts = [part.strip() for part in value.split("|")]
+            return SearchResult(
+                title=parts[0],
+                url=parts[1] if len(parts) > 1 else None,
+                snippet=parts[2] if len(parts) > 2 else None,
+                geography=parts[3] if len(parts) > 3 else fallback_geography,
+                contact_email=parts[4] if len(parts) > 4 else None,
+                source="seed",
+                raw={"value": value},
+            )
