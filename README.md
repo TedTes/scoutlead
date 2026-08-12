@@ -1,0 +1,128 @@
+# soutlead
+
+Reusable AI-powered customer discovery and outreach backend for validating different software products.
+
+The product is supplied as configuration. The runtime then executes the same bounded workflow for discovery, research, qualification, outreach drafting, human approval, response tracking, memory, and campaign evaluation.
+
+## Architecture
+
+Application code owns deterministic workflow orchestration and allowed state transitions. The LLM is isolated behind structured-output interfaces for judgment tasks:
+
+- research extraction
+- lead qualification
+- outreach personalization
+- response classification
+
+External capabilities are tools behind explicit interfaces: search, website inspection, email, and database access. Browser automation is represented as a fallback capability; first-pass inspection prefers direct HTTP.
+
+## Run Locally
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload
+```
+
+The API defaults to `http://localhost:8000` and SQLite at `data/soutlead.db`.
+
+## API Flow
+
+Create a product:
+
+```bash
+curl -s -X POST http://localhost:8000/products \
+  -H "content-type: application/json" \
+  --data-binary @examples/quotevan.product.json
+```
+
+Create a campaign with the returned `product_id`:
+
+```bash
+curl -s -X POST http://localhost:8000/campaigns \
+  -H "content-type: application/json" \
+  -d '{"product_id":"product_xxx","max_leads":10}'
+```
+
+Run the bounded workflow:
+
+```bash
+curl -s -X POST http://localhost:8000/campaigns/campaign_xxx/run
+```
+
+Review drafts:
+
+```bash
+curl -s http://localhost:8000/campaigns/campaign_xxx/messages
+```
+
+Approve before sending:
+
+```bash
+curl -s -X POST http://localhost:8000/messages/message_xxx/approve \
+  -H "content-type: application/json" \
+  -d '{"approved_by":"founder@example.com"}'
+```
+
+Send an approved message:
+
+```bash
+curl -s -X POST http://localhost:8000/messages/message_xxx/send
+```
+
+Track a response:
+
+```bash
+curl -s -X POST http://localhost:8000/conversations/conversation_xxx/responses \
+  -H "content-type: application/json" \
+  -d '{"body":"Sure, happy to schedule an interview next week."}'
+```
+
+Measure campaign performance:
+
+```bash
+curl -s http://localhost:8000/campaigns/campaign_xxx/metrics
+```
+
+## Background Jobs
+
+Direct endpoints are available for local development. The same operations can be queued:
+
+```bash
+curl -s -X POST http://localhost:8000/campaigns/campaign_xxx/enqueue
+curl -s -X POST http://localhost:8000/messages/message_xxx/enqueue-send
+soutlead-worker
+```
+
+## Example Product
+
+```json
+{
+  "product_name": "QuoteVan",
+  "product_description": "Quoting workflow software for trades businesses.",
+  "target_customer": "Residential painters",
+  "problem_being_solved": "Painters lose time and deals when quote follow-up is slow.",
+  "value_proposition": "Create polished quotes and follow-ups faster.",
+  "target_geography": "Ontario, Canada",
+  "validation_goal": "Book 10 customer discovery interviews.",
+  "qualification_criteria": [
+    { "label": "Residential painting services", "weight": 3, "required": true },
+    { "label": "Visible contact information", "weight": 2 },
+    { "label": "Serves homeowners", "weight": 2 }
+  ],
+  "preferred_discovery_sources": [
+    { "type": "web_search", "value": "residential painters Ontario" }
+  ],
+  "outreach_objective": "Ask for a 20-minute discovery interview.",
+  "constraints": ["Human approval required before sending."]
+}
+```
+
+Campaigns can also include `discovery_seeds` when no search provider is configured.
+
+## Verification
+
+```bash
+python -m compileall src
+pytest -q
+```

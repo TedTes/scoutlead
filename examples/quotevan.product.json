@@ -1,0 +1,35 @@
+{
+  "product_name": "QuoteVan",
+  "product_description": "Quoting workflow software for residential painters.",
+  "target_customer": "Residential painters",
+  "problem_being_solved": "Painters lose time and deals when quote follow-up is slow.",
+  "value_proposition": "Create polished painting quotes and follow-ups faster.",
+  "target_geography": "Ontario, Canada",
+  "validation_goal": "Book 10 customer discovery interviews.",
+  "qualification_criteria": [
+    {
+      "label": "Residential painting services",
+      "weight": 3,
+      "required": true
+    },
+    {
+      "label": "Visible contact information",
+      "weight": 2
+    },
+    {
+      "label": "Serves homeowners",
+      "weight": 2
+    }
+  ],
+  "preferred_discovery_sources": [
+    {
+      "type": "seed",
+      "value": "Maple House Painters|https://example.com|Residential painting company serving homeowners in Ontario|Ontario, Canada|hello@example.com"
+    }
+  ],
+  "outreach_objective": "Ask for a 20-minute customer discovery interview.",
+  "constraints": [
+    "Human approval is required before sending.",
+    "Do not imply the recipient has a problem unless evidence supports it."
+  ]
+}
