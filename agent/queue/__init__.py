@@ -1,7 +1,7 @@
 """Background job queue.
 
 This package intentionally keeps the user-requested `queue/` folder name. Because
-that shadows Python's standard-library `queue` module when `src` is on
+that shadows Python's standard-library `queue` module when `agent` is on
 `PYTHONPATH`, expose the stdlib queue classes here so framework imports like
 `from queue import Queue` continue to work.
 """

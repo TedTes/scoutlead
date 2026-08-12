@@ -116,13 +116,13 @@ Create these Railway services from the same GitHub repo:
 Backend start command:
 
 ```bash
-PYTHONPATH=src uvicorn app.main:app --host 0.0.0.0 --port $PORT
+PYTHONPATH=agent uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 Worker start command:
 
 ```bash
-PYTHONPATH=src python -m queue.worker
+PYTHONPATH=agent python -m queue.worker
 ```
 
 Web build/start commands:
@@ -144,7 +144,7 @@ Do not use the backend start command on the web service.
 Run migrations before disabling table auto-creation:
 
 ```bash
-PYTHONPATH=src DATABASE_URL="$DATABASE_URL" alembic upgrade head
+PYTHONPATH=agent DATABASE_URL="$DATABASE_URL" alembic upgrade head
 ```
 
 Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in production after migrations are running. Set `API_AUTH_TOKEN` on the backend and the same value as `VITE_API_TOKEN` on the web service.
@@ -178,7 +178,7 @@ Campaigns can also include `discovery_seeds` when no search provider is configur
 ## Verification
 
 ```bash
-python -m compileall src
+python -m compileall agent
 pytest -q
 cd web && npm run build
 ```
