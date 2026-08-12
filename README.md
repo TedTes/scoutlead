@@ -133,6 +133,14 @@ npm run build
 npm run preview -- --host 0.0.0.0 --port $PORT
 ```
 
+Set the web service Root Directory to:
+
+```text
+/web
+```
+
+Do not use the backend start command on the web service.
+
 Run migrations before disabling table auto-creation:
 
 ```bash
