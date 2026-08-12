@@ -1,4 +1,5 @@
 from functools import lru_cache
+import json
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     port: int = 8000
     auto_create_tables: bool = True
     api_auth_token: str | None = None
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    cors_origins: str | list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     search_api_endpoint: str | None = None
     search_api_key: str | None = None
@@ -32,11 +33,17 @@ class Settings(BaseSettings):
 
     request_timeout_seconds: float = Field(default=20.0, gt=0)
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", mode="after")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
+            raw_value = value.strip()
+            if raw_value.startswith("["):
+                parsed = json.loads(raw_value)
+                if not isinstance(parsed, list):
+                    raise ValueError("CORS_ORIGINS JSON value must be a list")
+                return [str(origin).strip() for origin in parsed if str(origin).strip()]
+            return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
         return value
 
 
