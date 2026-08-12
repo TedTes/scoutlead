@@ -26,6 +26,16 @@ uvicorn app.main:app --reload
 
 The API defaults to `http://localhost:8000` and SQLite at `data/soutlead.db`.
 
+Run the web dashboard:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The dashboard defaults to `http://localhost:5173`.
+
 ## API Flow
 
 Create a product:
@@ -94,6 +104,43 @@ curl -s -X POST http://localhost:8000/messages/message_xxx/enqueue-send
 soutlead-worker
 ```
 
+## Railway MVP Deployment
+
+Create these Railway services from the same GitHub repo:
+
+1. PostgreSQL service.
+2. Backend service from repo root.
+3. Worker service from repo root.
+4. Web service from `web/`.
+
+Backend start command:
+
+```bash
+PYTHONPATH=src uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Worker start command:
+
+```bash
+PYTHONPATH=src python -m queue.worker
+```
+
+Web build/start commands:
+
+```bash
+npm ci
+npm run build
+npm run preview -- --host 0.0.0.0 --port $PORT
+```
+
+Run migrations before disabling table auto-creation:
+
+```bash
+PYTHONPATH=src DATABASE_URL="$DATABASE_URL" alembic upgrade head
+```
+
+Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in production after migrations are running. Set `API_AUTH_TOKEN` on the backend and the same value as `VITE_API_TOKEN` on the web service.
+
 ## Example Product
 
 ```json
@@ -125,4 +172,5 @@ Campaigns can also include `discovery_seeds` when no search provider is configur
 ```bash
 python -m compileall src
 pytest -q
+cd web && npm run build
 ```
