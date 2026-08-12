@@ -1,6 +1,8 @@
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.dependencies import create_app_services
@@ -14,15 +16,47 @@ from shared.errors import SoutleadError
 from shared.logger import configure_logging
 
 
+class ApiAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, token: str | None) -> None:
+        super().__init__(app)
+        self.token = token
+
+    async def dispatch(self, request: Request, call_next):
+        if not self.token or request.method == "OPTIONS":
+            return await call_next(request)
+        if request.url.path in {"/health", "/openapi.json"} or request.url.path.startswith(
+            ("/docs", "/redoc")
+        ):
+            return await call_next(request)
+        auth_header = request.headers.get("authorization", "")
+        api_key_header = request.headers.get("x-api-key", "")
+        expected = f"Bearer {self.token}"
+        if auth_header != expected and api_key_header != self.token:
+            return JSONResponse(
+                status_code=401,
+                content={"error": {"code": "unauthorized", "message": "valid API token required"}},
+            )
+        return await call_next(request)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
     app = FastAPI(title=settings.app_name, version="0.1.0")
     app.state.services = create_app_services(settings)
+    app.add_middleware(ApiAuthMiddleware, token=settings.api_auth_token)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.on_event("startup")
     def startup() -> None:
-        create_database(app.state.services.db.engine)
+        if settings.auto_create_tables:
+            create_database(app.state.services.db.engine)
 
     @app.get("/health")
     def health() -> dict[str, str]:

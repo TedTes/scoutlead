@@ -5,7 +5,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from agents.llm import HeuristicLLMClient, LLMClient, RemoteJsonLLMClient
+from agents.llm import HeuristicLLMClient, LLMClient, OpenAIStructuredLLMClient, RemoteJsonLLMClient
 from db.session import Database
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
@@ -24,7 +24,13 @@ class AppServices:
 
 def create_app_services(settings: Settings) -> AppServices:
     llm: LLMClient
-    if settings.llm_json_endpoint:
+    if settings.openai_api_key:
+        llm = OpenAIStructuredLLMClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+    elif settings.llm_json_endpoint:
         llm = RemoteJsonLLMClient(
             endpoint=settings.llm_json_endpoint,
             api_key=settings.llm_api_key,
@@ -41,6 +47,7 @@ def create_app_services(settings: Settings) -> AppServices:
         search=SearchTool(
             endpoint=settings.search_api_endpoint,
             api_key=settings.search_api_key,
+            provider=settings.search_provider,
             timeout_seconds=settings.request_timeout_seconds,
         ),
         browser=DirectHttpBrowserTool(timeout_seconds=settings.request_timeout_seconds),

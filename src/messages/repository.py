@@ -4,9 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.models import MessageModel
-from messages.schemas import MessageApproval, MessageStatus, OutreachDraft
+from messages.schemas import MessageApproval, MessageStatus, MessageUpdate, OutreachDraft
 from messages.state import assert_message_transition
-from shared.errors import NotFoundError
+from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 
 
@@ -61,6 +61,20 @@ class MessageRepository:
             **approval.model_dump(mode="json"),
             "approved_at": utcnow().isoformat(),
         }
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
+    def update_draft(self, message_id: str, update: MessageUpdate) -> MessageModel:
+        model = self.get(message_id)
+        if MessageStatus(model.status) not in {MessageStatus.DRAFT, MessageStatus.PENDING_APPROVAL}:
+            raise ConflictError(
+                "only draft or pending approval messages can be edited",
+                {"message_id": message_id, "status": model.status},
+            )
+        data = update.model_dump(mode="json", exclude_unset=True)
+        for field, value in data.items():
+            setattr(model, field, value)
         self.session.commit()
         self.session.refresh(model)
         return model

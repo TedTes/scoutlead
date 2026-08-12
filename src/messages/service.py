@@ -8,7 +8,7 @@ from conversations.repository import ConversationRepository
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead, LeadStatus
 from messages.repository import MessageRepository
-from messages.schemas import MessageApproval, MessageRead, MessageStatus
+from messages.schemas import MessageApproval, MessageRead, MessageStatus, MessageUpdate
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from tools.email import EmailTool
@@ -27,6 +27,13 @@ class MessageService:
     def approve(self, message_id: str, approval: MessageApproval) -> MessageRead:
         message = self.messages.approve(message_id, approval)
         self.leads.update_status(message.lead_id, LeadStatus.APPROVED)
+        return MessageRead.model_validate(message)
+
+    def update(self, message_id: str, update: MessageUpdate) -> MessageRead:
+        return MessageRead.model_validate(self.messages.update_draft(message_id, update))
+
+    def cancel(self, message_id: str) -> MessageRead:
+        message = self.messages.set_status(message_id, MessageStatus.CANCELLED)
         return MessageRead.model_validate(message)
 
     def send(self, message_id: str) -> MessageRead:

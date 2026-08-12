@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignCreate, CampaignRead, CampaignRunSummary
+from campaigns.schemas import CampaignCreate, CampaignRead, CampaignRunSummary, CampaignStage, CampaignStatus
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
 from db.models import CampaignModel
@@ -52,6 +52,23 @@ class CampaignService:
 
     def get(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.get(campaign_id)
+
+    def pause(self, campaign_id: str) -> CampaignModel:
+        return self.campaigns.update_status(campaign_id, CampaignStatus.PAUSED)
+
+    def resume(self, campaign_id: str) -> CampaignModel:
+        campaign = self.campaigns.get(campaign_id)
+        stage_to_status = {
+            CampaignStage.DISCOVERY.value: CampaignStatus.DISCOVERING,
+            CampaignStage.RESEARCH.value: CampaignStatus.RESEARCHING,
+            CampaignStage.QUALIFICATION.value: CampaignStatus.QUALIFYING,
+            CampaignStage.OUTREACH.value: CampaignStatus.AWAITING_APPROVAL,
+            CampaignStage.RESPONSE.value: CampaignStatus.TRACKING,
+            CampaignStage.COMPLETE.value: CampaignStatus.COMPLETED,
+        }
+        return self.campaigns.update_status(
+            campaign_id, stage_to_status.get(campaign.stage, CampaignStatus.TRACKING)
+        )
 
     def run_campaign(self, campaign_id: str) -> CampaignRunSummary:
         campaign = self.campaigns.get(campaign_id)

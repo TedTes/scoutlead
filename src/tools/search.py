@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Protocol
+from urllib.parse import urlencode
 
 import httpx
 from pydantic import BaseModel
@@ -35,10 +36,12 @@ class SearchTool:
         *,
         endpoint: str | None = None,
         api_key: str | None = None,
+        provider: str = "generic",
         timeout_seconds: float = 20.0,
     ) -> None:
         self.endpoint = endpoint
         self.api_key = api_key
+        self.provider = provider
         self.timeout_seconds = timeout_seconds
 
     def execute(self, args: dict[str, Any]) -> list[dict[str, Any]]:
@@ -68,11 +71,25 @@ class SearchTool:
                 product.problem_being_solved,
             ]
         )
+        if self.provider == "tavily":
+            return self._search_tavily(query, source, limit)
+        if self.provider == "brave":
+            return self._search_brave(query, limit)
+        return self._search_generic(query, product, campaign, source, limit)
+
+    def _search_generic(
+        self,
+        query: str,
+        product: ProductRead,
+        campaign: CampaignRead,
+        source: DiscoverySource,
+        limit: int,
+    ) -> list[SearchResult]:
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         response = httpx.post(
-            self.endpoint,
+            str(self.endpoint),
             headers=headers,
             timeout=self.timeout_seconds,
             json={
@@ -87,6 +104,53 @@ class SearchTool:
         payload = response.json()
         rows = payload.get("results", payload) if isinstance(payload, dict) else payload
         return [SearchResult.model_validate(row) for row in rows[:limit]]
+
+    def _search_tavily(
+        self, query: str, source: DiscoverySource, limit: int
+    ) -> list[SearchResult]:
+        response = httpx.post(
+            str(self.endpoint or "https://api.tavily.com/search"),
+            timeout=self.timeout_seconds,
+            json={
+                "api_key": self.api_key,
+                "query": query,
+                "max_results": limit,
+                "search_depth": "basic",
+            },
+        )
+        response.raise_for_status()
+        rows = response.json().get("results", [])
+        return [
+            SearchResult(
+                title=row.get("title") or row.get("url") or source.value,
+                url=row.get("url"),
+                snippet=row.get("content"),
+                source="tavily",
+                raw=row,
+            )
+            for row in rows[:limit]
+        ]
+
+    def _search_brave(self, query: str, limit: int) -> list[SearchResult]:
+        url = str(self.endpoint or "https://api.search.brave.com/res/v1/web/search")
+        separator = "&" if "?" in url else "?"
+        response = httpx.get(
+            f"{url}{separator}{urlencode({'q': query, 'count': limit})}",
+            timeout=self.timeout_seconds,
+            headers={"X-Subscription-Token": self.api_key or "", "Accept": "application/json"},
+        )
+        response.raise_for_status()
+        rows = response.json().get("web", {}).get("results", [])
+        return [
+            SearchResult(
+                title=row.get("title") or row.get("url") or query,
+                url=row.get("url"),
+                snippet=row.get("description"),
+                source="brave",
+                raw=row,
+            )
+            for row in rows[:limit]
+        ]
 
     @staticmethod
     def _parse_seed(value: str, fallback_geography: str) -> SearchResult:

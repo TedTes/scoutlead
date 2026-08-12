@@ -1,3 +1,7 @@
 Alembic migrations belong here.
 
-The first local implementation uses `Base.metadata.create_all` on startup so the API can run immediately. For production, initialize Alembic and generate migrations from the SQLAlchemy models before deploying schema changes.
+Local development can still auto-create tables with `AUTO_CREATE_TABLES=true`. For Railway or any production deployment, set `AUTO_CREATE_TABLES=false` and run:
+
+```bash
+alembic upgrade head
+```

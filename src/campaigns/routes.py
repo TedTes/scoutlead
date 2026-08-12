@@ -47,6 +47,24 @@ def get_campaign(
     return _service(session, services).get(campaign_id)
 
 
+@router.post("/{campaign_id}/pause", response_model=CampaignRead)
+def pause_campaign(
+    campaign_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return _service(session, services).pause(campaign_id)
+
+
+@router.post("/{campaign_id}/resume", response_model=CampaignRead)
+def resume_campaign(
+    campaign_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return _service(session, services).resume(campaign_id)
+
+
 @router.post("/{campaign_id}/run", response_model=CampaignRunSummary)
 def run_campaign(
     campaign_id: str,

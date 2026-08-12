@@ -4,6 +4,7 @@ from typing import Any, Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel
+from shared.utils import safe_json_loads
 
 from shared.logger import get_logger
 
@@ -92,3 +93,86 @@ class RemoteJsonLLMClient:
             if self.fallback_on_error:
                 return fallback
             raise
+
+
+class OpenAIStructuredLLMClient:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        timeout_seconds: float = 20.0,
+        fallback_on_error: bool = True,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self.fallback_on_error = fallback_on_error
+
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model: type[TModel],
+        context: dict[str, Any] | None = None,
+        fallback: TModel,
+    ) -> TModel:
+        try:
+            schema = response_model.model_json_schema()
+            response = httpx.post(
+                "https://api.openai.com/v1/responses",
+                headers={
+                    "authorization": f"Bearer {self.api_key}",
+                    "content-type": "application/json",
+                },
+                timeout=self.timeout_seconds,
+                json={
+                    "model": self.model,
+                    "input": [
+                        {"role": "system", "content": system},
+                        {
+                            "role": "user",
+                            "content": "\n\n".join(
+                                [
+                                    prompt,
+                                    f"Task: {task}",
+                                    f"Context JSON: {context or {}}",
+                                ]
+                            ),
+                        },
+                    ],
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": response_model.__name__,
+                            "schema": schema,
+                            "strict": False,
+                        }
+                    },
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            output_text = self._extract_output_text(payload)
+            parsed = safe_json_loads(output_text)
+            if parsed is None:
+                raise ValueError("OpenAI response did not contain parseable JSON output")
+            return response_model.model_validate(parsed)
+        except Exception as exc:
+            logger.warning("openai_structured_llm_failed task=%s error=%s", task, exc)
+            if self.fallback_on_error:
+                return fallback
+            raise
+
+    @staticmethod
+    def _extract_output_text(payload: dict[str, Any]) -> str:
+        if isinstance(payload.get("output_text"), str):
+            return payload["output_text"]
+        for item in payload.get("output", []):
+            for content in item.get("content", []):
+                text = content.get("text")
+                if isinstance(text, str):
+                    return text
+        raise ValueError("missing output text")

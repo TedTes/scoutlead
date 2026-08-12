@@ -1,12 +1,13 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+import pytest
 
 from agents.llm import HeuristicLLMClient
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
 from conversations.service import ConversationService
 from db.session import create_database
-from messages.schemas import MessageApproval
+from messages.schemas import MessageApproval, MessageUpdate
 from messages.service import MessageService
 from products.repository import ProductRepository
 from products.schemas import (
@@ -15,6 +16,7 @@ from products.schemas import (
     ProductCreate,
     QualificationCriterion,
 )
+from shared.errors import ConflictError
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
@@ -78,6 +80,15 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
 
         message_id = session.execute(text("select id from messages")).scalar_one()
         message_service = MessageService(session=session, email=EmailTool())
+        with pytest.raises(ConflictError):
+            message_service.send(message_id)
+
+        edited = message_service.update(
+            message_id,
+            MessageUpdate(subject="Edited validation question", body="Hi there,\n\nOpen to talking?"),
+        )
+        assert edited.subject == "Edited validation question"
+
         approved = message_service.approve(
             message_id, MessageApproval(approved_by="test@example.com")
         )

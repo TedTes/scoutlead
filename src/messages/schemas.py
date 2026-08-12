@@ -29,6 +29,13 @@ class MessageApproval(BaseModel):
     notes: str | None = None
 
 
+class MessageUpdate(BaseModel):
+    subject: str | None = None
+    body: str | None = Field(default=None, min_length=1)
+    personalization_notes: list[str] | None = None
+    approach_tag: str | None = None
+
+
 class MessageRead(OutreachDraft):
     model_config = ConfigDict(from_attributes=True)
 

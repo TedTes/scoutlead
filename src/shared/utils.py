@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
+import json
+from typing import Any
 from uuid import uuid4
 
 
@@ -41,3 +43,10 @@ def enum_value(value: Enum | str) -> str:
 def keyword_hits(text: str, keywords: list[str]) -> list[str]:
     lower = text.lower()
     return [keyword for keyword in keywords if keyword.lower() in lower]
+
+
+def safe_json_loads(value: str) -> Any | None:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return None
