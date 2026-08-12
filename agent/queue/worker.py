@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 
 
 def run_once() -> bool:
-    # Keep this entrypoint minimal; Railway runs it as the worker process.
+    # Keep this entrypoint minimal; Railway runs it as the worker process trigger.
     settings = get_settings()
     configure_logging(settings.log_level)
     services = create_app_services(settings)
