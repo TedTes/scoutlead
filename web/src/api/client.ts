@@ -1,102 +1,15 @@
-export type Product = {
-  id: string;
-  product_name: string;
-  target_customer: string;
-  target_geography: string;
-  validation_goal: string;
-  [key: string]: unknown;
-};
-
-export type Campaign = {
-  id: string;
-  product_id: string;
-  name?: string;
-  status: string;
-  stage: string;
-  max_leads: number;
-  channels: string[];
-};
-
-export type Lead = {
-  id: string;
-  company_name: string;
-  website_url?: string;
-  contact_email?: string;
-  geography?: string;
-  description?: string;
-  source: string;
-  status: string;
-  research?: {
-    summary: string;
-    signals: string[];
-    pain_indicators: string[];
-    confidence: number;
-  };
-  qualification?: {
-    qualified: boolean;
-    score: number;
-    rationale: string;
-  };
-};
-
-export type Message = {
-  id: string;
-  campaign_id: string;
-  lead_id: string;
-  channel: string;
-  subject?: string;
-  body: string;
-  personalization_notes: string[];
-  approach_tag: string;
-  status: string;
-};
-
-export type Conversation = {
-  id: string;
-  lead_id: string;
-  status: string;
-  events: Array<{
-    id: string;
-    direction: string;
-    body: string;
-    classification?: {
-      intent: string;
-      confidence: number;
-      rationale: string;
-      follow_up_action: string;
-    };
-  }>;
-};
-
-export type Metrics = {
-  lead_count: number;
-  researched_lead_count: number;
-  qualified_lead_count: number;
-  average_lead_score: number;
-  pending_approval_count: number;
-  sent_count: number;
-  response_count: number;
-  response_rate: number;
-  interview_request_count: number;
-  interview_rate: number;
-  trial_interest_count: number;
-  approach_performance: Array<{
-    approach_tag: string;
-    sent: number;
-    replies: number;
-    positive_replies: number;
-    response_rate: number;
-    positive_response_rate: number;
-  }>;
-};
-
-export type CampaignSnapshot = {
-  campaign?: Campaign;
-  leads: Lead[];
-  messages: Message[];
-  conversations: Conversation[];
-  metrics?: Metrics;
-};
+import type {
+  ApiHealth,
+  Campaign,
+  CampaignRunSummary,
+  ConnectionStatus,
+  Conversation,
+  Lead,
+  Message,
+  Metrics,
+  ManualClassificationInput,
+  Product,
+} from "../types/domain";
 
 type ApiOptions = {
   baseUrl: string;
@@ -110,8 +23,16 @@ export class ApiClient {
     return this.request<Product[]>("/products");
   }
 
+  getHealth() {
+    return this.request<ApiHealth>("/health");
+  }
+
   createProduct(product: unknown) {
     return this.request<Product>("/products", { method: "POST", body: product });
+  }
+
+  updateProduct(id: string, product: unknown) {
+    return this.request<Product>(`/products/${id}`, { method: "PATCH", body: product });
   }
 
   getCampaigns() {
@@ -127,7 +48,7 @@ export class ApiClient {
   }
 
   runCampaign(id: string) {
-    return this.request(`/campaigns/${id}/run`, { method: "POST" });
+    return this.request<CampaignRunSummary>(`/campaigns/${id}/run`, { method: "POST" });
   }
 
   enqueueCampaign(id: string) {
@@ -187,8 +108,19 @@ export class ApiClient {
     });
   }
 
+  manuallyClassifyResponse(conversationId: string, classification: ManualClassificationInput) {
+    return this.request<Conversation>(`/conversations/${conversationId}/classification`, {
+      method: "POST",
+      body: classification,
+    });
+  }
+
   getMetrics(campaignId: string) {
     return this.request<Metrics>(`/campaigns/${campaignId}/metrics`);
+  }
+
+  getConnectionsStatus() {
+    return this.request<ConnectionStatus[]>("/connections/status");
   }
 
   private async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
