@@ -60,6 +60,14 @@ class InboundResponseCreate(BaseModel):
     body: str = Field(min_length=1)
 
 
+class ManualClassificationCreate(BaseModel):
+    intent: ResponseIntent
+    confidence: int = Field(default=100, ge=0, le=100)
+    rationale: str = Field(min_length=1)
+    follow_up_action: FollowUpAction
+    suggested_reply: str | None = None
+
+
 class ConversationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

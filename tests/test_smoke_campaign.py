@@ -5,6 +5,7 @@ import pytest
 from agents.llm import HeuristicLLMClient
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
+from conversations.schemas import FollowUpAction, ManualClassificationCreate, ResponseIntent
 from conversations.service import ConversationService
 from db.session import create_database
 from messages.schemas import MessageApproval, MessageUpdate
@@ -30,23 +31,23 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
     with session_factory() as session:
         product = ProductRepository(session).create(
             ProductCreate(
-                product_name="QuoteVan",
-                product_description="Quoting workflow software for residential painters.",
-                target_customer="Residential painters",
-                problem_being_solved="Slow quote follow-up loses painting jobs.",
-                value_proposition="Create polished quotes and follow-ups faster.",
-                target_geography="Ontario, Canada",
+                product_name="Test Product",
+                product_description="Software product used by the smoke test.",
+                target_customer="Target customer segment",
+                problem_being_solved="A customer workflow takes too long.",
+                value_proposition="Improve the workflow enough to justify discovery.",
+                target_geography="Test geography",
                 validation_goal="Book customer discovery interviews.",
                 qualification_criteria=[
                     QualificationCriterion(
-                        label="Residential painting services", weight=3, required=True
+                        label="Matches target customer", weight=3, required=True
                     ),
                     QualificationCriterion(label="Visible contact information", weight=2),
                 ],
                 preferred_discovery_sources=[
                     DiscoverySource(
                         type=DiscoverySourceType.SEED,
-                        value="Maple House Painters|https://example.com|Residential painters serving homeowners|Ontario|hello@example.com",
+                        value="Test Lead Company|https://example.com|Matches target customer|Test geography|hello@example.com",
                     )
                 ],
                 outreach_objective="Ask for a 20-minute discovery interview.",
@@ -102,3 +103,17 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
             conversation_id, "Sure, happy to schedule an interview next week."
         )
         assert conversation.events[-1].classification.intent == "interview_request"
+
+        reclassified = ConversationService(
+            session=session, llm=HeuristicLLMClient()
+        ).manually_classify(
+            conversation_id,
+            ManualClassificationCreate(
+                intent=ResponseIntent.INTERESTED,
+                confidence=100,
+                rationale="Operator confirmed this is interested.",
+                follow_up_action=FollowUpAction.REPLY,
+            ),
+        )
+        assert reclassified.events[-1].direction == "internal"
+        assert reclassified.events[-1].classification.intent == "interested"

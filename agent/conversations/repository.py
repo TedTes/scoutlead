@@ -79,6 +79,18 @@ class ConversationRepository:
             status=status,
         )
 
+    def add_manual_classification(
+        self, conversation_id: str, classification: ResponseClassification
+    ) -> ConversationModel:
+        status = self._status_for_classification(classification)
+        return self._add_event(
+            conversation_id=conversation_id,
+            direction=EventDirection.INTERNAL,
+            body="Manual response classification override.",
+            classification=classification,
+            status=status,
+        )
+
     def _add_event(
         self,
         *,

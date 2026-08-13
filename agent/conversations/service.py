@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
 from conversations.repository import ConversationRepository
-from conversations.schemas import ConversationRead
+from conversations.schemas import ConversationRead, ManualClassificationCreate, ResponseClassification
 from leads.repository import LeadRepository
 from memory.repository import MemoryRepository
 from messages.repository import MessageRepository
@@ -36,3 +36,18 @@ class ConversationService:
             memory=self.memory,
             llm=self.llm,
         ).classify_inbound(product=product, conversation_id=conversation_id, body=body)
+
+    def manually_classify(
+        self, conversation_id: str, classification: ManualClassificationCreate
+    ) -> ConversationRead:
+        updated = self.conversations.add_manual_classification(
+            conversation_id,
+            ResponseClassification(
+                intent=classification.intent,
+                confidence=classification.confidence,
+                rationale=classification.rationale,
+                follow_up_action=classification.follow_up_action,
+                suggested_reply=classification.suggested_reply,
+            ),
+        )
+        return ConversationRead.model_validate(updated)
