@@ -149,27 +149,26 @@ PYTHONPATH=agent DATABASE_URL="$DATABASE_URL" alembic upgrade head
 
 Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in production after migrations are running. Set `API_AUTH_TOKEN` on the backend and the same value as `VITE_API_TOKEN` on the web service.
 
-## Example Product
+## Product Payload Shape
 
 ```json
 {
-  "product_name": "QuoteVan",
-  "product_description": "Quoting workflow software for trades businesses.",
-  "target_customer": "Residential painters",
-  "problem_being_solved": "Painters lose time and deals when quote follow-up is slow.",
-  "value_proposition": "Create polished quotes and follow-ups faster.",
-  "target_geography": "Ontario, Canada",
-  "validation_goal": "Book 10 customer discovery interviews.",
+  "product_name": "<your product name>",
+  "product_description": "<what the product does>",
+  "target_customer": "<who you want to validate with>",
+  "problem_being_solved": "<problem being validated>",
+  "value_proposition": "<why the product matters>",
+  "target_geography": "<target geography>",
+  "validation_goal": "<validation goal>",
   "qualification_criteria": [
-    { "label": "Residential painting services", "weight": 3, "required": true },
-    { "label": "Visible contact information", "weight": 2 },
-    { "label": "Serves homeowners", "weight": 2 }
+    { "label": "<required customer signal>", "weight": 3, "required": true },
+    { "label": "<useful customer signal>", "weight": 2 }
   ],
   "preferred_discovery_sources": [
-    { "type": "web_search", "value": "residential painters Ontario" }
+    { "type": "web_search", "value": "<real search query or source>" }
   ],
-  "outreach_objective": "Ask for a 20-minute discovery interview.",
-  "constraints": ["Human approval required before sending."]
+  "outreach_objective": "<outreach objective>",
+  "constraints": ["<campaign constraint>"]
 }
 ```
 
