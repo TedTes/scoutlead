@@ -5,6 +5,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from db.base import Base
+from db.session import normalize_database_url
 import db.models  # noqa: F401
 
 config = context.config
@@ -16,7 +17,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return getenv("DATABASE_URL", "sqlite:///./data/soutlead.db")
+    return normalize_database_url(getenv("DATABASE_URL", "sqlite:///./data/soutlead.db"))
 
 
 def run_migrations_offline() -> None:
