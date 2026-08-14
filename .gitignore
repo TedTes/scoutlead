@@ -2,6 +2,8 @@ node_modules/
 dist/
 data/
 .env
+.env.local
+.env.*.local
 .DS_Store
 npm-debug.log*
 __pycache__/
