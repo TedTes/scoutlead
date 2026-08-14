@@ -34,6 +34,7 @@ type AppDataContextValue = {
   createProduct: (input: unknown) => Promise<boolean>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
+  deleteCampaigns: (campaignIds: string[]) => Promise<void>;
   runCampaign: (campaignId?: string) => Promise<void>;
   enqueueCampaign: (campaignId?: string) => Promise<void>;
   pauseCampaign: (campaignId?: string) => Promise<void>;
@@ -229,6 +230,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         });
         return created;
       },
+      deleteCampaigns: (campaignIds) =>
+        mutate(async () => {
+          await Promise.all(campaignIds.map((campaignId) => api.deleteCampaign(campaignId)));
+          if (campaignIds.includes(selectedCampaignIdState)) {
+            localStorage.setItem("selectedCampaignId", "");
+          }
+        }),
       runCampaign: (campaignId = selectedCampaignIdState) =>
         mutate(async () => {
           if (campaignId) await api.runCampaign(campaignId);

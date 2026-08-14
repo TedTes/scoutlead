@@ -31,6 +31,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
     selectedCampaignId,
     snapshot,
     createCampaign,
+    deleteCampaigns,
     setSelectedCampaignId,
     runCampaign,
     pauseCampaign,
@@ -39,6 +40,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
   } = useAppData();
   const [showNewCampaign, setShowNewCampaign] = useState(false);
   const [draft, setDraft] = useState<CampaignDraft>(defaultCampaignDraft);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const metrics = snapshot.metrics;
   const parsedMaxLeads = Number.parseInt(draft.maxLeads, 10);
   const canCreateCampaign =
@@ -55,6 +57,9 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
   const awaitingApprovalCampaigns = productCampaigns.filter(
     (campaign) => campaign.status === "awaiting_approval",
   );
+  const allVisibleSelected =
+    productCampaigns.length > 0 &&
+    productCampaigns.every((campaign) => selectedCampaignIds.includes(campaign.id));
   const defaultCampaignName = useMemo(() => {
     const date = new Date().toISOString().slice(0, 10);
     return selectedProduct ? `${selectedProduct.product_name} validation ${date}` : `Campaign ${date}`;
@@ -84,6 +89,28 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
       setShowNewCampaign(false);
       setDraft(defaultCampaignDraft);
     }
+  };
+
+  const toggleSelectedCampaign = (campaignId: string) => {
+    setSelectedCampaignIds((current) =>
+      current.includes(campaignId)
+        ? current.filter((id) => id !== campaignId)
+        : [...current, campaignId],
+    );
+  };
+
+  const toggleAllVisibleCampaigns = () => {
+    setSelectedCampaignIds(allVisibleSelected ? [] : productCampaigns.map((campaign) => campaign.id));
+  };
+
+  const deleteSelectedCampaigns = async () => {
+    if (selectedCampaignIds.length === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${selectedCampaignIds.length} campaign${selectedCampaignIds.length === 1 ? "" : "s"} and related workflow records?`,
+    );
+    if (!confirmed) return;
+    await deleteCampaigns(selectedCampaignIds);
+    setSelectedCampaignIds([]);
   };
 
   return (
@@ -178,7 +205,19 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
         <StatCard label="Interviews requested" value={String(metrics?.interview_request_count ?? 0)} />
       </div>
 
-      <Card title="Selected product campaigns" meta={<span className="muted">{productCampaigns.length} total</span>}>
+      <Card
+        title="Selected product campaigns"
+        meta={
+          <div className="card-actions">
+            {selectedCampaignIds.length > 0 ? (
+              <button className="danger" onClick={deleteSelectedCampaigns}>
+                Delete selected
+              </button>
+            ) : null}
+            <span className="muted">{productCampaigns.length} total</span>
+          </div>
+        }
+      >
         {productCampaigns.length === 0 ? (
           <p className="empty-copy">Create a campaign for the selected product.</p>
         ) : (
@@ -186,6 +225,14 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
             <table className="data-table campaigns-table">
               <thead>
                 <tr>
+                  <th className="selection-cell">
+                    <input
+                      aria-label="Select all campaigns"
+                      checked={allVisibleSelected}
+                      type="checkbox"
+                      onChange={toggleAllVisibleCampaigns}
+                    />
+                  </th>
                   <th>Campaign</th>
                   <th>Status</th>
                   <th>Stage</th>
@@ -206,6 +253,15 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
                       key={campaign.id}
                       onClick={() => setSelectedCampaignId(campaign.id)}
                     >
+                      <td className="selection-cell">
+                        <input
+                          aria-label={`Select ${campaign.name || campaign.id}`}
+                          checked={selectedCampaignIds.includes(campaign.id)}
+                          type="checkbox"
+                          onChange={() => toggleSelectedCampaign(campaign.id)}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </td>
                       <td>
                         <strong>{campaign.name || "Untitled campaign"}</strong>
                         <span>{campaign.id}</span>

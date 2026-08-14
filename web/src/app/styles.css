@@ -732,30 +732,45 @@ textarea {
 }
 
 .campaigns-table th:nth-child(1) {
-  width: 32%;
+  width: 42px;
 }
 
 .campaigns-table th:nth-child(2) {
+  width: 32%;
+}
+
+.campaigns-table th:nth-child(3) {
   width: 16%;
 }
 
-.campaigns-table th:nth-child(3),
 .campaigns-table th:nth-child(4),
 .campaigns-table th:nth-child(5),
-.campaigns-table th:nth-child(6) {
+.campaigns-table th:nth-child(6),
+.campaigns-table th:nth-child(7) {
   width: 10%;
 }
 
-.campaigns-table th:nth-child(7),
-.campaigns-table th:nth-child(8) {
+.campaigns-table th:nth-child(8),
+.campaigns-table th:nth-child(9) {
   width: 11%;
 }
 
-.campaigns-table td:first-child strong,
-.campaigns-table td:first-child span {
+.campaigns-table td:nth-child(2) strong,
+.campaigns-table td:nth-child(2) span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.selection-cell {
+  text-align: center;
+}
+
+.selection-cell input {
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  width: 15px;
 }
 
 .leads-table {

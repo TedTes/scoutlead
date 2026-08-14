@@ -48,6 +48,10 @@ export class ApiClient {
     return this.request<Campaign>(`/campaigns/${id}`);
   }
 
+  deleteCampaign(id: string) {
+    return this.request<void>(`/campaigns/${id}`, { method: "DELETE" });
+  }
+
   runCampaign(id: string) {
     return this.request<CampaignRunSummary>(`/campaigns/${id}/run`, { method: "POST" });
   }
@@ -133,7 +137,7 @@ export class ApiClient {
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
-    const payload = await response.json().catch(() => undefined);
+    const payload = response.status === 204 ? undefined : await response.json().catch(() => undefined);
     if (!response.ok) {
       const message = payload?.error?.message ?? `Request failed with ${response.status}`;
       throw new Error(message);
