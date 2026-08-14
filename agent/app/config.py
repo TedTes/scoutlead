@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_name: str = "soutlead"
     environment: Literal["local", "dev", "test", "staging", "production"] = "local"
     log_level: str = "INFO"
-    database_url: str = "sqlite:///./data/soutlead.db"
+    database_url: str = ""
     port: int = 8000
     auto_create_tables: bool = True
     api_auth_token: str | None = None

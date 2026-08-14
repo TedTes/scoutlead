@@ -17,7 +17,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return normalize_database_url(getenv("DATABASE_URL", "sqlite:///./data/soutlead.db"))
+    return normalize_database_url(getenv("DATABASE_URL", ""))
 
 
 def run_migrations_offline() -> None:

@@ -21,10 +21,11 @@ External capabilities are tools behind explicit interfaces: search, website insp
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload
+export DATABASE_URL="postgresql://user:password@localhost:5432/soutlead"
+PYTHONPATH=agent uvicorn app.main:app --reload
 ```
 
-The API defaults to `http://localhost:8000` and SQLite at `data/soutlead.db`.
+The API defaults to `http://localhost:8000` and requires `DATABASE_URL`; use Railway Postgres or another Postgres database for local development.
 
 Run the web dashboard:
 

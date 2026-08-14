@@ -43,3 +43,8 @@ def test_database_url_rejects_empty_value() -> None:
 def test_database_url_rejects_unresolved_railway_reference() -> None:
     with pytest.raises(DatabaseConfigurationError, match="unresolved variable reference"):
         normalize_database_url("${{postgres.DATABASE_URL}}")
+
+
+def test_database_url_rejects_sqlite_runtime_urls() -> None:
+    with pytest.raises(DatabaseConfigurationError, match="Postgres URL"):
+        normalize_database_url("sqlite:///./data/soutlead.db")
