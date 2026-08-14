@@ -6,8 +6,8 @@ export function statusTone(status: string): Tone {
   if (["active", "connected", "qualified", "completed", "interested", "meeting booked"].includes(value)) {
     return "green";
   }
-  if (["paused", "pending", "review", "not now", "degraded"].includes(value)) return "amber";
-  if (["objection", "disqualified"].includes(value)) return "red";
+  if (["paused", "pending", "queued", "waiting", "review", "not now", "degraded"].includes(value)) return "amber";
+  if (["objection", "disqualified", "failed", "cancelled"].includes(value)) return "red";
   return "gray";
 }
 

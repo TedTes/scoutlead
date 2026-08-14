@@ -598,6 +598,106 @@ textarea {
   margin-bottom: 14px;
 }
 
+.agent-run-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.agent-run-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(120px, 0.7fr) minmax(120px, 0.5fr);
+}
+
+.agent-run-summary div {
+  background: #f8fafc;
+  border: 1px solid #e2e7ef;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.agent-run-summary span {
+  color: #667286;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.agent-run-summary strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.run-error {
+  background: #fde8e8;
+  border: 1px solid #f2b8b8;
+  border-radius: 7px;
+  color: #9f1d16;
+  font-size: 13px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.agent-run-columns {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.agent-run-columns h3 {
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.agent-step-list,
+.agent-tool-list {
+  border: 1px solid #e1e6ee;
+  border-radius: 7px;
+  display: grid;
+  list-style: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.agent-step-list li,
+.agent-tool-list li {
+  align-items: center;
+  border-bottom: 1px solid #e1e6ee;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.agent-step-list li:last-child,
+.agent-tool-list li:last-child {
+  border-bottom: 0;
+}
+
+.agent-step-list strong,
+.agent-tool-list strong {
+  display: block;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.agent-step-list span,
+.agent-tool-list span {
+  color: #8a94a5;
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;
@@ -1201,7 +1301,9 @@ textarea {
   .product-grid,
   .product-selector-row,
   .conversation-grid,
-  .integration-grid {
+  .integration-grid,
+  .agent-run-summary,
+  .agent-run-columns {
     grid-template-columns: 1fr;
   }
 

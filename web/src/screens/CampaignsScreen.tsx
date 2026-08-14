@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { Card, PageHeader, StatCard, StatusPill } from "../shared-ui";
-import type { CampaignCreateInput, LeadSeedInput } from "../types/domain";
+import type { AgentRunDetail, CampaignCreateInput, LeadSeedInput, ToolCall } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
@@ -296,8 +296,106 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
           </div>
         )}
       </Card>
+
+      {selectedCampaignId ? (
+        <AgentRunPanel run={snapshot.latestAgentRun} totalRuns={snapshot.agentRuns.length} />
+      ) : null}
     </>
   );
+}
+
+function AgentRunPanel({ run, totalRuns }: { run?: AgentRunDetail; totalRuns: number }) {
+  return (
+    <Card
+      title="Latest agent run"
+      meta={
+        run ? (
+          <div className="card-actions">
+            <StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill>
+            <span className="muted">{totalRuns} total</span>
+          </div>
+        ) : undefined
+      }
+    >
+      {!run ? (
+        <p className="empty-copy">No agent run has been recorded for the selected campaign.</p>
+      ) : (
+        <div className="agent-run-panel">
+          <div className="agent-run-summary">
+            <div>
+              <span>Objective</span>
+              <strong>{run.objective}</strong>
+            </div>
+            <div>
+              <span>Current phase</span>
+              <strong>{run.current_phase || "none"}</strong>
+            </div>
+            <div>
+              <span>Tool calls</span>
+              <strong>
+                {run.tool_call_count} / {run.max_tool_calls}
+              </strong>
+            </div>
+          </div>
+          {run.error ? <p className="run-error">{run.error}</p> : null}
+          <div className="agent-run-columns">
+            <div>
+              <h3>Steps</h3>
+              {run.steps.length === 0 ? (
+                <p className="empty-copy">No workflow steps have started yet.</p>
+              ) : (
+                <ul className="agent-step-list">
+                  {run.steps.map((step) => (
+                    <li key={step.id}>
+                      <div>
+                        <strong>{step.phase}</strong>
+                        <span>{step.objective}</span>
+                      </div>
+                      <span>{snapshotCount(step.output_snapshot)}</span>
+                      <StatusPill tone={statusTone(step.status)}>{step.status}</StatusPill>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3>Tool calls</h3>
+              {run.tool_calls.length === 0 ? (
+                <p className="empty-copy">No tool calls have been recorded yet.</p>
+              ) : (
+                <ul className="agent-tool-list">
+                  {run.tool_calls.map((toolCall) => (
+                    <li key={toolCall.id}>
+                      <div>
+                        <strong>{toolCall.tool_name}</strong>
+                        <span>{toolCall.reason || "No reason recorded"}</span>
+                      </div>
+                      <span>{toolObservationLabel(toolCall)}</span>
+                      <StatusPill tone={statusTone(toolCall.status)}>{toolCall.status}</StatusPill>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function toolObservationLabel(toolCall: ToolCall): string {
+  if (Array.isArray(toolCall.observation)) return `${toolCall.observation.length} results`;
+  if (typeof toolCall.observation === "string") return toolCall.observation.slice(0, 32);
+  if (toolCall.observation && "count" in toolCall.observation) {
+    return `${String(toolCall.observation.count)} results`;
+  }
+  return toolCall.status;
+}
+
+function snapshotCount(snapshot?: Record<string, unknown> | null): string {
+  if (!snapshot || !("count" in snapshot)) return "-";
+  return String(snapshot.count);
 }
 
 function parseSeedLeads(value: string): LeadSeedInput[] {

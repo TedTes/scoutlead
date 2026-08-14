@@ -1,5 +1,7 @@
 import type {
   ApiHealth,
+  AgentRun,
+  AgentRunDetail,
   Campaign,
   CampaignCreateInput,
   CampaignRunSummary,
@@ -57,7 +59,15 @@ export class ApiClient {
   }
 
   enqueueCampaign(id: string) {
-    return this.request(`/campaigns/${id}/enqueue`, { method: "POST" });
+    return this.request<AgentRun>(`/campaigns/${id}/enqueue`, { method: "POST" });
+  }
+
+  getCampaignAgentRuns(campaignId: string) {
+    return this.request<AgentRun[]>(`/campaigns/${campaignId}/agent-runs`);
+  }
+
+  getAgentRun(id: string) {
+    return this.request<AgentRunDetail>(`/agent-runs/${id}`);
   }
 
   pauseCampaign(id: string) {

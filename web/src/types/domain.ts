@@ -171,12 +171,83 @@ export type Metrics = {
   }>;
 };
 
+export type AgentRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+
+export type AgentStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export type ToolCallStatus = "running" | "completed" | "failed";
+
+export type AgentStep = {
+  id: string;
+  run_id: string;
+  campaign_id: string;
+  phase: string;
+  status: AgentStepStatus;
+  sequence: number;
+  objective: string;
+  input_snapshot: Record<string, unknown>;
+  output_snapshot?: Record<string, unknown> | null;
+  observation?: Record<string, unknown> | null;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ToolCall = {
+  id: string;
+  run_id: string;
+  step_id?: string | null;
+  campaign_id: string;
+  tool_name: string;
+  status: ToolCallStatus;
+  reason?: string | null;
+  args: Record<string, unknown>;
+  observation?: Record<string, unknown> | unknown[] | string | null;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentRun = {
+  id: string;
+  campaign_id: string;
+  product_id: string;
+  kind: "campaign";
+  objective: string;
+  status: AgentRunStatus;
+  current_phase?: string | null;
+  context_snapshot: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+  error?: string | null;
+  max_tool_calls: number;
+  max_llm_calls: number;
+  max_leads: number;
+  tool_call_count: number;
+  llm_call_count: number;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentRunDetail = AgentRun & {
+  steps: AgentStep[];
+  tool_calls: ToolCall[];
+};
+
 export type CampaignSnapshot = {
   campaign?: Campaign;
   leads: Lead[];
   messages: Message[];
   conversations: Conversation[];
   metrics?: Metrics;
+  agentRuns: AgentRun[];
+  latestAgentRun?: AgentRunDetail;
 };
 
 export type ApiHealth = {
