@@ -48,6 +48,15 @@ export type Campaign = {
   updated_at: string;
 };
 
+export type CampaignCreateInput = {
+  product_id: string;
+  name: string;
+  max_leads: number;
+  channels: string[];
+  discovery_seeds?: LeadSeedInput[];
+  goal_override?: string | null;
+};
+
 export type LeadSeedInput = {
   company_name: string;
   website_url?: string | null;

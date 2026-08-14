@@ -28,8 +28,11 @@ function AppShell() {
     campaigns,
     snapshot,
   } = useAppData();
+  const selectedProductCampaignCount = selectedProductId
+    ? campaigns.filter((campaign) => campaign.product_id === selectedProductId).length
+    : 0;
   const navCounts: Partial<Record<Screen, string>> = {
-    campaigns: String(campaigns.length),
+    campaigns: String(selectedProductCampaignCount),
     leads: String(snapshot.metrics?.lead_count ?? snapshot.leads.length),
     approvals: String(snapshot.metrics?.pending_approval_count ?? 0),
     conversations: String(snapshot.conversations.length),

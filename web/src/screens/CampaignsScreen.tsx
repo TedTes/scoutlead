@@ -1,11 +1,32 @@
 import { Plus } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { Card, PageHeader, StatCard, StatusPill } from "../shared-ui";
+import type { CampaignCreateInput, LeadSeedInput } from "../types/domain";
+import type { Screen } from "../types/navigation";
 import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
 
-export function CampaignsScreen() {
+type CampaignDraft = {
+  name: string;
+  maxLeads: string;
+  channel: "email" | "linkedin" | "manual" | "phone";
+  goalOverride: string;
+  seedLeads: string;
+};
+
+const defaultCampaignDraft: CampaignDraft = {
+  name: "",
+  maxLeads: "25",
+  channel: "email",
+  goalOverride: "",
+  seedLeads: "",
+};
+
+export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
   const {
+    selectedProductId,
+    selectedProduct,
     productCampaigns,
     selectedCampaignId,
     snapshot,
@@ -16,12 +37,54 @@ export function CampaignsScreen() {
     resumeCampaign,
     enqueueCampaign,
   } = useAppData();
+  const [showNewCampaign, setShowNewCampaign] = useState(false);
+  const [draft, setDraft] = useState<CampaignDraft>(defaultCampaignDraft);
   const metrics = snapshot.metrics;
-  const activeCampaigns = productCampaigns.filter((campaign) =>
-    ["discovering", "researching", "qualifying", "drafting_outreach", "awaiting_approval", "sending", "tracking"].includes(
+  const parsedMaxLeads = Number.parseInt(draft.maxLeads, 10);
+  const canCreateCampaign =
+    Boolean(selectedProductId) &&
+    draft.name.trim().length > 0 &&
+    Number.isInteger(parsedMaxLeads) &&
+    parsedMaxLeads > 0 &&
+    parsedMaxLeads <= 1000;
+  const runningCampaigns = productCampaigns.filter((campaign) =>
+    ["discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(
       campaign.status,
     ),
   );
+  const awaitingApprovalCampaigns = productCampaigns.filter(
+    (campaign) => campaign.status === "awaiting_approval",
+  );
+  const defaultCampaignName = useMemo(() => {
+    const date = new Date().toISOString().slice(0, 10);
+    return selectedProduct ? `${selectedProduct.product_name} validation ${date}` : `Campaign ${date}`;
+  }, [selectedProduct]);
+
+  const openNewCampaign = () => {
+    setDraft({ ...defaultCampaignDraft, name: defaultCampaignName });
+    setShowNewCampaign(true);
+  };
+
+  const updateDraft = (field: keyof CampaignDraft, value: string) => {
+    setDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const submitCampaign = async () => {
+    if (!selectedProductId || !canCreateCampaign) return;
+    const input: CampaignCreateInput = {
+      product_id: selectedProductId,
+      name: draft.name.trim(),
+      max_leads: parsedMaxLeads,
+      channels: [draft.channel],
+      discovery_seeds: parseSeedLeads(draft.seedLeads),
+      goal_override: draft.goalOverride.trim() || null,
+    };
+    const created = await createCampaign(input);
+    if (created) {
+      setShowNewCampaign(false);
+      setDraft(defaultCampaignDraft);
+    }
+  };
 
   return (
     <>
@@ -29,26 +92,98 @@ export function CampaignsScreen() {
         title="Campaigns"
         subtitle="Repeatable discovery + outreach runs against your ICP."
         actions={
-          <button onClick={createCampaign}>
+          <button disabled={!selectedProductId} onClick={openNewCampaign}>
             <Plus size={14} />
             New campaign
           </button>
         }
       />
 
+      {showNewCampaign ? (
+        <div className="campaign-setup">
+          <Card title="New campaign" meta={<StatusPill tone="blue">Draft</StatusPill>}>
+            <div className="form-grid two">
+              <label className="field">
+                <span>Campaign name</span>
+                <input
+                  value={draft.name}
+                  onChange={(event) => updateDraft("name", event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Max leads</span>
+                <input
+                  inputMode="numeric"
+                  min="1"
+                  max="1000"
+                  type="number"
+                  value={draft.maxLeads}
+                  onChange={(event) => updateDraft("maxLeads", event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="form-grid two">
+              <label className="field">
+                <span>Primary channel</span>
+                <select
+                  value={draft.channel}
+                  onChange={(event) => updateDraft("channel", event.target.value as CampaignDraft["channel"])}
+                >
+                  <option value="email">Email</option>
+                  <option value="linkedin">LinkedIn</option>
+                  <option value="manual">Manual</option>
+                  <option value="phone">Phone</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Goal override</span>
+                <input
+                  placeholder={selectedProduct?.validation_goal || "Optional"}
+                  value={draft.goalOverride}
+                  onChange={(event) => updateDraft("goalOverride", event.target.value)}
+                />
+              </label>
+            </div>
+            <label className="field">
+              <span>Seed leads</span>
+              <textarea
+                rows={4}
+                placeholder="Company | website | email | geography | notes"
+                value={draft.seedLeads}
+                onChange={(event) => updateDraft("seedLeads", event.target.value)}
+              />
+              <em>Optional. One lead per line.</em>
+            </label>
+            {!canCreateCampaign ? (
+              <p className="field-help product-form-help">
+                Add a campaign name and use a max lead count from 1 to 1000.
+              </p>
+            ) : null}
+            <div className="form-actions">
+              <button className="secondary" onClick={() => setShowNewCampaign(false)}>
+                Cancel
+              </button>
+              <button disabled={!canCreateCampaign} onClick={submitCampaign}>
+                Create campaign
+              </button>
+            </div>
+          </Card>
+        </div>
+      ) : null}
+
       <div className="stat-grid four">
-        <StatCard label="Active campaigns" value={String(activeCampaigns.length)} />
-        <StatCard label="In queue for approval" value={String(metrics?.pending_approval_count ?? 0)} />
+        <StatCard label="Running campaigns" value={String(runningCampaigns.length)} />
+        <StatCard label="Awaiting approval" value={String(awaitingApprovalCampaigns.length)} />
         <StatCard label="Sent" value={String(metrics?.sent_count ?? 0)} />
         <StatCard label="Interviews requested" value={String(metrics?.interview_request_count ?? 0)} />
       </div>
 
-      <Card title="All campaigns" meta={<span className="muted">{productCampaigns.length} total</span>}>
+      <Card title="Selected product campaigns" meta={<span className="muted">{productCampaigns.length} total</span>}>
         {productCampaigns.length === 0 ? (
           <p className="empty-copy">Create a campaign for the selected product.</p>
         ) : (
           <div className="table-shell bare">
-            <table className="data-table">
+            <table className="data-table campaigns-table">
               <thead>
                 <tr>
                   <th>Campaign</th>
@@ -92,6 +227,9 @@ export function CampaignsScreen() {
                           onQueue={() => enqueueCampaign(campaign.id)}
                           onPause={() => pauseCampaign(campaign.id)}
                           onResume={() => resumeCampaign(campaign.id)}
+                          onReview={() => onNavigate("approvals")}
+                          onViewLeads={() => onNavigate("leads")}
+                          onViewConversations={() => onNavigate("conversations")}
                         />
                       </td>
                     </tr>
@@ -106,18 +244,45 @@ export function CampaignsScreen() {
   );
 }
 
+function parseSeedLeads(value: string): LeadSeedInput[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [companyName, websiteUrl, contactEmail, geography, ...descriptionParts] = line
+        .split("|")
+        .map((part) => part.trim());
+      return {
+        company_name: companyName,
+        website_url: websiteUrl || null,
+        contact_email: contactEmail || null,
+        geography: geography || null,
+        description: descriptionParts.join(" | ") || null,
+        source: "manual",
+      };
+    })
+    .filter((seed) => seed.company_name.length > 0);
+}
+
 function CampaignControl({
   status,
   onRun,
   onQueue,
   onPause,
   onResume,
+  onReview,
+  onViewLeads,
+  onViewConversations,
 }: {
   status: string;
   onRun: () => void;
   onQueue: () => void;
   onPause: () => void;
   onResume: () => void;
+  onReview: () => void;
+  onViewLeads: () => void;
+  onViewConversations: () => void;
 }) {
   if (status === "paused") {
     return <button onClick={(event) => { event.stopPropagation(); onResume(); }}>Resume</button>;
@@ -125,8 +290,17 @@ function CampaignControl({
   if (status === "draft" || status === "failed") {
     return <button onClick={(event) => { event.stopPropagation(); onRun(); }}>Run</button>;
   }
-  if (status === "completed") {
-    return <button className="secondary" onClick={(event) => { event.stopPropagation(); onQueue(); }}>Queue</button>;
+  if (status === "awaiting_approval") {
+    return <button onClick={(event) => { event.stopPropagation(); onReview(); }}>Review</button>;
   }
-  return <button className="secondary" onClick={(event) => { event.stopPropagation(); onPause(); }}>Pause</button>;
+  if (status === "tracking") {
+    return <button className="secondary" onClick={(event) => { event.stopPropagation(); onViewConversations(); }}>Conversations</button>;
+  }
+  if (status === "completed") {
+    return <button className="secondary" onClick={(event) => { event.stopPropagation(); onViewLeads(); }}>Results</button>;
+  }
+  if (["discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(status)) {
+    return <button className="secondary" onClick={(event) => { event.stopPropagation(); onPause(); }}>Pause</button>;
+  }
+  return <button className="secondary" onClick={(event) => { event.stopPropagation(); onQueue(); }}>Queue</button>;
 }

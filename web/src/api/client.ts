@@ -1,6 +1,7 @@
 import type {
   ApiHealth,
   Campaign,
+  CampaignCreateInput,
   CampaignRunSummary,
   ConnectionStatus,
   Conversation,
@@ -39,7 +40,7 @@ export class ApiClient {
     return this.request<Campaign[]>("/campaigns");
   }
 
-  createCampaign(input: unknown) {
+  createCampaign(input: CampaignCreateInput) {
     return this.request<Campaign>("/campaigns", { method: "POST", body: input });
   }
 

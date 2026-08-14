@@ -451,6 +451,7 @@ textarea {
 .form-actions {
   border-top: 1px solid #e4e8ef;
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
   margin: 18px -14px -14px;
   padding: 12px 14px;
@@ -593,6 +594,10 @@ textarea {
   font-size: 12px;
 }
 
+.campaign-setup {
+  margin-bottom: 14px;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;
@@ -719,6 +724,38 @@ textarea {
   border-collapse: collapse;
   min-width: 760px;
   width: 100%;
+}
+
+.campaigns-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.campaigns-table th:nth-child(1) {
+  width: 32%;
+}
+
+.campaigns-table th:nth-child(2) {
+  width: 16%;
+}
+
+.campaigns-table th:nth-child(3),
+.campaigns-table th:nth-child(4),
+.campaigns-table th:nth-child(5),
+.campaigns-table th:nth-child(6) {
+  width: 10%;
+}
+
+.campaigns-table th:nth-child(7),
+.campaigns-table th:nth-child(8) {
+  width: 11%;
+}
+
+.campaigns-table td:first-child strong,
+.campaigns-table td:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .leads-table {

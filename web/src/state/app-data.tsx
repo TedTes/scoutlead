@@ -3,6 +3,7 @@ import { ApiClient } from "../api/client";
 import { getApiBaseUrl } from "../config/env";
 import type {
   Campaign,
+  CampaignCreateInput,
   CampaignSnapshot,
   ConnectionStatus,
   Conversation,
@@ -32,7 +33,7 @@ type AppDataContextValue = {
   refreshSnapshot: (campaignId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<boolean>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
-  createCampaign: () => Promise<void>;
+  createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
   runCampaign: (campaignId?: string) => Promise<void>;
   enqueueCampaign: (campaignId?: string) => Promise<void>;
   pauseCampaign: (campaignId?: string) => Promise<void>;
@@ -219,14 +220,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           if (!selectedProductIdState) return;
           await api.updateProduct(selectedProductIdState, update);
         }),
-      createCampaign: () =>
-        mutate(async () => {
-          if (!selectedProductIdState) return;
-          const campaign = await api.createCampaign({
-            product_id: selectedProductIdState,
-          });
+      createCampaign: async (input) => {
+        let created = false;
+        await mutate(async () => {
+          const campaign = await api.createCampaign(input);
           localStorage.setItem("selectedCampaignId", campaign.id);
-        }),
+          created = true;
+        });
+        return created;
+      },
       runCampaign: (campaignId = selectedCampaignIdState) =>
         mutate(async () => {
           if (campaignId) await api.runCampaign(campaignId);

@@ -20,7 +20,7 @@ export function renderScreen(
     case "product":
       return <ProductScreen {...productEditor} />;
     case "campaigns":
-      return <CampaignsScreen />;
+      return <CampaignsScreen onNavigate={setActiveScreen} />;
     case "leads":
       return <LeadsScreen />;
     case "approvals":
