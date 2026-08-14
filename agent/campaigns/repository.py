@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from campaigns.schemas import CampaignCreate, CampaignStage, CampaignStatus
 from campaigns.state import assert_campaign_transition
-from db.models import CampaignModel
+from db.models import (
+    CampaignMemoryModel,
+    CampaignModel,
+    ConversationEventModel,
+    ConversationModel,
+    LeadModel,
+    LearningSummaryModel,
+    MessageModel,
+    QueueJobModel,
+)
 from shared.errors import NotFoundError
 from shared.utils import new_id, utcnow
 
@@ -44,6 +53,28 @@ class CampaignRepository:
         if model is None:
             raise NotFoundError("campaign not found", {"campaign_id": campaign_id})
         return model
+
+    def delete(self, campaign_id: str) -> None:
+        model = self.get(campaign_id)
+        conversation_ids = self.session.scalars(
+            select(ConversationModel.id).where(ConversationModel.campaign_id == campaign_id)
+        ).all()
+        if conversation_ids:
+            self.session.execute(
+                delete(ConversationEventModel).where(
+                    ConversationEventModel.conversation_id.in_(conversation_ids)
+                )
+            )
+        self.session.execute(delete(ConversationModel).where(ConversationModel.campaign_id == campaign_id))
+        self.session.execute(delete(MessageModel).where(MessageModel.campaign_id == campaign_id))
+        self.session.execute(delete(LeadModel).where(LeadModel.campaign_id == campaign_id))
+        self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.campaign_id == campaign_id))
+        self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.campaign_id == campaign_id))
+        self.session.execute(
+            delete(QueueJobModel).where(QueueJobModel.payload["campaign_id"].as_string() == campaign_id)
+        )
+        self.session.delete(model)
+        self.session.commit()
 
     def update_status(
         self,

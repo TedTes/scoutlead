@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 
 from app.dependencies import AppServices, DbSession, get_services
 from campaigns.schemas import CampaignCreate, CampaignRead, CampaignRunSummary
@@ -45,6 +45,16 @@ def get_campaign(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return _service(session, services).get(campaign_id)
+
+
+@router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_campaign(
+    campaign_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    _service(session, services).delete(campaign_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{campaign_id}/pause", response_model=CampaignRead)

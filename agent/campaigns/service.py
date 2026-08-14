@@ -53,6 +53,9 @@ class CampaignService:
     def get(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.get(campaign_id)
 
+    def delete(self, campaign_id: str) -> None:
+        self.campaigns.delete(campaign_id)
+
     def pause(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.update_status(campaign_id, CampaignStatus.PAUSED)
 

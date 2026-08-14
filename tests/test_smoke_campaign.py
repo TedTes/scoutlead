@@ -169,3 +169,57 @@ def test_campaign_with_no_drafts_completes_without_approval_queue() -> None:
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).metrics(campaign.id)
         assert metrics.pending_approval_count == 0
+
+
+def test_delete_campaign_removes_related_workflow_records() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            ProductCreate(
+                product_name="Delete Campaign Product",
+                product_description="Software product used by the delete test.",
+                target_customer="Target customer segment",
+                problem_being_solved="A customer workflow takes too long.",
+                value_proposition="Improve the workflow enough to justify discovery.",
+                target_geography="Test geography",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Matches target customer", weight=3, required=True),
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.SEED,
+                        value="Delete Test Lead|https://example.com|Matches target customer|Test geography|hello@example.com",
+                    )
+                ],
+                outreach_objective="Ask for a 20-minute discovery interview.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+        campaign_service = CampaignService(
+            session=session,
+            llm=HeuristicLLMClient(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        )
+        campaign = campaign_service.create(
+            CampaignCreate(product_id=product.id, name="Delete test campaign", max_leads=3)
+        )
+        campaign_service.run_campaign(campaign.id)
+
+        assert session.execute(text("select count(*) from campaigns")).scalar_one() == 1
+        assert session.execute(text("select count(*) from leads")).scalar_one() == 1
+        assert session.execute(text("select count(*) from messages")).scalar_one() == 1
+        assert session.execute(text("select count(*) from campaign_memory")).scalar_one() > 0
+
+        campaign_service.delete(campaign.id)
+
+        assert session.execute(text("select count(*) from campaigns")).scalar_one() == 0
+        assert session.execute(text("select count(*) from leads")).scalar_one() == 0
+        assert session.execute(text("select count(*) from messages")).scalar_one() == 0
+        assert session.execute(text("select count(*) from conversations")).scalar_one() == 0
+        assert session.execute(text("select count(*) from conversation_events")).scalar_one() == 0
+        assert session.execute(text("select count(*) from campaign_memory")).scalar_one() == 0
