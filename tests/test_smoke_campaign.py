@@ -59,7 +59,7 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
             llm=HeuristicLLMClient(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
-        ).create(CampaignCreate(product_id=product.id, max_leads=3))
+        ).create(CampaignCreate(product_id=product.id, name="Smoke test campaign", max_leads=3))
 
         summary = CampaignService(
             session=session,
@@ -117,3 +117,55 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
         )
         assert reclassified.events[-1].direction == "internal"
         assert reclassified.events[-1].classification.intent == "interested"
+
+
+def test_campaign_with_no_drafts_completes_without_approval_queue() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            ProductCreate(
+                product_name="No Lead Product",
+                product_description="Software product used by the no-lead workflow test.",
+                target_customer="Target customer segment",
+                problem_being_solved="A customer workflow takes too long.",
+                value_proposition="Improve the workflow enough to justify discovery.",
+                target_geography="Test geography",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Matches target customer", weight=3, required=True),
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(type=DiscoverySourceType.WEB_SEARCH, value="no configured search"),
+                ],
+                outreach_objective="Ask for a 20-minute discovery interview.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+        campaign = CampaignService(
+            session=session,
+            llm=HeuristicLLMClient(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        ).create(CampaignCreate(product_id=product.id, name="No draft campaign", max_leads=3))
+
+        summary = CampaignService(
+            session=session,
+            llm=HeuristicLLMClient(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        ).run_campaign(campaign.id)
+
+        assert summary.discovered_lead_count == 0
+        assert summary.drafted_message_count == 0
+        assert summary.campaign.status == "completed"
+        assert summary.campaign.stage == "complete"
+        metrics = CampaignService(
+            session=session,
+            llm=HeuristicLLMClient(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        ).metrics(campaign.id)
+        assert metrics.pending_approval_count == 0

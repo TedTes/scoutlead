@@ -1,5 +1,7 @@
 from app.config import Settings
+from campaigns.schemas import CampaignCreate
 import pytest
+from pydantic import ValidationError
 
 from db.session import DatabaseConfigurationError, normalize_database_url
 
@@ -48,3 +50,8 @@ def test_database_url_rejects_unresolved_railway_reference() -> None:
 def test_database_url_rejects_sqlite_runtime_urls() -> None:
     with pytest.raises(DatabaseConfigurationError, match="Postgres URL"):
         normalize_database_url("sqlite:///./data/soutlead.db")
+
+
+def test_campaign_create_requires_explicit_setup_fields() -> None:
+    with pytest.raises(ValidationError):
+        CampaignCreate(product_id="product_123")

@@ -46,8 +46,8 @@ class LeadSeedInput(BaseModel):
 
 class CampaignCreate(BaseModel):
     product_id: str = Field(min_length=1)
-    name: str | None = None
-    max_leads: int = Field(default=25, gt=0, le=1000)
+    name: str = Field(min_length=1)
+    max_leads: int = Field(gt=0, le=1000)
     channels: list[OutreachChannel] = Field(default_factory=lambda: [OutreachChannel.EMAIL])
     discovery_seeds: list[LeadSeedInput] = Field(default_factory=list)
     goal_override: str | None = None

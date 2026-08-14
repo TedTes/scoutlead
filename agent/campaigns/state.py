@@ -14,6 +14,7 @@ ALLOWED_CAMPAIGN_TRANSITIONS: dict[CampaignStatus, set[CampaignStatus]] = {
     },
     CampaignStatus.DRAFTING_OUTREACH: {
         CampaignStatus.AWAITING_APPROVAL,
+        CampaignStatus.COMPLETED,
         CampaignStatus.FAILED,
         CampaignStatus.PAUSED,
     },

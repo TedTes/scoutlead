@@ -6,7 +6,7 @@ from leads.schemas import LeadRead, LeadStatus
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
-from messages.schemas import MessageRead, OutreachDraft
+from messages.schemas import MessageRead, MessageStatus, OutreachDraft
 from products.schemas import ProductRead
 from prompts.outreach import fallback_outreach, outreach_prompt
 
@@ -55,16 +55,29 @@ class OutreachWorkflow:
             self.leads.update_status(lead.id, LeadStatus.AWAITING_APPROVAL)
             drafts.append(MessageRead.model_validate(message))
 
-        self.campaigns.update_status(
-            campaign.id, CampaignStatus.AWAITING_APPROVAL, stage=CampaignStage.OUTREACH
+        pending_approval_count = sum(
+            1
+            for message in self.messages.list_by_campaign(campaign.id)
+            if message.status == MessageStatus.PENDING_APPROVAL.value
         )
+        if pending_approval_count > 0:
+            self.campaigns.update_status(
+                campaign.id, CampaignStatus.AWAITING_APPROVAL, stage=CampaignStage.OUTREACH
+            )
+        else:
+            self.campaigns.update_status(
+                campaign.id, CampaignStatus.COMPLETED, stage=CampaignStage.COMPLETE
+            )
         self.memory.create_observation(
             CampaignMemoryCreate(
                 product_id=product.id,
                 campaign_id=campaign.id,
                 type=ObservationType.OUTREACH_VARIANT,
-                content=f"Drafted {len(drafts)} outreach messages for approval.",
-                tags=["outreach", "pending_approval"],
+                content=(
+                    f"Drafted {len(drafts)} outreach messages for approval. "
+                    f"{pending_approval_count} messages are pending approval."
+                ),
+                tags=["outreach", "pending_approval" if pending_approval_count else "no_pending_approval"],
             )
         )
         return drafts
