@@ -1,3 +1,5 @@
+from typing import Any, Callable
+
 from agents.runner import BoundedAgentRunner, StopAction, ToolAction
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus, LeadSeedInput
@@ -17,11 +19,17 @@ class DiscoveryWorkflow:
         leads: LeadRepository,
         memory: MemoryRepository,
         search_tool: SearchTool,
+        on_tool_start: Callable[[ToolAction, int], str | None] | None = None,
+        on_tool_success: Callable[[str, Any], None] | None = None,
+        on_tool_error: Callable[[str, Exception], None] | None = None,
     ) -> None:
         self.campaigns = campaigns
         self.leads = leads
         self.memory = memory
         self.search_tool = search_tool
+        self.on_tool_start = on_tool_start
+        self.on_tool_success = on_tool_success
+        self.on_tool_error = on_tool_error
 
     def run(self, product: ProductRead, campaign: CampaignRead) -> list[LeadRead]:
         self.campaigns.update_status(
@@ -68,6 +76,9 @@ class DiscoveryWorkflow:
             tools=[self.search_tool],
             decide=decide,
             observe=observe,
+            on_tool_start=self.on_tool_start,
+            on_tool_success=self.on_tool_success,
+            on_tool_error=self.on_tool_error,
         )
 
         for row in result.state["results"]:

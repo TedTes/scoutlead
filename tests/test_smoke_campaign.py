@@ -2,6 +2,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import pytest
 
+from agent_runs.schemas import AgentRunCreate
+from agent_runs.service import AgentRunService
 from agents.llm import HeuristicLLMClient
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
@@ -223,3 +225,65 @@ def test_delete_campaign_removes_related_workflow_records() -> None:
         assert session.execute(text("select count(*) from conversations")).scalar_one() == 0
         assert session.execute(text("select count(*) from conversation_events")).scalar_one() == 0
         assert session.execute(text("select count(*) from campaign_memory")).scalar_one() == 0
+
+
+def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            ProductCreate(
+                product_name="Agentic Product",
+                product_description="Software product used by the agent-run test.",
+                target_customer="Target customer segment",
+                problem_being_solved="A customer workflow takes too long.",
+                value_proposition="Improve the workflow enough to justify discovery.",
+                target_geography="Test geography",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Matches target customer", weight=3, required=True),
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.SEED,
+                        value="Agentic Lead|https://example.com|Matches target customer|Test geography|hello@example.com",
+                    )
+                ],
+                outreach_objective="Ask for a 20-minute discovery interview.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+        campaign_service = CampaignService(
+            session=session,
+            llm=HeuristicLLMClient(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        )
+        campaign = campaign_service.create(
+            CampaignCreate(product_id=product.id, name="Agent run campaign", max_leads=3)
+        )
+        agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
+
+        summary = campaign_service.run_campaign(campaign.id, agent_run_id=agent_run.id)
+        detail = AgentRunService(session).get(agent_run.id)
+
+        assert summary.discovered_lead_count == 1
+        assert detail.status == "completed"
+        assert [step.phase for step in detail.steps] == [
+            "discovery",
+            "research",
+            "qualification",
+            "outreach",
+        ]
+        assert all(step.status == "completed" for step in detail.steps)
+        assert detail.tool_call_count == 1
+        assert len(detail.tool_calls) == 1
+        assert detail.tool_calls[0].tool_name == "search"
+        assert detail.tool_calls[0].status == "completed"
+
+        campaign_service.delete(campaign.id)
+        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 0
+        assert session.execute(text("select count(*) from agent_steps")).scalar_one() == 0
+        assert session.execute(text("select count(*) from tool_calls")).scalar_one() == 0

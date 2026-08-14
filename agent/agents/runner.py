@@ -17,6 +17,9 @@ class StopAction:
 
 
 AgentAction = ToolAction | StopAction
+ToolStartCallback = Callable[[ToolAction, int], str | None]
+ToolSuccessCallback = Callable[[str, Any], None]
+ToolErrorCallback = Callable[[str, Exception], None]
 
 
 class Tool(Protocol):
@@ -53,6 +56,9 @@ class BoundedAgentRunner:
         tools: list[Tool],
         decide: Callable[[dict[str, Any], int], AgentAction],
         observe: Callable[[dict[str, Any], ToolAction, Any, int], dict[str, Any]],
+        on_tool_start: ToolStartCallback | None = None,
+        on_tool_success: ToolSuccessCallback | None = None,
+        on_tool_error: ToolErrorCallback | None = None,
     ) -> AgentRunResult:
         tool_map = {tool.name: tool for tool in tools}
         state = dict(initial_state)
@@ -79,7 +85,15 @@ class BoundedAgentRunner:
             if tool is None:
                 raise WorkflowBoundaryError(f"tool is not registered: {action.tool_name}")
 
-            observation = tool.execute(action.args)
+            tool_call_id = on_tool_start(action, iteration) if on_tool_start else None
+            try:
+                observation = tool.execute(action.args)
+            except Exception as exc:
+                if tool_call_id and on_tool_error:
+                    on_tool_error(tool_call_id, exc)
+                raise
+            if tool_call_id and on_tool_success:
+                on_tool_success(tool_call_id, observation)
             trace.append(AgentTraceEntry(iteration=iteration, action=action, observation=observation))
             state = observe(state, action, observation, iteration)
 

@@ -1,5 +1,6 @@
 from time import sleep
 
+from agent_runs.repository import AgentRunRepository
 from app.config import get_settings
 from app.dependencies import create_app_services
 from campaigns.service import CampaignService
@@ -22,6 +23,20 @@ def run_once() -> bool:
     generator = services.db.session()
     session = next(generator)
     try:
+        agent_runs = AgentRunRepository(session)
+        agent_run = agent_runs.claim_next()
+        if agent_run is not None:
+            try:
+                CampaignService(
+                    session=session,
+                    llm=services.llm,
+                    search_tool=services.search,
+                    browser=services.browser,
+                ).run_campaign(agent_run.campaign_id, agent_run_id=agent_run.id)
+            except Exception:
+                logger.exception("agent_run_failed run_id=%s", agent_run.id)
+            return True
+
         queue = QueueRepository(session)
         job = queue.claim_next()
         if job is None:

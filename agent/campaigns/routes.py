@@ -2,12 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
+from agent_runs.schemas import AgentRunCreate, AgentRunRead
+from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, DbSession, get_services
 from campaigns.schemas import CampaignCreate, CampaignRead, CampaignRunSummary
 from campaigns.service import CampaignService
 from evaluation.schemas import CampaignMetrics
-from queue.schemas import QueueJobRead
-from queue.service import QueueService
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -81,12 +81,13 @@ def run_campaign(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
 ):
-    return _service(session, services).run_campaign(campaign_id)
+    agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign_id))
+    return _service(session, services).run_campaign(campaign_id, agent_run_id=agent_run.id)
 
 
-@router.post("/{campaign_id}/enqueue", response_model=QueueJobRead)
+@router.post("/{campaign_id}/enqueue", response_model=AgentRunRead)
 def enqueue_campaign_run(campaign_id: str, session: DbSession):
-    return QueueService(session).enqueue_campaign_run(campaign_id)
+    return AgentRunService(session).create(AgentRunCreate(campaign_id=campaign_id))
 
 
 @router.get("/{campaign_id}/metrics", response_model=CampaignMetrics)
