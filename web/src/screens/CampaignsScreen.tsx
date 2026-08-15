@@ -441,8 +441,11 @@ function CampaignControl({
   if (status === "paused") {
     return <button onClick={(event) => { event.stopPropagation(); onResume(); }}>Resume</button>;
   }
-  if (status === "draft" || status === "failed") {
+  if (status === "draft") {
     return <button onClick={(event) => { event.stopPropagation(); onRun(); }}>Run</button>;
+  }
+  if (status === "failed") {
+    return <button className="secondary" disabled onClick={(event) => event.stopPropagation()}>Failed</button>;
   }
   if (status === "awaiting_approval") {
     return <button onClick={(event) => { event.stopPropagation(); onReview(); }}>Review</button>;

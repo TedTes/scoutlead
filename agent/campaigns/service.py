@@ -19,6 +19,7 @@ from messages.repository import MessageRepository
 from messages.schemas import MessageRead
 from products.repository import ProductRepository
 from products.schemas import ProductRead
+from shared.errors import ConflictError
 from tools.browser import DirectHttpBrowserTool
 from tools.search import SearchTool
 from workflows.discovery import DiscoveryWorkflow
@@ -79,14 +80,15 @@ class CampaignService:
         )
 
     def run_campaign(self, campaign_id: str, *, agent_run_id: str | None = None) -> CampaignRunSummary:
-        if agent_run_id:
-            self.agent_runs.start(agent_run_id)
-
         campaign = self.campaigns.get(campaign_id)
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
         campaign_read = CampaignRead.model_validate(campaign)
 
         try:
+            self._assert_runnable_campaign(campaign_read)
+            if agent_run_id:
+                self.agent_runs.start(agent_run_id)
+
             discovered = self._run_agent_step(
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
@@ -192,6 +194,14 @@ class CampaignService:
         return calculate_campaign_metrics(
             leads=leads, messages=messages, conversations=conversations
         )
+
+    @staticmethod
+    def _assert_runnable_campaign(campaign: CampaignRead) -> None:
+        if campaign.status not in {CampaignStatus.DRAFT, CampaignStatus.PAUSED}:
+            raise ConflictError(
+                "campaign can only be run from draft or paused status",
+                {"campaign_id": campaign.id, "status": campaign.status.value},
+            )
 
     def _run_agent_step(
         self,

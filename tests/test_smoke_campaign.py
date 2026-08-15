@@ -283,6 +283,12 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
         assert detail.tool_calls[0].tool_name == "search"
         assert detail.tool_calls[0].status == "completed"
 
+        with pytest.raises(ConflictError, match="draft or paused"):
+            AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
+        with pytest.raises(ConflictError, match="draft or paused"):
+            campaign_service.run_campaign(campaign.id)
+        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 1
+
         campaign_service.delete(campaign.id)
         assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 0
         assert session.execute(text("select count(*) from agent_steps")).scalar_one() == 0

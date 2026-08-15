@@ -6,13 +6,16 @@ import type { Lead } from "../types/domain";
 import { scoreTone, statusTone } from "../utils/status";
 
 export function LeadsScreen() {
-  const { snapshot, addSeedLeads, runCampaign } = useAppData();
+  const { selectedCampaign, snapshot, addSeedLeads, runCampaign } = useAppData();
   const [seedJson, setSeedJson] = useState("");
   const [expandedLeadId, setExpandedLeadId] = useState("");
   const leads = snapshot.leads;
   const qualified = leads.filter((lead) => lead.qualification?.qualified).length;
   const review = leads.filter((lead) => lead.status === "discovered" || lead.status === "researched").length;
   const disqualified = leads.filter((lead) => lead.status === "disqualified").length;
+  const canRunCampaign = selectedCampaign
+    ? ["draft", "paused"].includes(selectedCampaign.status)
+    : false;
 
   return (
     <>
@@ -22,7 +25,7 @@ export function LeadsScreen() {
         actions={
           <>
             <button className="secondary">Export CSV</button>
-            <button onClick={() => runCampaign()}>
+            <button disabled={!canRunCampaign} onClick={() => runCampaign()}>
               <Play size={14} />
               Run discovery
             </button>

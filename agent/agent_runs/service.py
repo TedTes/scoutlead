@@ -5,9 +5,13 @@ from sqlalchemy.orm import Session
 from agent_runs.repository import AgentRunRepository
 from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead, AgentStepRead, ToolCallRead
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignRead
+from campaigns.schemas import CampaignRead, CampaignStatus
 from products.repository import ProductRepository
 from products.schemas import ProductRead
+from shared.errors import ConflictError
+
+
+RUNNABLE_CAMPAIGN_STATUSES = {CampaignStatus.DRAFT, CampaignStatus.PAUSED}
 
 
 class AgentRunService:
@@ -19,6 +23,11 @@ class AgentRunService:
 
     def create(self, request: AgentRunCreate) -> AgentRunRead:
         campaign = CampaignRead.model_validate(self.campaigns.get(request.campaign_id))
+        if campaign.status not in RUNNABLE_CAMPAIGN_STATUSES:
+            raise ConflictError(
+                "agent run can only be created for draft or paused campaigns",
+                {"campaign_id": campaign.id, "status": campaign.status.value},
+            )
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
         objective = request.objective or self._default_objective(product, campaign)
         model = self.agent_runs.create(
