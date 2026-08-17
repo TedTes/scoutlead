@@ -22,16 +22,30 @@ class Settings(BaseSettings):
     search_api_key: str | None = None
     search_provider: Literal["generic", "tavily", "brave"] = "generic"
 
+    allow_mock_providers: bool = False
+    require_real_search: bool = False
+    require_real_email: bool = False
+    require_real_llm: bool = False
+
     llm_json_endpoint: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
 
+    email_provider: Literal["console", "http", "resend"] = "console"
     email_provider_endpoint: str | None = None
     email_api_key: str | None = None
+    resend_api_key: str | None = None
+    email_from_address: str | None = None
+    email_from_name: str = "Soutlead"
+    email_reply_to: str | None = None
 
     request_timeout_seconds: float = Field(default=20.0, gt=0)
+
+    @property
+    def strict_external_providers(self) -> bool:
+        return self.environment in {"staging", "production"} and not self.allow_mock_providers
 
     @field_validator("cors_origins", mode="after")
     @classmethod

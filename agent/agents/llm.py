@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel
 from shared.utils import safe_json_loads
 
+from shared.errors import ConfigurationError
 from shared.logger import get_logger
 
 TModel = TypeVar("TModel", bound=BaseModel)
@@ -39,6 +40,23 @@ class HeuristicLLMClient:
         fallback: TModel,
     ) -> TModel:
         return fallback
+
+
+class MissingLLMClient:
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model: type[TModel],
+        context: dict[str, Any] | None = None,
+        fallback: TModel,
+    ) -> TModel:
+        raise ConfigurationError(
+            "real LLM provider is required for this environment",
+            {"task": task},
+        )
 
 
 class RemoteJsonLLMClient:

@@ -32,6 +32,7 @@ def run_once() -> bool:
                     llm=services.llm,
                     search_tool=services.search,
                     browser=services.browser,
+                    email=services.email,
                 ).run_campaign(agent_run.campaign_id, agent_run_id=agent_run.id)
             except Exception:
                 logger.exception("agent_run_failed run_id=%s", agent_run.id)
@@ -48,6 +49,7 @@ def run_once() -> bool:
                     llm=services.llm,
                     search_tool=services.search,
                     browser=services.browser,
+                    email=services.email,
                 ).run_campaign(str(job.payload["campaign_id"]))
             elif job.type == JobType.MESSAGE_SEND.value:
                 MessageService(session=session, email=services.email).send(

@@ -264,6 +264,39 @@ class AgentRunRepository:
         self.session.refresh(model)
         return model
 
+    def start_llm_call(
+        self,
+        *,
+        run_id: str,
+        campaign_id: str,
+        task: str,
+        args: dict[str, Any],
+        step_id: str | None = None,
+        reason: str | None = None,
+    ) -> ToolCallModel:
+        run = self.get(run_id)
+        if run.llm_call_count >= run.max_llm_calls:
+            raise ConflictError("agent run exceeded max LLM calls", {"run_id": run_id})
+        run.llm_call_count += 1
+        run.heartbeat_at = utcnow()
+        model = ToolCallModel(
+            id=new_id("tool_call"),
+            run_id=run_id,
+            step_id=step_id,
+            campaign_id=campaign_id,
+            tool_name=f"llm:{task}",
+            status=ToolCallStatus.RUNNING.value,
+            reason=reason,
+            args=args,
+            observation=None,
+            error=None,
+            started_at=utcnow(),
+        )
+        self.session.add(model)
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
     def complete_tool_call(self, tool_call_id: str, observation: Any) -> ToolCallModel:
         model = self._get_tool_call(tool_call_id)
         model.status = ToolCallStatus.COMPLETED.value

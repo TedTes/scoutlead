@@ -9,6 +9,7 @@ from leads.repository import LeadRepository
 from leads.schemas import LeadRead, LeadStatus
 from messages.repository import MessageRepository
 from messages.schemas import MessageApproval, MessageRead, MessageStatus, MessageUpdate
+from messages.state import assert_send_allowed
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from tools.email import EmailTool
@@ -42,10 +43,19 @@ class MessageService:
         lead = LeadRead.model_validate(self.leads.get(message.lead_id))
         campaign = self.campaigns.get(message.campaign_id)
 
+        assert_send_allowed(message.status)
         if campaign.status == CampaignStatus.AWAITING_APPROVAL.value:
             self.campaigns.update_status(message.campaign_id, CampaignStatus.SENDING)
 
-        result = self.email.send(product=product, lead=lead, message=message)
+        try:
+            result = self.email.send(product=product, lead=lead, message=message)
+        except Exception as exc:
+            self.messages.set_status(
+                message_id,
+                MessageStatus.FAILED,
+                failure_reason=str(exc),
+            )
+            raise
         sent_at = datetime.fromisoformat(result.sent_at)
         updated = self.messages.set_status(
             message_id,

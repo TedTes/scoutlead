@@ -13,6 +13,11 @@ class ValidationError(SoutleadError):
     code = "validation_error"
 
 
+class ConfigurationError(SoutleadError):
+    status_code = 503
+    code = "configuration_error"
+
+
 class NotFoundError(SoutleadError):
     status_code = 404
     code = "not_found"

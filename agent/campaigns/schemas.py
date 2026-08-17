@@ -71,3 +71,16 @@ class CampaignRunSummary(BaseModel):
     researched_lead_count: int
     qualified_lead_count: int
     drafted_message_count: int
+
+
+class CampaignPreflightCheck(BaseModel):
+    name: str
+    status: str
+    detail: str
+    required: bool = True
+
+
+class CampaignPreflightRead(BaseModel):
+    campaign_id: str
+    ready: bool
+    checks: list[CampaignPreflightCheck]

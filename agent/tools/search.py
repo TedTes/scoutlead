@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from campaigns.schemas import CampaignRead
 from products.schemas import DiscoverySource, DiscoverySourceType, ProductRead
+from shared.errors import ConfigurationError
 
 
 class SearchResult(BaseModel):
@@ -38,11 +39,19 @@ class SearchTool:
         api_key: str | None = None,
         provider: str = "generic",
         timeout_seconds: float = 20.0,
+        require_config: bool = False,
     ) -> None:
         self.endpoint = endpoint
         self.api_key = api_key
         self.provider = provider
         self.timeout_seconds = timeout_seconds
+        self.require_config = require_config
+
+    @property
+    def is_configured(self) -> bool:
+        if self.provider in {"tavily", "brave"}:
+            return bool(self.api_key)
+        return bool(self.endpoint)
 
     def execute(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         product = ProductRead.model_validate(args["product"])
@@ -60,7 +69,12 @@ class SearchTool:
         if source.type == DiscoverySourceType.SEED:
             return [self._parse_seed(source.value, product.target_geography)]
 
-        if self.endpoint is None:
+        if not self.is_configured:
+            if self.require_config:
+                raise ConfigurationError(
+                    "real search provider is required for non-seed discovery sources",
+                    {"provider": self.provider, "source_type": source.type.value},
+                )
             return []
 
         query = " ".join(

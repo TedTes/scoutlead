@@ -1,12 +1,23 @@
+from __future__ import annotations
+
 from typing import Any, Callable
 
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agent_runs.repository import AgentRunRepository
-from agents.llm import LLMClient
+from agents.llm import HeuristicLLMClient, LLMClient, MissingLLMClient
 from agents.runner import ToolAction
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignCreate, CampaignRead, CampaignRunSummary, CampaignStage, CampaignStatus
+from campaigns.schemas import (
+    CampaignCreate,
+    CampaignPreflightCheck,
+    CampaignPreflightRead,
+    CampaignRead,
+    CampaignRunSummary,
+    CampaignStage,
+    CampaignStatus,
+)
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
 from db.models import CampaignModel
@@ -18,14 +29,103 @@ from memory.repository import MemoryRepository
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
 from products.repository import ProductRepository
-from products.schemas import ProductRead
+from products.schemas import DiscoverySourceType, ProductRead
 from shared.errors import ConflictError
 from tools.browser import DirectHttpBrowserTool
+from tools.email import EmailTool
 from tools.search import SearchTool
 from workflows.discovery import DiscoveryWorkflow
 from workflows.outreach import OutreachWorkflow
 from workflows.qualification import QualificationWorkflow
 from workflows.research import ResearchWorkflow
+
+
+class RecordingBrowserTool:
+    def __init__(
+        self,
+        *,
+        browser: DirectHttpBrowserTool,
+        agent_runs: AgentRunRepository,
+        run_id: str,
+        campaign_id: str,
+        step_id: str | None,
+    ) -> None:
+        self.browser = browser
+        self.agent_runs = agent_runs
+        self.run_id = run_id
+        self.campaign_id = campaign_id
+        self.step_id = step_id
+
+    def inspect(self, url: str):
+        tool_call = self.agent_runs.start_tool_call(
+            run_id=self.run_id,
+            campaign_id=self.campaign_id,
+            step_id=self.step_id,
+            tool_name="browser:inspect",
+            reason="inspect lead website for public evidence",
+            args={"url": url},
+        )
+        try:
+            result = self.browser.inspect(url)
+        except Exception as exc:
+            self.agent_runs.fail_tool_call(tool_call.id, str(exc))
+            raise
+        self.agent_runs.complete_tool_call(tool_call.id, CampaignService._json_safe(result))
+        return result
+
+
+class RecordingLLMClient:
+    def __init__(
+        self,
+        *,
+        llm: LLMClient,
+        agent_runs: AgentRunRepository,
+        run_id: str,
+        campaign_id: str,
+        step_id: str | None,
+    ) -> None:
+        self.llm = llm
+        self.agent_runs = agent_runs
+        self.run_id = run_id
+        self.campaign_id = campaign_id
+        self.step_id = step_id
+
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model: type[BaseModel],
+        context: dict[str, Any] | None = None,
+        fallback: BaseModel,
+    ) -> BaseModel:
+        llm_call = self.agent_runs.start_llm_call(
+            run_id=self.run_id,
+            campaign_id=self.campaign_id,
+            step_id=self.step_id,
+            task=task,
+            reason=system,
+            args={
+                "task": task,
+                "response_model": response_model.__name__,
+                "context": CampaignService._json_safe(context or {}),
+            },
+        )
+        try:
+            result = self.llm.generate_object(
+                task=task,
+                system=system,
+                prompt=prompt,
+                response_model=response_model,
+                context=context,
+                fallback=fallback,
+            )
+        except Exception as exc:
+            self.agent_runs.fail_tool_call(llm_call.id, str(exc))
+            raise
+        self.agent_runs.complete_tool_call(llm_call.id, CampaignService._json_safe(result))
+        return result
 
 
 class CampaignService:
@@ -36,11 +136,13 @@ class CampaignService:
         llm: LLMClient,
         search_tool: SearchTool,
         browser: DirectHttpBrowserTool,
+        email: EmailTool | None = None,
     ) -> None:
         self.session = session
         self.llm = llm
         self.search_tool = search_tool
         self.browser = browser
+        self.email = email or EmailTool()
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)
         self.agent_runs = AgentRunRepository(session)
@@ -61,6 +163,16 @@ class CampaignService:
 
     def delete(self, campaign_id: str) -> None:
         self.campaigns.delete(campaign_id)
+
+    def preflight(self, campaign_id: str) -> CampaignPreflightRead:
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        product = ProductRead.model_validate(self.products.get(campaign.product_id))
+        checks = self._preflight_checks(campaign, product)
+        return CampaignPreflightRead(
+            campaign_id=campaign_id,
+            ready=all(check.status != "failed" for check in checks if check.required),
+            checks=checks,
+        )
 
     def pause(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.update_status(campaign_id, CampaignStatus.PAUSED)
@@ -86,6 +198,7 @@ class CampaignService:
 
         try:
             self._assert_runnable_campaign(campaign_read)
+            self._assert_preflight_ready(campaign_read, product)
             if agent_run_id:
                 self.agent_runs.start(agent_run_id)
 
@@ -121,8 +234,8 @@ class CampaignService:
                     campaigns=self.campaigns,
                     leads=self.leads,
                     memory=self.memory,
-                    browser=self.browser,
-                    llm=self.llm,
+                    browser=self._browser_for_step(agent_run_id, campaign_id, _step_id),
+                    llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
                 ).run(product, campaign_read),
             )
 
@@ -138,7 +251,7 @@ class CampaignService:
                     campaigns=self.campaigns,
                     leads=self.leads,
                     memory=self.memory,
-                    llm=self.llm,
+                    llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
                 ).run(product, campaign_read),
             )
 
@@ -155,7 +268,7 @@ class CampaignService:
                     leads=self.leads,
                     messages=self.messages,
                     memory=self.memory,
-                    llm=self.llm,
+                    llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
                 ).run(product, campaign_read),
             )
 
@@ -194,6 +307,103 @@ class CampaignService:
         return calculate_campaign_metrics(
             leads=leads, messages=messages, conversations=conversations
         )
+
+    def _assert_preflight_ready(self, campaign: CampaignRead, product: ProductRead) -> None:
+        preflight = CampaignPreflightRead(
+            campaign_id=campaign.id,
+            ready=True,
+            checks=self._preflight_checks(campaign, product),
+        )
+        failures = [check for check in preflight.checks if check.required and check.status == "failed"]
+        if failures:
+            raise ConflictError(
+                "campaign cannot run until required integrations are configured",
+                {"failures": [failure.model_dump(mode="json") for failure in failures]},
+            )
+
+    def _preflight_checks(
+        self, campaign: CampaignRead, product: ProductRead
+    ) -> list[CampaignPreflightCheck]:
+        sources = product.preferred_discovery_sources
+        has_seed_source = any(source.type == DiscoverySourceType.SEED for source in sources)
+        has_live_source = any(source.type != DiscoverySourceType.SEED for source in sources)
+        checks = [
+            CampaignPreflightCheck(
+                name="Campaign status",
+                status="ok" if campaign.status in {CampaignStatus.DRAFT, CampaignStatus.PAUSED} else "failed",
+                detail=f"Campaign is {campaign.status.value}.",
+            )
+        ]
+
+        if has_live_source:
+            missing_search_is_required = self.search_tool.require_config
+            checks.append(
+                CampaignPreflightCheck(
+                    name="Search provider",
+                    status=(
+                        "ok"
+                        if self.search_tool.is_configured
+                        else "failed"
+                        if missing_search_is_required
+                        else "warning"
+                    ),
+                    detail=(
+                        f"{self.search_tool.provider} search configured"
+                        if self.search_tool.is_configured
+                        else "Configure SEARCH_PROVIDER plus SEARCH_API_KEY or SEARCH_API_ENDPOINT."
+                    ),
+                    required=missing_search_is_required,
+                )
+            )
+        else:
+            checks.append(
+                CampaignPreflightCheck(
+                    name="Search provider",
+                    status="warning" if has_seed_source else "failed",
+                    detail=(
+                        "Using seed discovery only; no live search will run."
+                        if has_seed_source
+                        else "No discovery sources configured."
+                    ),
+                    required=not has_seed_source,
+                )
+            )
+
+        if isinstance(self.llm, MissingLLMClient):
+            llm_status = "failed"
+            llm_detail = "Configure OPENAI_API_KEY or LLM_JSON_ENDPOINT."
+        elif isinstance(self.llm, HeuristicLLMClient):
+            llm_status = "warning"
+            llm_detail = "Using heuristic fallback; configure a real LLM for production-quality reasoning."
+        else:
+            llm_status = "ok"
+            llm_detail = self.llm.__class__.__name__
+        checks.append(CampaignPreflightCheck(name="LLM provider", status=llm_status, detail=llm_detail))
+
+        checks.append(
+            CampaignPreflightCheck(
+                name="Email provider",
+                status="ok" if self.messages_can_send_real_email() else "failed",
+                detail=(
+                    f"{self.email.provider} email provider ready"
+                    if self.messages_can_send_real_email()
+                    else "Configure EMAIL_PROVIDER=resend with RESEND_API_KEY and EMAIL_FROM_ADDRESS."
+                ),
+            )
+        )
+
+        checks.append(
+            CampaignPreflightCheck(
+                name="Website inspection",
+                status="ok",
+                detail="Direct HTTP website inspection is enabled.",
+                required=False,
+            )
+        )
+        return checks
+
+    def messages_can_send_real_email(self) -> bool:
+        return self.email.is_configured
 
     @staticmethod
     def _assert_runnable_campaign(campaign: CampaignRead) -> None:
@@ -300,6 +510,38 @@ class CampaignService:
             "on_tool_success": on_tool_success,
             "on_tool_error": on_tool_error,
         }
+
+    def _llm_for_step(
+        self,
+        agent_run_id: str | None,
+        campaign_id: str,
+        step_id: str | None,
+    ) -> LLMClient:
+        if agent_run_id is None:
+            return self.llm
+        return RecordingLLMClient(
+            llm=self.llm,
+            agent_runs=self.agent_runs,
+            run_id=agent_run_id,
+            campaign_id=campaign_id,
+            step_id=step_id,
+        )
+
+    def _browser_for_step(
+        self,
+        agent_run_id: str | None,
+        campaign_id: str,
+        step_id: str | None,
+    ) -> DirectHttpBrowserTool:
+        if agent_run_id is None:
+            return self.browser
+        return RecordingBrowserTool(
+            browser=self.browser,
+            agent_runs=self.agent_runs,
+            run_id=agent_run_id,
+            campaign_id=campaign_id,
+            step_id=step_id,
+        )
 
     @staticmethod
     def _json_safe(value: Any) -> Any:

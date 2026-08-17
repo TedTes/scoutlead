@@ -278,10 +278,17 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
             "outreach",
         ]
         assert all(step.status == "completed" for step in detail.steps)
-        assert detail.tool_call_count == 1
-        assert len(detail.tool_calls) == 1
-        assert detail.tool_calls[0].tool_name == "search"
-        assert detail.tool_calls[0].status == "completed"
+        assert detail.tool_call_count == 2
+        assert detail.llm_call_count == 3
+        assert len(detail.tool_calls) == 5
+        assert [tool_call.tool_name for tool_call in detail.tool_calls] == [
+            "search",
+            "browser:inspect",
+            "llm:lead_research",
+            "llm:lead_qualification",
+            "llm:outreach_draft",
+        ]
+        assert all(tool_call.status == "completed" for tool_call in detail.tool_calls)
 
         with pytest.raises(ConflictError, match="draft or paused"):
             AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
