@@ -51,6 +51,11 @@ class ProductCreate(ProductBase):
     pass
 
 
+class ProductSourceCreate(BaseModel):
+    source: str = Field(min_length=1)
+    target_geography: str = Field(default="United States", min_length=1)
+
+
 class ProductUpdate(BaseModel):
     product_name: str | None = Field(default=None, min_length=1)
     product_description: str | None = Field(default=None, min_length=1)

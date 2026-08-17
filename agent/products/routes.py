@@ -1,7 +1,9 @@
-from fastapi import APIRouter
+from typing import Annotated
 
-from app.dependencies import DbSession
-from products.schemas import ProductCreate, ProductRead, ProductUpdate
+from fastapi import APIRouter, Depends
+
+from app.dependencies import AppServices, DbSession, get_services
+from products.schemas import ProductCreate, ProductRead, ProductSourceCreate, ProductUpdate
 from products.service import ProductService
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -10,6 +12,15 @@ router = APIRouter(prefix="/products", tags=["products"])
 @router.post("", response_model=ProductRead)
 def create_product(product: ProductCreate, session: DbSession):
     return ProductService(session).create(product)
+
+
+@router.post("/from-source", response_model=ProductRead)
+def create_product_from_source(
+    request: ProductSourceCreate,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return ProductService(session, llm=services.llm, browser=services.browser).create_from_source(request)
 
 
 @router.get("", response_model=list[ProductRead])
