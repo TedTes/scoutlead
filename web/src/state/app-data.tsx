@@ -12,6 +12,7 @@ import type {
   Metrics,
   ManualClassificationInput,
   Product,
+  ProductSourceInput,
 } from "../types/domain";
 
 type AppDataContextValue = {
@@ -32,6 +33,7 @@ type AppDataContextValue = {
   refreshAll: () => Promise<void>;
   refreshSnapshot: (campaignId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<boolean>;
+  createProductFromSource: (input: ProductSourceInput) => Promise<boolean>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
   deleteCampaigns: (campaignIds: string[]) => Promise<void>;
@@ -216,6 +218,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         await mutate(async () => {
           const product = await api.createProduct(input);
           localStorage.setItem("selectedProductId", product.id);
+          created = true;
+        });
+        return created;
+      },
+      createProductFromSource: async (input) => {
+        let created = false;
+        await mutate(async () => {
+          const product = await api.createProductFromSource(input);
+          localStorage.setItem("selectedProductId", product.id);
+          localStorage.setItem("selectedCampaignId", "");
           created = true;
         });
         return created;

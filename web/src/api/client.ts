@@ -13,6 +13,7 @@ import type {
   Metrics,
   ManualClassificationInput,
   Product,
+  ProductSourceInput,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -33,6 +34,10 @@ export class ApiClient {
 
   createProduct(product: unknown) {
     return this.request<Product>("/products", { method: "POST", body: product });
+  }
+
+  createProductFromSource(input: ProductSourceInput) {
+    return this.request<Product>("/products/from-source", { method: "POST", body: input });
   }
 
   updateProduct(id: string, product: unknown) {

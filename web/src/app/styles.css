@@ -562,6 +562,66 @@ textarea {
   grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.85fr);
 }
 
+.product-summary-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.9fr);
+}
+
+.source-create {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  padding-top: 14px;
+}
+
+.source-create .field {
+  margin-bottom: 0;
+}
+
+.summary-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px 0 0;
+}
+
+.summary-list.compact {
+  padding-top: 0;
+}
+
+.summary-item {
+  background: #f8fafc;
+  border: 1px solid #e2e7ef;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.summary-item span {
+  color: #667286;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.summary-item strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.stacked-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
 .product-selector-row {
   align-items: end;
   display: grid;
@@ -768,6 +828,16 @@ textarea {
   color: #4d5869;
   font-weight: 600;
   padding: 2px 6px;
+}
+
+.chip.blue {
+  background: #edf2ff;
+  color: #2448df;
+}
+
+.chip.grey {
+  background: #eef1f5;
+  color: #5d6879;
 }
 
 .chip-input {
@@ -1304,7 +1374,9 @@ textarea {
 
   .split,
   .product-grid,
+  .product-summary-grid,
   .product-selector-row,
+  .source-create,
   .conversation-grid,
   .integration-grid,
   .agent-run-summary,

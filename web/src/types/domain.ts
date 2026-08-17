@@ -16,6 +16,11 @@ export type Product = {
   updated_at: string;
 };
 
+export type ProductSourceInput = {
+  source: string;
+  target_geography?: string;
+};
+
 export type QualificationCriterion = {
   id?: string | null;
   label: string;

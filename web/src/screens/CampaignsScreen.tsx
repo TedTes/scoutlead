@@ -6,7 +6,6 @@ import type {
   AgentRunDetail,
   CampaignCreateInput,
   CampaignPreflight,
-  LeadSeedInput,
   ToolCall,
 } from "../types/domain";
 import type { Screen } from "../types/navigation";
@@ -14,19 +13,11 @@ import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
 
 type CampaignDraft = {
-  name: string;
-  maxLeads: string;
-  channel: "email" | "linkedin" | "manual" | "phone";
-  goalOverride: string;
-  seedLeads: string;
+  source: string;
 };
 
 const defaultCampaignDraft: CampaignDraft = {
-  name: "",
-  maxLeads: "25",
-  channel: "email",
-  goalOverride: "",
-  seedLeads: "",
+  source: "",
 };
 
 export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
@@ -38,6 +29,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
     snapshot,
     createCampaign,
     deleteCampaigns,
+    updateSelectedProduct,
     setSelectedCampaignId,
     runCampaign,
     pauseCampaign,
@@ -48,13 +40,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
   const [draft, setDraft] = useState<CampaignDraft>(defaultCampaignDraft);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const metrics = snapshot.metrics;
-  const parsedMaxLeads = Number.parseInt(draft.maxLeads, 10);
-  const canCreateCampaign =
-    Boolean(selectedProductId) &&
-    draft.name.trim().length > 0 &&
-    Number.isInteger(parsedMaxLeads) &&
-    parsedMaxLeads > 0 &&
-    parsedMaxLeads <= 1000;
+  const canCreateCampaign = Boolean(selectedProductId);
   const runningCampaigns = productCampaigns.filter((campaign) =>
     ["discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(
       campaign.status,
@@ -73,7 +59,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
   }, [selectedProduct]);
 
   const openNewCampaign = () => {
-    setDraft({ ...defaultCampaignDraft, name: defaultCampaignName });
+    setDraft(defaultCampaignDraft);
     setShowNewCampaign(true);
   };
 
@@ -83,13 +69,19 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
 
   const submitCampaign = async () => {
     if (!selectedProductId || !canCreateCampaign) return;
+    const source = draft.source.trim();
+    if (selectedProduct && source) {
+      await updateSelectedProduct({
+        preferred_discovery_sources: [{ type: "web_search", value: source, limit: 10 }],
+      });
+    }
     const input: CampaignCreateInput = {
       product_id: selectedProductId,
-      name: draft.name.trim(),
-      max_leads: parsedMaxLeads,
-      channels: [draft.channel],
-      discovery_seeds: parseSeedLeads(draft.seedLeads),
-      goal_override: draft.goalOverride.trim() || null,
+      name: defaultCampaignName,
+      max_leads: 10,
+      channels: ["email"],
+      discovery_seeds: [],
+      goal_override: null,
     };
     const created = await createCampaign(input);
     if (created) {
@@ -136,69 +128,25 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
       {showNewCampaign ? (
         <div className="campaign-setup">
           <Card title="New campaign" meta={<StatusPill tone="blue">Draft</StatusPill>}>
-            <div className="form-grid two">
+            <div className="source-create">
               <label className="field">
-                <span>Campaign name</span>
+                <span>Discovery source</span>
                 <input
-                  value={draft.name}
-                  onChange={(event) => updateDraft("name", event.target.value)}
+                  autoFocus
+                  placeholder="residential painters Austin Texas or https://directory.example"
+                  value={draft.source}
+                  onChange={(event) => updateDraft("source", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void submitCampaign();
+                  }}
                 />
+                <em>Blank uses the selected product discovery profile.</em>
               </label>
-              <label className="field">
-                <span>Max leads</span>
-                <input
-                  inputMode="numeric"
-                  min="1"
-                  max="1000"
-                  type="number"
-                  value={draft.maxLeads}
-                  onChange={(event) => updateDraft("maxLeads", event.target.value)}
-                />
-              </label>
-            </div>
-            <div className="form-grid two">
-              <label className="field">
-                <span>Primary channel</span>
-                <select
-                  value={draft.channel}
-                  onChange={(event) => updateDraft("channel", event.target.value as CampaignDraft["channel"])}
-                >
-                  <option value="email">Email</option>
-                  <option value="linkedin">LinkedIn</option>
-                  <option value="manual">Manual</option>
-                  <option value="phone">Phone</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Goal override</span>
-                <input
-                  placeholder={selectedProduct?.validation_goal || "Optional"}
-                  value={draft.goalOverride}
-                  onChange={(event) => updateDraft("goalOverride", event.target.value)}
-                />
-              </label>
-            </div>
-            <label className="field">
-              <span>Seed leads</span>
-              <textarea
-                rows={4}
-                placeholder="Company | website | email | geography | notes"
-                value={draft.seedLeads}
-                onChange={(event) => updateDraft("seedLeads", event.target.value)}
-              />
-              <em>Optional. One lead per line.</em>
-            </label>
-            {!canCreateCampaign ? (
-              <p className="field-help product-form-help">
-                Add a campaign name and use a max lead count from 1 to 1000.
-              </p>
-            ) : null}
-            <div className="form-actions">
-              <button className="secondary" onClick={() => setShowNewCampaign(false)}>
-                Cancel
-              </button>
               <button disabled={!canCreateCampaign} onClick={submitCampaign}>
                 Create campaign
+              </button>
+              <button className="secondary" onClick={() => setShowNewCampaign(false)}>
+                Cancel
               </button>
             </div>
           </Card>
@@ -429,27 +377,6 @@ function toolObservationLabel(toolCall: ToolCall): string {
 function snapshotCount(snapshot?: Record<string, unknown> | null): string {
   if (!snapshot || !("count" in snapshot)) return "-";
   return String(snapshot.count);
-}
-
-function parseSeedLeads(value: string): LeadSeedInput[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [companyName, websiteUrl, contactEmail, geography, ...descriptionParts] = line
-        .split("|")
-        .map((part) => part.trim());
-      return {
-        company_name: companyName,
-        website_url: websiteUrl || null,
-        contact_email: contactEmail || null,
-        geography: geography || null,
-        description: descriptionParts.join(" | ") || null,
-        source: "manual",
-      };
-    })
-    .filter((seed) => seed.company_name.length > 0);
 }
 
 function CampaignControl({
