@@ -150,6 +150,29 @@ PYTHONPATH=agent DATABASE_URL="$DATABASE_URL" alembic upgrade head
 
 Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in production after migrations are running. Set `API_AUTH_TOKEN` on the backend and the same value as `VITE_API_TOKEN` on the web service.
 
+For real-world operation, disable mock providers and configure actual integrations:
+
+```bash
+ALLOW_MOCK_PROVIDERS=false
+REQUIRE_REAL_SEARCH=true
+REQUIRE_REAL_EMAIL=true
+REQUIRE_REAL_LLM=true
+SEARCH_PROVIDER=tavily # or brave
+SEARCH_API_KEY=...
+OPENAI_API_KEY=...
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=...
+EMAIL_FROM_ADDRESS=founder@example.com
+```
+
+Before running a campaign, check provider readiness:
+
+```bash
+curl -s http://localhost:8000/campaigns/campaign_xxx/preflight
+```
+
+If required providers are missing, the API blocks campaign runs before creating an agent run.
+
 ## Product Payload Shape
 
 ```json
