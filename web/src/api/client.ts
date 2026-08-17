@@ -4,6 +4,7 @@ import type {
   AgentRunDetail,
   Campaign,
   CampaignCreateInput,
+  CampaignPreflight,
   CampaignRunSummary,
   ConnectionStatus,
   Conversation,
@@ -48,6 +49,10 @@ export class ApiClient {
 
   getCampaign(id: string) {
     return this.request<Campaign>(`/campaigns/${id}`);
+  }
+
+  getCampaignPreflight(id: string) {
+    return this.request<CampaignPreflight>(`/campaigns/${id}/preflight`);
   }
 
   deleteCampaign(id: string) {

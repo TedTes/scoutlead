@@ -240,12 +240,26 @@ export type AgentRunDetail = AgentRun & {
   tool_calls: ToolCall[];
 };
 
+export type CampaignPreflightCheck = {
+  name: string;
+  status: string;
+  detail: string;
+  required: boolean;
+};
+
+export type CampaignPreflight = {
+  campaign_id: string;
+  ready: boolean;
+  checks: CampaignPreflightCheck[];
+};
+
 export type CampaignSnapshot = {
   campaign?: Campaign;
   leads: Lead[];
   messages: Message[];
   conversations: Conversation[];
   metrics?: Metrics;
+  preflight?: CampaignPreflight;
   agentRuns: AgentRun[];
   latestAgentRun?: AgentRunDetail;
 };

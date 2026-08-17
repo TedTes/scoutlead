@@ -656,7 +656,8 @@ textarea {
 }
 
 .agent-step-list,
-.agent-tool-list {
+.agent-tool-list,
+.preflight-list {
   border: 1px solid #e1e6ee;
   border-radius: 7px;
   display: grid;
@@ -667,7 +668,8 @@ textarea {
 }
 
 .agent-step-list li,
-.agent-tool-list li {
+.agent-tool-list li,
+.preflight-list li {
   align-items: center;
   border-bottom: 1px solid #e1e6ee;
   display: grid;
@@ -678,19 +680,22 @@ textarea {
 }
 
 .agent-step-list li:last-child,
-.agent-tool-list li:last-child {
+.agent-tool-list li:last-child,
+.preflight-list li:last-child {
   border-bottom: 0;
 }
 
 .agent-step-list strong,
-.agent-tool-list strong {
+.agent-tool-list strong,
+.preflight-list strong {
   display: block;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
 .agent-step-list span,
-.agent-tool-list span {
+.agent-tool-list span,
+.preflight-list span {
   color: #8a94a5;
   display: block;
   font-size: 12px;

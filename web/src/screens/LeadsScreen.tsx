@@ -16,6 +16,7 @@ export function LeadsScreen() {
   const canRunCampaign = selectedCampaign
     ? ["draft", "paused"].includes(selectedCampaign.status)
     : false;
+  const preflightReady = snapshot.preflight?.ready ?? true;
 
   return (
     <>
@@ -25,7 +26,7 @@ export function LeadsScreen() {
         actions={
           <>
             <button className="secondary">Export CSV</button>
-            <button disabled={!canRunCampaign} onClick={() => runCampaign()}>
+            <button disabled={!canRunCampaign || !preflightReady} onClick={() => runCampaign()}>
               <Play size={14} />
               Run discovery
             </button>

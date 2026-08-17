@@ -2,7 +2,13 @@ import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { Card, PageHeader, StatCard, StatusPill } from "../shared-ui";
-import type { AgentRunDetail, CampaignCreateInput, LeadSeedInput, ToolCall } from "../types/domain";
+import type {
+  AgentRunDetail,
+  CampaignCreateInput,
+  CampaignPreflight,
+  LeadSeedInput,
+  ToolCall,
+} from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
@@ -57,6 +63,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
   const awaitingApprovalCampaigns = productCampaigns.filter(
     (campaign) => campaign.status === "awaiting_approval",
   );
+  const preflight = snapshot.preflight;
   const allVisibleSelected =
     productCampaigns.length > 0 &&
     productCampaigns.every((campaign) => selectedCampaignIds.includes(campaign.id));
@@ -279,6 +286,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
                       <td>
                         <CampaignControl
                           status={campaign.status}
+                          preflightReady={campaign.id === selectedCampaignId && preflight ? preflight.ready : true}
                           onRun={() => runCampaign(campaign.id)}
                           onQueue={() => enqueueCampaign(campaign.id)}
                           onPause={() => pauseCampaign(campaign.id)}
@@ -298,9 +306,34 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
       </Card>
 
       {selectedCampaignId ? (
-        <AgentRunPanel run={snapshot.latestAgentRun} totalRuns={snapshot.agentRuns.length} />
+        <>
+          <PreflightPanel preflight={preflight} />
+          <AgentRunPanel run={snapshot.latestAgentRun} totalRuns={snapshot.agentRuns.length} />
+        </>
       ) : null}
     </>
+  );
+}
+
+function PreflightPanel({ preflight }: { preflight?: CampaignPreflight }) {
+  if (!preflight) return null;
+  return (
+    <Card
+      title="Run preflight"
+      meta={<StatusPill tone={preflight.ready ? "green" : "red"}>{preflight.ready ? "Ready" : "Blocked"}</StatusPill>}
+    >
+      <ul className="preflight-list">
+        {preflight.checks.map((check) => (
+          <li key={check.name}>
+            <div>
+              <strong>{check.name}</strong>
+              <span>{check.detail}</span>
+            </div>
+            <StatusPill tone={statusTone(check.status)}>{check.status}</StatusPill>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -421,6 +454,7 @@ function parseSeedLeads(value: string): LeadSeedInput[] {
 
 function CampaignControl({
   status,
+  preflightReady,
   onRun,
   onQueue,
   onPause,
@@ -430,6 +464,7 @@ function CampaignControl({
   onViewConversations,
 }: {
   status: string;
+  preflightReady: boolean;
   onRun: () => void;
   onQueue: () => void;
   onPause: () => void;
@@ -442,7 +477,7 @@ function CampaignControl({
     return <button onClick={(event) => { event.stopPropagation(); onResume(); }}>Resume</button>;
   }
   if (status === "draft") {
-    return <button onClick={(event) => { event.stopPropagation(); onRun(); }}>Run</button>;
+    return <button disabled={!preflightReady} onClick={(event) => { event.stopPropagation(); onRun(); }}>Run</button>;
   }
   if (status === "failed") {
     return <button className="secondary" disabled onClick={(event) => event.stopPropagation()}>Failed</button>;

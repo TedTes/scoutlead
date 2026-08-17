@@ -115,16 +115,17 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         setSnapshot(emptySnapshot);
         return;
       }
-      const [campaign, leads, messages, conversations, metrics, agentRuns] = await Promise.all([
+      const [campaign, leads, messages, conversations, metrics, agentRuns, preflight] = await Promise.all([
         api.getCampaign(campaignId),
         api.getLeads(campaignId),
         api.getMessages(campaignId),
         api.getConversations(campaignId),
         api.getMetrics(campaignId),
         api.getCampaignAgentRuns(campaignId),
+        api.getCampaignPreflight(campaignId),
       ]);
       const latestAgentRun = agentRuns[0] ? await api.getAgentRun(agentRuns[0].id) : undefined;
-      setSnapshot({ campaign, leads, messages, conversations, metrics, agentRuns, latestAgentRun });
+      setSnapshot({ campaign, leads, messages, conversations, metrics, preflight, agentRuns, latestAgentRun });
     },
     [api, selectedCampaignIdState],
   );
