@@ -952,6 +952,101 @@ textarea {
   min-width: 920px;
 }
 
+.lead-list-shell {
+  background: #fff;
+  border: 1px solid #dce2ec;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.lead-list {
+  display: grid;
+}
+
+.lead-row-card {
+  background: #fff;
+  border-bottom: 1px solid #e1e6ee;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.lead-row-card:last-child {
+  border-bottom: 0;
+}
+
+.lead-row-card:hover {
+  background: #fbfcff;
+}
+
+.lead-row-card.expanded {
+  background: #fbfcff;
+}
+
+.lead-row-main {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 16px minmax(220px, 1.4fr) minmax(130px, 0.7fr) minmax(110px, 0.55fr) minmax(180px, 1fr) auto;
+  min-height: 74px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.lead-company-cell,
+.lead-contact-cell,
+.lead-meta-cell,
+.lead-signal-cell {
+  min-width: 0;
+}
+
+.lead-company-cell strong,
+.lead-contact-cell strong,
+.lead-meta-cell strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead-company-cell span,
+.lead-contact-cell span,
+.lead-meta-cell span,
+.lead-signal-cell > span {
+  color: #8a94a5;
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead-contact-cell > span,
+.lead-meta-cell > span {
+  color: #667286;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.lead-signal-cell .chips {
+  max-height: 48px;
+  overflow: hidden;
+}
+
+.lead-score-cell {
+  align-items: flex-end;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  min-width: 92px;
+}
+
 .data-table th,
 .data-table td {
   border-bottom: 1px solid #e1e6ee;
@@ -988,14 +1083,12 @@ textarea {
   width: 2px;
 }
 
-.lead-dossier-row td {
-  background: #fbfcff;
-}
-
 .lead-dossier {
+  border-top: 1px solid #e1e6ee;
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 14px;
 }
 
 .lead-dossier strong {
@@ -1380,8 +1473,19 @@ textarea {
   .conversation-grid,
   .integration-grid,
   .agent-run-summary,
-  .agent-run-columns {
+  .agent-run-columns,
+  .lead-dossier {
     grid-template-columns: 1fr;
+  }
+
+  .lead-row-main {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+  }
+
+  .lead-contact-cell,
+  .lead-meta-cell,
+  .lead-signal-cell {
+    display: none;
   }
 
   .page-header {
