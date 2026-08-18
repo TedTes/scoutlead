@@ -53,7 +53,31 @@ class ProductCreate(ProductBase):
 
 class ProductSourceCreate(BaseModel):
     source: str = Field(min_length=1)
+    context: str | None = Field(default=None, min_length=1)
     target_geography: str = Field(default="United States", min_length=1)
+
+
+class ProductSourceEvidence(BaseModel):
+    product_name_candidates: list[str] = Field(default_factory=list)
+    headline: str | None = None
+    claims: list[str] = Field(default_factory=list)
+    target_customer_clues: list[str] = Field(default_factory=list)
+    problem_clues: list[str] = Field(default_factory=list)
+    value_clues: list[str] = Field(default_factory=list)
+    source_snippets: list[str] = Field(default_factory=list)
+    confidence: int = Field(ge=0, le=100)
+    missing_info: list[str] = Field(default_factory=list)
+    rationale: str
+
+
+class ProductInferenceRead(BaseModel):
+    source: str
+    context: str | None = None
+    ready_to_save: bool
+    confidence: int = Field(ge=0, le=100)
+    missing_info: list[str] = Field(default_factory=list)
+    evidence: ProductSourceEvidence
+    product: ProductCreate
 
 
 class ProductUpdate(BaseModel):

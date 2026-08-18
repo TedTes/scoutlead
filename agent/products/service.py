@@ -1,22 +1,30 @@
 from __future__ import annotations
 
 import re
-from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
 from db.models import ProductModel
+from prompts.product_inference import (
+    PRODUCT_CONFIG_PROMPT,
+    PRODUCT_CONFIG_SYSTEM,
+    PRODUCT_EVIDENCE_PROMPT,
+    PRODUCT_EVIDENCE_SYSTEM,
+)
 from products.repository import ProductRepository
 from products.schemas import (
     DiscoverySource,
     DiscoverySourceType,
     ProductCreate,
+    ProductInferenceRead,
     ProductSourceCreate,
+    ProductSourceEvidence,
     ProductUpdate,
     QualificationCriterion,
 )
+from shared.errors import ValidationError
 from shared.utils import normalize_text, truncate
 from tools.browser import DirectHttpBrowserTool, WebsiteInspection
 
@@ -37,43 +45,72 @@ class ProductService:
         return self.products.create(product)
 
     def create_from_source(self, request: ProductSourceCreate) -> ProductModel:
-        return self.products.create(self.infer_from_source(request))
+        inference = self.infer_product_from_source(request)
+        if not inference.ready_to_save:
+            raise ValidationError(
+                "source does not contain enough product evidence to create a product",
+                {
+                    "confidence": inference.confidence,
+                    "missing_info": inference.missing_info,
+                },
+            )
+        return self.products.create(inference.product)
 
     def infer_from_source(self, request: ProductSourceCreate) -> ProductCreate:
-        source = request.source.strip()
-        inspection = self._inspect_source(source)
-        fallback = self._fallback_product(source, request.target_geography, inspection)
-        if self.llm is None or not self._has_enough_source_evidence(inspection):
-            return fallback
+        return self.infer_product_from_source(request).product
 
-        inferred = self.llm.generate_object(
-            task="product_source_inference",
-            system=(
-                "You turn a product landing page or plain-language source into a complete "
-                "customer discovery configuration. Infer the best target customer, problem, "
-                "value proposition, validation goal, qualification criteria, and discovery "
-                "search queries. Do not invent exact customer claims that are unsupported; "
-                "use concise practical language for a validation campaign. Do not infer an "
-                "industry from substrings in the brand name or domain unless the source text "
-                "supports that industry."
-            ),
-            prompt=(
-                "Create a ProductCreate JSON object for the product described by the submitted source. "
-                "ScoutLead is only the internal application name and must not be used as the product "
-                "name unless the submitted source is actually about ScoutLead. "
-                "preferred_discovery_sources should contain 3-6 web_search queries that find "
-                "potential customers, not searches for the product itself. "
-                "qualification_criteria should be concrete public signals the workflow can verify."
-            ),
-            response_model=ProductCreate,
+    def infer_product_from_source(self, request: ProductSourceCreate) -> ProductInferenceRead:
+        source = request.source.strip()
+        context = request.context.strip() if request.context else None
+        inspection = self._inspect_source(source)
+        fallback_evidence = self._fallback_evidence(source, context, inspection)
+        fallback = self._fallback_product(
+            source,
+            request.target_geography,
+            inspection,
+            context,
+            fallback_evidence,
+        )
+        if self.llm is None or not self._has_enough_source_evidence(inspection, context):
+            return self._build_inference(source, context, fallback_evidence, fallback)
+
+        evidence = self.llm.generate_object(
+            task="product_source_evidence",
+            system=PRODUCT_EVIDENCE_SYSTEM,
+            prompt=PRODUCT_EVIDENCE_PROMPT,
+            response_model=ProductSourceEvidence,
             context={
                 "source": source,
+                "user_context": context,
                 "target_geography": request.target_geography,
                 "website": inspection.model_dump(mode="json") if inspection else None,
             },
-            fallback=fallback,
+            fallback=fallback_evidence,
         )
-        return self._reject_ungrounded_inference(inferred, fallback, inspection)
+
+        draft_fallback = self._fallback_product(
+            source,
+            request.target_geography,
+            inspection,
+            context,
+            evidence,
+        )
+        draft = self.llm.generate_object(
+            task="product_config_from_evidence",
+            system=PRODUCT_CONFIG_SYSTEM,
+            prompt=PRODUCT_CONFIG_PROMPT,
+            response_model=ProductCreate,
+            context={
+                "source": source,
+                "user_context": context,
+                "target_geography": request.target_geography,
+                "evidence": evidence.model_dump(mode="json"),
+                "website": inspection.model_dump(mode="json") if inspection else None,
+            },
+            fallback=draft_fallback,
+        )
+        draft = self._reject_ungrounded_inference(draft, draft_fallback, inspection, context)
+        return self._build_inference(source, context, evidence, draft)
 
     def list(self) -> list[ProductModel]:
         return self.products.list()
@@ -90,15 +127,84 @@ class ProductService:
         url = self._source_url(source)
         if url is None:
             return None
-        return self.browser.inspect(url)
+        root = self.browser.inspect(url)
+        if root.error:
+            return root
+
+        inspections = [root]
+        for link in self._candidate_detail_links(root):
+            inspections.append(self.browser.inspect(link))
+
+        text_parts: list[str] = []
+        emails: list[str] = []
+        links: list[str] = []
+        for inspection in inspections:
+            if inspection.error:
+                continue
+            title = inspection.title or ""
+            description = inspection.description or ""
+            text = inspection.text or ""
+            text_parts.append(
+                normalize_text(
+                    " ".join(part for part in [title, description, text] if part)
+                )
+            )
+            emails.extend(inspection.emails)
+            links.extend(inspection.links)
+
+        return WebsiteInspection(
+            url=root.url,
+            title=root.title,
+            description=root.description,
+            text=truncate(normalize_text(" ".join(text_parts)), 10000),
+            emails=sorted(set(emails))[:10],
+            links=sorted(set(links))[:50],
+        )
 
     @staticmethod
-    def _has_enough_source_evidence(inspection: WebsiteInspection | None) -> bool:
+    def _candidate_detail_links(root: WebsiteInspection) -> list[str]:
+        parsed_root = urlparse(root.url)
+        root_host = parsed_root.netloc.replace("www.", "")
+        keywords = [
+            "about",
+            "feature",
+            "features",
+            "product",
+            "solution",
+            "solutions",
+            "pricing",
+            "faq",
+            "how-it-works",
+        ]
+        candidates: list[str] = []
+        for link in root.links:
+            absolute = urljoin(root.url, link).split("#", maxsplit=1)[0]
+            parsed = urlparse(absolute)
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            if parsed.netloc.replace("www.", "") != root_host:
+                continue
+            path = parsed.path.strip("/").lower()
+            if not path or not any(keyword in path for keyword in keywords):
+                continue
+            if absolute not in candidates:
+                candidates.append(absolute)
+            if len(candidates) >= 3:
+                break
+        return candidates
+
+    @staticmethod
+    def _has_enough_source_evidence(
+        inspection: WebsiteInspection | None,
+        context: str | None = None,
+    ) -> bool:
+        if context and len(re.findall(r"[A-Za-z]{3,}", context)) >= 6:
+            return True
         if inspection is None or inspection.error:
             return False
         evidence = ProductService._source_evidence_text(inspection)
         words = re.findall(r"[A-Za-z]{3,}", evidence)
-        return len(words) >= 12
+        return len(words) >= 18
 
     @staticmethod
     def _source_evidence_text(inspection: WebsiteInspection | None) -> str:
@@ -113,12 +219,98 @@ class ProductService:
         )
 
     @staticmethod
+    def _fallback_evidence(
+        source: str,
+        context: str | None,
+        inspection: WebsiteInspection | None,
+    ) -> ProductSourceEvidence:
+        snippets: list[str] = []
+        if inspection and inspection.title:
+            snippets.append(f"Title: {inspection.title}")
+        if inspection and inspection.description:
+            snippets.append(f"Description: {inspection.description}")
+        if inspection and inspection.text:
+            snippets.append(f"Page text: {truncate(normalize_text(inspection.text), 280)}")
+        if context:
+            snippets.append(f"User context: {context}")
+
+        confidence = ProductService._fallback_evidence_confidence(context, inspection)
+        missing_info = []
+        if confidence < 70:
+            missing_info = [
+                "Add one sentence describing what the product does.",
+                "Add who the product is for.",
+                "Add the main customer problem or workflow it improves.",
+            ]
+        return ProductSourceEvidence(
+            product_name_candidates=[
+                ProductService._fallback_name(source, inspection),
+            ],
+            headline=inspection.title if inspection and inspection.title else None,
+            claims=[inspection.description] if inspection and inspection.description else [],
+            target_customer_clues=[],
+            problem_clues=[],
+            value_clues=[],
+            source_snippets=snippets[:6],
+            confidence=confidence,
+            missing_info=missing_info,
+            rationale=(
+                "Grounded in submitted source and optional user context."
+                if confidence >= 70
+                else "The submitted source is too sparse or ambiguous for reliable product inference."
+            ),
+        )
+
+    @staticmethod
+    def _fallback_evidence_confidence(
+        context: str | None,
+        inspection: WebsiteInspection | None,
+    ) -> int:
+        context_words = len(re.findall(r"[A-Za-z]{3,}", context or ""))
+        source_words = len(re.findall(r"[A-Za-z]{3,}", ProductService._source_evidence_text(inspection)))
+        if context_words >= 6 and source_words >= 18:
+            return 82
+        if context_words >= 6:
+            return 74
+        if source_words >= 60:
+            return 72
+        if source_words >= 18:
+            return 72
+        if inspection and (inspection.title or inspection.description):
+            return 35
+        return 20
+
+    @staticmethod
+    def _build_inference(
+        source: str,
+        context: str | None,
+        evidence: ProductSourceEvidence,
+        product: ProductCreate,
+    ) -> ProductInferenceRead:
+        ready_to_save = evidence.confidence >= 70 and not evidence.missing_info
+        return ProductInferenceRead(
+            source=source,
+            context=context,
+            ready_to_save=ready_to_save,
+            confidence=evidence.confidence,
+            missing_info=evidence.missing_info,
+            evidence=evidence,
+            product=product,
+        )
+
+    @staticmethod
     def _reject_ungrounded_inference(
         inferred: ProductCreate,
         fallback: ProductCreate,
         inspection: WebsiteInspection | None,
+        context: str | None = None,
     ) -> ProductCreate:
-        evidence = ProductService._source_evidence_text(inspection).lower()
+        evidence = " ".join(
+            [
+                ProductService._source_evidence_text(inspection),
+                context or "",
+            ]
+        ).lower()
         generated = " ".join(
             [
                 inferred.product_description,
@@ -156,12 +348,19 @@ class ProductService:
         source: str,
         target_geography: str,
         inspection: WebsiteInspection | None,
+        context: str | None = None,
+        evidence: ProductSourceEvidence | None = None,
     ) -> ProductCreate:
-        name = self._fallback_name(source, inspection)
+        name = (
+            evidence.product_name_candidates[0].strip()
+            if evidence and evidence.product_name_candidates and evidence.product_name_candidates[0].strip()
+            else self._fallback_name(source, inspection)
+        )
         text = " ".join(
             filter(
                 None,
                 [
+                    context,
                     inspection.title if inspection else None,
                     inspection.description if inspection else None,
                     inspection.text if inspection else None,
@@ -171,12 +370,15 @@ class ProductService:
         )
         target_customer = self._fallback_target_customer(text, name)
         product_description = (
-            inspection.description
+            context
+            if context
+            else inspection.description
             if inspection and inspection.description
             else truncate(normalize_text(inspection.text), 240)
             if inspection and inspection.text
             else f"{name} is a product being validated from the provided source."
         )
+        product_description = truncate(normalize_text(product_description), 280)
         problem = self._fallback_problem(text, target_customer)
         value = self._fallback_value(name, product_description)
         queries = self._fallback_queries(source, target_customer, target_geography, text)

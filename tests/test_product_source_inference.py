@@ -8,6 +8,7 @@ from products.schemas import (
     DiscoverySourceType,
     ProductCreate,
     ProductSourceCreate,
+    ProductSourceEvidence,
     QualificationCriterion,
 )
 from products.service import ProductService
@@ -21,6 +22,7 @@ class FakeBrowser:
             title="QuoteVan",
             description="Fast quote intake for residential painting companies.",
             text="QuoteVan helps painters handle estimate requests and homeowner quote workflows.",
+            links=["https://quotevan.com/features"],
         )
 
 
@@ -41,7 +43,7 @@ class AmbiguousQuoteBrowser:
 
 class CapturingLLM:
     def __init__(self) -> None:
-        self.prompt = ""
+        self.prompts: list[str] = []
         self.context = {}
 
     def generate_object(
@@ -50,11 +52,11 @@ class CapturingLLM:
         task: str,
         system: str,
         prompt: str,
-        response_model: type[ProductCreate],
+        response_model,
         context: dict | None = None,
-        fallback: ProductCreate,
-    ) -> ProductCreate:
-        self.prompt = prompt
+        fallback,
+    ):
+        self.prompts.extend([system, prompt])
         self.context = context or {}
         return fallback
 
@@ -69,11 +71,24 @@ class VanRentalGuessLLM:
         task: str,
         system: str,
         prompt: str,
-        response_model: type[ProductCreate],
+        response_model,
         context: dict | None = None,
-        fallback: ProductCreate,
-    ) -> ProductCreate:
+        fallback,
+    ):
         self.called = True
+        if response_model is ProductSourceEvidence:
+            return ProductSourceEvidence(
+                product_name_candidates=["QuoteVan"],
+                headline="Compare quotes from local service providers",
+                claims=["Compare quotes from local service providers."],
+                target_customer_clues=["local service providers"],
+                problem_clues=["customers request quotes and compare estimates"],
+                value_clues=["compare estimates"],
+                source_snippets=["Compare quotes from local service providers."],
+                confidence=80,
+                missing_info=[],
+                rationale="Enough page evidence to draft, but not enough to infer van rentals.",
+            )
         return ProductCreate(
             product_name="QuoteVan",
             product_description="A van rental comparison platform.",
@@ -124,8 +139,9 @@ def test_product_source_prompt_does_not_treat_scoutlead_as_product() -> None:
             browser=FakeBrowser(),
         ).infer_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
-        assert "for ScoutLead" not in llm.prompt
-        assert "submitted source" in llm.prompt
+        joined_prompts = "\n".join(llm.prompts)
+        assert "ScoutLead" not in joined_prompts
+        assert "submitted source" in joined_prompts
         assert llm.context["source"] == "https://quotevan.com"
 
 
@@ -136,15 +152,16 @@ def test_sparse_source_uses_fallback_without_llm_guessing() -> None:
     llm = VanRentalGuessLLM()
 
     with session_factory() as session:
-        product = ProductService(
+        inference = ProductService(
             session,
             llm=llm,
             browser=SparseBrowser(),
-        ).infer_from_source(ProductSourceCreate(source="https://quotevan.com"))
+        ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
         assert llm.called is False
-        assert "rental" not in product.target_customer.lower()
-        assert "moving" not in product.target_customer.lower()
+        assert inference.ready_to_save is False
+        assert "rental" not in inference.product.target_customer.lower()
+        assert "moving" not in inference.product.target_customer.lower()
 
 
 def test_ungrounded_van_rental_inference_is_rejected() -> None:
@@ -170,3 +187,24 @@ def test_ungrounded_van_rental_inference_is_rejected() -> None:
         ).lower()
         assert "van rental" not in generated
         assert "moving services" not in generated
+
+
+def test_sparse_source_with_user_context_can_generate_saveable_draft() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        inference = ProductService(
+            session,
+            llm=HeuristicLLMClient(),
+            browser=SparseBrowser(),
+        ).infer_product_from_source(
+            ProductSourceCreate(
+                source="https://quotevan.com",
+                context="Quote intake workflow for residential painting companies",
+            )
+        )
+
+        assert inference.ready_to_save is True
+        assert "painting" in inference.product.target_customer.lower()
