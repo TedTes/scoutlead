@@ -43,17 +43,19 @@ class ProductService:
         source = request.source.strip()
         inspection = self._inspect_source(source)
         fallback = self._fallback_product(source, request.target_geography, inspection)
-        if self.llm is None:
+        if self.llm is None or not self._has_enough_source_evidence(inspection):
             return fallback
 
-        return self.llm.generate_object(
+        inferred = self.llm.generate_object(
             task="product_source_inference",
             system=(
                 "You turn a product landing page or plain-language source into a complete "
                 "customer discovery configuration. Infer the best target customer, problem, "
                 "value proposition, validation goal, qualification criteria, and discovery "
                 "search queries. Do not invent exact customer claims that are unsupported; "
-                "use concise practical language for a validation campaign."
+                "use concise practical language for a validation campaign. Do not infer an "
+                "industry from substrings in the brand name or domain unless the source text "
+                "supports that industry."
             ),
             prompt=(
                 "Create a ProductCreate JSON object for the product described by the submitted source. "
@@ -71,6 +73,7 @@ class ProductService:
             },
             fallback=fallback,
         )
+        return self._reject_ungrounded_inference(inferred, fallback, inspection)
 
     def list(self) -> list[ProductModel]:
         return self.products.list()
@@ -88,6 +91,56 @@ class ProductService:
         if url is None:
             return None
         return self.browser.inspect(url)
+
+    @staticmethod
+    def _has_enough_source_evidence(inspection: WebsiteInspection | None) -> bool:
+        if inspection is None or inspection.error:
+            return False
+        evidence = ProductService._source_evidence_text(inspection)
+        words = re.findall(r"[A-Za-z]{3,}", evidence)
+        return len(words) >= 12
+
+    @staticmethod
+    def _source_evidence_text(inspection: WebsiteInspection | None) -> str:
+        if inspection is None:
+            return ""
+        return normalize_text(
+            " ".join(
+                part
+                for part in [inspection.title, inspection.description, inspection.text]
+                if part
+            )
+        )
+
+    @staticmethod
+    def _reject_ungrounded_inference(
+        inferred: ProductCreate,
+        fallback: ProductCreate,
+        inspection: WebsiteInspection | None,
+    ) -> ProductCreate:
+        evidence = ProductService._source_evidence_text(inspection).lower()
+        generated = " ".join(
+            [
+                inferred.product_description,
+                inferred.target_customer,
+                inferred.problem_being_solved,
+                inferred.value_proposition,
+                inferred.validation_goal,
+                " ".join(source.value for source in inferred.preferred_discovery_sources),
+            ]
+        ).lower()
+        ungrounded_phrases = [
+            "van rental",
+            "van rentals",
+            "moving service",
+            "moving services",
+            "transportation",
+            "delivery service",
+            "delivery services",
+        ]
+        if any(phrase in generated and phrase not in evidence for phrase in ungrounded_phrases):
+            return fallback
+        return inferred
 
     @staticmethod
     def _source_url(source: str) -> str | None:
