@@ -4,6 +4,7 @@ import hashlib
 import re
 from urllib.parse import urljoin, urlparse
 
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
@@ -27,9 +28,12 @@ from products.schemas import (
     QualificationCriterion,
 )
 from shared.errors import ValidationError
+from shared.logger import get_logger
 from shared.utils import normalize_text, truncate, utcnow
 from tools.browser import DirectHttpBrowserTool, WebsiteInspection
 from tools.search import SearchResult, SearchTool
+
+logger = get_logger(__name__)
 
 
 class ProductService:
@@ -107,22 +111,26 @@ class ProductService:
         if self.llm is None or not self._has_enough_source_evidence(inspection, context):
             return self._build_inference(source, context, fallback_evidence, fallback)
 
-        evidence = self.llm.generate_object(
-            task="product_source_evidence",
-            system=PRODUCT_EVIDENCE_SYSTEM,
-            prompt=PRODUCT_EVIDENCE_PROMPT,
-            response_model=ProductSourceEvidence,
-            context={
-                "source": source,
-                "user_context": context,
-                "target_geography": request.target_geography,
-                "website": inspection.model_dump(mode="json") if inspection else None,
-                "source_lookup_results": [
-                    result.model_dump(mode="json") for result in lookup_results
-                ],
-            },
-            fallback=fallback_evidence,
-        )
+        try:
+            evidence = self.llm.generate_object(
+                task="product_source_evidence",
+                system=PRODUCT_EVIDENCE_SYSTEM,
+                prompt=PRODUCT_EVIDENCE_PROMPT,
+                response_model=ProductSourceEvidence,
+                context={
+                    "source": source,
+                    "user_context": context,
+                    "target_geography": request.target_geography,
+                    "website": inspection.model_dump(mode="json") if inspection else None,
+                    "source_lookup_results": [
+                        result.model_dump(mode="json") for result in lookup_results
+                    ],
+                },
+                fallback=fallback_evidence,
+            )
+        except PydanticValidationError as exc:
+            logger.warning("invalid_product_source_evidence error=%s", exc)
+            evidence = fallback_evidence
 
         draft_fallback = self._fallback_product(
             source,
@@ -131,23 +139,27 @@ class ProductService:
             context,
             evidence,
         )
-        draft = self.llm.generate_object(
-            task="product_config_from_evidence",
-            system=PRODUCT_CONFIG_SYSTEM,
-            prompt=PRODUCT_CONFIG_PROMPT,
-            response_model=ProductCreate,
-            context={
-                "source": source,
-                "user_context": context,
-                "target_geography": request.target_geography,
-                "evidence": evidence.model_dump(mode="json"),
-                "website": inspection.model_dump(mode="json") if inspection else None,
-                "source_lookup_results": [
-                    result.model_dump(mode="json") for result in lookup_results
-                ],
-            },
-            fallback=draft_fallback,
-        )
+        try:
+            draft = self.llm.generate_object(
+                task="product_config_from_evidence",
+                system=PRODUCT_CONFIG_SYSTEM,
+                prompt=PRODUCT_CONFIG_PROMPT,
+                response_model=ProductCreate,
+                context={
+                    "source": source,
+                    "user_context": context,
+                    "target_geography": request.target_geography,
+                    "evidence": evidence.model_dump(mode="json"),
+                    "website": inspection.model_dump(mode="json") if inspection else None,
+                    "source_lookup_results": [
+                        result.model_dump(mode="json") for result in lookup_results
+                    ],
+                },
+                fallback=draft_fallback,
+            )
+        except PydanticValidationError as exc:
+            logger.warning("invalid_product_config_from_evidence error=%s", exc)
+            draft = draft_fallback
         draft = self._reject_ungrounded_inference(draft, draft_fallback, inspection, context)
         draft = self._attach_source_metadata(
             draft,

@@ -134,6 +134,49 @@ class VanRentalGuessLLM:
         )
 
 
+class InvalidProductConfigLLM:
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model,
+        context: dict | None = None,
+        fallback,
+    ):
+        if response_model is ProductSourceEvidence:
+            return ProductSourceEvidence(
+                product_name_candidates=["QuoteVan"],
+                headline="Quote the job before you leave it.",
+                claims=["Walk the job, capture the scope, send a professional quote."],
+                target_customer_clues=[],
+                problem_clues=[],
+                value_clues=["Send a professional quote."],
+                source_snippets=["Quote the job before you leave it."],
+                confidence=70,
+                missing_info=["Specific target customer segments or industries"],
+                rationale="Partial product evidence was found.",
+            )
+        return response_model.model_validate(
+            {
+                "product_name": "QuoteVan",
+                "product_description": "Quote the job before you leave it.",
+                "target_customer": "",
+                "problem_being_solved": "Quote workflows are slow.",
+                "value_proposition": "Send professional quotes faster.",
+                "target_geography": "United States",
+                "validation_goal": "Book customer discovery interviews.",
+                "qualification_criteria": [{"label": "Matches target customer"}],
+                "preferred_discovery_sources": [
+                    {"type": "web_search", "value": "field service quote software"}
+                ],
+                "outreach_objective": "Ask for a customer discovery conversation.",
+                "constraints": ["Human approval required before outbound messages are sent."],
+            }
+        )
+
+
 def test_product_can_be_created_from_single_source() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
@@ -283,6 +326,23 @@ def test_sparse_source_uses_source_lookup_before_needing_context() -> None:
         assert "painting" in inference.product.target_customer.lower()
         assert "quote" in inference.product.problem_being_solved.lower()
         assert any("Source lookup result" in snippet for snippet in inference.evidence.source_snippets)
+
+
+def test_invalid_llm_product_config_falls_back_without_crashing() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        inference = ProductService(
+            session,
+            llm=InvalidProductConfigLLM(),
+            browser=FakeBrowser(),
+        ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
+
+        assert inference.ready_to_save is False
+        assert inference.product.target_customer
+        assert inference.product.target_customer != ""
 
 
 def test_ungrounded_van_rental_inference_is_rejected() -> None:
