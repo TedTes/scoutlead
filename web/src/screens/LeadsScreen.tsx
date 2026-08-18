@@ -1,4 +1,4 @@
-import { Play } from "lucide-react";
+import { ChevronRight, Play } from "lucide-react";
 import { useState } from "react";
 import { useAppData } from "../state/app-data";
 import { ChipSet, PageHeader, StatusPill } from "../shared-ui";
@@ -54,6 +54,14 @@ export function LeadsScreen() {
           <p className="empty-copy">No matching leads yet. Run the selected campaign or change the filter.</p>
         ) : (
           <div className="lead-list">
+            <div className="lead-list-head" aria-hidden="true">
+              <span />
+              <span>Company</span>
+              <span>Contact</span>
+              <span>Location</span>
+              <span>Signals</span>
+              <span>Score</span>
+            </div>
             {visibleLeads.map((lead) => (
               <LeadRow
                 lead={lead}
@@ -78,27 +86,38 @@ function LeadRow({ lead, expanded, onToggle }: { lead: Lead; expanded: boolean; 
   ].slice(0, 3);
 
   return (
-    <article className={`lead-row-card${expanded ? " expanded" : ""}`} onClick={onToggle}>
+    <article
+      className={`lead-row-card${expanded ? " expanded" : ""}`}
+      onClick={onToggle}
+      role="button"
+      aria-expanded={expanded}
+    >
       <div className="lead-row-main">
-        <i className="row-marker" />
+        <ChevronRight className="row-chevron" size={16} />
         <div className="lead-company-cell">
           <strong>{lead.company_name}</strong>
           <span>{url ? displayUrl(url) : "No website captured"}</span>
         </div>
         <div className="lead-contact-cell">
           <span>Contact</span>
-          <strong>{lead.research?.contact_name || lead.research?.contact_email || lead.contact_email || "-"}</strong>
+          <strong>{lead.research?.contact_name || lead.research?.contact_email || lead.contact_email || "No contact found"}</strong>
         </div>
         <div className="lead-meta-cell">
           <span>Location</span>
-          <strong>{lead.geography || lead.research?.geography || "-"}</strong>
+          <strong>{lead.geography || lead.research?.geography || "Unknown"}</strong>
         </div>
         <div className="lead-signal-cell">
           {signals.length ? <ChipSet values={signals} small /> : <span>{lead.description || "No signal captured"}</span>}
         </div>
         <div className="lead-score-cell">
-          {score === undefined ? <span>-</span> : <StatusPill tone={scoreTone(score)}>{score}</StatusPill>}
-          <StatusPill tone={statusTone(lead.status)}>{lead.status}</StatusPill>
+          <div className="lead-score-item">
+            <span>Score</span>
+            {score === undefined ? <strong className="muted">-</strong> : <StatusPill tone={scoreTone(score)}>{score}</StatusPill>}
+          </div>
+          <div className="lead-score-item">
+            <span>Status</span>
+            <StatusPill tone={statusTone(lead.status)}>{lead.status.replace(/_/g, " ")}</StatusPill>
+          </div>
         </div>
       </div>
       {expanded && (
