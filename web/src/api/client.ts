@@ -13,6 +13,7 @@ import type {
   Metrics,
   ManualClassificationInput,
   Product,
+  ProductInference,
   ProductSourceInput,
 } from "../types/domain";
 
@@ -38,6 +39,10 @@ export class ApiClient {
 
   createProductFromSource(input: ProductSourceInput) {
     return this.request<Product>("/products/from-source", { method: "POST", body: input });
+  }
+
+  inferProductFromSource(input: ProductSourceInput) {
+    return this.request<ProductInference>("/products/infer-source", { method: "POST", body: input });
   }
 
   updateProduct(id: string, product: unknown) {

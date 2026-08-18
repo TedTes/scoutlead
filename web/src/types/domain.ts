@@ -18,7 +18,31 @@ export type Product = {
 
 export type ProductSourceInput = {
   source: string;
+  context?: string | null;
   target_geography?: string;
+};
+
+export type ProductSourceEvidence = {
+  product_name_candidates: string[];
+  headline?: string | null;
+  claims: string[];
+  target_customer_clues: string[];
+  problem_clues: string[];
+  value_clues: string[];
+  source_snippets: string[];
+  confidence: number;
+  missing_info: string[];
+  rationale: string;
+};
+
+export type ProductInference = {
+  source: string;
+  context?: string | null;
+  ready_to_save: boolean;
+  confidence: number;
+  missing_info: string[];
+  evidence: ProductSourceEvidence;
+  product: Omit<Product, "id" | "archived_at" | "created_at" | "updated_at">;
 };
 
 export type QualificationCriterion = {

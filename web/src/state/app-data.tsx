@@ -12,6 +12,7 @@ import type {
   Metrics,
   ManualClassificationInput,
   Product,
+  ProductInference,
   ProductSourceInput,
 } from "../types/domain";
 
@@ -34,6 +35,7 @@ type AppDataContextValue = {
   refreshSnapshot: (campaignId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<boolean>;
   createProductFromSource: (input: ProductSourceInput) => Promise<boolean>;
+  inferProductFromSource: (input: ProductSourceInput) => Promise<ProductInference>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
   deleteCampaigns: (campaignIds: string[]) => Promise<void>;
@@ -232,6 +234,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         });
         return created;
       },
+      inferProductFromSource: (input) => api.inferProductFromSource(input),
       updateSelectedProduct: (update) =>
         mutate(async () => {
           if (!selectedProductIdState) return;
