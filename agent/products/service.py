@@ -56,7 +56,9 @@ class ProductService:
                 "use concise practical language for a validation campaign."
             ),
             prompt=(
-                "Create a ProductCreate JSON object for ScoutLead. "
+                "Create a ProductCreate JSON object for the product described by the submitted source. "
+                "ScoutLead is only the internal application name and must not be used as the product "
+                "name unless the submitted source is actually about ScoutLead. "
                 "preferred_discovery_sources should contain 3-6 web_search queries that find "
                 "potential customers, not searches for the product itself. "
                 "qualification_criteria should be concrete public signals the workflow can verify."
