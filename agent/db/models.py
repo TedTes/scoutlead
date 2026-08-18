@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base, TimestampMixin
@@ -31,6 +31,26 @@ class ProductModel(TimestampMixin, Base):
     )
     source_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProductSourceDraftModel(TimestampMixin, Base):
+    __tablename__ = "product_source_drafts"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_fingerprint",
+            "context_fingerprint",
+            name="uq_product_source_drafts_source_context",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    target_geography: Mapped[str] = mapped_column(String(255), nullable=False)
+    inference: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
 
 class CampaignModel(TimestampMixin, Base):

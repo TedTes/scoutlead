@@ -177,6 +177,41 @@ class InvalidProductConfigLLM:
         )
 
 
+class ChangingProductInferenceLLM:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model,
+        context: dict | None = None,
+        fallback,
+    ):
+        self.calls.append(task)
+        if response_model is ProductSourceEvidence:
+            evidence_call_count = sum(call == "product_source_evidence" for call in self.calls)
+            confidence = 80 if evidence_call_count == 1 else 10
+            return ProductSourceEvidence(
+                product_name_candidates=["QuoteVan"],
+                headline="Quote the job before you leave it.",
+                claims=["Walk the job, capture the scope, send a professional quote."],
+                target_customer_clues=[],
+                problem_clues=[],
+                value_clues=["Send a professional quote."],
+                source_snippets=[
+                    "Walk the job, capture the scope, send a professional quote.",
+                ],
+                confidence=confidence,
+                missing_info=["Specific target customer segments or industries served"],
+                rationale=f"Generated confidence {confidence}.",
+            )
+        return fallback
+
+
 def test_product_can_be_created_from_single_source() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
@@ -326,6 +361,55 @@ def test_sparse_source_uses_source_lookup_before_needing_context() -> None:
         assert "painting" in inference.product.target_customer.lower()
         assert "quote" in inference.product.problem_being_solved.lower()
         assert any("Source lookup result" in snippet for snippet in inference.evidence.source_snippets)
+
+
+def test_repeated_source_inference_uses_cached_draft() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    llm = ChangingProductInferenceLLM()
+    browser = FakeBrowser()
+
+    with session_factory() as session:
+        service = ProductService(
+            session,
+            llm=llm,
+            browser=browser,
+        )
+        first = service.infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
+        browser_calls = browser.calls
+        second = service.infer_product_from_source(ProductSourceCreate(source="https://www.quotevan.com/"))
+
+        assert first.confidence == 80
+        assert second.confidence == first.confidence
+        assert browser.calls == browser_calls
+        assert llm.calls == ["product_source_evidence", "product_config_from_evidence"]
+
+
+def test_context_refines_cached_source_draft_without_lowering_confidence() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    llm = ChangingProductInferenceLLM()
+
+    with session_factory() as session:
+        service = ProductService(
+            session,
+            llm=llm,
+            browser=FakeBrowser(),
+        )
+        base = service.infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
+        refined = service.infer_product_from_source(
+            ProductSourceCreate(
+                source="https://quotevan.com",
+                context="Quote intake workflow for residential painting companies",
+            )
+        )
+
+        assert refined.confidence >= base.confidence
+        assert refined.ready_to_save is True
+        assert "painting" in refined.product.target_customer.lower()
+        assert llm.calls == ["product_source_evidence", "product_config_from_evidence"]
 
 
 def test_invalid_llm_product_config_falls_back_without_crashing() -> None:

@@ -75,6 +75,8 @@ class ProductService:
         context = request.context.strip() if request.context else None
         source_url = self._normalized_source_url(source)
         source_fingerprint = self._source_fingerprint(source_url)
+        source_cache_fingerprint = self._source_cache_fingerprint(source, source_url)
+        context_fingerprint = self._context_fingerprint(context)
         existing = self.products.find_by_source_fingerprint(source_fingerprint)
         if existing is None and source_url and source_fingerprint:
             legacy_match = self.products.find_active_by_product_name(
@@ -89,9 +91,39 @@ class ProductService:
         if existing is not None:
             return self._existing_product_inference(source, context, ProductRead.model_validate(existing))
 
+        cached = self.products.find_source_draft(
+            source_fingerprint=source_cache_fingerprint,
+            context_fingerprint=context_fingerprint,
+        )
+        if cached is not None:
+            return ProductInferenceRead.model_validate(cached.inference)
+
+        cached_base = self.products.find_latest_source_draft(
+            source_fingerprint=source_cache_fingerprint
+        )
+        if context and cached_base is not None:
+            inference = self._refine_cached_source_draft(
+                source=source,
+                context=context,
+                target_geography=request.target_geography,
+                source_url=source_url,
+                source_fingerprint=source_fingerprint,
+                cached=ProductInferenceRead.model_validate(cached_base.inference),
+            )
+            self._cache_source_draft(
+                source=source,
+                source_url=source_url,
+                source_cache_fingerprint=source_cache_fingerprint,
+                context=context,
+                context_fingerprint=context_fingerprint,
+                target_geography=request.target_geography,
+                inference=inference,
+            )
+            return inference
+
         inspection = self._inspect_source(source)
         lookup_results: list[SearchResult] = []
-        if not self._has_enough_source_evidence(inspection, context) and source_url:
+        if not self._has_enough_source_evidence(inspection) and source_url:
             lookup_results = self._lookup_source_results(source_url)
             inspection = self._merge_lookup_results(inspection, source_url, lookup_results)
         fallback_evidence = self._fallback_evidence(source, context, inspection)
@@ -109,7 +141,17 @@ class ProductService:
             evidence=fallback_evidence,
         )
         if self.llm is None or not self._has_enough_source_evidence(inspection, context):
-            return self._build_inference(source, context, fallback_evidence, fallback)
+            inference = self._build_inference(source, context, fallback_evidence, fallback)
+            self._cache_source_draft(
+                source=source,
+                source_url=source_url,
+                source_cache_fingerprint=source_cache_fingerprint,
+                context=context,
+                context_fingerprint=context_fingerprint,
+                target_geography=request.target_geography,
+                inference=inference,
+            )
+            return inference
 
         try:
             evidence = self.llm.generate_object(
@@ -131,6 +173,7 @@ class ProductService:
         except PydanticValidationError as exc:
             logger.warning("invalid_product_source_evidence error=%s", exc)
             evidence = fallback_evidence
+        evidence = self._stabilize_context_evidence(evidence, fallback_evidence, context)
 
         draft_fallback = self._fallback_product(
             source,
@@ -167,7 +210,17 @@ class ProductService:
             source_fingerprint=source_fingerprint,
             evidence=evidence,
         )
-        return self._build_inference(source, context, evidence, draft)
+        inference = self._build_inference(source, context, evidence, draft)
+        self._cache_source_draft(
+            source=source,
+            source_url=source_url,
+            source_cache_fingerprint=source_cache_fingerprint,
+            context=context,
+            context_fingerprint=context_fingerprint,
+            target_geography=request.target_geography,
+            inference=inference,
+        )
+        return inference
 
     def list(self) -> list[ProductModel]:
         return self.products.list()
@@ -434,6 +487,133 @@ class ProductService:
             existing_product=existing_product,
         )
 
+    def _cache_source_draft(
+        self,
+        *,
+        source: str,
+        source_url: str | None,
+        source_cache_fingerprint: str,
+        context: str | None,
+        context_fingerprint: str,
+        target_geography: str,
+        inference: ProductInferenceRead,
+    ) -> None:
+        self.products.upsert_source_draft(
+            source=source,
+            source_url=source_url,
+            source_fingerprint=source_cache_fingerprint,
+            context=context,
+            context_fingerprint=context_fingerprint,
+            target_geography=target_geography,
+            inference=inference.model_dump(mode="json"),
+        )
+
+    def _refine_cached_source_draft(
+        self,
+        *,
+        source: str,
+        context: str,
+        target_geography: str,
+        source_url: str | None,
+        source_fingerprint: str | None,
+        cached: ProductInferenceRead,
+    ) -> ProductInferenceRead:
+        evidence = self._contextualize_evidence(cached.evidence, context)
+        inspection = WebsiteInspection(
+            url=source_url or cached.product.source_url or source,
+            title=cached.product.product_name,
+            description=cached.product.product_description,
+            text=truncate(
+                normalize_text(
+                    " ".join(
+                        [
+                            cached.product.product_description,
+                            cached.product.target_customer,
+                            cached.product.problem_being_solved,
+                            cached.product.value_proposition,
+                            " ".join(cached.evidence.source_snippets),
+                            context,
+                        ]
+                    )
+                ),
+                10000,
+            ),
+        )
+        product = self._fallback_product(
+            source,
+            target_geography,
+            inspection,
+            context,
+            evidence,
+        )
+        product = self._attach_source_metadata(
+            product,
+            source_url=source_url,
+            source_fingerprint=source_fingerprint,
+            evidence=evidence,
+        )
+        return self._build_inference(source, context, evidence, product)
+
+    @staticmethod
+    def _contextualize_evidence(
+        evidence: ProductSourceEvidence,
+        context: str,
+    ) -> ProductSourceEvidence:
+        context_words = len(re.findall(r"[A-Za-z]{3,}", context))
+        confidence = evidence.confidence
+        missing_info = evidence.missing_info
+        if context_words >= 6:
+            confidence = max(confidence, 82 if evidence.confidence >= 50 else 74)
+            if confidence >= 70:
+                missing_info = []
+        snippets = ProductService._dedupe_snippets(
+            [*evidence.source_snippets, f"User context: {context}"]
+        )
+        return evidence.model_copy(
+            update={
+                "confidence": confidence,
+                "missing_info": missing_info,
+                "source_snippets": snippets[:6],
+                "rationale": "Cached source evidence was reused and strengthened with user context.",
+            }
+        )
+
+    @staticmethod
+    def _stabilize_context_evidence(
+        evidence: ProductSourceEvidence,
+        fallback: ProductSourceEvidence,
+        context: str | None,
+    ) -> ProductSourceEvidence:
+        if not context or evidence.confidence >= fallback.confidence:
+            return evidence
+        snippets = ProductService._dedupe_snippets(
+            [*fallback.source_snippets, *evidence.source_snippets]
+        )
+        return fallback.model_copy(
+            update={
+                "confidence": fallback.confidence,
+                "missing_info": fallback.missing_info,
+                "source_snippets": snippets[:6],
+                "rationale": (
+                    "LLM evidence scored lower after context was added, so the grounded "
+                    "source and user-context fallback was kept."
+                ),
+            }
+        )
+
+    @staticmethod
+    def _dedupe_snippets(snippets: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for snippet in snippets:
+            value = normalize_text(snippet)
+            key = value.lower()
+            if not value or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(value)
+        return deduped
+
     @staticmethod
     def _existing_product_inference(
         source: str,
@@ -570,6 +750,18 @@ class ProductService:
         if not source_url:
             return None
         return hashlib.sha256(source_url.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _source_cache_fingerprint(source: str, source_url: str | None) -> str:
+        normalized = source_url or normalize_text(source).lower()
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _context_fingerprint(context: str | None) -> str:
+        normalized = normalize_text(context or "").lower()
+        if not normalized:
+            return "no_context"
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _source_product_name_hint(source_url: str) -> str | None:

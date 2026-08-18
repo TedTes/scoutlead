@@ -14,6 +14,7 @@ from db.models import (
     LearningSummaryModel,
     MessageModel,
     ProductModel,
+    ProductSourceDraftModel,
     QueueJobModel,
     ToolCallModel,
 )
@@ -76,6 +77,72 @@ class ProductRepository:
             )
         )
         return results[0] if len(results) == 1 else None
+
+    def find_source_draft(
+        self,
+        *,
+        source_fingerprint: str | None,
+        context_fingerprint: str | None,
+    ) -> ProductSourceDraftModel | None:
+        if not source_fingerprint or not context_fingerprint:
+            return None
+        return self.session.scalar(
+            select(ProductSourceDraftModel)
+            .where(ProductSourceDraftModel.source_fingerprint == source_fingerprint)
+            .where(ProductSourceDraftModel.context_fingerprint == context_fingerprint)
+        )
+
+    def find_latest_source_draft(
+        self,
+        *,
+        source_fingerprint: str | None,
+    ) -> ProductSourceDraftModel | None:
+        if not source_fingerprint:
+            return None
+        return self.session.scalar(
+            select(ProductSourceDraftModel)
+            .where(ProductSourceDraftModel.source_fingerprint == source_fingerprint)
+            .order_by(ProductSourceDraftModel.updated_at.desc())
+            .limit(1)
+        )
+
+    def upsert_source_draft(
+        self,
+        *,
+        source: str,
+        source_url: str | None,
+        source_fingerprint: str,
+        context: str | None,
+        context_fingerprint: str,
+        target_geography: str,
+        inference: dict,
+    ) -> ProductSourceDraftModel:
+        model = self.find_source_draft(
+            source_fingerprint=source_fingerprint,
+            context_fingerprint=context_fingerprint,
+        )
+        if model is None:
+            model = ProductSourceDraftModel(
+                id=new_id("product_draft"),
+                source=source,
+                source_url=source_url,
+                source_fingerprint=source_fingerprint,
+                context=context,
+                context_fingerprint=context_fingerprint,
+                target_geography=target_geography,
+                inference=inference,
+            )
+            self.session.add(model)
+        else:
+            model.source = source
+            model.source_url = source_url
+            model.context = context
+            model.target_geography = target_geography
+            model.inference = inference
+            model.updated_at = utcnow()
+        self.session.commit()
+        self.session.refresh(model)
+        return model
 
     def attach_source_metadata(
         self,
