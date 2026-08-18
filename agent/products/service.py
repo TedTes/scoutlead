@@ -29,6 +29,7 @@ from products.schemas import (
 from shared.errors import ValidationError
 from shared.utils import normalize_text, truncate, utcnow
 from tools.browser import DirectHttpBrowserTool, WebsiteInspection
+from tools.search import SearchResult, SearchTool
 
 
 class ProductService:
@@ -38,10 +39,12 @@ class ProductService:
         *,
         llm: LLMClient | None = None,
         browser: DirectHttpBrowserTool | None = None,
+        search: SearchTool | None = None,
     ) -> None:
         self.products = ProductRepository(session)
         self.llm = llm
         self.browser = browser
+        self.search = search
 
     def create(self, product: ProductCreate) -> ProductModel:
         return self.products.create(product)
@@ -83,6 +86,10 @@ class ProductService:
             return self._existing_product_inference(source, context, ProductRead.model_validate(existing))
 
         inspection = self._inspect_source(source)
+        lookup_results: list[SearchResult] = []
+        if not self._has_enough_source_evidence(inspection, context) and source_url:
+            lookup_results = self._lookup_source_results(source_url)
+            inspection = self._merge_lookup_results(inspection, source_url, lookup_results)
         fallback_evidence = self._fallback_evidence(source, context, inspection)
         fallback = self._fallback_product(
             source,
@@ -110,6 +117,9 @@ class ProductService:
                 "user_context": context,
                 "target_geography": request.target_geography,
                 "website": inspection.model_dump(mode="json") if inspection else None,
+                "source_lookup_results": [
+                    result.model_dump(mode="json") for result in lookup_results
+                ],
             },
             fallback=fallback_evidence,
         )
@@ -132,6 +142,9 @@ class ProductService:
                 "target_geography": request.target_geography,
                 "evidence": evidence.model_dump(mode="json"),
                 "website": inspection.model_dump(mode="json") if inspection else None,
+                "source_lookup_results": [
+                    result.model_dump(mode="json") for result in lookup_results
+                ],
             },
             fallback=draft_fallback,
         )
@@ -194,6 +207,80 @@ class ProductService:
             text=truncate(normalize_text(" ".join(text_parts)), 10000),
             emails=sorted(set(emails))[:10],
             links=sorted(set(links))[:50],
+        )
+
+    def _lookup_source_results(self, source_url: str) -> list[SearchResult]:
+        if self.search is None or not self.search.is_configured:
+            return []
+        host = urlparse(source_url).hostname or source_url
+        name_hint = self._source_product_name_hint(source_url) or host
+        queries = [
+            f'"{host}" product',
+            f'"{name_hint}" "{host}"',
+            f'"{name_hint}" software product',
+        ]
+        results: list[SearchResult] = []
+        seen_urls: set[str] = set()
+        for query in queries:
+            try:
+                rows = self.search.lookup(query, limit=5)
+            except Exception:
+                continue
+            for row in rows:
+                if not self._lookup_result_matches_source(row, source_url):
+                    continue
+                key = row.url or row.title
+                if key in seen_urls:
+                    continue
+                seen_urls.add(key)
+                results.append(row)
+                if len(results) >= 5:
+                    return results
+        return results
+
+    @staticmethod
+    def _lookup_result_matches_source(result: SearchResult, source_url: str) -> bool:
+        source_host = (urlparse(source_url).hostname or "").removeprefix("www.").lower()
+        result_host = (urlparse(result.url or "").hostname or "").removeprefix("www.").lower()
+        text = " ".join([result.title, result.snippet or "", result.url or ""]).lower()
+        name_hint = ProductService._source_product_name_hint(source_url) or ""
+        return (
+            bool(source_host and result_host == source_host)
+            or bool(source_host and source_host in text)
+            or bool(name_hint and name_hint.lower() in text)
+        )
+
+    @staticmethod
+    def _merge_lookup_results(
+        inspection: WebsiteInspection | None,
+        source_url: str,
+        results: list[SearchResult],
+    ) -> WebsiteInspection | None:
+        if not results:
+            return inspection
+        lookup_text = " ".join(
+            normalize_text(
+                " ".join(
+                    part
+                    for part in [
+                        f"Source lookup result: {result.title}",
+                        result.snippet,
+                        result.url,
+                    ]
+                    if part
+                )
+            )
+            for result in results
+        )
+        if inspection is None:
+            return WebsiteInspection(url=source_url, text=truncate(lookup_text, 10000))
+        return inspection.model_copy(
+            update={
+                "text": truncate(
+                    normalize_text(" ".join([inspection.text or "", lookup_text])),
+                    10000,
+                )
+            }
         )
 
     @staticmethod
@@ -504,6 +591,42 @@ class ProductService:
             )
         )
         target_customer = self._fallback_target_customer(text, name)
+        if evidence and evidence.confidence < 70 and not context:
+            return ProductCreate(
+                product_name=name,
+                product_description=(
+                    f"{name} could not be identified from the submitted source."
+                ),
+                target_customer="Unknown until more product context is provided",
+                problem_being_solved=(
+                    "Not enough public source evidence to identify the customer problem."
+                ),
+                value_proposition=(
+                    "Not enough public source evidence to identify the value proposition."
+                ),
+                target_geography=target_geography,
+                validation_goal="Add product context before running customer discovery.",
+                qualification_criteria=[
+                    QualificationCriterion(
+                        label="Product context is available",
+                        weight=1,
+                        required=True,
+                        evidence_required=True,
+                    )
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.WEB_SEARCH,
+                        value="Add product context before running discovery",
+                        limit=1,
+                    )
+                ],
+                outreach_objective="Add product context before drafting outreach.",
+                constraints=[
+                    "Human approval required before outbound messages are sent.",
+                    "Do not run discovery until product context is available.",
+                ],
+            )
         product_description = (
             context
             if context

@@ -63,6 +63,22 @@ class SearchTool:
             for result in self.search(product=product, campaign=campaign, source=source, limit=limit)
         ]
 
+    def lookup(self, query: str, limit: int = 5) -> list[SearchResult]:
+        if not self.is_configured:
+            if self.require_config:
+                raise ConfigurationError(
+                    "real search provider is required for source lookup",
+                    {"provider": self.provider},
+                )
+            return []
+
+        source = DiscoverySource(type=DiscoverySourceType.WEB_SEARCH, value=query)
+        if self.provider == "tavily":
+            return self._search_tavily(query, source, limit)
+        if self.provider == "brave":
+            return self._search_brave(query, limit)
+        return self._lookup_generic(query, limit)
+
     def search(
         self, *, product: ProductRead, campaign: CampaignRead, source: DiscoverySource, limit: int
     ) -> list[SearchResult]:
@@ -116,6 +132,21 @@ class SearchTool:
                 "campaign": campaign.model_dump(mode="json"),
                 "limit": limit,
             },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get("results", payload) if isinstance(payload, dict) else payload
+        return [SearchResult.model_validate(row) for row in rows[:limit]]
+
+    def _lookup_generic(self, query: str, limit: int) -> list[SearchResult]:
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        response = httpx.post(
+            str(self.endpoint),
+            headers=headers,
+            timeout=self.timeout_seconds,
+            json={"query": query, "limit": limit},
         )
         response.raise_for_status()
         payload = response.json()

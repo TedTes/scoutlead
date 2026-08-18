@@ -13,6 +13,7 @@ from products.schemas import (
 )
 from products.service import ProductService
 from tools.browser import WebsiteInspection
+from tools.search import SearchResult
 
 
 class FakeBrowser:
@@ -33,6 +34,27 @@ class FakeBrowser:
 class SparseBrowser:
     def inspect(self, url: str) -> WebsiteInspection:
         return WebsiteInspection(url=url, title="QuoteVan", text="")
+
+
+class SourceLookupSearch:
+    is_configured = True
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def lookup(self, query: str, limit: int = 5) -> list[SearchResult]:
+        self.calls.append(query)
+        return [
+            SearchResult(
+                title="QuoteVan quote intake for residential painting contractors",
+                url="https://quotevan.com",
+                snippet=(
+                    "QuoteVan helps residential painting companies manage homeowner quote "
+                    "requests, estimate intake, and follow-up workflows from one simple form."
+                ),
+                source="test",
+            )
+        ]
 
 
 class AmbiguousQuoteBrowser:
@@ -236,8 +258,31 @@ def test_sparse_source_uses_fallback_without_llm_guessing() -> None:
 
         assert llm.called is False
         assert inference.ready_to_save is False
+        assert "unknown" in inference.product.target_customer.lower()
+        assert "not enough public source evidence" in inference.product.problem_being_solved.lower()
         assert "rental" not in inference.product.target_customer.lower()
         assert "moving" not in inference.product.target_customer.lower()
+
+
+def test_sparse_source_uses_source_lookup_before_needing_context() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    search = SourceLookupSearch()
+
+    with session_factory() as session:
+        inference = ProductService(
+            session,
+            llm=HeuristicLLMClient(),
+            browser=SparseBrowser(),
+            search=search,
+        ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
+
+        assert search.calls
+        assert inference.ready_to_save is True
+        assert "painting" in inference.product.target_customer.lower()
+        assert "quote" in inference.product.problem_being_solved.lower()
+        assert any("Source lookup result" in snippet for snippet in inference.evidence.source_snippets)
 
 
 def test_ungrounded_van_rental_inference_is_rejected() -> None:
