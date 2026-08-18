@@ -16,7 +16,15 @@ export function ProductScreen({
   newProductToken,
   onCreatingProductChange,
 }: ProductScreenProps) {
-  const { selectedProduct, productCampaigns, createProduct, deleteProduct, inferProductFromSource } = useAppData();
+  const {
+    selectedProduct,
+    productCampaigns,
+    createProduct,
+    deleteProduct,
+    inferProductFromSource,
+    refreshAll,
+    setSelectedProductId,
+  } = useAppData();
   const [source, setSource] = useState("");
   const [context, setContext] = useState("");
   const [draft, setDraft] = useState<ProductInference | null>(null);
@@ -45,6 +53,16 @@ export function ProductScreen({
         context: context.trim() || undefined,
         target_geography: "United States",
       });
+      if (result.existing_product) {
+        window.alert(`${result.existing_product.product_name} already exists. Opening the saved product.`);
+        setSelectedProductId(result.existing_product.id);
+        await refreshAll();
+        setSource("");
+        setContext("");
+        setDraft(null);
+        onCreatingProductChange(false);
+        return;
+      }
       setDraft(result);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));

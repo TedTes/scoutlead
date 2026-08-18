@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -18,7 +18,7 @@ from db.models import (
     ToolCallModel,
 )
 from products.schemas import ProductCreate, ProductUpdate
-from shared.errors import NotFoundError
+from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 
 
@@ -27,8 +27,20 @@ class ProductRepository:
         self.session = session
 
     def create(self, product: ProductCreate) -> ProductModel:
-        data = product.model_dump(mode="json")
+        data = product.model_dump(mode="python")
         self._ensure_criterion_ids(data)
+        source_fingerprint = data.get("source_fingerprint")
+        if source_fingerprint:
+            existing = self.find_by_source_fingerprint(source_fingerprint)
+            if existing is not None:
+                raise ConflictError(
+                    "product already exists for this source",
+                    {
+                        "product_id": existing.id,
+                        "product_name": existing.product_name,
+                        "source_url": existing.source_url,
+                    },
+                )
         model = ProductModel(id=new_id("product"), **data)
         self.session.add(model)
         self.session.commit()
@@ -44,9 +56,55 @@ class ProductRepository:
             raise NotFoundError("product not found", {"product_id": product_id})
         return model
 
+    def find_by_source_fingerprint(self, source_fingerprint: str | None) -> ProductModel | None:
+        if not source_fingerprint:
+            return None
+        return self.session.scalar(
+            select(ProductModel).where(ProductModel.source_fingerprint == source_fingerprint)
+        )
+
+    def find_active_by_product_name(self, product_name: str | None) -> ProductModel | None:
+        if not product_name:
+            return None
+        results = list(
+            self.session.scalars(
+                select(ProductModel)
+                .where(func.lower(ProductModel.product_name) == product_name.lower())
+                .where(ProductModel.archived_at.is_(None))
+                .order_by(ProductModel.created_at.desc())
+                .limit(2)
+            )
+        )
+        return results[0] if len(results) == 1 else None
+
+    def attach_source_metadata(
+        self,
+        product_id: str,
+        *,
+        source_url: str,
+        source_fingerprint: str,
+    ) -> ProductModel:
+        existing = self.find_by_source_fingerprint(source_fingerprint)
+        if existing is not None and existing.id != product_id:
+            raise ConflictError(
+                "source is already attached to another product",
+                {
+                    "product_id": existing.id,
+                    "product_name": existing.product_name,
+                    "source_url": existing.source_url,
+                },
+            )
+        model = self.get(product_id)
+        model.source_url = source_url
+        model.source_fingerprint = source_fingerprint
+        model.source_last_checked_at = utcnow()
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
     def update(self, product_id: str, update: ProductUpdate) -> ProductModel:
         model = self.get(product_id)
-        data = update.model_dump(mode="json", exclude_unset=True)
+        data = update.model_dump(mode="python", exclude_unset=True)
         if "qualification_criteria" in data:
             self._ensure_criterion_ids(data)
         for field, value in data.items():

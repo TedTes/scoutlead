@@ -3,6 +3,7 @@ from collections.abc import Generator
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import Base
@@ -61,3 +62,34 @@ def create_database(engine: Engine) -> None:
     import db.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_product_source_columns(engine)
+
+
+def _ensure_product_source_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("products"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("products")}
+    dialect = engine.dialect.name
+    source_last_checked_type = "TIMESTAMP WITH TIME ZONE" if dialect == "postgresql" else "DATETIME"
+    source_evidence_type = "JSONB" if dialect == "postgresql" else "JSON"
+    columns = {
+        "source_url": "VARCHAR(1000)",
+        "source_fingerprint": "VARCHAR(255)",
+        "source_last_checked_at": source_last_checked_type,
+        "source_evidence": source_evidence_type,
+    }
+
+    existing_indexes = {index["name"] for index in inspector.get_indexes("products")}
+    with engine.begin() as connection:
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE products ADD COLUMN {column_name} {column_type}"))
+        if "ix_products_source_fingerprint" not in existing_indexes:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_products_source_fingerprint "
+                    "ON products (source_fingerprint)"
+                )
+            )

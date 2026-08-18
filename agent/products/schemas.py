@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -40,6 +41,10 @@ class ProductBase(BaseModel):
     preferred_discovery_sources: list[DiscoverySource] = Field(min_length=1)
     outreach_objective: str = Field(min_length=1)
     constraints: list[str] = Field(default_factory=list)
+    source_url: str | None = None
+    source_fingerprint: str | None = None
+    source_last_checked_at: datetime | None = None
+    source_evidence: dict[str, Any] | None = None
 
     @field_validator("constraints")
     @classmethod
@@ -55,6 +60,15 @@ class ProductSourceCreate(BaseModel):
     source: str = Field(min_length=1)
     context: str | None = Field(default=None, min_length=1)
     target_geography: str = Field(default="United States", min_length=1)
+
+
+class ProductRead(ProductBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    archived_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ProductSourceEvidence(BaseModel):
@@ -78,6 +92,7 @@ class ProductInferenceRead(BaseModel):
     missing_info: list[str] = Field(default_factory=list)
     evidence: ProductSourceEvidence
     product: ProductCreate
+    existing_product: ProductRead | None = None
 
 
 class ProductUpdate(BaseModel):
@@ -92,12 +107,7 @@ class ProductUpdate(BaseModel):
     preferred_discovery_sources: list[DiscoverySource] | None = None
     outreach_objective: str | None = Field(default=None, min_length=1)
     constraints: list[str] | None = None
-
-
-class ProductRead(ProductBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    archived_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    source_url: str | None = None
+    source_fingerprint: str | None = None
+    source_last_checked_at: datetime | None = None
+    source_evidence: dict[str, Any] | None = None

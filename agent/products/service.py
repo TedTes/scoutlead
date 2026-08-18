@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from urllib.parse import urljoin, urlparse
 
@@ -19,13 +20,14 @@ from products.schemas import (
     DiscoverySourceType,
     ProductCreate,
     ProductInferenceRead,
+    ProductRead,
     ProductSourceCreate,
     ProductSourceEvidence,
     ProductUpdate,
     QualificationCriterion,
 )
 from shared.errors import ValidationError
-from shared.utils import normalize_text, truncate
+from shared.utils import normalize_text, truncate, utcnow
 from tools.browser import DirectHttpBrowserTool, WebsiteInspection
 
 
@@ -46,6 +48,8 @@ class ProductService:
 
     def create_from_source(self, request: ProductSourceCreate) -> ProductModel:
         inference = self.infer_product_from_source(request)
+        if inference.existing_product is not None:
+            return self.products.get(inference.existing_product.id)
         if not inference.ready_to_save:
             raise ValidationError(
                 "source does not contain enough product evidence to create a product",
@@ -62,6 +66,22 @@ class ProductService:
     def infer_product_from_source(self, request: ProductSourceCreate) -> ProductInferenceRead:
         source = request.source.strip()
         context = request.context.strip() if request.context else None
+        source_url = self._normalized_source_url(source)
+        source_fingerprint = self._source_fingerprint(source_url)
+        existing = self.products.find_by_source_fingerprint(source_fingerprint)
+        if existing is None and source_url and source_fingerprint:
+            legacy_match = self.products.find_active_by_product_name(
+                self._source_product_name_hint(source_url)
+            )
+            if legacy_match is not None and not legacy_match.source_fingerprint:
+                existing = self.products.attach_source_metadata(
+                    legacy_match.id,
+                    source_url=source_url,
+                    source_fingerprint=source_fingerprint,
+                )
+        if existing is not None:
+            return self._existing_product_inference(source, context, ProductRead.model_validate(existing))
+
         inspection = self._inspect_source(source)
         fallback_evidence = self._fallback_evidence(source, context, inspection)
         fallback = self._fallback_product(
@@ -70,6 +90,12 @@ class ProductService:
             inspection,
             context,
             fallback_evidence,
+        )
+        fallback = self._attach_source_metadata(
+            fallback,
+            source_url=source_url,
+            source_fingerprint=source_fingerprint,
+            evidence=fallback_evidence,
         )
         if self.llm is None or not self._has_enough_source_evidence(inspection, context):
             return self._build_inference(source, context, fallback_evidence, fallback)
@@ -110,6 +136,12 @@ class ProductService:
             fallback=draft_fallback,
         )
         draft = self._reject_ungrounded_inference(draft, draft_fallback, inspection, context)
+        draft = self._attach_source_metadata(
+            draft,
+            source_url=source_url,
+            source_fingerprint=source_fingerprint,
+            evidence=evidence,
+        )
         return self._build_inference(source, context, evidence, draft)
 
     def list(self) -> list[ProductModel]:
@@ -289,6 +321,7 @@ class ProductService:
         context: str | None,
         evidence: ProductSourceEvidence,
         product: ProductCreate,
+        existing_product: ProductRead | None = None,
     ) -> ProductInferenceRead:
         ready_to_save = evidence.confidence >= 70 and not evidence.missing_info
         return ProductInferenceRead(
@@ -299,6 +332,74 @@ class ProductService:
             missing_info=evidence.missing_info,
             evidence=evidence,
             product=product,
+            existing_product=existing_product,
+        )
+
+    @staticmethod
+    def _existing_product_inference(
+        source: str,
+        context: str | None,
+        existing_product: ProductRead,
+    ) -> ProductInferenceRead:
+        evidence = ProductService._existing_product_evidence(existing_product)
+        product = ProductService._product_create_from_read(existing_product)
+        return ProductService._build_inference(
+            source,
+            context,
+            evidence,
+            product,
+            existing_product=existing_product,
+        )
+
+    @staticmethod
+    def _existing_product_evidence(product: ProductRead) -> ProductSourceEvidence:
+        if product.source_evidence:
+            try:
+                return ProductSourceEvidence.model_validate(product.source_evidence)
+            except Exception:
+                pass
+        return ProductSourceEvidence(
+            product_name_candidates=[product.product_name],
+            headline=product.product_name,
+            claims=[product.product_description],
+            target_customer_clues=[product.target_customer],
+            problem_clues=[product.problem_being_solved],
+            value_clues=[product.value_proposition],
+            source_snippets=[
+                f"Existing saved product: {product.product_name}",
+                f"Source URL: {product.source_url}",
+            ],
+            confidence=100,
+            missing_info=[],
+            rationale="Matched an existing saved product with the same normalized source URL.",
+        )
+
+    @staticmethod
+    def _product_create_from_read(product: ProductRead) -> ProductCreate:
+        return ProductCreate.model_validate(
+            product.model_dump(
+                mode="json",
+                exclude={"id", "archived_at", "created_at", "updated_at"},
+            )
+        )
+
+    @staticmethod
+    def _attach_source_metadata(
+        product: ProductCreate,
+        *,
+        source_url: str | None,
+        source_fingerprint: str | None,
+        evidence: ProductSourceEvidence,
+    ) -> ProductCreate:
+        if not source_url or not source_fingerprint:
+            return product
+        return product.model_copy(
+            update={
+                "source_url": source_url,
+                "source_fingerprint": source_fingerprint,
+                "source_last_checked_at": utcnow(),
+                "source_evidence": evidence.model_dump(mode="json"),
+            }
         )
 
     @staticmethod
@@ -345,6 +446,37 @@ class ProductService:
         if " " in value or "." not in value:
             return None
         return f"https://{value}"
+
+    @staticmethod
+    def _normalized_source_url(source: str) -> str | None:
+        value = ProductService._source_url(source)
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return None
+        if host.startswith("www."):
+            host = host.removeprefix("www.")
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        netloc = f"{host}:{port}" if port else host
+        path = re.sub(r"/+", "/", parsed.path or "/").rstrip("/")
+        return f"https://{netloc}{path}"
+
+    @staticmethod
+    def _source_fingerprint(source_url: str | None) -> str | None:
+        if not source_url:
+            return None
+        return hashlib.sha256(source_url.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _source_product_name_hint(source_url: str) -> str | None:
+        host = urlparse(source_url).hostname or ""
+        first_label = host.split(".", maxsplit=1)[0]
+        return first_label or None
 
     def _fallback_product(
         self,

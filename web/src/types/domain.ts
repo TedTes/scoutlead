@@ -11,6 +11,10 @@ export type Product = {
   preferred_discovery_sources: DiscoverySource[];
   outreach_objective: string;
   constraints: string[];
+  source_url?: string | null;
+  source_fingerprint?: string | null;
+  source_last_checked_at?: string | null;
+  source_evidence?: Record<string, unknown> | null;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -43,6 +47,7 @@ export type ProductInference = {
   missing_info: string[];
   evidence: ProductSourceEvidence;
   product: Omit<Product, "id" | "archived_at" | "created_at" | "updated_at">;
+  existing_product?: Product | null;
 };
 
 export type QualificationCriterion = {

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from agents.llm import HeuristicLLMClient
@@ -16,7 +16,11 @@ from tools.browser import WebsiteInspection
 
 
 class FakeBrowser:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def inspect(self, url: str) -> WebsiteInspection:
+        self.calls += 1
         return WebsiteInspection(
             url=url,
             title="QuoteVan",
@@ -124,6 +128,78 @@ def test_product_can_be_created_from_single_source() -> None:
         assert "painting" in product.target_customer.lower()
         assert product.qualification_criteria
         assert product.preferred_discovery_sources
+
+
+def test_same_source_reuses_existing_product_without_refetching() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    browser = FakeBrowser()
+
+    with session_factory() as session:
+        service = ProductService(
+            session,
+            llm=HeuristicLLMClient(),
+            browser=browser,
+        )
+        product = service.create_from_source(ProductSourceCreate(source="https://quotevan.com"))
+        calls_after_create = browser.calls
+
+        inference = service.infer_product_from_source(
+            ProductSourceCreate(source="https://www.quotevan.com/")
+        )
+        recreated = service.create_from_source(ProductSourceCreate(source="quotevan.com/"))
+
+        assert browser.calls == calls_after_create
+        assert inference.existing_product is not None
+        assert inference.existing_product.id == product.id
+        assert inference.product.product_description == product.product_description
+        assert recreated.id == product.id
+        assert session.execute(text("select count(*) from products")).scalar_one() == 1
+
+
+def test_same_source_reuses_legacy_product_name_match_without_refetching() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    browser = FakeBrowser()
+
+    with session_factory() as session:
+        product = ProductService(session).create(
+            ProductCreate(
+                product_name="QuoteVan",
+                product_description="Saved before source metadata existed.",
+                target_customer="Residential painting companies",
+                problem_being_solved="Quote requests are slow.",
+                value_proposition="Organize quote intake.",
+                target_geography="United States",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Matches target customer", required=True),
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.WEB_SEARCH,
+                        value="residential painting companies United States",
+                    )
+                ],
+                outreach_objective="Ask for a customer discovery conversation.",
+                constraints=["Human approval required before outbound messages are sent."],
+            )
+        )
+
+        inference = ProductService(
+            session,
+            llm=HeuristicLLMClient(),
+            browser=browser,
+        ).infer_product_from_source(ProductSourceCreate(source="https://www.quotevan.com/"))
+
+        session.refresh(product)
+        assert browser.calls == 0
+        assert inference.existing_product is not None
+        assert inference.existing_product.id == product.id
+        assert product.source_url == "https://quotevan.com"
+        assert product.source_fingerprint
 
 
 def test_product_source_prompt_does_not_treat_scoutlead_as_product() -> None:
