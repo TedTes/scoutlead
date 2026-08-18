@@ -32,7 +32,7 @@ export function ProductScreen({
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState("");
   const showSourceCreator = isCreatingProduct || !selectedProduct;
-  const canGenerate = source.trim().length > 0 && !generating;
+  const canGenerate = source.trim().length > 0 && context.trim().length > 0 && !generating;
   const canSave = Boolean(draft?.ready_to_save && !saving);
 
   useEffect(() => {
@@ -119,26 +119,18 @@ export function ProductScreen({
               onChange={(event) => setSource(event.target.value)}
             />
           </label>
+          <label className="field">
+            <span>One-line context</span>
+            <input
+              placeholder="Quote intake workflow for residential painting companies"
+              value={context}
+              onChange={(event) => setContext(event.target.value)}
+            />
+          </label>
           <button disabled={!canGenerate} type="submit">
-            {generating ? "Generating..." : "Generate draft"}
+            {generating ? "Generating..." : draft ? "Update draft" : "Generate draft"}
           </button>
         </form>
-
-        {draft && !draft.ready_to_save ? (
-          <div className="context-retry">
-            <label className="field">
-              <span>One-line context</span>
-              <input
-                placeholder="Example: Quote intake workflow for residential painting companies"
-                value={context}
-                onChange={(event) => setContext(event.target.value)}
-              />
-            </label>
-            <button disabled={!canGenerate} onClick={generateDraft}>
-              Regenerate
-            </button>
-          </div>
-        ) : null}
 
         {localError ? <p className="form-error">{localError}</p> : null}
         {draft ? (

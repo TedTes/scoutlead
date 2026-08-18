@@ -581,7 +581,7 @@ textarea {
 }
 
 .product-source-create {
-  grid-template-columns: minmax(260px, 1fr) auto;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) auto;
 }
 
 .context-retry {
