@@ -580,82 +580,22 @@ textarea {
   margin-bottom: 0;
 }
 
-.product-source-create {
-  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) auto;
-}
-
-.context-retry {
-  align-items: end;
-  background: #fff8eb;
-  border: 1px solid #f1d7a5;
-  border-radius: 7px;
+.product-description-create {
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(260px, 1fr) auto;
-  margin-top: 12px;
-  padding: 12px;
+  gap: 14px;
+  padding-top: 14px;
 }
 
-.context-retry .field {
+.product-description-create .field {
   margin-bottom: 0;
 }
 
-.product-draft-review {
-  border-top: 1px solid #e2e7ef;
-  display: grid;
-  gap: 14px;
-  margin-top: 16px;
-  padding-top: 16px;
+.product-description-create textarea {
+  min-height: 160px;
 }
 
-.draft-status-row {
-  align-items: center;
-  display: flex;
-  gap: 14px;
-  justify-content: space-between;
-}
-
-.draft-status-row p {
-  color: #566276;
-  font-size: 13px;
-  margin-top: 7px;
-}
-
-.draft-warning {
-  background: #fff8eb;
-  border: 1px solid #f1d7a5;
-  border-radius: 7px;
-  color: #6c4b0d;
-  font-size: 13px;
-  padding: 12px;
-}
-
-.draft-warning ul {
-  margin: 8px 0 0 18px;
-}
-
-.product-draft-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
-}
-
-.evidence-list {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.evidence-list p {
-  background: #f8fafc;
-  border: 1px solid #e2e7ef;
-  border-radius: 7px;
-  color: #2c3545;
-  font-size: 13px;
-  line-height: 1.45;
-  margin: 0;
-  overflow-wrap: anywhere;
-  padding: 10px 12px;
+.product-description-create button {
+  justify-self: end;
 }
 
 .form-error {
@@ -1636,8 +1576,6 @@ textarea {
   .product-summary-grid,
   .product-selector-row,
   .source-create,
-  .context-retry,
-  .product-draft-grid,
   .conversation-grid,
   .integration-grid,
   .campaign-summary,

@@ -13,8 +13,7 @@ import type {
   Metrics,
   ManualClassificationInput,
   Product,
-  ProductInference,
-  ProductSourceInput,
+  ProductDescriptionInput,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -37,12 +36,8 @@ export class ApiClient {
     return this.request<Product>("/products", { method: "POST", body: product });
   }
 
-  createProductFromSource(input: ProductSourceInput) {
-    return this.request<Product>("/products/from-source", { method: "POST", body: input });
-  }
-
-  inferProductFromSource(input: ProductSourceInput) {
-    return this.request<ProductInference>("/products/infer-source", { method: "POST", body: input });
+  createProductFromDescription(input: ProductDescriptionInput) {
+    return this.request<Product>("/products/from-description", { method: "POST", body: input });
   }
 
   updateProduct(id: string, product: unknown) {

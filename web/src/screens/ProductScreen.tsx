@@ -2,8 +2,6 @@ import { Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card, StatusPill, Subhead } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { ProductInference } from "../types/domain";
-import type { Tone } from "../types/navigation";
 
 type ProductScreenProps = {
   isCreatingProduct: boolean;
@@ -19,74 +17,38 @@ export function ProductScreen({
   const {
     selectedProduct,
     productCampaigns,
-    createProduct,
+    createProductFromDescription,
     deleteProduct,
-    inferProductFromSource,
-    refreshAll,
-    setSelectedProductId,
   } = useAppData();
-  const [source, setSource] = useState("");
-  const [context, setContext] = useState("");
-  const [draft, setDraft] = useState<ProductInference | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
   const [localError, setLocalError] = useState("");
-  const showSourceCreator = isCreatingProduct || !selectedProduct;
-  const canGenerate = source.trim().length > 0 && context.trim().length > 0 && !generating;
-  const canSave = Boolean(draft?.ready_to_save && !saving);
+  const showProductCreator = isCreatingProduct || !selectedProduct;
+  const canCreate = description.trim().length >= 20 && !creating;
 
   useEffect(() => {
     if (!isCreatingProduct) return;
-    setSource("");
-    setContext("");
-    setDraft(null);
+    setDescription("");
     setLocalError("");
   }, [isCreatingProduct, newProductToken]);
 
-  const generateDraft = async () => {
-    if (!canGenerate) return;
-    setGenerating(true);
+  const createFromDescription = async () => {
+    if (!canCreate) return;
+    setCreating(true);
     setLocalError("");
     try {
-      const result = await inferProductFromSource({
-        source: source.trim(),
-        context: context.trim() || undefined,
+      const created = await createProductFromDescription({
+        description: description.trim(),
         target_geography: "United States",
       });
-      if (result.existing_product) {
-        window.alert(`${result.existing_product.product_name} already exists. Opening the saved product.`);
-        setSelectedProductId(result.existing_product.id);
-        await refreshAll();
-        setSource("");
-        setContext("");
-        setDraft(null);
-        onCreatingProductChange(false);
-        return;
-      }
-      setDraft(result);
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const saveDraft = async () => {
-    if (!draft?.ready_to_save || saving) return;
-    setSaving(true);
-    setLocalError("");
-    try {
-      const created = await createProduct(draft.product);
       if (created) {
-        setSource("");
-        setContext("");
-        setDraft(null);
+        setDescription("");
         onCreatingProductChange(false);
       }
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSaving(false);
+      setCreating(false);
     }
   };
 
@@ -100,47 +62,31 @@ export function ProductScreen({
     await deleteProduct(selectedProduct.id);
   };
 
-  if (showSourceCreator) {
+  if (showProductCreator) {
     return (
-      <Card title="New product" meta={<StatusPill tone="blue">Draft</StatusPill>}>
+      <Card title="New product">
         <form
-          className="source-create product-source-create"
+          className="product-description-create"
           onSubmit={(event) => {
             event.preventDefault();
-            void generateDraft();
+            void createFromDescription();
           }}
         >
           <label className="field">
-            <span>Landing page or source</span>
-            <input
+            <span>Describe your product</span>
+            <textarea
               autoFocus
-              placeholder="https://quotevan.com"
-              value={source}
-              onChange={(event) => setSource(event.target.value)}
+              placeholder="Example: QuoteVan helps home-service painters capture job scope during a walkthrough, send a professional quote before leaving the job, and keep customer history in one place."
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </label>
-          <label className="field">
-            <span>One-line context</span>
-            <input
-              placeholder="Quote intake workflow for residential painting companies"
-              value={context}
-              onChange={(event) => setContext(event.target.value)}
-            />
-          </label>
-          <button disabled={!canGenerate} type="submit">
-            {generating ? "Generating..." : draft ? "Update draft" : "Generate draft"}
+          <button disabled={!canCreate} type="submit">
+            {creating ? "Creating..." : "Create product"}
           </button>
         </form>
 
         {localError ? <p className="form-error">{localError}</p> : null}
-        {draft ? (
-          <ProductDraftReview
-            draft={draft}
-            saving={saving}
-            canSave={canSave}
-            onSave={() => void saveDraft()}
-          />
-        ) : null}
       </Card>
     );
   }
@@ -198,106 +144,6 @@ export function ProductScreen({
           ))}
         </div>
       </Card>
-    </div>
-  );
-}
-
-function ProductDraftReview({
-  draft,
-  saving,
-  canSave,
-  onSave,
-}: {
-  draft: ProductInference;
-  saving: boolean;
-  canSave: boolean;
-  onSave: () => void;
-}) {
-  const product = draft.product;
-  const confidenceTone: Tone = draft.confidence >= 75 ? "green" : draft.confidence >= 50 ? "amber" : "red";
-
-  return (
-    <div className="product-draft-review">
-      <div className="draft-status-row">
-        <div>
-          <StatusPill tone={confidenceTone}>{draft.confidence}% confidence</StatusPill>
-          <p>{draft.evidence.rationale}</p>
-        </div>
-        {draft.ready_to_save ? (
-          <button disabled={!canSave} onClick={onSave}>
-            {saving ? "Saving..." : "Save product"}
-          </button>
-        ) : (
-          <button disabled>Add context to save</button>
-        )}
-      </div>
-
-      {!draft.ready_to_save ? (
-        <div className="product-draft-grid">
-          <div className="draft-warning">
-            <strong>More context needed before saving.</strong>
-            <ul>
-              {draft.missing_info.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <Subhead>Evidence</Subhead>
-            <EvidenceList draft={draft} />
-          </div>
-        </div>
-      ) : null}
-
-      {draft.ready_to_save ? (
-        <div className="product-draft-grid">
-        <div className="summary-list">
-          <SummaryItem label="Product" value={product.product_name} />
-          <SummaryItem label="Target customer" value={product.target_customer} />
-          <SummaryItem label="Problem" value={product.problem_being_solved} />
-          <SummaryItem label="Value proposition" value={product.value_proposition} />
-          <SummaryItem label="Geography" value={product.target_geography} />
-          <SummaryItem label="Validation goal" value={product.validation_goal} />
-        </div>
-
-        <div>
-          <Subhead>Evidence</Subhead>
-          <EvidenceList draft={draft} />
-
-          <Subhead>Qualification criteria</Subhead>
-          <div className="stacked-chips">
-            {product.qualification_criteria.map((criterion) => (
-              <span className="chip blue" key={criterion.id || criterion.label}>
-                {criterion.label}
-              </span>
-            ))}
-          </div>
-
-          <Subhead>Discovery sources</Subhead>
-          <div className="summary-list compact">
-            {product.preferred_discovery_sources.map((discoverySource) => (
-              <SummaryItem
-                key={`${discoverySource.type}:${discoverySource.value}`}
-                label={discoverySource.type}
-                value={discoverySource.value}
-              />
-            ))}
-          </div>
-        </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function EvidenceList({ draft }: { draft: ProductInference }) {
-  return (
-    <div className="evidence-list">
-      {draft.evidence.source_snippets.length ? (
-        draft.evidence.source_snippets.map((snippet) => <p key={snippet}>{snippet}</p>)
-      ) : (
-        <p>No usable source snippets found.</p>
-      )}
     </div>
   );
 }

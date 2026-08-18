@@ -12,8 +12,7 @@ import type {
   Metrics,
   ManualClassificationInput,
   Product,
-  ProductInference,
-  ProductSourceInput,
+  ProductDescriptionInput,
 } from "../types/domain";
 
 type AppDataContextValue = {
@@ -34,8 +33,7 @@ type AppDataContextValue = {
   refreshAll: () => Promise<void>;
   refreshSnapshot: (campaignId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<boolean>;
-  createProductFromSource: (input: ProductSourceInput) => Promise<boolean>;
-  inferProductFromSource: (input: ProductSourceInput) => Promise<ProductInference>;
+  createProductFromDescription: (input: ProductDescriptionInput) => Promise<boolean>;
   deleteProduct: (productId?: string) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
@@ -225,17 +223,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         });
         return created;
       },
-      createProductFromSource: async (input) => {
+      createProductFromDescription: async (input) => {
         let created = false;
         await mutate(async () => {
-          const product = await api.createProductFromSource(input);
+          const product = await api.createProductFromDescription(input);
           localStorage.setItem("selectedProductId", product.id);
           localStorage.setItem("selectedCampaignId", "");
           created = true;
         });
         return created;
       },
-      inferProductFromSource: (input) => api.inferProductFromSource(input),
       deleteProduct: (productId = selectedProductIdState) =>
         mutate(async () => {
           if (!productId) return;
