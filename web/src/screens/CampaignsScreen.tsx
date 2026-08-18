@@ -2,12 +2,7 @@ import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { Card, PageHeader, StatCard, StatusPill } from "../shared-ui";
-import type {
-  AgentRunDetail,
-  CampaignCreateInput,
-  CampaignPreflight,
-  ToolCall,
-} from "../types/domain";
+import type { Campaign, CampaignCreateInput, Metrics } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
@@ -50,6 +45,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
     (campaign) => campaign.status === "awaiting_approval",
   );
   const preflight = snapshot.preflight;
+  const selectedCampaign = snapshot.campaign ?? productCampaigns.find((campaign) => campaign.id === selectedCampaignId);
   const allVisibleSelected =
     productCampaigns.length > 0 &&
     productCampaigns.every((campaign) => selectedCampaignIds.includes(campaign.id));
@@ -155,7 +151,7 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
 
       <div className="stat-grid four">
         <StatCard label="Running campaigns" value={String(runningCampaigns.length)} />
-        <StatCard label="Awaiting approval" value={String(awaitingApprovalCampaigns.length)} />
+        <StatCard label="Needs review" value={String(awaitingApprovalCampaigns.length)} />
         <StatCard label="Sent" value={String(metrics?.sent_count ?? 0)} />
         <StatCard label="Interviews requested" value={String(metrics?.interview_request_count ?? 0)} />
       </div>
@@ -190,12 +186,12 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
                   </th>
                   <th>Campaign</th>
                   <th>Status</th>
-                  <th>Stage</th>
-                  <th>Max leads</th>
+                  <th>Leads</th>
+                  <th>Review</th>
                   <th>Sent</th>
                   <th>Replies</th>
                   <th>Started</th>
-                  <th>Controls</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -224,8 +220,8 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
                       <td>
                         <StatusPill tone={statusTone(campaign.status)}>{campaign.status}</StatusPill>
                       </td>
-                      <td>{campaign.stage}</td>
-                      <td>{campaign.max_leads}</td>
+                      <td>{selectedMetrics?.lead_count ?? "-"}</td>
+                      <td>{selectedMetrics?.pending_approval_count ?? "-"}</td>
                       <td>{selectedMetrics?.sent_count ?? "-"}</td>
                       <td>{selectedMetrics?.response_count ?? "-"}</td>
                       <td>
@@ -254,129 +250,79 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
       </Card>
 
       {selectedCampaignId ? (
-        <>
-          <PreflightPanel preflight={preflight} />
-          <AgentRunPanel run={snapshot.latestAgentRun} totalRuns={snapshot.agentRuns.length} />
-        </>
+        <SelectedCampaignSummary
+          campaign={selectedCampaign}
+          metrics={metrics}
+          preflightReady={preflight?.ready ?? true}
+          onRun={() => runCampaign(selectedCampaignId)}
+          onReview={() => onNavigate("approvals")}
+          onViewLeads={() => onNavigate("leads")}
+        />
       ) : null}
     </>
   );
 }
 
-function PreflightPanel({ preflight }: { preflight?: CampaignPreflight }) {
-  if (!preflight) return null;
+function SelectedCampaignSummary({
+  campaign,
+  metrics,
+  preflightReady,
+  onRun,
+  onReview,
+  onViewLeads,
+}: {
+  campaign?: Campaign;
+  metrics?: Metrics;
+  preflightReady: boolean;
+  onRun: () => void;
+  onReview: () => void;
+  onViewLeads: () => void;
+}) {
+  if (!campaign) return null;
+  const needsReview = metrics?.pending_approval_count ?? 0;
   return (
     <Card
-      title="Run preflight"
-      meta={<StatusPill tone={preflight.ready ? "green" : "red"}>{preflight.ready ? "Ready" : "Blocked"}</StatusPill>}
-    >
-      <ul className="preflight-list">
-        {preflight.checks.map((check) => (
-          <li key={check.name}>
-            <div>
-              <strong>{check.name}</strong>
-              <span>{check.detail}</span>
-            </div>
-            <StatusPill tone={statusTone(check.status)}>{check.status}</StatusPill>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-function AgentRunPanel({ run, totalRuns }: { run?: AgentRunDetail; totalRuns: number }) {
-  return (
-    <Card
-      title="Latest agent run"
+      title="Selected campaign"
       meta={
-        run ? (
-          <div className="card-actions">
-            <StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill>
-            <span className="muted">{totalRuns} total</span>
-          </div>
-        ) : undefined
+        <StatusPill tone={statusTone(campaign.status)}>{campaign.status}</StatusPill>
       }
     >
-      {!run ? (
-        <p className="empty-copy">No agent run has been recorded for the selected campaign.</p>
-      ) : (
-        <div className="agent-run-panel">
-          <div className="agent-run-summary">
-            <div>
-              <span>Objective</span>
-              <strong>{run.objective}</strong>
-            </div>
-            <div>
-              <span>Current phase</span>
-              <strong>{run.current_phase || "none"}</strong>
-            </div>
-            <div>
-              <span>Tool calls</span>
-              <strong>
-                {run.tool_call_count} / {run.max_tool_calls}
-              </strong>
-            </div>
-          </div>
-          {run.error ? <p className="run-error">{run.error}</p> : null}
-          <div className="agent-run-columns">
-            <div>
-              <h3>Steps</h3>
-              {run.steps.length === 0 ? (
-                <p className="empty-copy">No workflow steps have started yet.</p>
-              ) : (
-                <ul className="agent-step-list">
-                  {run.steps.map((step) => (
-                    <li key={step.id}>
-                      <div>
-                        <strong>{step.phase}</strong>
-                        <span>{step.objective}</span>
-                      </div>
-                      <span>{snapshotCount(step.output_snapshot)}</span>
-                      <StatusPill tone={statusTone(step.status)}>{step.status}</StatusPill>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div>
-              <h3>Tool calls</h3>
-              {run.tool_calls.length === 0 ? (
-                <p className="empty-copy">No tool calls have been recorded yet.</p>
-              ) : (
-                <ul className="agent-tool-list">
-                  {run.tool_calls.map((toolCall) => (
-                    <li key={toolCall.id}>
-                      <div>
-                        <strong>{toolCall.tool_name}</strong>
-                        <span>{toolCall.reason || "No reason recorded"}</span>
-                      </div>
-                      <span>{toolObservationLabel(toolCall)}</span>
-                      <StatusPill tone={statusTone(toolCall.status)}>{toolCall.status}</StatusPill>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+      <div className="campaign-summary">
+        <div>
+          <span>Campaign</span>
+          <strong>{campaign.name}</strong>
         </div>
-      )}
+        <div>
+          <span>Leads</span>
+          <strong>{metrics?.lead_count ?? 0}</strong>
+        </div>
+        <div>
+          <span>Qualified</span>
+          <strong>{metrics?.qualified_lead_count ?? 0}</strong>
+        </div>
+        <div>
+          <span>Needs review</span>
+          <strong>{needsReview}</strong>
+        </div>
+        <div>
+          <span>Replies</span>
+          <strong>{metrics?.response_count ?? 0}</strong>
+        </div>
+      </div>
+      <div className="form-actions">
+        {campaign.status === "draft" || campaign.status === "paused" ? (
+          <button disabled={!preflightReady} onClick={onRun}>Run campaign</button>
+        ) : null}
+        {needsReview > 0 || campaign.status === "awaiting_approval" ? (
+          <button onClick={onReview}>Review outreach</button>
+        ) : null}
+        <button className="secondary" onClick={onViewLeads}>View leads</button>
+        {!preflightReady ? (
+          <span className="muted">Missing required setup before this campaign can run.</span>
+        ) : null}
+      </div>
     </Card>
   );
-}
-
-function toolObservationLabel(toolCall: ToolCall): string {
-  if (Array.isArray(toolCall.observation)) return `${toolCall.observation.length} results`;
-  if (typeof toolCall.observation === "string") return toolCall.observation.slice(0, 32);
-  if (toolCall.observation && "count" in toolCall.observation) {
-    return `${String(toolCall.observation.count)} results`;
-  }
-  return toolCall.status;
-}
-
-function snapshotCount(snapshot?: Record<string, unknown> | null): string {
-  if (!snapshot || !("count" in snapshot)) return "-";
-  return String(snapshot.count);
 }
 
 function CampaignControl({

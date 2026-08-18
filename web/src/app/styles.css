@@ -658,6 +658,39 @@ textarea {
   margin-bottom: 14px;
 }
 
+.campaign-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(90px, 0.45fr));
+  padding: 14px;
+}
+
+.campaign-summary div {
+  background: #f8fafc;
+  border: 1px solid #e2e7ef;
+  border-radius: 7px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.campaign-summary span {
+  color: #667286;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.campaign-summary strong {
+  display: block;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-run-panel {
   display: grid;
   gap: 14px;
@@ -1472,6 +1505,7 @@ textarea {
   .source-create,
   .conversation-grid,
   .integration-grid,
+  .campaign-summary,
   .agent-run-summary,
   .agent-run-columns,
   .lead-dossier {
