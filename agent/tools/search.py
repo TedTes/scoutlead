@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from pydantic import BaseModel
@@ -86,10 +86,13 @@ class SearchTool:
             ]
         )
         if self.provider == "tavily":
-            return self._search_tavily(query, source, limit)
+            return self._filter_business_results(self._search_tavily(query, source, limit), limit)
         if self.provider == "brave":
-            return self._search_brave(query, limit)
-        return self._search_generic(query, product, campaign, source, limit)
+            return self._filter_business_results(self._search_brave(query, limit), limit)
+        return self._filter_business_results(
+            self._search_generic(query, product, campaign, source, limit),
+            limit,
+        )
 
     def _search_generic(
         self,
@@ -182,3 +185,69 @@ class SearchTool:
                 source="seed",
                 raw={"value": value},
             )
+
+    @classmethod
+    def _filter_business_results(
+        cls,
+        results: list[SearchResult],
+        limit: int,
+    ) -> list[SearchResult]:
+        filtered = [result for result in results if cls._looks_like_business_result(result)]
+        return filtered[:limit]
+
+    @staticmethod
+    def _looks_like_business_result(result: SearchResult) -> bool:
+        if not result.url:
+            return False
+        parsed = urlparse(result.url)
+        host = parsed.netloc.lower().removeprefix("www.")
+        path = parsed.path.lower()
+        title = result.title.lower()
+        blocked_hosts = {
+            "youtube.com",
+            "youtu.be",
+            "vimeo.com",
+            "medium.com",
+            "reddit.com",
+            "quora.com",
+            "wikipedia.org",
+            "linkedin.com",
+            "facebook.com",
+            "instagram.com",
+            "twitter.com",
+            "x.com",
+        }
+        if host in blocked_hosts or any(host.endswith(f".{blocked}") for blocked in blocked_hosts):
+            return False
+        blocked_path_parts = (
+            "/blog",
+            "/blogs",
+            "/article",
+            "/articles",
+            "/news",
+            "/watch",
+            "/video",
+            "/videos",
+            "/podcast",
+            "/resources",
+            "/learn",
+            "/guide",
+            "/guides",
+            "/whitepaper",
+        )
+        if any(part in path for part in blocked_path_parts):
+            return False
+        blocked_title_phrases = (
+            "how to ",
+            "why ",
+            "guide",
+            "tips",
+            "strategies",
+            "blog",
+            "article",
+            "watch",
+            "video",
+            "podcast",
+            "template",
+        )
+        return not any(phrase in title for phrase in blocked_title_phrases)
