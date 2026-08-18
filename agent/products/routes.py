@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 
 from app.dependencies import AppServices, DbSession, get_services
 from products.schemas import (
@@ -53,3 +53,9 @@ def get_product(product_id: str, session: DbSession):
 @router.patch("/{product_id}", response_model=ProductRead)
 def update_product(product_id: str, update: ProductUpdate, session: DbSession):
     return ProductService(session).update(product_id, update)
+
+
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(product_id: str, session: DbSession):
+    ProductService(session).delete(product_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

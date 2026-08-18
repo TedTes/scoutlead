@@ -1,3 +1,4 @@
+import { Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card, StatusPill, Subhead } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -15,7 +16,7 @@ export function ProductScreen({
   newProductToken,
   onCreatingProductChange,
 }: ProductScreenProps) {
-  const { selectedProduct, createProduct, inferProductFromSource } = useAppData();
+  const { selectedProduct, productCampaigns, createProduct, deleteProduct, inferProductFromSource } = useAppData();
   const [source, setSource] = useState("");
   const [context, setContext] = useState("");
   const [draft, setDraft] = useState<ProductInference | null>(null);
@@ -69,6 +70,16 @@ export function ProductScreen({
     } finally {
       setSaving(false);
     }
+  };
+
+  const deleteSelectedProduct = async () => {
+    if (!selectedProduct) return;
+    const campaignCount = productCampaigns.length;
+    const confirmed = window.confirm(
+      `Delete ${selectedProduct.product_name}? This also deletes ${campaignCount} related campaign${campaignCount === 1 ? "" : "s"} and all leads, messages, conversations, and agent records for this product.`,
+    );
+    if (!confirmed) return;
+    await deleteProduct(selectedProduct.id);
   };
 
   if (showSourceCreator) {
@@ -126,7 +137,18 @@ export function ProductScreen({
 
   return (
     <div className="product-summary-grid">
-      <Card title={selectedProduct.product_name} meta={<StatusPill tone="green">Active</StatusPill>}>
+      <Card
+        title={selectedProduct.product_name}
+        meta={
+          <div className="card-actions">
+            <StatusPill tone="green">Active</StatusPill>
+            <button className="danger" onClick={deleteSelectedProduct}>
+              <Trash2 size={14} />
+              Delete
+            </button>
+          </div>
+        }
+      >
         <div className="summary-list">
           <SummaryItem label="Target customer" value={selectedProduct.target_customer} />
           <SummaryItem label="Problem" value={selectedProduct.problem_being_solved} />

@@ -36,6 +36,7 @@ type AppDataContextValue = {
   createProduct: (input: unknown) => Promise<boolean>;
   createProductFromSource: (input: ProductSourceInput) => Promise<boolean>;
   inferProductFromSource: (input: ProductSourceInput) => Promise<ProductInference>;
+  deleteProduct: (productId?: string) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
   deleteCampaigns: (campaignIds: string[]) => Promise<void>;
@@ -235,6 +236,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         return created;
       },
       inferProductFromSource: (input) => api.inferProductFromSource(input),
+      deleteProduct: (productId = selectedProductIdState) =>
+        mutate(async () => {
+          if (!productId) return;
+          await api.deleteProduct(productId);
+          if (productId === selectedProductIdState) {
+            localStorage.removeItem("selectedProductId");
+            localStorage.setItem("selectedCampaignId", "");
+          }
+        }),
       updateSelectedProduct: (update) =>
         mutate(async () => {
           if (!selectedProductIdState) return;

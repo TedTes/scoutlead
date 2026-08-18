@@ -227,6 +227,78 @@ def test_delete_campaign_removes_related_workflow_records() -> None:
         assert session.execute(text("select count(*) from campaign_memory")).scalar_one() == 0
 
 
+def test_delete_product_removes_related_workflow_records() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product_repository = ProductRepository(session)
+        product = product_repository.create(
+            ProductCreate(
+                product_name="Delete Product",
+                product_description="Software product used by the product delete test.",
+                target_customer="Target customer segment",
+                problem_being_solved="A customer workflow takes too long.",
+                value_proposition="Improve the workflow enough to justify discovery.",
+                target_geography="Test geography",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Matches target customer", weight=3, required=True),
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.SEED,
+                        value="Product Delete Lead|https://example.com|Matches target customer|Test geography|hello@example.com",
+                    )
+                ],
+                outreach_objective="Ask for a 20-minute discovery interview.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+        campaign_service = CampaignService(
+            session=session,
+            llm=HeuristicLLMClient(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        )
+        campaign = campaign_service.create(
+            CampaignCreate(product_id=product.id, name="Product delete campaign", max_leads=3)
+        )
+        agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
+        campaign_service.run_campaign(campaign.id, agent_run_id=agent_run.id)
+
+        message_id = session.execute(text("select id from messages")).scalar_one()
+        message_service = MessageService(session=session, email=EmailTool())
+        message_service.approve(message_id, MessageApproval(approved_by="test@example.com"))
+        message_service.send(message_id)
+
+        assert session.execute(text("select count(*) from products")).scalar_one() == 1
+        assert session.execute(text("select count(*) from campaigns")).scalar_one() == 1
+        assert session.execute(text("select count(*) from leads")).scalar_one() == 1
+        assert session.execute(text("select count(*) from messages")).scalar_one() == 1
+        assert session.execute(text("select count(*) from conversations")).scalar_one() == 1
+        assert session.execute(text("select count(*) from conversation_events")).scalar_one() == 1
+        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 1
+        assert session.execute(text("select count(*) from agent_steps")).scalar_one() > 0
+        assert session.execute(text("select count(*) from tool_calls")).scalar_one() > 0
+        assert session.execute(text("select count(*) from campaign_memory")).scalar_one() > 0
+
+        product_repository.delete(product.id)
+
+        assert session.execute(text("select count(*) from products")).scalar_one() == 0
+        assert session.execute(text("select count(*) from campaigns")).scalar_one() == 0
+        assert session.execute(text("select count(*) from leads")).scalar_one() == 0
+        assert session.execute(text("select count(*) from messages")).scalar_one() == 0
+        assert session.execute(text("select count(*) from conversations")).scalar_one() == 0
+        assert session.execute(text("select count(*) from conversation_events")).scalar_one() == 0
+        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 0
+        assert session.execute(text("select count(*) from agent_steps")).scalar_one() == 0
+        assert session.execute(text("select count(*) from tool_calls")).scalar_one() == 0
+        assert session.execute(text("select count(*) from campaign_memory")).scalar_one() == 0
+        assert session.execute(text("select count(*) from learning_summaries")).scalar_one() == 0
+
+
 def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

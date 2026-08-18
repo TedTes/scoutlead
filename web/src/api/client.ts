@@ -49,6 +49,10 @@ export class ApiClient {
     return this.request<Product>(`/products/${id}`, { method: "PATCH", body: product });
   }
 
+  deleteProduct(id: string) {
+    return this.request<void>(`/products/${id}`, { method: "DELETE" });
+  }
+
   getCampaigns() {
     return this.request<Campaign[]>("/campaigns");
   }

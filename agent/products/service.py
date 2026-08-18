@@ -121,6 +121,9 @@ class ProductService:
     def update(self, product_id: str, update: ProductUpdate) -> ProductModel:
         return self.products.update(product_id, update)
 
+    def delete(self, product_id: str) -> None:
+        self.products.delete(product_id)
+
     def _inspect_source(self, source: str) -> WebsiteInspection | None:
         if self.browser is None:
             return None
