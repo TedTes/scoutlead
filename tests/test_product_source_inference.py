@@ -7,6 +7,7 @@ from products.schemas import (
     DiscoverySource,
     DiscoverySourceType,
     ProductCreate,
+    ProductDescriptionCreate,
     ProductSourceCreate,
     ProductSourceEvidence,
     QualificationCriterion,
@@ -55,6 +56,16 @@ class SourceLookupSearch:
                 source="test",
             )
         ]
+
+
+class ExplodingBrowser:
+    def inspect(self, url: str) -> WebsiteInspection:
+        raise AssertionError("browser should not be used for description product creation")
+
+
+class ExplodingLLM:
+    def generate_object(self, **kwargs):
+        raise AssertionError("llm should not be used for description product creation")
 
 
 class AmbiguousQuoteBrowser:
@@ -226,6 +237,35 @@ def test_product_can_be_created_from_single_source() -> None:
 
         assert product.product_name == "QuoteVan"
         assert "painting" in product.target_customer.lower()
+        assert product.qualification_criteria
+        assert product.preferred_discovery_sources
+
+
+def test_product_can_be_created_from_description_without_llm_or_scraping() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductService(
+            session,
+            llm=ExplodingLLM(),
+            browser=ExplodingBrowser(),
+        ).create_from_description(
+            ProductDescriptionCreate(
+                description=(
+                    "QuoteVan helps home-service painters capture job scope during a "
+                    "walkthrough, send a professional quote before leaving the job, and "
+                    "keep customer history in one place."
+                )
+            )
+        )
+
+        assert product.product_name == "QuoteVan"
+        assert "painters" in product.target_customer.lower()
+        assert "quote" in product.problem_being_solved.lower()
+        assert product.source_url is None
+        assert product.source_fingerprint is None
         assert product.qualification_criteria
         assert product.preferred_discovery_sources
 

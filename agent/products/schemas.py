@@ -56,6 +56,11 @@ class ProductCreate(ProductBase):
     pass
 
 
+class ProductDescriptionCreate(BaseModel):
+    description: str = Field(min_length=20)
+    target_geography: str = Field(default="United States", min_length=1)
+
+
 class ProductSourceCreate(BaseModel):
     source: str = Field(min_length=1)
     context: str | None = Field(default=None, min_length=1)

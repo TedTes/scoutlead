@@ -1,13 +1,10 @@
-from typing import Annotated
+from fastapi import APIRouter, Response, status
 
-from fastapi import APIRouter, Depends, Response, status
-
-from app.dependencies import AppServices, DbSession, get_services
+from app.dependencies import DbSession
 from products.schemas import (
     ProductCreate,
-    ProductInferenceRead,
+    ProductDescriptionCreate,
     ProductRead,
-    ProductSourceCreate,
     ProductUpdate,
 )
 from products.service import ProductService
@@ -20,32 +17,9 @@ def create_product(product: ProductCreate, session: DbSession):
     return ProductService(session).create(product)
 
 
-@router.post("/from-source", response_model=ProductRead)
-def create_product_from_source(
-    request: ProductSourceCreate,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-):
-    return ProductService(
-        session,
-        llm=services.llm,
-        browser=services.browser,
-        search=services.search,
-    ).create_from_source(request)
-
-
-@router.post("/infer-source", response_model=ProductInferenceRead)
-def infer_product_from_source(
-    request: ProductSourceCreate,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-):
-    return ProductService(
-        session,
-        llm=services.llm,
-        browser=services.browser,
-        search=services.search,
-    ).infer_product_from_source(request)
+@router.post("/from-description", response_model=ProductRead)
+def create_product_from_description(request: ProductDescriptionCreate, session: DbSession):
+    return ProductService(session).create_from_description(request)
 
 
 @router.get("", response_model=list[ProductRead])

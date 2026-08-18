@@ -20,6 +20,7 @@ from products.schemas import (
     DiscoverySource,
     DiscoverySourceType,
     ProductCreate,
+    ProductDescriptionCreate,
     ProductInferenceRead,
     ProductRead,
     ProductSourceCreate,
@@ -52,6 +53,69 @@ class ProductService:
 
     def create(self, product: ProductCreate) -> ProductModel:
         return self.products.create(product)
+
+    def create_from_description(self, request: ProductDescriptionCreate) -> ProductModel:
+        return self.products.create(self.product_from_description(request))
+
+    def product_from_description(self, request: ProductDescriptionCreate) -> ProductCreate:
+        description = normalize_text(request.description)
+        if len(description) < 20:
+            raise ValidationError(
+                "product description is too short",
+                {"minimum_length": 20},
+            )
+        name = self._name_from_description(description)
+        target_customer = self._target_customer_from_description(description, name)
+        problem = self._problem_from_description(description, target_customer)
+        value = self._value_from_description(description, target_customer, name)
+        queries = self._fallback_queries(
+            description,
+            target_customer,
+            request.target_geography,
+            description,
+        )
+        return ProductCreate(
+            product_name=name,
+            product_description=description,
+            target_customer=target_customer,
+            problem_being_solved=problem,
+            value_proposition=value,
+            target_geography=request.target_geography,
+            validation_goal=f"Book customer discovery interviews with {target_customer.lower()}.",
+            qualification_criteria=[
+                QualificationCriterion(
+                    label=f"Matches target customer: {target_customer}",
+                    weight=3,
+                    required=True,
+                    evidence_required=True,
+                ),
+                QualificationCriterion(
+                    label="Shows a public signal related to the described workflow",
+                    weight=2,
+                    required=False,
+                    evidence_required=True,
+                ),
+                QualificationCriterion(
+                    label="Has reachable contact information",
+                    weight=1,
+                    required=False,
+                    evidence_required=True,
+                ),
+            ],
+            preferred_discovery_sources=[
+                DiscoverySource(type=DiscoverySourceType.WEB_SEARCH, value=query, limit=10)
+                for query in queries
+            ],
+            outreach_objective="Ask for a short customer discovery conversation.",
+            constraints=[
+                "Human approval required before outbound messages are sent.",
+                "Position outreach as customer discovery, not a product pitch.",
+            ],
+            source_evidence={
+                "source": "user_description",
+                "description": description,
+            },
+        )
 
     def create_from_source(self, request: ProductSourceCreate) -> ProductModel:
         inference = self.infer_product_from_source(request)
@@ -768,6 +832,70 @@ class ProductService:
         host = urlparse(source_url).hostname or ""
         first_label = host.split(".", maxsplit=1)[0]
         return first_label or None
+
+    @staticmethod
+    def _name_from_description(description: str) -> str:
+        first_sentence = re.split(r"[.!?\n]", description, maxsplit=1)[0].strip()
+        explicit_name = re.match(
+            r"^(?:product|app|tool|platform)\s+(?:called|named)\s+([A-Za-z][A-Za-z0-9 -]{1,60})",
+            first_sentence,
+            flags=re.IGNORECASE,
+        )
+        if explicit_name:
+            return truncate(explicit_name.group(1).strip(" :-"), 80)
+        lead_name = re.match(
+            r"^([A-Z][A-Za-z0-9]*(?:[ -][A-Z][A-Za-z0-9]*){0,3})\s+"
+            r"(?:helps|lets|enables|allows|is|provides|gives|makes|replaces|automates|offers)\b",
+            first_sentence,
+        )
+        if lead_name:
+            return truncate(lead_name.group(1).strip(), 80)
+        return "New Product"
+
+    @staticmethod
+    def _target_customer_from_description(description: str, product_name: str) -> str:
+        text = normalize_text(description)
+        patterns = [
+            r"\b(?:helps|serves|supports)\s+(.+?)\s+(?:capture|send|manage|book|find|create|track|automate|replace|coordinate|validate|generate|reduce|improve|handle|compare|discover|qualify|draft|sync|run|save|centralize|organize|build|collect|turn|get|close)\b",
+            r"\b(?:for|built for|made for)\s+(.+?)\s+(?:who|that|to|with|by)\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip(" ,.-")
+                if candidate and product_name.lower() not in candidate.lower():
+                    return truncate(candidate, 140)
+        return f"Customers likely to benefit from {product_name}"
+
+    @staticmethod
+    def _problem_from_description(description: str, target_customer: str) -> str:
+        text = normalize_text(description)
+        explicit_problem = re.search(
+            r"\b(?:problem|pain|challenge)\s*(?:is|:|-)\s*(.+?)(?:\.|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if explicit_problem:
+            return truncate(explicit_problem.group(1).strip(), 220)
+        if any(keyword in text.lower() for keyword in ["quote", "estimate", "proposal"]):
+            return f"{target_customer} need a faster and more consistent quote workflow."
+        return f"{target_customer} have a workflow that may be slow, manual, or inconsistent."
+
+    @staticmethod
+    def _value_from_description(
+        description: str,
+        target_customer: str,
+        product_name: str,
+    ) -> str:
+        text = normalize_text(description)
+        value_match = re.search(
+            r"\b(?:helps|lets|enables|allows)\s+.+?\s+(?:to\s+)?(.+?)(?:\.|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if value_match:
+            return truncate(f"Help {target_customer} {value_match.group(1).strip()}.", 220)
+        return truncate(f"Help {target_customer} solve the workflow described for {product_name}.", 220)
 
     def _fallback_product(
         self,
