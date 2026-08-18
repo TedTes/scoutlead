@@ -231,23 +231,34 @@ function ProductDraftReview({
           <StatusPill tone={confidenceTone}>{draft.confidence}% confidence</StatusPill>
           <p>{draft.evidence.rationale}</p>
         </div>
-        <button disabled={!canSave} onClick={onSave}>
-          {saving ? "Saving..." : "Save product"}
-        </button>
+        {draft.ready_to_save ? (
+          <button disabled={!canSave} onClick={onSave}>
+            {saving ? "Saving..." : "Save product"}
+          </button>
+        ) : (
+          <button disabled>Add context to save</button>
+        )}
       </div>
 
       {!draft.ready_to_save ? (
-        <div className="draft-warning">
-          <strong>More context needed before saving.</strong>
-          <ul>
-            {draft.missing_info.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+        <div className="product-draft-grid">
+          <div className="draft-warning">
+            <strong>More context needed before saving.</strong>
+            <ul>
+              {draft.missing_info.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <Subhead>Evidence</Subhead>
+            <EvidenceList draft={draft} />
+          </div>
         </div>
       ) : null}
 
-      <div className="product-draft-grid">
+      {draft.ready_to_save ? (
+        <div className="product-draft-grid">
         <div className="summary-list">
           <SummaryItem label="Product" value={product.product_name} />
           <SummaryItem label="Target customer" value={product.target_customer} />
@@ -259,13 +270,7 @@ function ProductDraftReview({
 
         <div>
           <Subhead>Evidence</Subhead>
-          <div className="evidence-list">
-            {draft.evidence.source_snippets.length ? (
-              draft.evidence.source_snippets.map((snippet) => <p key={snippet}>{snippet}</p>)
-            ) : (
-              <p>No usable source snippets found.</p>
-            )}
-          </div>
+          <EvidenceList draft={draft} />
 
           <Subhead>Qualification criteria</Subhead>
           <div className="stacked-chips">
@@ -287,7 +292,20 @@ function ProductDraftReview({
             ))}
           </div>
         </div>
-      </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EvidenceList({ draft }: { draft: ProductInference }) {
+  return (
+    <div className="evidence-list">
+      {draft.evidence.source_snippets.length ? (
+        draft.evidence.source_snippets.map((snippet) => <p key={snippet}>{snippet}</p>)
+      ) : (
+        <p>No usable source snippets found.</p>
+      )}
     </div>
   );
 }
