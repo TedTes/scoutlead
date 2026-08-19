@@ -8,6 +8,7 @@ from campaigns.state import assert_campaign_transition
 from db.models import (
     AgentRunModel,
     AgentStepModel,
+    CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
     ConversationEventModel,
@@ -75,6 +76,7 @@ class CampaignRepository:
         self.session.execute(delete(MessageModel).where(MessageModel.campaign_id == campaign_id))
         self.session.execute(delete(LeadModel).where(LeadModel.campaign_id == campaign_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.campaign_id == campaign_id))
+        self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.campaign_id == campaign_id))
         self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.campaign_id == campaign_id))
         self.session.execute(
             delete(QueueJobModel).where(QueueJobModel.payload["campaign_id"].as_string() == campaign_id)

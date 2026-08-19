@@ -59,6 +59,8 @@ class CampaignModel(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    goal_type: Mapped[str] = mapped_column(String(32), nullable=False, default="learn")
+    icp_preset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     stage: Mapped[str] = mapped_column(String(64), nullable=False)
     max_leads: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -160,6 +162,20 @@ class LearningSummaryModel(TimestampMixin, Base):
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id"), nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+
+
+class CampaignInsightModel(TimestampMixin, Base):
+    __tablename__ = "campaign_insights"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    goal_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    findings: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    icp_verdict: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    metrics_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False)
 
 

@@ -1,3 +1,5 @@
+from campaigns.goal import goal_policy
+from campaigns.schemas import CampaignGoalType
 from conversations.schemas import ConversationRead, ResponseIntent
 from evaluation.lead_quality import evaluate_lead_quality
 from evaluation.outreach import evaluate_outreach_approaches
@@ -11,7 +13,9 @@ def calculate_campaign_metrics(
     leads: list[LeadRead],
     messages: list[MessageRead],
     conversations: list[ConversationRead],
+    goal_type: CampaignGoalType | str = CampaignGoalType.LEARN,
 ) -> CampaignMetrics:
+    policy = goal_policy(goal_type)
     scores = [evaluate_lead_quality(lead).score for lead in leads]
     sent = [message for message in messages if message.status in {MessageStatus.SENT, MessageStatus.REPLIED}]
     inbound_events = [
@@ -30,7 +34,25 @@ def calculate_campaign_metrics(
         for event in inbound_events
         if event.classification and event.classification.intent == ResponseIntent.PRODUCT_TRIAL_INTEREST
     )
+    response_rate = len(inbound_events) / len(sent) if sent else 0
+    interview_rate = interview_count / len(sent) if sent else 0
+    approach_performance = evaluate_outreach_approaches(
+        messages,
+        conversations,
+        positive_intents=policy.positive_response_intents,
+    )
+    positive_response_rate = (
+        sum(item.positive_replies for item in approach_performance) / len(sent) if sent else 0
+    )
+    north_star_values = {
+        "interview_rate": interview_rate,
+        "positive_response_rate": positive_response_rate,
+        "response_rate": response_rate,
+    }
     return CampaignMetrics(
+        goal_type=policy.goal_type.value,
+        north_star_metric=policy.north_star_metric,
+        north_star_value=north_star_values.get(policy.north_star_metric, 0),
         lead_count=len(leads),
         researched_lead_count=sum(1 for lead in leads if lead.research is not None),
         qualified_lead_count=sum(1 for lead in leads if lead.qualification and lead.qualification.qualified),
@@ -40,9 +62,9 @@ def calculate_campaign_metrics(
         ),
         sent_count=len(sent),
         response_count=len(inbound_events),
-        response_rate=len(inbound_events) / len(sent) if sent else 0,
+        response_rate=response_rate,
         interview_request_count=interview_count,
-        interview_rate=interview_count / len(sent) if sent else 0,
+        interview_rate=interview_rate,
         trial_interest_count=trial_count,
-        approach_performance=evaluate_outreach_approaches(messages, conversations),
+        approach_performance=approach_performance,
     )

@@ -18,6 +18,9 @@ class OutreachApproachEvaluation(BaseModel):
 
 
 class CampaignMetrics(BaseModel):
+    goal_type: str = "learn"
+    north_star_metric: str = "interview_rate"
+    north_star_value: float = 0
     lead_count: int
     researched_lead_count: int
     qualified_lead_count: int

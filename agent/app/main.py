@@ -11,6 +11,8 @@ from campaigns.routes import router as campaigns_router
 from connections.routes import router as connections_router
 from conversations.routes import router as conversations_router
 from db.session import create_database
+from icp.routes import router as icp_router
+from insights.routes import router as insights_router
 from leads.routes import router as leads_router
 from messages.routes import router as messages_router
 from products.routes import router as products_router
@@ -75,6 +77,8 @@ def create_app() -> FastAPI:
     app.include_router(agent_runs_router)
     app.include_router(campaigns_router)
     app.include_router(connections_router)
+    app.include_router(icp_router)
+    app.include_router(insights_router)
     app.include_router(leads_router)
     app.include_router(messages_router)
     app.include_router(conversations_router)

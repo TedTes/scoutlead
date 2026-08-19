@@ -44,6 +44,8 @@ class QualificationWorkflow:
                 },
                 fallback=fallback,
             )
+            if lead.research and lead.research.disqualifiers:
+                result = fallback_qualification(product, lead)
             updated = LeadRead.model_validate(self.leads.attach_qualification(lead.id, result))
             qualified.append(updated)
             self.memory.create_observation(

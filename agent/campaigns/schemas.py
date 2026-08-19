@@ -27,6 +27,11 @@ class CampaignStage(StrEnum):
     COMPLETE = "complete"
 
 
+class CampaignGoalType(StrEnum):
+    LEARN = "learn"
+    SELL = "sell"
+
+
 class OutreachChannel(StrEnum):
     EMAIL = "email"
     LINKEDIN = "linkedin"
@@ -47,6 +52,8 @@ class LeadSeedInput(BaseModel):
 class CampaignCreate(BaseModel):
     product_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    goal_type: CampaignGoalType = CampaignGoalType.LEARN
+    icp_preset_id: str | None = None
     max_leads: int = Field(gt=0, le=1000)
     channels: list[OutreachChannel] = Field(default_factory=lambda: [OutreachChannel.EMAIL])
     discovery_seeds: list[LeadSeedInput] = Field(default_factory=list)
@@ -69,6 +76,9 @@ class CampaignRunSummary(BaseModel):
     campaign: CampaignRead
     discovered_lead_count: int
     researched_lead_count: int
+    contacted_lead_count: int = 0
+    verified_lead_count: int = 0
+    signaled_lead_count: int = 0
     qualified_lead_count: int
     drafted_message_count: int
 

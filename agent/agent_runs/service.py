@@ -73,6 +73,8 @@ class AgentRunService:
     def _default_objective(product: ProductRead, campaign: CampaignRead) -> str:
         return (
             f"Validate {product.product_name} for {product.target_customer}. "
+            f"Campaign mode: {campaign.goal_type.value}. "
+            f"ICP preset: {campaign.icp_preset_id or 'default-web-validation'}. "
             f"Goal: {campaign.goal_override or product.validation_goal}. "
             f"Create human-approved outreach drafts only for qualified leads."
         )

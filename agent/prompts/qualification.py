@@ -14,6 +14,27 @@ def qualification_prompt(product: ProductRead, lead: LeadRead) -> str:
 
 
 def fallback_qualification(product: ProductRead, lead: LeadRead) -> QualificationResult:
+    if lead.research and lead.research.disqualifiers:
+        return QualificationResult(
+            qualified=False,
+            score=min(25, lead.research.confidence),
+            rationale=(
+                "Lead was disqualified before outreach because public research identified: "
+                + ", ".join(lead.research.disqualifiers)
+            ),
+            criteria=[
+                CriterionScore(
+                    criterion_id=criterion.id or criterion.label,
+                    label=criterion.label,
+                    score=0,
+                    evidence=[],
+                    missing_evidence=["Lead has disqualifying public evidence."],
+                )
+                for criterion in product.qualification_criteria
+            ],
+            recommended_next_step="Do not send outreach.",
+        )
+
     evidence_text = " ".join(
         [
             lead.company_name,

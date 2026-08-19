@@ -1,4 +1,5 @@
 from collections import defaultdict
+from collections.abc import Iterable
 
 from conversations.schemas import ConversationRead, ResponseIntent
 from evaluation.schemas import OutreachApproachEvaluation
@@ -6,8 +7,21 @@ from messages.schemas import MessageRead, MessageStatus
 
 
 def evaluate_outreach_approaches(
-    messages: list[MessageRead], conversations: list[ConversationRead]
+    messages: list[MessageRead],
+    conversations: list[ConversationRead],
+    positive_intents: Iterable[str | ResponseIntent] | None = None,
 ) -> list[OutreachApproachEvaluation]:
+    positive_intent_values = {
+        intent.value if isinstance(intent, ResponseIntent) else str(intent)
+        for intent in (
+            positive_intents
+            or {
+                ResponseIntent.INTERESTED,
+                ResponseIntent.INTERVIEW_REQUEST,
+                ResponseIntent.PRODUCT_TRIAL_INTEREST,
+            }
+        )
+    }
     by_tag: dict[str, dict[str, int]] = defaultdict(
         lambda: {"sent": 0, "replies": 0, "positive_replies": 0}
     )
@@ -28,12 +42,7 @@ def evaluate_outreach_approaches(
             bucket["replies"] += 1
         if any(
             event.classification
-            and event.classification.intent
-            in {
-                ResponseIntent.INTERESTED,
-                ResponseIntent.INTERVIEW_REQUEST,
-                ResponseIntent.PRODUCT_TRIAL_INTEREST,
-            }
+            and event.classification.intent.value in positive_intent_values
             for event in inbound
         ):
             bucket["positive_replies"] += 1

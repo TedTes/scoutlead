@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from db.models import (
     AgentRunModel,
     AgentStepModel,
+    CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
     ConversationEventModel,
@@ -222,6 +223,7 @@ class ProductRepository:
         self.session.execute(delete(MessageModel).where(MessageModel.product_id == product_id))
         self.session.execute(delete(LeadModel).where(LeadModel.product_id == product_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))
+        self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.product_id == product_id))
         self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.product_id == product_id))
         self.session.execute(delete(CampaignModel).where(CampaignModel.product_id == product_id))
         self.session.execute(

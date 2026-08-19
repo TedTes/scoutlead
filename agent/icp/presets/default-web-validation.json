@@ -1,0 +1,59 @@
+{
+  "id": "default-web-validation",
+  "name": "Default web validation",
+  "description": "Generic validation preset using configured providers with human-approved email sending.",
+  "budget": {
+    "max_cost_usd": 5.0,
+    "max_tool_calls": 50
+  },
+  "slots": [
+    {
+      "slot": "discovery",
+      "mode": "accumulate",
+      "tools": [
+        {
+          "name": "web_search",
+          "provider": "configured_search"
+        }
+      ],
+      "confidence_threshold": 55,
+      "target_count": 25
+    },
+    {
+      "slot": "contact",
+      "mode": "first_good",
+      "tools": [
+        {
+          "name": "public_email",
+          "provider": "website_inspection"
+        }
+      ],
+      "confidence_threshold": 70,
+      "target_count": 1
+    },
+    {
+      "slot": "verify",
+      "mode": "first_good",
+      "tools": [
+        {
+          "name": "email_syntax",
+          "provider": "local"
+        }
+      ],
+      "confidence_threshold": 70,
+      "target_count": 1
+    },
+    {
+      "slot": "signal",
+      "mode": "accumulate",
+      "tools": [
+        {
+          "name": "public_page_signals",
+          "provider": "website_inspection"
+        }
+      ],
+      "confidence_threshold": 55,
+      "target_count": 5
+    }
+  ]
+}

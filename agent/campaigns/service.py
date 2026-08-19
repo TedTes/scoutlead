@@ -23,6 +23,7 @@ from conversations.schemas import ConversationRead
 from db.models import CampaignModel
 from evaluation.campaign_metrics import calculate_campaign_metrics
 from evaluation.schemas import CampaignMetrics
+from icp.service import ICPPresetService
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 from memory.repository import MemoryRepository
@@ -35,9 +36,13 @@ from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
 from workflows.discovery import DiscoveryWorkflow
+from workflows.contact import ContactWorkflow
 from workflows.outreach import OutreachWorkflow
 from workflows.qualification import QualificationWorkflow
 from workflows.research import ResearchWorkflow
+from workflows.signal import SignalWorkflow
+from workflows.verify import VerifyWorkflow
+from tools.base import ToolSlot
 
 
 class RecordingBrowserTool:
@@ -146,6 +151,7 @@ class CampaignService:
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)
         self.agent_runs = AgentRunRepository(session)
+        self.icp_presets = ICPPresetService()
         self.leads = LeadRepository(session)
         self.messages = MessageRepository(session)
         self.conversations = ConversationRepository(session)
@@ -195,6 +201,7 @@ class CampaignService:
         campaign = self.campaigns.get(campaign_id)
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
         campaign_read = CampaignRead.model_validate(campaign)
+        preset = self.icp_presets.get(campaign_read.icp_preset_id)
 
         try:
             self._assert_runnable_campaign(campaign_read)
@@ -240,11 +247,74 @@ class CampaignService:
             )
 
             campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+            contacted = self._run_agent_step(
+                agent_run_id=agent_run_id,
+                campaign_id=campaign_id,
+                phase=ToolSlot.CONTACT.value,
+                sequence=3,
+                objective="Find the first good reachable contact point for each researched lead.",
+                input_snapshot=self._campaign_step_input(product, campaign_read),
+                action=lambda _step_id: ContactWorkflow(
+                    campaigns=self.campaigns,
+                    leads=self.leads,
+                    memory=self.memory,
+                    slot_config=preset.slot_config(ToolSlot.CONTACT),
+                    **self._slot_tool_call_callbacks(
+                        agent_run_id=agent_run_id,
+                        campaign_id=campaign_id,
+                        step_id=_step_id,
+                    ),
+                ).run(product, campaign_read),
+            )
+
+            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+            verified = self._run_agent_step(
+                agent_run_id=agent_run_id,
+                campaign_id=campaign_id,
+                phase=ToolSlot.VERIFY.value,
+                sequence=4,
+                objective="Verify contact points before qualification and outreach drafting.",
+                input_snapshot=self._campaign_step_input(product, campaign_read),
+                action=lambda _step_id: VerifyWorkflow(
+                    campaigns=self.campaigns,
+                    leads=self.leads,
+                    memory=self.memory,
+                    slot_config=preset.slot_config(ToolSlot.VERIFY),
+                    **self._slot_tool_call_callbacks(
+                        agent_run_id=agent_run_id,
+                        campaign_id=campaign_id,
+                        step_id=_step_id,
+                    ),
+                ).run(product, campaign_read),
+            )
+
+            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+            signaled = self._run_agent_step(
+                agent_run_id=agent_run_id,
+                campaign_id=campaign_id,
+                phase=ToolSlot.SIGNAL.value,
+                sequence=5,
+                objective="Accumulate public signals used by qualification and campaign insights.",
+                input_snapshot=self._campaign_step_input(product, campaign_read),
+                action=lambda _step_id: SignalWorkflow(
+                    campaigns=self.campaigns,
+                    leads=self.leads,
+                    memory=self.memory,
+                    slot_config=preset.slot_config(ToolSlot.SIGNAL),
+                    **self._slot_tool_call_callbacks(
+                        agent_run_id=agent_run_id,
+                        campaign_id=campaign_id,
+                        step_id=_step_id,
+                    ),
+                ).run(product, campaign_read),
+            )
+
+            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
             qualified = self._run_agent_step(
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=CampaignStage.QUALIFICATION.value,
-                sequence=3,
+                sequence=6,
                 objective="Score researched leads against the product qualification criteria.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: QualificationWorkflow(
@@ -260,7 +330,7 @@ class CampaignService:
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=CampaignStage.OUTREACH.value,
-                sequence=4,
+                sequence=7,
                 objective="Draft personalized outreach and queue messages for human approval.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: OutreachWorkflow(
@@ -276,6 +346,9 @@ class CampaignService:
                 campaign=CampaignRead.model_validate(self.campaigns.get(campaign_id)),
                 discovered_lead_count=len(discovered),
                 researched_lead_count=len(researched),
+                contacted_lead_count=len(contacted),
+                verified_lead_count=len(verified),
+                signaled_lead_count=len(signaled),
                 qualified_lead_count=sum(
                     1
                     for lead in qualified
@@ -304,8 +377,12 @@ class CampaignService:
             ConversationRead.model_validate(model)
             for model in self.conversations.list_by_campaign(campaign_id)
         ]
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
         return calculate_campaign_metrics(
-            leads=leads, messages=messages, conversations=conversations
+            leads=leads,
+            messages=messages,
+            conversations=conversations,
+            goal_type=campaign.goal_type,
         )
 
     def _assert_preflight_ready(self, campaign: CampaignRead, product: ProductRead) -> None:
@@ -461,6 +538,8 @@ class CampaignService:
             "campaign_id": campaign.id,
             "campaign_status": campaign.status.value,
             "campaign_stage": campaign.stage.value,
+            "goal_type": campaign.goal_type.value,
+            "icp_preset_id": campaign.icp_preset_id,
             "max_leads": campaign.max_leads,
         }
 
@@ -496,6 +575,43 @@ class CampaignService:
                 tool_name=action.tool_name,
                 reason=action.reason,
                 args={"iteration": iteration, **self._json_safe(action.args)},
+            )
+            return tool_call.id
+
+        def on_tool_success(tool_call_id: str, observation: Any) -> None:
+            self.agent_runs.complete_tool_call(tool_call_id, self._json_safe(observation))
+
+        def on_tool_error(tool_call_id: str, error: Exception) -> None:
+            self.agent_runs.fail_tool_call(tool_call_id, str(error))
+
+        return {
+            "on_tool_start": on_tool_start,
+            "on_tool_success": on_tool_success,
+            "on_tool_error": on_tool_error,
+        }
+
+    def _slot_tool_call_callbacks(
+        self,
+        *,
+        agent_run_id: str | None,
+        campaign_id: str,
+        step_id: str | None,
+    ) -> dict[str, Callable[..., Any] | None]:
+        if agent_run_id is None:
+            return {
+                "on_tool_start": None,
+                "on_tool_success": None,
+                "on_tool_error": None,
+            }
+
+        def on_tool_start(tool_name: str, args: dict[str, Any], reason: str) -> str:
+            tool_call = self.agent_runs.start_tool_call(
+                run_id=agent_run_id,
+                campaign_id=campaign_id,
+                step_id=step_id,
+                tool_name=tool_name,
+                reason=reason,
+                args=self._json_safe(args),
             )
             return tool_call.id
 

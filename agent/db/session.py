@@ -63,6 +63,7 @@ def create_database(engine: Engine) -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_product_source_columns(engine)
+    _ensure_campaign_runtime_columns(engine)
 
 
 def _ensure_product_source_columns(engine: Engine) -> None:
@@ -93,3 +94,17 @@ def _ensure_product_source_columns(engine: Engine) -> None:
                     "ON products (source_fingerprint)"
                 )
             )
+
+
+def _ensure_campaign_runtime_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("campaigns"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("campaigns")}
+    with engine.begin() as connection:
+        if "goal_type" not in existing_columns:
+            connection.execute(text("ALTER TABLE campaigns ADD COLUMN goal_type VARCHAR(32)"))
+            connection.execute(text("UPDATE campaigns SET goal_type = 'learn' WHERE goal_type IS NULL"))
+        if "icp_preset_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE campaigns ADD COLUMN icp_preset_id VARCHAR(255)"))

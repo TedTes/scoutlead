@@ -14,6 +14,11 @@ def test_search_filter_excludes_content_pages_and_keeps_business_sites() -> None
             snippet="Blog",
         ),
         SearchResult(
+            title="Best Estimating Software For Contractors 2026",
+            url="https://quoteiq.example/estimating-software",
+            snippet="Vendor category page",
+        ),
+        SearchResult(
             title="Fernwood Painting",
             url="https://fernwoodpainting.example",
             snippet="Residential painting company",

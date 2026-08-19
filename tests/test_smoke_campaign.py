@@ -10,6 +10,7 @@ from campaigns.service import CampaignService
 from conversations.schemas import FollowUpAction, ManualClassificationCreate, ResponseIntent
 from conversations.service import ConversationService
 from db.session import create_database
+from insights.service import CampaignInsightService
 from messages.schemas import MessageApproval, MessageUpdate
 from messages.service import MessageService
 from products.repository import ProductRepository
@@ -119,6 +120,11 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
         )
         assert reclassified.events[-1].direction == "internal"
         assert reclassified.events[-1].classification.intent == "interested"
+
+        insight = CampaignInsightService(session=session, llm=HeuristicLLMClient()).generate(campaign.id)
+        assert insight.campaign_id == campaign.id
+        assert insight.findings
+        assert insight.metrics_snapshot["interview_request_count"] == 1
 
 
 def test_campaign_with_no_drafts_completes_without_approval_queue() -> None:
@@ -346,17 +352,23 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
         assert [step.phase for step in detail.steps] == [
             "discovery",
             "research",
+            "contact",
+            "verify",
+            "signal",
             "qualification",
             "outreach",
         ]
         assert all(step.status == "completed" for step in detail.steps)
-        assert detail.tool_call_count == 2
+        assert detail.tool_call_count == 5
         assert detail.llm_call_count == 3
-        assert len(detail.tool_calls) == 5
+        assert len(detail.tool_calls) == 8
         assert [tool_call.tool_name for tool_call in detail.tool_calls] == [
             "search",
             "browser:inspect",
             "llm:lead_research",
+            "public_email",
+            "email_syntax",
+            "public_page_signals",
             "llm:lead_qualification",
             "llm:outreach_draft",
         ]

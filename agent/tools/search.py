@@ -269,6 +269,8 @@ class SearchTool:
         if any(part in path for part in blocked_path_parts):
             return False
         blocked_title_phrases = (
+            "best ",
+            "top ",
             "how to ",
             "why ",
             "guide",
@@ -276,6 +278,14 @@ class SearchTool:
             "strategies",
             "blog",
             "article",
+            "review",
+            "reviews",
+            "comparison",
+            "alternatives",
+            "software for",
+            "apps for",
+            "tools for",
+            "near me",
             "watch",
             "video",
             "podcast",
