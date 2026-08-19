@@ -8,7 +8,7 @@ from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
 from messages.schemas import MessageStatus
 from products.schemas import ProductRead
-from prompts.response import fallback_response_classification, response_prompt
+from prompts.response import response_prompt
 
 
 class ResponseWorkflow:
@@ -32,7 +32,6 @@ class ResponseWorkflow:
     ) -> ConversationRead:
         conversation = self.conversations.get(conversation_id)
         lead = LeadRead.model_validate(self.leads.get(conversation.lead_id))
-        fallback = fallback_response_classification(body)
         classification = self.llm.generate_object(
             task="response_classification",
             system="Classify an inbound response into the allowed response labels.",
@@ -43,7 +42,6 @@ class ResponseWorkflow:
                 "lead": lead.model_dump(mode="json"),
                 "body": body,
             },
-            fallback=fallback,
         )
         updated = self.conversations.add_inbound_event(conversation_id, body, classification)
         self.leads.update_status(lead.id, LeadStatus.RESPONDED)

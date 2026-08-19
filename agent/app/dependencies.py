@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from agents.llm import (
-    HeuristicLLMClient,
     LLMClient,
     MissingLLMClient,
     OpenAIStructuredLLMClient,
@@ -30,13 +29,11 @@ class AppServices:
 
 def create_app_services(settings: Settings) -> AppServices:
     llm: LLMClient
-    strict_llm = settings.require_real_llm or settings.strict_external_providers
     if settings.openai_api_key:
         llm = OpenAIStructuredLLMClient(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
             timeout_seconds=settings.request_timeout_seconds,
-            fallback_on_error=not strict_llm,
         )
     elif settings.llm_json_endpoint:
         llm = RemoteJsonLLMClient(
@@ -44,12 +41,9 @@ def create_app_services(settings: Settings) -> AppServices:
             api_key=settings.llm_api_key,
             model=settings.llm_model,
             timeout_seconds=settings.request_timeout_seconds,
-            fallback_on_error=not strict_llm,
         )
-    elif strict_llm:
-        llm = MissingLLMClient()
     else:
-        llm = HeuristicLLMClient()
+        llm = MissingLLMClient()
 
     return AppServices(
         settings=settings,

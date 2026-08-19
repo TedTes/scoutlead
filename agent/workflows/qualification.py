@@ -6,7 +6,7 @@ from leads.schemas import LeadRead, LeadStatus, QualificationResult
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
-from prompts.qualification import fallback_qualification, qualification_prompt
+from prompts.qualification import disqualified_by_research, qualification_prompt
 
 
 class QualificationWorkflow:
@@ -32,7 +32,6 @@ class QualificationWorkflow:
             lead = LeadRead.model_validate(lead_model)
             if lead.status != LeadStatus.RESEARCHED:
                 continue
-            fallback = fallback_qualification(product, lead)
             result = self.llm.generate_object(
                 task="lead_qualification",
                 system="Score the lead against explicit qualification criteria.",
@@ -42,10 +41,9 @@ class QualificationWorkflow:
                     "product": product.model_dump(mode="json"),
                     "lead": lead.model_dump(mode="json"),
                 },
-                fallback=fallback,
             )
             if lead.research and lead.research.disqualifiers:
-                result = fallback_qualification(product, lead)
+                result = disqualified_by_research(product, lead)
             updated = LeadRead.model_validate(self.leads.attach_qualification(lead.id, result))
             qualified.append(updated)
             self.memory.create_observation(

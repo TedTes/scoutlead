@@ -69,5 +69,5 @@ class BrowserAutomationFallbackTool:
     def inspect(self, url: str) -> WebsiteInspection:
         return WebsiteInspection(
             url=url,
-            error="browser automation fallback is not configured in the initial implementation",
+            error="browser automation is not configured in the initial implementation",
         )

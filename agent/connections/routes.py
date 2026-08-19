@@ -29,8 +29,8 @@ def list_connection_status() -> list[ConnectionStatus]:
         ConnectionStatus(
             name="LLM provider",
             category="reasoning",
-            status="connected" if llm_ready else "not_configured" if strict else "degraded",
-            detail=settings.openai_model if settings.openai_api_key else "Remote JSON LLM" if settings.llm_json_endpoint else "Heuristic fallback",
+            status="connected" if llm_ready else "not_configured",
+            detail=settings.openai_model if settings.openai_api_key else "Remote JSON LLM" if settings.llm_json_endpoint else "LLM required",
         ),
         ConnectionStatus(
             name="Search provider",

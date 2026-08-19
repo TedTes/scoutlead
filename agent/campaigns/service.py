@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agent_runs.repository import AgentRunRepository
-from agents.llm import HeuristicLLMClient, LLMClient, MissingLLMClient
+from agents.llm import LLMClient, MissingLLMClient
 from agents.runner import ToolAction
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import (
@@ -103,7 +103,6 @@ class RecordingLLMClient:
         prompt: str,
         response_model: type[BaseModel],
         context: dict[str, Any] | None = None,
-        fallback: BaseModel,
     ) -> BaseModel:
         llm_call = self.agent_runs.start_llm_call(
             run_id=self.run_id,
@@ -124,7 +123,6 @@ class RecordingLLMClient:
                 prompt=prompt,
                 response_model=response_model,
                 context=context,
-                fallback=fallback,
             )
         except Exception as exc:
             self.agent_runs.fail_tool_call(llm_call.id, str(exc))
@@ -449,9 +447,6 @@ class CampaignService:
         if isinstance(self.llm, MissingLLMClient):
             llm_status = "failed"
             llm_detail = "Configure OPENAI_API_KEY or LLM_JSON_ENDPOINT."
-        elif isinstance(self.llm, HeuristicLLMClient):
-            llm_status = "warning"
-            llm_detail = "Using heuristic fallback; configure a real LLM for production-quality reasoning."
         else:
             llm_status = "ok"
             llm_detail = self.llm.__class__.__name__

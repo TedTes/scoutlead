@@ -201,7 +201,7 @@ class SearchTool:
         ]
 
     @staticmethod
-    def _parse_seed(value: str, fallback_geography: str) -> SearchResult:
+    def _parse_seed(value: str, default_geography: str) -> SearchResult:
         try:
             parsed = json.loads(value)
             return SearchResult.model_validate(parsed)
@@ -211,7 +211,7 @@ class SearchTool:
                 title=parts[0],
                 url=parts[1] if len(parts) > 1 else None,
                 snippet=parts[2] if len(parts) > 2 else None,
-                geography=parts[3] if len(parts) > 3 else fallback_geography,
+                geography=parts[3] if len(parts) > 3 else default_geography,
                 contact_email=parts[4] if len(parts) > 4 else None,
                 source="seed",
                 raw={"value": value},

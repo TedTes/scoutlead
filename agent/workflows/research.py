@@ -6,7 +6,7 @@ from leads.schemas import LeadRead, LeadResearch, LeadStatus
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
-from prompts.research import fallback_research, research_prompt
+from prompts.research import research_prompt
 from tools.browser import DirectHttpBrowserTool
 
 
@@ -37,7 +37,6 @@ class ResearchWorkflow:
                 continue
             self.leads.update_status(lead.id, LeadStatus.RESEARCHING)
             inspection = self.browser.inspect(lead.website_url) if lead.website_url else None
-            fallback = fallback_research(product, lead, inspection)
             research = self.llm.generate_object(
                 task="lead_research",
                 system="Extract structured lead research from public evidence only.",
@@ -48,7 +47,6 @@ class ResearchWorkflow:
                     "lead": lead.model_dump(mode="json"),
                     "inspection": inspection.model_dump(mode="json") if inspection else None,
                 },
-                fallback=fallback,
             )
             researched.append(LeadRead.model_validate(self.leads.attach_research(lead.id, research)))
         self.memory.create_observation(

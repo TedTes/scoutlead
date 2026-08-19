@@ -4,14 +4,20 @@ import pytest
 
 from agent_runs.schemas import AgentRunCreate
 from agent_runs.service import AgentRunService
-from agents.llm import HeuristicLLMClient
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
-from conversations.schemas import FollowUpAction, ManualClassificationCreate, ResponseIntent
+from conversations.schemas import (
+    FollowUpAction,
+    ManualClassificationCreate,
+    ResponseClassification,
+    ResponseIntent,
+)
 from conversations.service import ConversationService
 from db.session import create_database
+from insights.schemas import CampaignInsightDraft, Finding, IcpVerdict, IcpVerdictValue
 from insights.service import CampaignInsightService
-from messages.schemas import MessageApproval, MessageUpdate
+from leads.schemas import CriterionScore, LeadResearch, QualificationResult
+from messages.schemas import MessageApproval, MessageUpdate, OutreachDraft
 from messages.service import MessageService
 from products.repository import ProductRepository
 from products.schemas import (
@@ -24,6 +30,97 @@ from shared.errors import ConflictError
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
+
+
+class FakeWorkflowLLM:
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model,
+        context: dict | None = None,
+    ):
+        context = context or {}
+        if response_model is LeadResearch:
+            lead = context["lead"]
+            product = context["product"]
+            return LeadResearch(
+                summary=lead.get("description") or f"{lead['company_name']} appears relevant.",
+                business_type=product["target_customer"],
+                geography=lead.get("geography"),
+                website_url=lead.get("website_url"),
+                contact_email=lead.get("contact_email"),
+                signals=["Matches target customer"],
+                pain_indicators=["Relevant workflow signal"],
+                disqualifiers=[],
+                sources=["seed"],
+                confidence=80,
+            )
+        if response_model is QualificationResult:
+            product = context["product"]
+            return QualificationResult(
+                qualified=True,
+                score=85,
+                rationale="Lead matches the configured target customer.",
+                criteria=[
+                    CriterionScore(
+                        criterion_id=criterion.get("id") or criterion["label"],
+                        label=criterion["label"],
+                        score=85,
+                        evidence=["Seed lead matches this criterion."],
+                    )
+                    for criterion in product["qualification_criteria"]
+                ],
+                recommended_next_step="Draft outreach for human review.",
+            )
+        if response_model is OutreachDraft:
+            lead = context["lead"]
+            product = context["product"]
+            return OutreachDraft(
+                subject=f"{product['product_name']} question for {lead['company_name']}",
+                body="Hi there,\n\nOpen to a short customer discovery conversation?\n\nThanks,",
+                personalization_notes=["Referenced public seed signal."],
+                approach_tag="test_validation_request",
+            )
+        if response_model is ResponseClassification:
+            body = context.get("body", "").lower()
+            if "interview" in body or "schedule" in body:
+                return ResponseClassification(
+                    intent=ResponseIntent.INTERVIEW_REQUEST,
+                    confidence=90,
+                    rationale="Response includes scheduling/interview language.",
+                    suggested_reply="Share available times.",
+                    follow_up_action=FollowUpAction.SCHEDULE_INTERVIEW,
+                )
+            return ResponseClassification(
+                intent=ResponseIntent.INTERESTED,
+                confidence=80,
+                rationale="Response is positive.",
+                suggested_reply="Reply with next steps.",
+                follow_up_action=FollowUpAction.REPLY,
+            )
+        if response_model is CampaignInsightDraft:
+            return CampaignInsightDraft(
+                summary="Test campaign produced a qualified lead and response evidence.",
+                findings=[
+                    Finding(
+                        theme="Lead fit",
+                        summary="The seed lead matched the configured ICP.",
+                        evidence=["Seed lead matched this criterion."],
+                        count=1,
+                        confidence=80,
+                    )
+                ],
+                icp_verdict=IcpVerdict(
+                    verdict=IcpVerdictValue.MIXED,
+                    rationale="Small test sample with positive evidence.",
+                    recommended_action="Collect more responses.",
+                ),
+                evidence=["Smoke test evidence"],
+            )
+        raise AssertionError(f"Unhandled response model {response_model}")
 
 
 def test_end_to_end_campaign_requires_approval_before_send() -> None:
@@ -59,14 +156,14 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
         )
         campaign = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).create(CampaignCreate(product_id=product.id, name="Smoke test campaign", max_leads=3))
 
         summary = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).run_campaign(campaign.id)
@@ -76,7 +173,7 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
 
         messages = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).metrics(campaign.id)
@@ -102,13 +199,13 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
         assert sent.status == "sent"
 
         conversation_id = session.execute(text("select id from conversations")).scalar_one()
-        conversation = ConversationService(session=session, llm=HeuristicLLMClient()).classify_response(
+        conversation = ConversationService(session=session, llm=FakeWorkflowLLM()).classify_response(
             conversation_id, "Sure, happy to schedule an interview next week."
         )
         assert conversation.events[-1].classification.intent == "interview_request"
 
         reclassified = ConversationService(
-            session=session, llm=HeuristicLLMClient()
+            session=session, llm=FakeWorkflowLLM()
         ).manually_classify(
             conversation_id,
             ManualClassificationCreate(
@@ -121,7 +218,7 @@ def test_end_to_end_campaign_requires_approval_before_send() -> None:
         assert reclassified.events[-1].direction == "internal"
         assert reclassified.events[-1].classification.intent == "interested"
 
-        insight = CampaignInsightService(session=session, llm=HeuristicLLMClient()).generate(campaign.id)
+        insight = CampaignInsightService(session=session, llm=FakeWorkflowLLM()).generate(campaign.id)
         assert insight.campaign_id == campaign.id
         assert insight.findings
         assert insight.metrics_snapshot["interview_request_count"] == 1
@@ -154,14 +251,14 @@ def test_campaign_with_no_drafts_completes_without_approval_queue() -> None:
         )
         campaign = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).create(CampaignCreate(product_id=product.id, name="No draft campaign", max_leads=3))
 
         summary = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).run_campaign(campaign.id)
@@ -172,7 +269,7 @@ def test_campaign_with_no_drafts_completes_without_approval_queue() -> None:
         assert summary.campaign.stage == "complete"
         metrics = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         ).metrics(campaign.id)
@@ -209,7 +306,7 @@ def test_delete_campaign_removes_related_workflow_records() -> None:
         )
         campaign_service = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         )
@@ -264,7 +361,7 @@ def test_delete_product_removes_related_workflow_records() -> None:
         )
         campaign_service = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         )
@@ -335,7 +432,7 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
         )
         campaign_service = CampaignService(
             session=session,
-            llm=HeuristicLLMClient(),
+            llm=FakeWorkflowLLM(),
             search_tool=SearchTool(),
             browser=DirectHttpBrowserTool(timeout_seconds=0.1),
         )

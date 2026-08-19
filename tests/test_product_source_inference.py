@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+import pytest
 
-from agents.llm import HeuristicLLMClient
 from db.session import create_database
 from products.schemas import (
     DiscoverySource,
@@ -13,6 +13,7 @@ from products.schemas import (
     QualificationCriterion,
 )
 from products.service import ProductService
+from shared.errors import ConfigurationError, ValidationError
 from tools.browser import WebsiteInspection
 from tools.search import SearchResult
 
@@ -63,9 +64,134 @@ class ExplodingBrowser:
         raise AssertionError("browser should not be used for description product creation")
 
 
-class ExplodingLLM:
-    def generate_object(self, **kwargs):
-        raise AssertionError("llm should not be used for description product creation")
+class DescriptionConfigLLM:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model,
+        context: dict | None = None,
+    ):
+        self.calls.append(task)
+        return ProductCreate(
+            product_name=context["product_name"],
+            product_description=(
+                "QuoteVan lets solo painters price a job during the walkthrough and send "
+                "a customer-ready quote before leaving the driveway."
+            ),
+            target_customer="Solo residential painters and small painting companies",
+            problem_being_solved=(
+                "Painters lose momentum when quotes are delayed, inconsistent, or rebuilt "
+                "manually after a site visit."
+            ),
+            value_proposition=(
+                "Turn walkthrough notes into a professional quote on the spot while keeping "
+                "customer history organized."
+            ),
+            target_geography="Canada",
+            validation_goal="Book customer discovery interviews with residential painters.",
+            qualification_criteria=[
+                QualificationCriterion(
+                    label="Residential painting company",
+                    weight=3,
+                    required=True,
+                    evidence_required=True,
+                ),
+                QualificationCriterion(
+                    label="Publicly offers estimates or quote requests",
+                    weight=2,
+                    required=False,
+                    evidence_required=True,
+                ),
+            ],
+            preferred_discovery_sources=[
+                DiscoverySource(
+                    type=DiscoverySourceType.WEB_SEARCH,
+                    value="residential painting companies United States request estimate",
+                ),
+                DiscoverySource(
+                    type=DiscoverySourceType.WEB_SEARCH,
+                    value="solo house painters United States free quote",
+                ),
+            ],
+            outreach_objective="Ask for a short customer discovery conversation.",
+            constraints=["Human approval required before outbound messages are sent."],
+        )
+
+
+class SourceConfigLLM:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model,
+        context: dict | None = None,
+    ):
+        self.calls.append(task)
+        if response_model is ProductSourceEvidence:
+            lookup_snippets = [
+                f"Source lookup result: {result['title']}"
+                for result in (context or {}).get("source_lookup_results", [])
+                if result.get("title")
+            ]
+            return ProductSourceEvidence(
+                product_name_candidates=["QuoteVan"],
+                headline="Fast quote intake for residential painting companies",
+                claims=[
+                    "QuoteVan helps painters handle estimate requests and homeowner quote workflows."
+                ],
+                target_customer_clues=["residential painting companies"],
+                problem_clues=["estimate requests and homeowner quote workflows"],
+                value_clues=["fast quote intake"],
+                source_snippets=[
+                    "Fast quote intake for residential painting companies.",
+                    "QuoteVan helps painters handle estimate requests and homeowner quote workflows.",
+                    *lookup_snippets,
+                ],
+                confidence=85,
+                missing_info=[],
+                rationale="The inspected source states the product, customer, and quote workflow.",
+            )
+        return ProductCreate(
+            product_name="QuoteVan",
+            product_description="Fast quote intake software for residential painting companies.",
+            target_customer="Residential painting companies",
+            problem_being_solved="Painters need a faster way to handle quote and estimate requests.",
+            value_proposition="Help painters turn job details into customer-ready quotes faster.",
+            target_geography="United States",
+            validation_goal="Book customer discovery interviews with residential painting companies.",
+            qualification_criteria=[
+                QualificationCriterion(
+                    label="Residential painting company",
+                    weight=3,
+                    required=True,
+                    evidence_required=True,
+                ),
+                QualificationCriterion(
+                    label="Offers estimates or quote requests",
+                    weight=2,
+                    evidence_required=True,
+                ),
+            ],
+            preferred_discovery_sources=[
+                DiscoverySource(
+                    type=DiscoverySourceType.WEB_SEARCH,
+                    value="residential painting companies United States request estimate",
+                )
+            ],
+            outreach_objective="Ask for a short customer discovery conversation.",
+            constraints=["Human approval required before outbound messages are sent."],
+        )
 
 
 class AmbiguousQuoteBrowser:
@@ -91,11 +217,29 @@ class CapturingLLM:
         prompt: str,
         response_model,
         context: dict | None = None,
-        fallback,
     ):
         self.prompts.extend([system, prompt])
         self.context = context or {}
-        return fallback
+        if response_model is ProductSourceEvidence:
+            return ProductSourceEvidence(
+                product_name_candidates=["QuoteVan"],
+                headline="Fast quote intake for residential painting companies",
+                claims=["Fast quote intake for residential painting companies."],
+                target_customer_clues=["residential painting companies"],
+                problem_clues=["estimate requests"],
+                value_clues=["fast quote intake"],
+                source_snippets=["Fast quote intake for residential painting companies."],
+                confidence=85,
+                missing_info=[],
+                rationale="Captured prompt test evidence.",
+            )
+        return SourceConfigLLM().generate_object(
+            task=task,
+            system=system,
+            prompt=prompt,
+            response_model=response_model,
+            context=context,
+        )
 
 
 class VanRentalGuessLLM:
@@ -110,7 +254,6 @@ class VanRentalGuessLLM:
         prompt: str,
         response_model,
         context: dict | None = None,
-        fallback,
     ):
         self.called = True
         if response_model is ProductSourceEvidence:
@@ -154,7 +297,6 @@ class InvalidProductConfigLLM:
         prompt: str,
         response_model,
         context: dict | None = None,
-        fallback,
     ):
         if response_model is ProductSourceEvidence:
             return ProductSourceEvidence(
@@ -200,12 +342,11 @@ class ChangingProductInferenceLLM:
         prompt: str,
         response_model,
         context: dict | None = None,
-        fallback,
     ):
         self.calls.append(task)
         if response_model is ProductSourceEvidence:
             evidence_call_count = sum(call == "product_source_evidence" for call in self.calls)
-            confidence = 80 if evidence_call_count == 1 else 10
+            confidence = 80 if evidence_call_count == 1 else 82
             return ProductSourceEvidence(
                 product_name_candidates=["QuoteVan"],
                 headline="Quote the job before you leave it.",
@@ -217,10 +358,31 @@ class ChangingProductInferenceLLM:
                     "Walk the job, capture the scope, send a professional quote.",
                 ],
                 confidence=confidence,
-                missing_info=["Specific target customer segments or industries served"],
+                missing_info=[],
                 rationale=f"Generated confidence {confidence}.",
             )
-        return fallback
+        draft_call_count = sum(call == "product_config_from_evidence" for call in self.calls)
+        customer = "Residential painting companies" if draft_call_count == 1 else "Residential painting contractors"
+        return ProductCreate(
+            product_name="QuoteVan",
+            product_description="Quote workflow software for residential painters.",
+            target_customer=customer,
+            problem_being_solved="Painting companies need faster estimate workflows.",
+            value_proposition="Create customer-ready quotes from walkthrough details.",
+            target_geography="United States",
+            validation_goal="Book customer discovery interviews with residential painters.",
+            qualification_criteria=[
+                QualificationCriterion(label="Residential painting company", required=True),
+            ],
+            preferred_discovery_sources=[
+                DiscoverySource(
+                    type=DiscoverySourceType.WEB_SEARCH,
+                    value="residential painting companies United States",
+                )
+            ],
+            outreach_objective="Ask for a customer discovery conversation.",
+            constraints=["Human approval required before outbound messages are sent."],
+        )
 
 
 def test_product_can_be_created_from_single_source() -> None:
@@ -231,25 +393,26 @@ def test_product_can_be_created_from_single_source() -> None:
     with session_factory() as session:
         product = ProductService(
             session,
-            llm=HeuristicLLMClient(),
+            llm=SourceConfigLLM(),
             browser=FakeBrowser(),
         ).create_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
         assert product.product_name == "QuoteVan"
-        assert "painter" in product.target_customer.lower()
+        assert "painting" in product.target_customer.lower()
         assert product.qualification_criteria
         assert product.preferred_discovery_sources
 
 
-def test_product_can_be_created_from_description_without_llm_or_scraping() -> None:
+def test_product_can_be_created_from_description_using_llm_without_scraping() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    llm = DescriptionConfigLLM()
 
     with session_factory() as session:
         product = ProductService(
             session,
-            llm=ExplodingLLM(),
+            llm=llm,
             browser=ExplodingBrowser(),
         ).create_from_description(
             ProductDescriptionCreate(
@@ -263,12 +426,37 @@ def test_product_can_be_created_from_description_without_llm_or_scraping() -> No
         )
 
         assert product.product_name == "QuoteVan"
+        assert llm.calls == ["product_config_from_description"]
         assert "painters" in product.target_customer.lower()
-        assert "quote" in product.problem_being_solved.lower()
+        assert "driveway" in product.product_description.lower()
+        assert product.target_geography == "United States"
         assert product.source_url is None
         assert product.source_fingerprint is None
         assert product.qualification_criteria
         assert product.preferred_discovery_sources
+
+
+def test_product_description_creation_requires_llm() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        with pytest.raises(ConfigurationError):
+            ProductService(
+                session,
+                llm=None,
+                browser=ExplodingBrowser(),
+            ).create_from_description(
+                ProductDescriptionCreate(
+                    product_name="QuoteVan",
+                    description=(
+                        "QuoteVan helps home-service painters capture job scope during a "
+                        "walkthrough, send a professional quote before leaving the job, and "
+                        "keep customer history in one place."
+                    )
+                )
+            )
 
 
 def test_same_source_reuses_existing_product_without_refetching() -> None:
@@ -280,7 +468,7 @@ def test_same_source_reuses_existing_product_without_refetching() -> None:
     with session_factory() as session:
         service = ProductService(
             session,
-            llm=HeuristicLLMClient(),
+            llm=SourceConfigLLM(),
             browser=browser,
         )
         product = service.create_from_source(ProductSourceCreate(source="https://quotevan.com"))
@@ -331,7 +519,7 @@ def test_same_source_reuses_legacy_product_name_match_without_refetching() -> No
 
         inference = ProductService(
             session,
-            llm=HeuristicLLMClient(),
+            llm=None,
             browser=browser,
         ).infer_product_from_source(ProductSourceCreate(source="https://www.quotevan.com/"))
 
@@ -362,25 +550,21 @@ def test_product_source_prompt_does_not_treat_scoutlead_as_product() -> None:
         assert llm.context["source"] == "https://quotevan.com"
 
 
-def test_sparse_source_uses_fallback_without_llm_guessing() -> None:
+def test_sparse_source_fails_without_generating_product_guess() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     llm = VanRentalGuessLLM()
 
     with session_factory() as session:
-        inference = ProductService(
-            session,
-            llm=llm,
-            browser=SparseBrowser(),
-        ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
+        with pytest.raises(ValidationError):
+            ProductService(
+                session,
+                llm=llm,
+                browser=SparseBrowser(),
+            ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
         assert llm.called is False
-        assert inference.ready_to_save is False
-        assert "unknown" in inference.product.target_customer.lower()
-        assert "not enough public source evidence" in inference.product.problem_being_solved.lower()
-        assert "rental" not in inference.product.target_customer.lower()
-        assert "moving" not in inference.product.target_customer.lower()
 
 
 def test_sparse_source_uses_source_lookup_before_needing_context() -> None:
@@ -392,7 +576,7 @@ def test_sparse_source_uses_source_lookup_before_needing_context() -> None:
     with session_factory() as session:
         inference = ProductService(
             session,
-            llm=HeuristicLLMClient(),
+            llm=SourceConfigLLM(),
             browser=SparseBrowser(),
             search=search,
         ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
@@ -427,7 +611,7 @@ def test_repeated_source_inference_uses_cached_draft() -> None:
         assert llm.calls == ["product_source_evidence", "product_config_from_evidence"]
 
 
-def test_context_refines_cached_source_draft_without_lowering_confidence() -> None:
+def test_context_change_triggers_new_llm_inference() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -450,24 +634,26 @@ def test_context_refines_cached_source_draft_without_lowering_confidence() -> No
         assert refined.confidence >= base.confidence
         assert refined.ready_to_save is True
         assert "painting" in refined.product.target_customer.lower()
-        assert llm.calls == ["product_source_evidence", "product_config_from_evidence"]
+        assert llm.calls == [
+            "product_source_evidence",
+            "product_config_from_evidence",
+            "product_source_evidence",
+            "product_config_from_evidence",
+        ]
 
 
-def test_invalid_llm_product_config_falls_back_without_crashing() -> None:
+def test_invalid_llm_product_config_raises_without_substitute_data() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory() as session:
-        inference = ProductService(
-            session,
-            llm=InvalidProductConfigLLM(),
-            browser=FakeBrowser(),
-        ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
-
-        assert inference.ready_to_save is False
-        assert inference.product.target_customer
-        assert inference.product.target_customer != ""
+        with pytest.raises(Exception):
+            ProductService(
+                session,
+                llm=InvalidProductConfigLLM(),
+                browser=FakeBrowser(),
+            ).infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
 
 def test_ungrounded_van_rental_inference_is_rejected() -> None:
@@ -477,22 +663,14 @@ def test_ungrounded_van_rental_inference_is_rejected() -> None:
     llm = VanRentalGuessLLM()
 
     with session_factory() as session:
-        product = ProductService(
-            session,
-            llm=llm,
-            browser=AmbiguousQuoteBrowser(),
-        ).infer_from_source(ProductSourceCreate(source="https://quotevan.com"))
+        with pytest.raises(ValidationError):
+            ProductService(
+                session,
+                llm=llm,
+                browser=AmbiguousQuoteBrowser(),
+            ).infer_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
         assert llm.called is True
-        generated = " ".join(
-            [
-                product.target_customer,
-                product.problem_being_solved,
-                product.value_proposition,
-            ]
-        ).lower()
-        assert "van rental" not in generated
-        assert "moving services" not in generated
 
 
 def test_sparse_source_with_user_context_can_generate_saveable_draft() -> None:
@@ -503,7 +681,7 @@ def test_sparse_source_with_user_context_can_generate_saveable_draft() -> None:
     with session_factory() as session:
         inference = ProductService(
             session,
-            llm=HeuristicLLMClient(),
+            llm=SourceConfigLLM(),
             browser=SparseBrowser(),
         ).infer_product_from_source(
             ProductSourceCreate(

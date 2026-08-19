@@ -1,1 +1,1 @@
-"""Prompt builders and deterministic fallbacks."""
+"""Prompt builders for structured LLM tasks."""

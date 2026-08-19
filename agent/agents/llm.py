@@ -23,23 +23,8 @@ class LLMClient(Protocol):
         prompt: str,
         response_model: type[TModel],
         context: dict[str, Any] | None = None,
-        fallback: TModel,
     ) -> TModel:
         raise NotImplementedError
-
-
-class HeuristicLLMClient:
-    def generate_object(
-        self,
-        *,
-        task: str,
-        system: str,
-        prompt: str,
-        response_model: type[TModel],
-        context: dict[str, Any] | None = None,
-        fallback: TModel,
-    ) -> TModel:
-        return fallback
 
 
 class MissingLLMClient:
@@ -51,7 +36,6 @@ class MissingLLMClient:
         prompt: str,
         response_model: type[TModel],
         context: dict[str, Any] | None = None,
-        fallback: TModel,
     ) -> TModel:
         raise ConfigurationError(
             "real LLM provider is required for this environment",
@@ -67,13 +51,11 @@ class RemoteJsonLLMClient:
         api_key: str | None = None,
         model: str | None = None,
         timeout_seconds: float = 20.0,
-        fallback_on_error: bool = True,
     ) -> None:
         self.endpoint = endpoint
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
-        self.fallback_on_error = fallback_on_error
 
     def generate_object(
         self,
@@ -83,7 +65,6 @@ class RemoteJsonLLMClient:
         prompt: str,
         response_model: type[TModel],
         context: dict[str, Any] | None = None,
-        fallback: TModel,
     ) -> TModel:
         try:
             headers = {"content-type": "application/json"}
@@ -108,8 +89,6 @@ class RemoteJsonLLMClient:
             return response_model.model_validate(output)
         except Exception as exc:
             logger.warning("remote_llm_failed task=%s error=%s", task, exc)
-            if self.fallback_on_error:
-                return fallback
             raise
 
 
@@ -120,12 +99,10 @@ class OpenAIStructuredLLMClient:
         api_key: str,
         model: str,
         timeout_seconds: float = 20.0,
-        fallback_on_error: bool = True,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
-        self.fallback_on_error = fallback_on_error
 
     def generate_object(
         self,
@@ -135,7 +112,6 @@ class OpenAIStructuredLLMClient:
         prompt: str,
         response_model: type[TModel],
         context: dict[str, Any] | None = None,
-        fallback: TModel,
     ) -> TModel:
         try:
             schema = response_model.model_json_schema()
@@ -180,8 +156,6 @@ class OpenAIStructuredLLMClient:
             return response_model.model_validate(parsed)
         except Exception as exc:
             logger.warning("openai_structured_llm_failed task=%s error=%s", task, exc)
-            if self.fallback_on_error:
-                return fallback
             raise
 
     @staticmethod

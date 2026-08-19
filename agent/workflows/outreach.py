@@ -10,8 +10,8 @@ from messages.schemas import MessageRead, MessageStatus, OutreachDraft
 from products.schemas import ProductRead
 from campaigns.goal import goal_policy
 from campaigns.schemas import CampaignGoalType
-from prompts.outreach_learn import fallback_outreach_learn, outreach_learn_prompt
-from prompts.outreach_sell import fallback_outreach_sell, outreach_sell_prompt
+from prompts.outreach_learn import outreach_learn_prompt
+from prompts.outreach_sell import outreach_sell_prompt
 
 
 class OutreachWorkflow:
@@ -44,11 +44,9 @@ class OutreachWorkflow:
                 continue
             policy = goal_policy(campaign.goal_type)
             if policy.goal_type == CampaignGoalType.SELL:
-                fallback = fallback_outreach_sell(product, lead, channel)
                 prompt = outreach_sell_prompt(product, lead, channel)
                 system = "Draft concise sales outreach for human approval."
             else:
-                fallback = fallback_outreach_learn(product, lead, channel)
                 prompt = outreach_learn_prompt(product, lead, channel)
                 system = "Draft customer-discovery outreach for human approval."
             draft = self.llm.generate_object(
@@ -60,7 +58,6 @@ class OutreachWorkflow:
                     "product": product.model_dump(mode="json"),
                     "lead": lead.model_dump(mode="json"),
                 },
-                fallback=fallback,
             )
             message = self.messages.create_draft(campaign.id, product.id, lead.id, draft)
             self.leads.update_status(lead.id, LeadStatus.AWAITING_APPROVAL)
