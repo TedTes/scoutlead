@@ -236,7 +236,7 @@ def test_product_can_be_created_from_single_source() -> None:
         ).create_from_source(ProductSourceCreate(source="https://quotevan.com"))
 
         assert product.product_name == "QuoteVan"
-        assert "painting" in product.target_customer.lower()
+        assert "painter" in product.target_customer.lower()
         assert product.qualification_criteria
         assert product.preferred_discovery_sources
 

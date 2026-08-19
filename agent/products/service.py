@@ -835,10 +835,18 @@ class ProductService:
 
     @staticmethod
     def _target_customer_from_description(description: str, product_name: str) -> str:
-        text = normalize_text(description)
+        target_customer = ProductService._target_customer_from_text(description, product_name)
+        if target_customer:
+            return target_customer
+        return f"Customers likely to benefit from {product_name}"
+
+    @staticmethod
+    def _target_customer_from_text(text: str, product_name: str) -> str | None:
+        text = normalize_text(text)
         patterns = [
             r"\b(?:helps|serves|supports)\s+(.+?)\s+(?:capture|send|manage|book|find|create|track|automate|replace|coordinate|validate|generate|reduce|improve|handle|compare|discover|qualify|draft|sync|run|save|centralize|organize|build|collect|turn|get|close)\b",
-            r"\b(?:for|built for|made for)\s+(.+?)\s+(?:who|that|to|with|by)\b",
+            r"\b(?:for|built for|made for)\s+(.+?)(?:\s+(?:who|that|to|with|by|using|needing)\b|[.,;]|$)",
+            r"\b(?:used by|serving|serve)\s+(.+?)(?:\s+(?:who|that|to|with|by|using|needing)\b|[.,;]|$)",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -846,7 +854,7 @@ class ProductService:
                 candidate = match.group(1).strip(" ,.-")
                 if candidate and product_name.lower() not in candidate.lower():
                     return truncate(candidate, 140)
-        return f"Customers likely to benefit from {product_name}"
+        return None
 
     @staticmethod
     def _problem_from_description(description: str, target_customer: str) -> str:
@@ -891,7 +899,7 @@ class ProductService:
             if evidence and evidence.product_name_candidates and evidence.product_name_candidates[0].strip()
             else self._fallback_name(source, inspection)
         )
-        text = " ".join(
+        text = ". ".join(
             filter(
                 None,
                 [
@@ -1005,10 +1013,11 @@ class ProductService:
 
     @staticmethod
     def _fallback_target_customer(text: str, product_name: str) -> str:
+        target_customer = ProductService._target_customer_from_text(text, product_name)
+        if target_customer:
+            return target_customer
         lower = text.lower()
-        if any(keyword in lower for keyword in ["paint", "painter", "painting", "contractor"]):
-            return "Residential painting companies and small painting contractors"
-        if any(keyword in lower for keyword in ["quote", "estimate", "invoice", "contractor"]):
+        if any(keyword in lower for keyword in ["quote", "estimate", "invoice"]):
             return "Service businesses that handle quote requests"
         return f"Businesses likely to benefit from {product_name}"
 
@@ -1027,17 +1036,10 @@ class ProductService:
 
     @staticmethod
     def _fallback_queries(source: str, target_customer: str, geography: str, text: str) -> list[str]:
-        lower = text.lower()
-        if any(keyword in lower for keyword in ["paint", "painter", "painting"]):
-            return [
-                f"residential painting companies {geography} free estimate",
-                f"house painters {geography} request quote",
-                f"interior exterior painting contractors {geography}",
-            ]
         if " " in source and "." not in source:
             return [source]
         return [
             f"{target_customer} {geography}",
-            f"{target_customer} request quote {geography}",
+            f"{target_customer} contact {geography}",
             f"{target_customer} business owner {geography}",
         ]
