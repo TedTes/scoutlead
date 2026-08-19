@@ -49,7 +49,7 @@
   --fw-bold: 700;
 
   --ls-eyebrow: 0.6px;
-  --ls-tight: -0.4px;
+  --ls-tight: 0;
 
   --lh-tight: 1.45;
   --lh-body: 1.6;
@@ -1967,6 +1967,90 @@ textarea {
   text-align: right;
 }
 
+.insights-page {
+  display: grid;
+  gap: 14px;
+}
+
+.insight-summary {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.85fr);
+}
+
+.insight-summary p {
+  color: var(--tx-2);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  margin: 10px 0 0;
+}
+
+.insight-summary span:not(.pill) {
+  color: var(--tx-3);
+  display: block;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-semi);
+  letter-spacing: var(--ls-eyebrow);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.insight-summary strong {
+  display: block;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-semi);
+  line-height: 1.35;
+}
+
+.insight-summary em {
+  color: var(--tx-2);
+  display: block;
+  font-size: var(--fs-sm);
+  font-style: normal;
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.finding-list {
+  display: grid;
+  gap: 12px;
+}
+
+.finding-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 12px;
+}
+
+.finding-row header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.finding-row strong {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semi);
+}
+
+.finding-row p {
+  color: var(--tx-2);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.finding-row ul {
+  color: var(--tx-2);
+  display: grid;
+  font-size: var(--fs-sm);
+  gap: 5px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
 .tone-blue {
   background: var(--info-bg);
   border-color: var(--info-bg);
@@ -2117,6 +2201,7 @@ textarea {
   .product-selector-row,
   .conversation-grid,
   .integration-grid,
+  .insight-summary,
   .campaign-summary,
   .agent-run-summary,
   .agent-run-columns,

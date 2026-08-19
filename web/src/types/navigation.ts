@@ -3,6 +3,7 @@ export type Screen =
   | "product"
   | "campaigns"
   | "leads"
+  | "insights"
   | "approvals"
   | "conversations"
   | "connections";

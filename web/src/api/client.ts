@@ -5,9 +5,11 @@ import type {
   Campaign,
   CampaignCreateInput,
   CampaignPreflight,
+  CampaignInsight,
   CampaignRunSummary,
   ConnectionStatus,
   Conversation,
+  ICPPreset,
   Lead,
   Message,
   Metrics,
@@ -50,6 +52,10 @@ export class ApiClient {
 
   getCampaigns() {
     return this.request<Campaign[]>("/campaigns");
+  }
+
+  getIcpPresets() {
+    return this.request<ICPPreset[]>("/icp-presets");
   }
 
   createCampaign(input: CampaignCreateInput) {
@@ -146,6 +152,14 @@ export class ApiClient {
 
   getMetrics(campaignId: string) {
     return this.request<Metrics>(`/campaigns/${campaignId}/metrics`);
+  }
+
+  getCampaignInsight(campaignId: string) {
+    return this.request<CampaignInsight>(`/campaigns/${campaignId}/insights`);
+  }
+
+  generateCampaignInsight(campaignId: string) {
+    return this.request<CampaignInsight>(`/campaigns/${campaignId}/insights`, { method: "POST" });
   }
 
   getConnectionsStatus() {

@@ -7,6 +7,7 @@ import type {
   CampaignSnapshot,
   ConnectionStatus,
   Conversation,
+  ICPPreset,
   Lead,
   Message,
   Metrics,
@@ -28,6 +29,7 @@ type AppDataContextValue = {
   productCampaigns: Campaign[];
   snapshot: CampaignSnapshot;
   connections: ConnectionStatus[];
+  icpPresets: ICPPreset[];
   setSelectedProductId: (productId: string) => void;
   setSelectedCampaignId: (campaignId: string) => void;
   refreshAll: () => Promise<void>;
@@ -53,6 +55,7 @@ type AppDataContextValue = {
     conversationId: string,
     classification: ManualClassificationInput,
   ) => Promise<void>;
+  generateCampaignInsight: (campaignId?: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -78,6 +81,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
   const [snapshot, setSnapshot] = useState<CampaignSnapshot>(emptySnapshot);
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
+  const [icpPresets, setIcpPresets] = useState<ICPPreset[]>([]);
 
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const api = useMemo(() => new ApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
@@ -119,7 +123,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         setSnapshot(emptySnapshot);
         return;
       }
-      const [campaign, leads, messages, conversations, metrics, agentRuns, preflight] = await Promise.all([
+      const [campaign, leads, messages, conversations, metrics, agentRuns, preflight, insight] = await Promise.all([
         api.getCampaign(campaignId),
         api.getLeads(campaignId),
         api.getMessages(campaignId),
@@ -127,9 +131,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         api.getMetrics(campaignId),
         api.getCampaignAgentRuns(campaignId),
         api.getCampaignPreflight(campaignId),
+        api.getCampaignInsight(campaignId).catch(() => undefined),
       ]);
       const latestAgentRun = agentRuns[0] ? await api.getAgentRun(agentRuns[0].id) : undefined;
-      setSnapshot({ campaign, leads, messages, conversations, metrics, preflight, agentRuns, latestAgentRun });
+      setSnapshot({ campaign, leads, messages, conversations, metrics, insight, preflight, agentRuns, latestAgentRun });
     },
     [api, selectedCampaignIdState],
   );
@@ -149,6 +154,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setApiHealthy(health);
       setProducts(nextProducts);
       setCampaigns(nextCampaigns);
+      setIcpPresets(await api.getIcpPresets().catch(() => []));
 
       const storedProductId = localStorage.getItem("selectedProductId") || "";
       const nextProductId =
@@ -211,6 +217,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       productCampaigns,
       snapshot,
       connections,
+      icpPresets,
       setSelectedProductId: persistSelectedProductId,
       setSelectedCampaignId: persistSelectedCampaignId,
       refreshAll,
@@ -313,6 +320,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         mutate(async () => {
           await api.manuallyClassifyResponse(conversationId, classification);
         }),
+      generateCampaignInsight: (campaignId = selectedCampaignIdState) =>
+        mutate(async () => {
+          if (campaignId) await api.generateCampaignInsight(campaignId);
+        }),
     }),
     [
       api,
@@ -320,6 +331,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       campaigns,
       connections,
       error,
+      icpPresets,
       loading,
       mutate,
       persistSelectedCampaignId,

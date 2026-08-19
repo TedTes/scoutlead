@@ -32,6 +32,7 @@ export function ProductScreen({
     runCampaign,
     pauseCampaign,
     resumeCampaign,
+    icpPresets,
   } = useAppData();
   const { showToast } = useToast();
   const [detailProductId, setDetailProductId] = useState("");
@@ -42,6 +43,7 @@ export function ProductScreen({
   const [showNewCampaign, setShowNewCampaign] = useState(false);
   const [campaignSource, setCampaignSource] = useState("");
   const [maxLeads, setMaxLeads] = useState("10");
+  const [goalType, setGoalType] = useState<"learn" | "sell">("learn");
   const [toolPlan, setToolPlan] = useState({
     search: true,
     websiteResearch: true,
@@ -67,6 +69,7 @@ export function ProductScreen({
     setDetailProductId(selectedProductId);
     setCampaignSource("");
     setMaxLeads("10");
+    setGoalType("learn");
     setToolPlan({
       search: true,
       websiteResearch: true,
@@ -154,6 +157,8 @@ export function ProductScreen({
     const input: CampaignCreateInput = {
       product_id: detailProduct.id,
       name: `${displayProductName(detailProduct)} validation ${date}`,
+      goal_type: goalType,
+      icp_preset_id: icpPresets[0]?.id || "default-web-validation",
       max_leads: nextMaxLeads,
       channels: ["email"],
       discovery_seeds: [],
@@ -184,7 +189,7 @@ export function ProductScreen({
               <span>Product name</span>
               <input
                 autoFocus
-                placeholder="QuoteVan"
+                placeholder="Product name"
                 value={productName}
                 onChange={(event) => setProductName(event.target.value)}
               />
@@ -192,7 +197,7 @@ export function ProductScreen({
             <label className="field">
               <span>Product description</span>
               <textarea
-                placeholder="Example: QuoteVan helps home-service painters capture job scope during a walkthrough, send a professional quote before leaving the job, and keep customer history in one place."
+                placeholder="Describe what the product does, who it is for, the problem it solves, and the outcome customers should get."
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
               />
@@ -332,10 +337,17 @@ export function ProductScreen({
         <Modal title="New campaign" onClose={() => setShowNewCampaign(false)}>
           <div className="campaign-create-modal">
             <label className="field">
+              <span>Goal</span>
+              <select value={goalType} onChange={(event) => setGoalType(event.target.value as "learn" | "sell")}>
+                <option value="learn">Learn - validate ICP and book interviews</option>
+                <option value="sell">Sell - find buyers and drive product interest</option>
+              </select>
+            </label>
+            <label className="field">
               <span>Discovery source</span>
               <input
                 autoFocus
-                placeholder="residential painters Austin Texas"
+                placeholder="Optional search query, source, or seed list"
                 value={campaignSource}
                 onChange={(event) => setCampaignSource(event.target.value)}
               />

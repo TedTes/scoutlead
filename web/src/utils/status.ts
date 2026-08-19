@@ -4,20 +4,39 @@ export function statusTone(status: string): Tone {
   const value = status.toLowerCase();
   if (["running", "researching", "discovered", "outreach_drafted", "sent"].includes(value)) return "blue";
   if (
-    ["active", "connected", "qualified", "completed", "interested", "meeting booked", "approved", "responded"].includes(
-      value,
-    )
+    [
+      "active",
+      "connected",
+      "qualified",
+      "completed",
+      "interested",
+      "meeting booked",
+      "approved",
+      "responded",
+      "strong",
+    ].includes(value)
   ) {
     return "green";
   }
   if (
-    ["paused", "pending", "queued", "waiting", "review", "researched", "not now", "degraded", "awaiting_approval"].includes(
-      value,
-    )
+    [
+      "paused",
+      "pending",
+      "queued",
+      "waiting",
+      "review",
+      "researched",
+      "not now",
+      "degraded",
+      "awaiting_approval",
+      "mixed",
+      "weak",
+      "insufficient_data",
+    ].includes(value)
   ) {
     return "amber";
   }
-  if (["objection", "failed", "cancelled"].includes(value)) return "red";
+  if (["objection", "failed", "cancelled", "invalid"].includes(value)) return "red";
   return "gray";
 }
 

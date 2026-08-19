@@ -42,10 +42,36 @@ export type DiscoverySource = {
   notes?: string | null;
 };
 
+export type ICPPreset = {
+  id: string;
+  name: string;
+  description?: string | null;
+  budget: {
+    max_cost_usd?: number | null;
+    max_tool_calls: number;
+  };
+  slots: Array<{
+    slot: "discovery" | "contact" | "verify" | "signal";
+    mode: "accumulate" | "first_good";
+    tools: Array<{
+      name: string;
+      provider: string;
+      enabled: boolean;
+      config: Record<string, unknown>;
+    }>;
+    confidence_threshold: number;
+    target_count: number;
+    max_cost_usd?: number | null;
+    max_calls?: number | null;
+  }>;
+};
+
 export type Campaign = {
   id: string;
   product_id: string;
   name?: string | null;
+  goal_type: "learn" | "sell";
+  icp_preset_id?: string | null;
   status: string;
   stage: string;
   max_leads: number;
@@ -61,6 +87,8 @@ export type Campaign = {
 export type CampaignCreateInput = {
   product_id: string;
   name: string;
+  goal_type?: "learn" | "sell";
+  icp_preset_id?: string | null;
   max_leads: number;
   channels: string[];
   discovery_seeds?: LeadSeedInput[];
@@ -160,6 +188,9 @@ export type Conversation = {
 };
 
 export type Metrics = {
+  goal_type: "learn" | "sell";
+  north_star_metric: string;
+  north_star_value: number;
   lead_count: number;
   researched_lead_count: number;
   qualified_lead_count: number;
@@ -179,6 +210,30 @@ export type Metrics = {
     response_rate: number;
     positive_response_rate: number;
   }>;
+};
+
+export type CampaignInsight = {
+  id: string;
+  campaign_id: string;
+  product_id: string;
+  goal_type: string;
+  summary: string;
+  findings: Array<{
+    theme: string;
+    summary: string;
+    evidence: string[];
+    count: number;
+    confidence: number;
+  }>;
+  icp_verdict: {
+    verdict: "strong" | "mixed" | "weak" | "invalid" | "insufficient_data";
+    rationale: string;
+    recommended_action: string;
+  };
+  metrics_snapshot: Record<string, unknown>;
+  evidence: string[];
+  created_at: string;
+  updated_at: string;
 };
 
 export type AgentRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -269,6 +324,7 @@ export type CampaignSnapshot = {
   messages: Message[];
   conversations: Conversation[];
   metrics?: Metrics;
+  insight?: CampaignInsight;
   preflight?: CampaignPreflight;
   agentRuns: AgentRun[];
   latestAgentRun?: AgentRunDetail;
@@ -283,6 +339,9 @@ export type CampaignRunSummary = {
   campaign: Campaign;
   discovered_lead_count: number;
   researched_lead_count: number;
+  contacted_lead_count: number;
+  verified_lead_count: number;
+  signaled_lead_count: number;
   qualified_lead_count: number;
   drafted_message_count: number;
 };

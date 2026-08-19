@@ -3,6 +3,7 @@ import { CampaignsScreen } from "../screens/CampaignsScreen";
 import { ConnectionsScreen } from "../screens/ConnectionsScreen";
 import { ConversationsScreen } from "../screens/ConversationsScreen";
 import { LeadsScreen } from "../screens/LeadsScreen";
+import { InsightsScreen } from "../screens/InsightsScreen";
 import { OverviewScreen } from "../screens/OverviewScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import type { Screen } from "../types/navigation";
@@ -23,6 +24,8 @@ export function renderScreen(
       return <CampaignsScreen onNavigate={setActiveScreen} />;
     case "leads":
       return <LeadsScreen />;
+    case "insights":
+      return <InsightsScreen />;
     case "approvals":
       return <ApprovalsScreen />;
     case "conversations":
