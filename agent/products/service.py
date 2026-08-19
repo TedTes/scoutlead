@@ -64,7 +64,7 @@ class ProductService:
                 "product description is too short",
                 {"minimum_length": 20},
             )
-        name = self._name_from_description(description)
+        name = normalize_text(request.product_name)
         target_customer = self._target_customer_from_description(description, name)
         problem = self._problem_from_description(description, target_customer)
         value = self._value_from_description(description, target_customer, name)
@@ -832,25 +832,6 @@ class ProductService:
         host = urlparse(source_url).hostname or ""
         first_label = host.split(".", maxsplit=1)[0]
         return first_label or None
-
-    @staticmethod
-    def _name_from_description(description: str) -> str:
-        first_sentence = re.split(r"[.!?\n]", description, maxsplit=1)[0].strip()
-        explicit_name = re.match(
-            r"^(?:product|app|tool|platform)\s+(?:called|named)\s+([A-Za-z][A-Za-z0-9 -]{1,60})",
-            first_sentence,
-            flags=re.IGNORECASE,
-        )
-        if explicit_name:
-            return truncate(explicit_name.group(1).strip(" :-"), 80)
-        lead_name = re.match(
-            r"^([A-Z][A-Za-z0-9]*(?:[ -][A-Z][A-Za-z0-9]*){0,3})\s+"
-            r"(?:helps|lets|enables|allows|is|provides|gives|makes|replaces|automates|offers)\b",
-            first_sentence,
-        )
-        if lead_name:
-            return truncate(lead_name.group(1).strip(), 80)
-        return "New Product"
 
     @staticmethod
     def _target_customer_from_description(description: str, product_name: str) -> str:

@@ -253,6 +253,7 @@ def test_product_can_be_created_from_description_without_llm_or_scraping() -> No
             browser=ExplodingBrowser(),
         ).create_from_description(
             ProductDescriptionCreate(
+                product_name="QuoteVan",
                 description=(
                     "QuoteVan helps home-service painters capture job scope during a "
                     "walkthrough, send a professional quote before leaving the job, and "
