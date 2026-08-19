@@ -1,15 +1,100 @@
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import type { Tone } from "../types/navigation";
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle: string; actions?: ReactNode }) {
+type ToastInput = {
+  title: string;
+  message?: string;
+  tone?: Tone;
+};
+
+type ToastItem = ToastInput & {
+  id: string;
+};
+
+type ToastContextValue = {
+  showToast: (toast: ToastInput) => void;
+};
+
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
+  const showToast = useCallback(
+    (toast: ToastInput) => {
+      const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+      const nextToast = { ...toast, id, tone: toast.tone || "blue" };
+      setToasts((current) => [...current.slice(-3), nextToast]);
+      window.setTimeout(() => dismissToast(id), 4200);
+    },
+    [dismissToast],
+  );
+
+  const value = useMemo(() => ({ showToast }), [showToast]);
+
   return (
-    <div className="page-header">
-      <div>
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
+    <ToastContext.Provider value={value}>
+      {children}
+      <div className="toast-stack" aria-live="polite" aria-atomic="true">
+        {toasts.map((toast) => (
+          <div className={`toast tone-${toast.tone}`} key={toast.id}>
+            <strong>{toast.title}</strong>
+            {toast.message ? <span>{toast.message}</span> : null}
+            <button className="link-button" type="button" aria-label="Dismiss message" onClick={() => dismissToast(toast.id)}>
+              <X size={14} />
+            </button>
+          </div>
+        ))}
       </div>
-      {actions && <div className="page-actions">{actions}</div>}
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast() {
+  const value = useContext(ToastContext);
+  if (!value) {
+    throw new Error("useToast must be used inside ToastProvider");
+  }
+  return value;
+}
+
+export function Modal({
+  title,
+  children,
+  footer,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <h2>{title}</h2>
+          <button className="link-button" type="button" aria-label="Close dialog" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="modal-body">{children}</div>
+        {footer ? <footer>{footer}</footer> : null}
+      </section>
     </div>
   );
 }
@@ -81,8 +166,13 @@ export function ChipSet({
   );
 }
 
-export function StatusPill({ children, tone }: { children: ReactNode; tone: Tone }) {
-  return <span className={`pill tone-${tone}`}>{children}</span>;
+export function StatusPill({ children, tone, dot }: { children: ReactNode; tone: Tone; dot?: boolean }) {
+  return (
+    <span className={`pill tone-${tone}`}>
+      {dot && <i className={`dot tone-${tone}`} />}
+      {children}
+    </span>
+  );
 }
 
 export function Subhead({ children }: { children: ReactNode }) {

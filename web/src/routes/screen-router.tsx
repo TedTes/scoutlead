@@ -12,13 +12,13 @@ export function renderScreen(
   setActiveScreen: (screen: Screen) => void,
   productEditor: {
     isCreatingProduct: boolean;
-    newProductToken: number;
+    newCampaignToken: number;
     onCreatingProductChange: (isCreating: boolean) => void;
   },
 ) {
   switch (screen) {
     case "product":
-      return <ProductScreen {...productEditor} />;
+      return <ProductScreen {...productEditor} onNavigate={setActiveScreen} />;
     case "campaigns":
       return <CampaignsScreen onNavigate={setActiveScreen} />;
     case "leads":
@@ -30,6 +30,6 @@ export function renderScreen(
     case "connections":
       return <ConnectionsScreen />;
     default:
-      return <OverviewScreen onNewCampaign={() => setActiveScreen("campaigns")} />;
+      return <OverviewScreen />;
   }
 }

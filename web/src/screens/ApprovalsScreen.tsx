@@ -1,7 +1,7 @@
 import { Check, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAppData } from "../state/app-data";
-import { PageHeader, StatusPill } from "../shared-ui";
+import { StatusPill } from "../shared-ui";
 import type { Message } from "../types/domain";
 import { statusTone } from "../utils/status";
 
@@ -31,12 +31,6 @@ export function ApprovalsScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Approval queue"
-        subtitle="No message sends without a human sign-off. Review, edit, then approve."
-        actions={<span>{approvalMessages.length} awaiting review</span>}
-      />
-
       <div className="approval-list">
         {approvalMessages.length === 0 ? (
           <article className="approval-card">

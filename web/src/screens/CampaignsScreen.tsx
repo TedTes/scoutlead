@@ -1,41 +1,25 @@
-import { Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAppData } from "../state/app-data";
-import { Card, PageHeader, StatCard, StatusPill } from "../shared-ui";
-import type { Campaign, CampaignCreateInput, Metrics } from "../types/domain";
+import { Card, StatCard, StatusPill } from "../shared-ui";
+import type { Campaign, Metrics } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
 
-type CampaignDraft = {
-  source: string;
-};
-
-const defaultCampaignDraft: CampaignDraft = {
-  source: "",
-};
-
 export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
   const {
-    selectedProductId,
-    selectedProduct,
     productCampaigns,
     selectedCampaignId,
     snapshot,
-    createCampaign,
     deleteCampaigns,
-    updateSelectedProduct,
     setSelectedCampaignId,
     runCampaign,
     pauseCampaign,
     resumeCampaign,
     enqueueCampaign,
   } = useAppData();
-  const [showNewCampaign, setShowNewCampaign] = useState(false);
-  const [draft, setDraft] = useState<CampaignDraft>(defaultCampaignDraft);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const metrics = snapshot.metrics;
-  const canCreateCampaign = Boolean(selectedProductId);
   const runningCampaigns = productCampaigns.filter((campaign) =>
     ["discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(
       campaign.status,
@@ -49,42 +33,6 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
   const allVisibleSelected =
     productCampaigns.length > 0 &&
     productCampaigns.every((campaign) => selectedCampaignIds.includes(campaign.id));
-  const defaultCampaignName = useMemo(() => {
-    const date = new Date().toISOString().slice(0, 10);
-    return selectedProduct ? `${selectedProduct.product_name} validation ${date}` : `Campaign ${date}`;
-  }, [selectedProduct]);
-
-  const openNewCampaign = () => {
-    setDraft(defaultCampaignDraft);
-    setShowNewCampaign(true);
-  };
-
-  const updateDraft = (field: keyof CampaignDraft, value: string) => {
-    setDraft((current) => ({ ...current, [field]: value }));
-  };
-
-  const submitCampaign = async () => {
-    if (!selectedProductId || !canCreateCampaign) return;
-    const source = draft.source.trim();
-    if (selectedProduct && source) {
-      await updateSelectedProduct({
-        preferred_discovery_sources: [{ type: "web_search", value: source, limit: 10 }],
-      });
-    }
-    const input: CampaignCreateInput = {
-      product_id: selectedProductId,
-      name: defaultCampaignName,
-      max_leads: 10,
-      channels: ["email"],
-      discovery_seeds: [],
-      goal_override: null,
-    };
-    const created = await createCampaign(input);
-    if (created) {
-      setShowNewCampaign(false);
-      setDraft(defaultCampaignDraft);
-    }
-  };
 
   const toggleSelectedCampaign = (campaignId: string) => {
     setSelectedCampaignIds((current) =>
@@ -110,45 +58,6 @@ export function CampaignsScreen({ onNavigate }: { onNavigate: (screen: Screen) =
 
   return (
     <>
-      <PageHeader
-        title="Campaigns"
-        subtitle="Repeatable discovery + outreach runs against your ICP."
-        actions={
-          <button disabled={!selectedProductId} onClick={openNewCampaign}>
-            <Plus size={14} />
-            New campaign
-          </button>
-        }
-      />
-
-      {showNewCampaign ? (
-        <div className="campaign-setup">
-          <Card title="New campaign" meta={<StatusPill tone="blue">Draft</StatusPill>}>
-            <div className="source-create">
-              <label className="field">
-                <span>Discovery source</span>
-                <input
-                  autoFocus
-                  placeholder="residential painters Austin Texas or https://directory.example"
-                  value={draft.source}
-                  onChange={(event) => updateDraft("source", event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void submitCampaign();
-                  }}
-                />
-                <em>Blank uses the selected product discovery profile.</em>
-              </label>
-              <button disabled={!canCreateCampaign} onClick={submitCampaign}>
-                Create campaign
-              </button>
-              <button className="secondary" onClick={() => setShowNewCampaign(false)}>
-                Cancel
-              </button>
-            </div>
-          </Card>
-        </div>
-      ) : null}
-
       <div className="stat-grid four">
         <StatCard label="Running campaigns" value={String(runningCampaigns.length)} />
         <StatCard label="Needs review" value={String(awaitingApprovalCampaigns.length)} />

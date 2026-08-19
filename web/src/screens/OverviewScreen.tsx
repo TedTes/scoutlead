@@ -1,4 +1,3 @@
-import { Download, Plus } from "lucide-react";
 import { useAppData } from "../state/app-data";
 import { Card, StatCard, StatusPill } from "../shared-ui";
 import type { Conversation, Lead } from "../types/domain";
@@ -6,8 +5,8 @@ import type { Tone } from "../types/navigation";
 import { formatPercent } from "../utils/format";
 import { statusTone } from "../utils/status";
 
-export function OverviewScreen({ onNewCampaign }: { onNewCampaign: () => void }) {
-  const { selectedProduct, selectedCampaign, snapshot } = useAppData();
+export function OverviewScreen() {
+  const { selectedCampaign, snapshot } = useAppData();
   const metrics = snapshot.metrics;
   const funnel = [
     { label: "Sourced", value: metrics?.lead_count ?? 0, pct: "100%", width: 100, tone: "gray" as Tone },
@@ -51,8 +50,6 @@ export function OverviewScreen({ onNewCampaign }: { onNewCampaign: () => void })
 
   return (
     <>
-      <PageIntro productName={selectedProduct?.product_name || "No product"} onNewCampaign={onNewCampaign} />
-
       <div className="campaign-status-strip">
         <StatusPill tone={statusTone(selectedCampaign?.status || "draft")}>Active campaign</StatusPill>
         <strong>{selectedCampaign?.name || selectedCampaign?.id || "No campaign selected"}</strong>
@@ -103,27 +100,6 @@ export function OverviewScreen({ onNewCampaign }: { onNewCampaign: () => void })
         </Card>
       </div>
     </>
-  );
-}
-
-function PageIntro({ productName, onNewCampaign }: { productName: string; onNewCampaign: () => void }) {
-  return (
-    <div className="page-header">
-      <div>
-        <h1>Overview</h1>
-        <p>Validating {productName}</p>
-      </div>
-      <div className="page-actions">
-        <button className="secondary">
-          <Download size={14} />
-          Export report
-        </button>
-        <button onClick={onNewCampaign}>
-          <Plus size={14} />
-          New campaign
-        </button>
-      </div>
-    </div>
   );
 }
 

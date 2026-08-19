@@ -2,7 +2,7 @@ import type { Tone } from "../types/navigation";
 
 export function statusTone(status: string): Tone {
   const value = status.toLowerCase();
-  if (["running", "researching", "outreach_drafted", "sent"].includes(value)) return "blue";
+  if (["running", "researching", "discovered", "outreach_drafted", "sent"].includes(value)) return "blue";
   if (
     ["active", "connected", "qualified", "completed", "interested", "meeting booked", "approved", "responded"].includes(
       value,
@@ -11,11 +11,13 @@ export function statusTone(status: string): Tone {
     return "green";
   }
   if (
-    ["paused", "pending", "queued", "waiting", "review", "not now", "degraded", "awaiting_approval"].includes(value)
+    ["paused", "pending", "queued", "waiting", "review", "researched", "not now", "degraded", "awaiting_approval"].includes(
+      value,
+    )
   ) {
     return "amber";
   }
-  if (["objection", "disqualified", "failed", "cancelled"].includes(value)) return "red";
+  if (["objection", "failed", "cancelled"].includes(value)) return "red";
   return "gray";
 }
 
@@ -24,4 +26,26 @@ export function scoreTone(score: number): Tone {
   if (normalized >= 80) return "green";
   if (normalized >= 60) return "amber";
   return "gray";
+}
+
+const LEAD_STAGE_LABELS: Record<string, string> = {
+  discovered: "Researching",
+  researching: "Researching",
+  researched: "Review",
+  qualified: "Qualified",
+  disqualified: "Disqualified",
+  outreach_drafted: "Drafting outreach",
+  awaiting_approval: "Awaiting approval",
+  approved: "Approved",
+  sent: "Sent",
+  responded: "Responded",
+  archived: "Archived",
+};
+
+export function leadStageLabel(status: string): string {
+  return LEAD_STAGE_LABELS[status.toLowerCase()] ?? status.replace(/_/g, " ");
+}
+
+export function isLiveLeadStage(status: string): boolean {
+  return ["discovered", "researching", "outreach_drafted", "sent"].includes(status.toLowerCase());
 }

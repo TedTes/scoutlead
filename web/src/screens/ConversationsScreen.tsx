@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
-import { Card, ConversationStat, PageHeader, StatusPill } from "../shared-ui";
+import { Card, ConversationStat, StatusPill } from "../shared-ui";
 import type { Conversation } from "../types/domain";
 import { formatDate } from "../utils/format";
 import { statusTone } from "../utils/status";
@@ -23,11 +23,6 @@ export function ConversationsScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Conversations"
-        subtitle="Replies captured and auto-classified. Confirm or reclassify to train targeting."
-      />
-
       <div className="stat-grid six">
         <ConversationStat label="Interview" value={String(intentCounts.interview_request)} tone="green" />
         <ConversationStat label="Interested" value={String(intentCounts.interested)} tone="green" />

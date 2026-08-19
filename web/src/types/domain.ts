@@ -21,6 +21,7 @@ export type Product = {
 };
 
 export type ProductDescriptionInput = {
+  product_name: string;
   description: string;
   target_geography?: string;
 };

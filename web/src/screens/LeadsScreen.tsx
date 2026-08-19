@@ -1,14 +1,13 @@
-import { ChevronRight, Play } from "lucide-react";
 import { useState } from "react";
 import { useAppData } from "../state/app-data";
-import { ChipSet, PageHeader, StatusPill } from "../shared-ui";
+import { ChipSet, StatusPill } from "../shared-ui";
 import type { Lead } from "../types/domain";
-import { scoreTone, statusTone } from "../utils/status";
+import { isLiveLeadStage, leadStageLabel, scoreTone, statusTone } from "../utils/status";
 
 type LeadFilter = "all" | "qualified" | "review" | "disqualified";
 
 export function LeadsScreen() {
-  const { selectedCampaign, snapshot, runCampaign } = useAppData();
+  const { snapshot } = useAppData();
   const [expandedLeadId, setExpandedLeadId] = useState("");
   const [filter, setFilter] = useState<LeadFilter>("all");
   const leads = snapshot.leads;
@@ -21,32 +20,14 @@ export function LeadsScreen() {
     if (filter === "disqualified") return lead.status === "disqualified";
     return true;
   });
-  const canRunCampaign = selectedCampaign
-    ? ["draft", "paused"].includes(selectedCampaign.status)
-    : false;
-  const preflightReady = snapshot.preflight?.ready ?? true;
 
   return (
     <>
-      <PageHeader
-        title="Lead discovery"
-        subtitle="Matched companies with AI research and qualification. Click a row for the full dossier."
-        actions={
-          <>
-            <button className="secondary">Export CSV</button>
-            <button disabled={!canRunCampaign || !preflightReady} onClick={() => runCampaign()}>
-              <Play size={14} />
-              Run discovery
-            </button>
-          </>
-        }
-      />
-
       <div className="tabs">
-        <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All - {leads.length}</button>
-        <button className={filter === "qualified" ? "active" : ""} onClick={() => setFilter("qualified")}>Qualified - {qualified}</button>
-        <button className={filter === "review" ? "active" : ""} onClick={() => setFilter("review")}>Review - {review}</button>
-        <button className={filter === "disqualified" ? "active" : ""} onClick={() => setFilter("disqualified")}>Disqualified - {disqualified}</button>
+        <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All · {leads.length}</button>
+        <button className={filter === "qualified" ? "active" : ""} onClick={() => setFilter("qualified")}>Qualified · {qualified}</button>
+        <button className={filter === "review" ? "active" : ""} onClick={() => setFilter("review")}>Review · {review}</button>
+        <button className={filter === "disqualified" ? "active" : ""} onClick={() => setFilter("disqualified")}>Disqualified · {disqualified}</button>
       </div>
 
       <div className="lead-list-shell">
@@ -55,12 +36,11 @@ export function LeadsScreen() {
         ) : (
           <div className="lead-list">
             <div className="lead-list-head" aria-hidden="true">
-              <span />
               <span>Company</span>
-              <span>Contact</span>
-              <span>Location</span>
+              <span>Owner</span>
               <span>Signals</span>
               <span>Score</span>
+              <span>Stage</span>
             </div>
             {visibleLeads.map((lead) => (
               <LeadRow
@@ -80,6 +60,13 @@ export function LeadsScreen() {
 function LeadRow({ lead, expanded, onToggle }: { lead: Lead; expanded: boolean; onToggle: () => void }) {
   const score = lead.qualification?.score ?? lead.research?.confidence;
   const url = lead.website_url || lead.research?.website_url || "";
+  const preResearch = lead.status === "discovered" || lead.status === "researching";
+  const owner = lead.research?.contact_name || lead.contact_email || lead.research?.contact_email || "";
+  const ownerDetail = preResearch
+    ? "researching..."
+    : lead.research?.contact_email && lead.research.contact_email !== owner
+      ? lead.research.contact_email
+      : "";
   const signals = [
     ...(lead.research?.signals || []),
     ...(lead.research?.pain_indicators || []).map((signal) => `pain: ${signal}`),
@@ -93,37 +80,31 @@ function LeadRow({ lead, expanded, onToggle }: { lead: Lead; expanded: boolean; 
       aria-expanded={expanded}
     >
       <div className="lead-row-main">
-        <ChevronRight className="row-chevron" size={16} />
         <div className="lead-company-cell">
           <strong>{lead.company_name}</strong>
-          <span>{url ? displayUrl(url) : "No website captured"}</span>
+          <span>{lead.geography || lead.research?.geography || "—"}</span>
         </div>
         <div className="lead-contact-cell">
-          <span>Contact</span>
-          <strong>{lead.research?.contact_name || lead.research?.contact_email || lead.contact_email || "No contact found"}</strong>
-        </div>
-        <div className="lead-meta-cell">
-          <span>Location</span>
-          <strong>{lead.geography || lead.research?.geography || "Unknown"}</strong>
+          <strong>{owner || "—"}</strong>
+          <span className={preResearch ? "muted" : ""}>{ownerDetail || "—"}</span>
         </div>
         <div className="lead-signal-cell">
           {signals.length ? <ChipSet values={signals} small /> : <span>{lead.description || "No signal captured"}</span>}
         </div>
         <div className="lead-score-cell">
-          <div className="lead-score-item">
-            <span>Score</span>
-            {score === undefined ? <strong className="muted">-</strong> : <StatusPill tone={scoreTone(score)}>{score}</StatusPill>}
-          </div>
-          <div className="lead-score-item">
-            <span>Status</span>
-            <StatusPill tone={statusTone(lead.status)}>{lead.status.replace(/_/g, " ")}</StatusPill>
-          </div>
+          {score === undefined ? <span className="muted">–</span> : <StatusPill tone={scoreTone(score)}>{score}</StatusPill>}
+        </div>
+        <div className="lead-stage-cell">
+          <StatusPill tone={statusTone(lead.status)} dot={isLiveLeadStage(lead.status)}>
+            {leadStageLabel(lead.status)}
+          </StatusPill>
         </div>
       </div>
       {expanded && (
         <div className="lead-dossier">
           <section>
             <strong>Research</strong>
+            {url && <p className="dossier-website">{displayUrl(url)}</p>}
             <p>{lead.research?.summary || "No research captured yet."}</p>
           </section>
           <section>

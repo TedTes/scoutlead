@@ -32,11 +32,12 @@ type AppDataContextValue = {
   setSelectedCampaignId: (campaignId: string) => void;
   refreshAll: () => Promise<void>;
   refreshSnapshot: (campaignId?: string) => Promise<void>;
-  createProduct: (input: unknown) => Promise<boolean>;
-  createProductFromDescription: (input: ProductDescriptionInput) => Promise<boolean>;
+  createProduct: (input: unknown) => Promise<Product | null>;
+  createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
   deleteProduct: (productId?: string) => Promise<void>;
+  updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
-  createCampaign: (input: CampaignCreateInput) => Promise<boolean>;
+  createCampaign: (input: CampaignCreateInput) => Promise<Campaign | null>;
   deleteCampaigns: (campaignIds: string[]) => Promise<void>;
   runCampaign: (campaignId?: string) => Promise<void>;
   enqueueCampaign: (campaignId?: string) => Promise<void>;
@@ -215,21 +216,21 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       refreshAll,
       refreshSnapshot,
       createProduct: async (input) => {
-        let created = false;
+        let created: Product | null = null;
         await mutate(async () => {
           const product = await api.createProduct(input);
           localStorage.setItem("selectedProductId", product.id);
-          created = true;
+          created = product;
         });
         return created;
       },
       createProductFromDescription: async (input) => {
-        let created = false;
+        let created: Product | null = null;
         await mutate(async () => {
           const product = await api.createProductFromDescription(input);
           localStorage.setItem("selectedProductId", product.id);
           localStorage.setItem("selectedCampaignId", "");
-          created = true;
+          created = product;
         });
         return created;
       },
@@ -242,17 +243,22 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem("selectedCampaignId", "");
           }
         }),
+      updateProduct: (productId, update) =>
+        mutate(async () => {
+          if (!productId) return;
+          await api.updateProduct(productId, update);
+        }),
       updateSelectedProduct: (update) =>
         mutate(async () => {
           if (!selectedProductIdState) return;
           await api.updateProduct(selectedProductIdState, update);
         }),
       createCampaign: async (input) => {
-        let created = false;
+        let created: Campaign | null = null;
         await mutate(async () => {
           const campaign = await api.createCampaign(input);
           localStorage.setItem("selectedCampaignId", campaign.id);
-          created = true;
+          created = campaign;
         });
         return created;
       },
