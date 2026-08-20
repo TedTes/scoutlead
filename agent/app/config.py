@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     search_api_endpoint: str | None = None
     search_api_key: str | None = None
     search_provider: Literal["generic", "tavily", "brave"] = "generic"
+    google_places_api_key: str | None = None
+    google_places_api_endpoint: str | None = None
 
     allow_mock_providers: bool = False
     require_real_search: bool = False

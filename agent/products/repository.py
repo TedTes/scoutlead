@@ -9,6 +9,7 @@ from db.models import (
     CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
+    CampaignSourceModel,
     ConversationEventModel,
     ConversationModel,
     DiscoveryCandidateModel,
@@ -216,6 +217,7 @@ class ProductRepository:
             self.session.execute(delete(ToolCallModel).where(ToolCallModel.campaign_id.in_(campaign_ids)))
             self.session.execute(delete(AgentStepModel).where(AgentStepModel.campaign_id.in_(campaign_ids)))
             self.session.execute(delete(AgentRunModel).where(AgentRunModel.campaign_id.in_(campaign_ids)))
+            self.session.execute(delete(CampaignSourceModel).where(CampaignSourceModel.campaign_id.in_(campaign_ids)))
             self.session.execute(
                 delete(QueueJobModel).where(QueueJobModel.payload["campaign_id"].as_string().in_(campaign_ids))
             )

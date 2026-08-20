@@ -48,6 +48,11 @@ class ResearchWorkflow:
                     "inspection": inspection.model_dump(mode="json") if inspection else None,
                 },
             )
+            scraped_emails = inspection.emails if inspection else []
+            candidates = list(
+                dict.fromkeys([*scraped_emails, *([research.contact_email] if research.contact_email else [])])
+            )
+            research = research.model_copy(update={"contact_candidates": candidates})
             researched.append(LeadRead.model_validate(self.leads.attach_research(lead.id, research)))
         self.memory.create_observation(
             CampaignMemoryCreate(

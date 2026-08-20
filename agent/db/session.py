@@ -108,3 +108,5 @@ def _ensure_campaign_runtime_columns(engine: Engine) -> None:
             connection.execute(text("UPDATE campaigns SET goal_type = 'learn' WHERE goal_type IS NULL"))
         if "icp_preset_id" not in existing_columns:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN icp_preset_id VARCHAR(255)"))
+        if "source_preset_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE campaigns ADD COLUMN source_preset_id VARCHAR(255)"))

@@ -1,0 +1,23 @@
+{
+  "id": "google-places-local-business",
+  "name": "Google Places local business",
+  "description": "Use Google Places Text Search to discover real local businesses for service-business validation campaigns.",
+  "sources": [
+    {
+      "slot": "discovery",
+      "provider_id": "google_places",
+      "mode": "accumulate",
+      "input": {
+        "query": "{{query}}",
+        "geography": "{{geography}}"
+      },
+      "config": {
+        "limit": "{{limit}}",
+        "region_code": "US",
+        "include_pure_service_area_businesses": true
+      },
+      "priority": 10,
+      "enabled": true
+    }
+  ]
+}

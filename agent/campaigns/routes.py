@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, Response, status
 from agent_runs.schemas import AgentRunCreate, AgentRunRead
 from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, DbSession, get_services
+from campaign_sources.repository import CampaignSourceRepository
+from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary
 from campaigns.service import CampaignService
 from evaluation.schemas import CampaignMetrics
@@ -20,6 +22,9 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         search_tool=services.search,
         browser=services.browser,
         email=services.email,
+        google_places_api_key=services.settings.google_places_api_key,
+        google_places_api_endpoint=services.settings.google_places_api_endpoint,
+        timeout_seconds=services.settings.request_timeout_seconds,
     )
 
 
@@ -47,6 +52,11 @@ def get_campaign(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return _service(session, services).get(campaign_id)
+
+
+@router.get("/{campaign_id}/sources", response_model=list[CampaignSourceRead])
+def list_campaign_sources(campaign_id: str, session: DbSession):
+    return CampaignSourceRepository(session).list_by_campaign(campaign_id)
 
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)

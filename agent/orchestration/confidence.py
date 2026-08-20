@@ -39,7 +39,9 @@ def downgrade_contact_confidence(
 ) -> dict[str, Any]:
     current_confidence = lead.research.confidence if lead.research else 0
     if verdict == "valid":
-        updated_confidence = max(current_confidence, confidence)
+        # A "valid" verdict here is only a syntax check, not real deliverability
+        # verification. It may confirm existing confidence but must never raise it.
+        updated_confidence = min(current_confidence, confidence)
     elif verdict in {"risky", "unknown"}:
         updated_confidence = min(current_confidence, confidence)
     else:

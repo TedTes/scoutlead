@@ -1,0 +1,22 @@
+{
+  "id": "default-web-validation",
+  "name": "Default web validation",
+  "description": "Use the configured search adapter for discovery, then run existing contact, verify, and signal slots.",
+  "sources": [
+    {
+      "slot": "discovery",
+      "provider_id": "configured_search",
+      "mode": "accumulate",
+      "input": {
+        "query": "{{query}}",
+        "source_type": "{{source_type}}",
+        "geography": "{{geography}}"
+      },
+      "config": {
+        "limit": "{{limit}}"
+      },
+      "priority": 10,
+      "enabled": true
+    }
+  ]
+}

@@ -35,6 +35,7 @@ class LeadResearch(BaseModel):
     website_url: str | None = None
     contact_email: str | None = None
     contact_name: str | None = None
+    contact_candidates: list[str] = Field(default_factory=list)
     signals: list[str] = Field(default_factory=list)
     pain_indicators: list[str] = Field(default_factory=list)
     disqualifiers: list[str] = Field(default_factory=list)

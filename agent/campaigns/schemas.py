@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,6 +55,9 @@ class CampaignCreate(BaseModel):
     name: str = Field(min_length=1)
     goal_type: CampaignGoalType = CampaignGoalType.LEARN
     icp_preset_id: str | None = None
+    source_preset_id: str | None = None
+    source_input: str | None = None
+    source_inputs: dict[str, Any] = Field(default_factory=dict)
     max_leads: int = Field(gt=0, le=1000)
     channels: list[OutreachChannel] = Field(default_factory=lambda: [OutreachChannel.EMAIL])
     discovery_seeds: list[LeadSeedInput] = Field(default_factory=list)

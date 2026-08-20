@@ -13,7 +13,7 @@ from orchestration.confidence import downgrade_contact_confidence
 from orchestration.slot_runner import SlotRunner
 from products.schemas import ProductRead
 from tools.base import ToolExecutionMode, ToolSlot
-from tools.verify import EmailSyntaxVerifyTool
+from tools.registry import resolve_tools
 
 
 class VerifyWorkflow:
@@ -48,7 +48,7 @@ class VerifyWorkflow:
         )
         processed: list[LeadRead] = []
         runner = SlotRunner()
-        tools = [EmailSyntaxVerifyTool()]
+        tools = resolve_tools(self.slot_config)
         for lead_model in self.leads.list_by_campaign(campaign.id):
             lead = LeadRead.model_validate(lead_model)
             if lead.status != LeadStatus.RESEARCHED:

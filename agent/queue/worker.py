@@ -33,6 +33,9 @@ def run_once() -> bool:
                     search_tool=services.search,
                     browser=services.browser,
                     email=services.email,
+                    google_places_api_key=services.settings.google_places_api_key,
+                    google_places_api_endpoint=services.settings.google_places_api_endpoint,
+                    timeout_seconds=services.settings.request_timeout_seconds,
                 ).run_campaign(agent_run.campaign_id, agent_run_id=agent_run.id)
             except Exception:
                 logger.exception("agent_run_failed run_id=%s", agent_run.id)
@@ -50,6 +53,9 @@ def run_once() -> bool:
                     search_tool=services.search,
                     browser=services.browser,
                     email=services.email,
+                    google_places_api_key=services.settings.google_places_api_key,
+                    google_places_api_endpoint=services.settings.google_places_api_endpoint,
+                    timeout_seconds=services.settings.request_timeout_seconds,
                 ).run_campaign(str(job.payload["campaign_id"]))
             elif job.type == JobType.MESSAGE_SEND.value:
                 MessageService(session=session, email=services.email).send(

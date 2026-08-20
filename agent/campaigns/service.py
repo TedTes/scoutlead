@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from agent_runs.repository import AgentRunRepository
 from agents.llm import LLMClient, MissingLLMClient
 from agents.runner import ToolAction
+from campaign_sources.repository import CampaignSourceRepository
+from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import (
     CampaignCreate,
@@ -28,15 +30,19 @@ from icp.service import ICPPresetService
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 from memory.repository import MemoryRepository
+from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
+from orchestration.hit_rate import calculate_hit_rates
 from products.repository import ProductRepository
-from products.schemas import DiscoverySourceType, ProductRead
+from products.schemas import ProductRead
 from shared.errors import ConflictError
 from shared.utils import truncate
+from source_presets.service import SourcePresetService
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
+from tools.source_registry import SourceAdapterRegistry
 from workflows.discovery import DiscoveryWorkflow
 from workflows.contact import ContactWorkflow
 from workflows.outreach import OutreachWorkflow
@@ -144,16 +150,24 @@ class CampaignService:
         search_tool: SearchTool,
         browser: DirectHttpBrowserTool,
         email: EmailTool | None = None,
+        google_places_api_key: str | None = None,
+        google_places_api_endpoint: str | None = None,
+        timeout_seconds: float = 20.0,
     ) -> None:
         self.session = session
         self.llm = llm
         self.search_tool = search_tool
         self.browser = browser
         self.email = email or EmailTool()
+        self.google_places_api_key = google_places_api_key
+        self.google_places_api_endpoint = google_places_api_endpoint
+        self.timeout_seconds = timeout_seconds
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)
+        self.campaign_sources = CampaignSourceRepository(session)
         self.agent_runs = AgentRunRepository(session)
         self.icp_presets = ICPPresetService()
+        self.source_presets = SourcePresetService()
         self.discovery_candidates = DiscoveryCandidateRepository(session)
         self.leads = LeadRepository(session)
         self.messages = MessageRepository(session)
@@ -161,8 +175,16 @@ class CampaignService:
         self.memory = MemoryRepository(session)
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:
-        self.products.get(campaign.product_id)
-        return self.campaigns.create(campaign)
+        product = ProductRead.model_validate(self.products.get(campaign.product_id))
+        campaign_model = self.campaigns.create(campaign)
+        sources = self.source_presets.expand_for_campaign(
+            campaign_id=campaign_model.id,
+            campaign=campaign,
+            product=product,
+        )
+        if sources:
+            self.campaign_sources.create_many(sources)
+        return campaign_model
 
     def list(self) -> list[CampaignModel]:
         return self.campaigns.list()
@@ -221,10 +243,14 @@ class CampaignService:
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda step_id: DiscoveryWorkflow(
                     campaigns=self.campaigns,
+                    campaign_sources=self.campaign_sources,
                     candidates=self.discovery_candidates,
                     leads=self.leads,
                     memory=self.memory,
                     search_tool=self.search_tool,
+                    google_places_api_key=self.google_places_api_key,
+                    google_places_api_endpoint=self.google_places_api_endpoint,
+                    timeout_seconds=self.timeout_seconds,
                     **self._tool_call_callbacks(
                         agent_run_id=agent_run_id,
                         campaign_id=campaign_id,
@@ -346,6 +372,9 @@ class CampaignService:
                 ).run(product, campaign_read),
             )
 
+            if agent_run_id:
+                self._log_hit_rates(agent_run_id=agent_run_id, campaign_id=campaign_id, product_id=product.id)
+
             summary = CampaignRunSummary(
                 campaign=CampaignRead.model_validate(self.campaigns.get(campaign_id)),
                 discovered_lead_count=len(discovered),
@@ -367,6 +396,36 @@ class CampaignService:
             if agent_run_id:
                 self.agent_runs.fail(agent_run_id, str(exc))
             raise
+
+    def _log_hit_rates(self, *, agent_run_id: str, campaign_id: str, product_id: str) -> None:
+        """Surface per-provider hit-rate for this run as a readable observation.
+
+        This is manual feedback for the operator (see ICP integration model) --
+        it is logged, never used to auto-tune preset selection.
+        """
+        rows = [
+            tool_call.observation
+            for tool_call in self.agent_runs.list_tool_calls(agent_run_id)
+            if isinstance(tool_call.observation, dict)
+            and "confidence" in tool_call.observation
+            and "slot" in tool_call.observation
+        ]
+        if not rows:
+            return
+        hit_rates = calculate_hit_rates(rows)
+        summary_line = "; ".join(
+            f"{rate.slot}/{rate.provider}: {rate.accepted}/{rate.calls} accepted"
+            for rate in hit_rates
+        )
+        self.memory.create_observation(
+            CampaignMemoryCreate(
+                product_id=product_id,
+                campaign_id=campaign_id,
+                type=ObservationType.TOOL_HIT_RATE,
+                content=f"Tool hit-rate for this run: {summary_line}",
+                tags=["hit_rate"],
+            )
+        )
 
     def metrics(self, campaign_id: str) -> CampaignMetrics:
         leads = [
@@ -405,9 +464,15 @@ class CampaignService:
     def _preflight_checks(
         self, campaign: CampaignRead, product: ProductRead
     ) -> list[CampaignPreflightCheck]:
-        sources = product.preferred_discovery_sources
-        has_seed_source = any(source.type == DiscoverySourceType.SEED for source in sources)
-        has_live_source = any(source.type != DiscoverySourceType.SEED for source in sources)
+        del product
+        sources = [
+            CampaignSourceRead.model_validate(source)
+            for source in self.campaign_sources.list_by_campaign(
+                campaign.id,
+                slot=CampaignSourceSlot.DISCOVERY,
+                enabled_only=True,
+            )
+        ]
         checks = [
             CampaignPreflightCheck(
                 name="Campaign status",
@@ -416,37 +481,45 @@ class CampaignService:
             )
         ]
 
-        if has_live_source:
-            missing_search_is_required = self.search_tool.require_config
+        if sources:
+            registry = SourceAdapterRegistry(
+                search_tool=self.search_tool,
+                google_places_api_key=self.google_places_api_key,
+                google_places_api_endpoint=self.google_places_api_endpoint,
+                timeout_seconds=self.timeout_seconds,
+            )
+            provider_ids = list(dict.fromkeys(source.provider_id for source in sources))
+            unregistered = [provider_id for provider_id in provider_ids if provider_id not in registry.adapters]
+            missing_config = registry.missing_configuration(provider_ids)
+            if "configured_search" in provider_ids and not self.search_tool.is_configured:
+                missing_config.append("configured_search")
+            missing_config = list(dict.fromkeys(missing_config))
+            required_missing_config = [
+                provider_id
+                for provider_id in missing_config
+                if provider_id != "configured_search" or self.search_tool.require_config
+            ]
+            failures = [*unregistered, *missing_config]
+            required_failures = [*unregistered, *required_missing_config]
             checks.append(
                 CampaignPreflightCheck(
-                    name="Search provider",
-                    status=(
-                        "ok"
-                        if self.search_tool.is_configured
-                        else "failed"
-                        if missing_search_is_required
-                        else "warning"
-                    ),
+                    name="Campaign sources",
+                    status="ok" if not failures else "failed" if required_failures else "warning",
                     detail=(
-                        f"{self.search_tool.provider} search configured"
-                        if self.search_tool.is_configured
-                        else "Configure SEARCH_PROVIDER plus SEARCH_API_KEY or SEARCH_API_ENDPOINT."
+                        f"{len(sources)} discovery source(s): {', '.join(provider_ids)}"
+                        if not failures
+                        else f"Missing or unavailable source provider(s): {', '.join(failures)}"
                     ),
-                    required=missing_search_is_required,
+                    required=bool(required_failures),
                 )
             )
         else:
             checks.append(
                 CampaignPreflightCheck(
-                    name="Search provider",
-                    status="warning" if has_seed_source else "failed",
-                    detail=(
-                        "Using seed discovery only; no live search will run."
-                        if has_seed_source
-                        else "No discovery sources configured."
-                    ),
-                    required=not has_seed_source,
+                    name="Campaign sources",
+                    status="failed",
+                    detail="No campaign discovery sources configured.",
+                    required=True,
                 )
             )
 
@@ -541,6 +614,7 @@ class CampaignService:
             "campaign_stage": campaign.stage.value,
             "goal_type": campaign.goal_type.value,
             "icp_preset_id": campaign.icp_preset_id,
+            "source_preset_id": campaign.source_preset_id,
             "max_leads": campaign.max_leads,
         }
 

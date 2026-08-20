@@ -4,6 +4,8 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from campaign_sources.repository import CampaignSourceRepository
+from campaign_sources.schemas import CampaignSourceCreate, CampaignSourceMode, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, CampaignRead
 from db.session import create_database
@@ -19,17 +21,22 @@ from workflows.discovery import DiscoveryWorkflow
 
 class FakeSearchTool:
     name = "search"
+    is_configured = True
 
     def __init__(self, rows: list[SearchResult]) -> None:
         self.rows = rows
 
-    @staticmethod
-    def build_query(*, product: ProductRead, campaign: CampaignRead, source: DiscoverySource) -> str:
-        del product, campaign
-        return source.value
-
-    def execute(self, args: dict[str, Any]) -> list[dict[str, Any]]:
-        return [row.model_dump(mode="json") for row in self.rows]
+    def search(
+        self,
+        *,
+        product: ProductRead,
+        campaign: CampaignRead,
+        source: DiscoverySource,
+        limit: int,
+        query: str | None = None,
+    ) -> list[SearchResult]:
+        del product, campaign, source, query
+        return self.rows[:limit]
 
 
 def test_discovery_stores_salary_result_as_rejected_candidate_not_lead() -> None:
@@ -48,9 +55,22 @@ def test_discovery_stores_salary_result_as_rejected_candidate_not_lead() -> None
                 )
             )
         )
+        CampaignSourceRepository(session).create_many(
+            [
+                CampaignSourceCreate(
+                    campaign_id=campaign.id,
+                    slot=CampaignSourceSlot.DISCOVERY,
+                    provider_id="configured_search",
+                    mode=CampaignSourceMode.ACCUMULATE,
+                    input={"query": '"residential painting company"', "source_type": "web_search"},
+                    config={"limit": 5},
+                )
+            ]
+        )
 
         workflow = DiscoveryWorkflow(
             campaigns=CampaignRepository(session),
+            campaign_sources=CampaignSourceRepository(session),
             candidates=DiscoveryCandidateRepository(session),
             leads=LeadRepository(session),
             memory=MemoryRepository(session),

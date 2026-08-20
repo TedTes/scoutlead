@@ -1,6 +1,8 @@
 from typing import Any, Callable
 
 from agents.runner import BoundedAgentRunner, StopAction, ToolAction
+from campaign_sources.repository import CampaignSourceRepository
+from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus, LeadSeedInput
 from discovery.classifier import assess_discovery_candidate
@@ -12,6 +14,7 @@ from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
 from tools.search import SearchResult, SearchTool
+from tools.source_registry import CampaignSourceTool, SourceAdapterRegistry
 
 
 class DiscoveryWorkflow:
@@ -19,19 +22,27 @@ class DiscoveryWorkflow:
         self,
         *,
         campaigns: CampaignRepository,
+        campaign_sources: CampaignSourceRepository,
         candidates: DiscoveryCandidateRepository,
         leads: LeadRepository,
         memory: MemoryRepository,
         search_tool: SearchTool,
+        google_places_api_key: str | None = None,
+        google_places_api_endpoint: str | None = None,
+        timeout_seconds: float = 20.0,
         on_tool_start: Callable[[ToolAction, int], str | None] | None = None,
         on_tool_success: Callable[[str, Any], None] | None = None,
         on_tool_error: Callable[[str, Exception], None] | None = None,
     ) -> None:
         self.campaigns = campaigns
+        self.campaign_sources = campaign_sources
         self.candidates = candidates
         self.leads = leads
         self.memory = memory
         self.search_tool = search_tool
+        self.google_places_api_key = google_places_api_key
+        self.google_places_api_endpoint = google_places_api_endpoint
+        self.timeout_seconds = timeout_seconds
         self.on_tool_start = on_tool_start
         self.on_tool_success = on_tool_success
         self.on_tool_error = on_tool_error
@@ -48,34 +59,50 @@ class DiscoveryWorkflow:
             discovered.append(LeadRead.model_validate(lead).model_dump(mode="json"))
 
         runner = BoundedAgentRunner()
-        sources = product.preferred_discovery_sources
+        sources = [
+            CampaignSourceRead.model_validate(source)
+            for source in self.campaign_sources.list_by_campaign(
+                campaign.id,
+                slot=CampaignSourceSlot.DISCOVERY,
+                enabled_only=True,
+            )
+        ]
+        source_tool = CampaignSourceTool(
+            SourceAdapterRegistry(
+                search_tool=self.search_tool,
+                google_places_api_key=self.google_places_api_key,
+                google_places_api_endpoint=self.google_places_api_endpoint,
+                timeout_seconds=self.timeout_seconds,
+            )
+        )
 
         def decide(state: dict, iteration: int):
             if state["source_index"] >= len(sources):
-                return StopAction("no more configured discovery sources")
+                return StopAction("no more campaign discovery sources")
             source = sources[state["source_index"]]
-            resolved_query = self.search_tool.build_query(
-                product=product,
-                campaign=campaign,
-                source=source,
-            )
             return ToolAction(
-                tool_name="search",
-                reason=f"search configured source {source.type.value}:{source.value}",
+                tool_name=source_tool.name,
+                reason=(
+                    f"run campaign source {source.provider_id} for {source.slot.value}"
+                ),
                 args={
-                    "product": product.model_dump(mode="json"),
-                    "campaign": campaign.model_dump(mode="json"),
                     "source": source.model_dump(mode="json"),
-                    "resolved_query": resolved_query,
-                    "limit": min(source.limit or campaign.max_leads, campaign.max_leads),
+                    "context": {
+                        "product": product.model_dump(mode="json"),
+                        "campaign": campaign.model_dump(mode="json"),
+                    },
                 },
             )
 
         def observe(state: dict, action: ToolAction, observation, iteration: int):
             enriched_rows = []
-            for row in observation:
+            tool_data = observation.get("data", []) if isinstance(observation, dict) else []
+            source = sources[state["source_index"]]
+            for row in tool_data:
                 enriched = dict(row)
-                enriched["discovery_query"] = action.args["resolved_query"]
+                enriched["discovery_query"] = source.input.get("query") or ""
+                enriched["campaign_source_id"] = source.id
+                enriched["provider_id"] = source.provider_id
                 enriched_rows.append(enriched)
             return {
                 "source_index": state["source_index"] + 1,
@@ -86,8 +113,8 @@ class DiscoveryWorkflow:
             goal=f"Discover leads for {product.product_name}",
             initial_state={"source_index": 0, "results": []},
             max_iterations=max(1, len(sources)),
-            allowed_tools={"search"},
-            tools=[self.search_tool],
+            allowed_tools={source_tool.name},
+            tools=[source_tool],
             decide=decide,
             observe=observe,
             on_tool_start=self.on_tool_start,

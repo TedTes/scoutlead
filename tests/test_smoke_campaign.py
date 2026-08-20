@@ -4,6 +4,7 @@ import pytest
 
 from agent_runs.schemas import AgentRunCreate
 from agent_runs.service import AgentRunService
+from campaign_sources.repository import CampaignSourceRepository
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
 from conversations.schemas import (
@@ -464,7 +465,7 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
         assert detail.llm_call_count == 3
         assert len(detail.tool_calls) == 8
         assert [tool_call.tool_name for tool_call in detail.tool_calls] == [
-            "search",
+            "campaign_source",
             "browser:inspect",
             "llm:lead_research",
             "public_email",
@@ -474,13 +475,18 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
             "llm:outreach_draft",
         ]
         assert all(tool_call.status == "completed" for tool_call in detail.tool_calls)
-        search_call = next(tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "search")
-        assert search_call.args["source"]["type"] == "seed"
+        search_call = next(
+            tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "campaign_source"
+        )
+        assert search_call.args["source"]["provider_id"] == "seed"
+        assert search_call.args["source"]["input"]["source_type"] == "seed"
         assert (
-            search_call.args["resolved_query"]
+            search_call.args["source"]["input"]["query"]
             == "Agentic Lead|https://example.com|Matches target customer|Test geography|hello@example.com"
         )
-        assert isinstance(search_call.observation, list)
+        assert isinstance(search_call.observation, dict)
+        assert search_call.observation["provider"] == "seed"
+        assert isinstance(search_call.observation["data"], list)
         research_call = next(
             tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "llm:lead_research"
         )
@@ -498,3 +504,57 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
         assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 0
         assert session.execute(text("select count(*) from agent_steps")).scalar_one() == 0
         assert session.execute(text("select count(*) from tool_calls")).scalar_one() == 0
+
+
+def test_google_places_source_preset_creates_campaign_source_row() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            ProductCreate(
+                product_name="Painter Quote Tool",
+                product_description="Quoting tool for residential painters.",
+                target_customer="Residential painting companies",
+                problem_being_solved="Creating professional quotes after walkthroughs is slow.",
+                value_proposition="Create customer-ready quotes faster.",
+                target_geography="United States",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Residential painting company", required=True)
+                ],
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.WEB_SEARCH,
+                        value="residential painters",
+                    )
+                ],
+                outreach_objective="Ask for a discovery conversation.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+
+        campaign = CampaignService(
+            session=session,
+            llm=FakeWorkflowLLM(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        ).create(
+            CampaignCreate(
+                product_id=product.id,
+                name="Google Places source campaign",
+                max_leads=10,
+                source_preset_id="google-places-local-business",
+                source_input="residential painters Austin TX",
+            )
+        )
+
+        sources = CampaignSourceRepository(session).list_by_campaign(campaign.id)
+
+        assert len(sources) == 1
+        assert sources[0].provider_id == "google_places"
+        assert sources[0].input["query"] == "residential painters Austin TX"
+        assert sources[0].input["geography"] == "United States"
+        assert sources[0].config["region_code"] == "US"
+        assert sources[0].config["include_pure_service_area_businesses"] is True

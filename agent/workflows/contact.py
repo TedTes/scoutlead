@@ -12,7 +12,7 @@ from memory.schemas import CampaignMemoryCreate, ObservationType
 from orchestration.slot_runner import SlotRunner
 from products.schemas import ProductRead
 from tools.base import ToolExecutionMode, ToolSlot
-from tools.contact import PublicEmailContactTool
+from tools.registry import resolve_tools
 
 
 class ContactWorkflow:
@@ -47,7 +47,7 @@ class ContactWorkflow:
         )
         processed: list[LeadRead] = []
         runner = SlotRunner()
-        tools = [PublicEmailContactTool()]
+        tools = resolve_tools(self.slot_config)
         for lead_model in self.leads.list_by_campaign(campaign.id):
             lead = LeadRead.model_validate(lead_model)
             if lead.status != LeadStatus.RESEARCHED:

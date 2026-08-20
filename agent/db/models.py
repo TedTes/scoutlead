@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base, TimestampMixin
@@ -61,6 +61,7 @@ class CampaignModel(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     goal_type: Mapped[str] = mapped_column(String(32), nullable=False, default="learn")
     icp_preset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_preset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     stage: Mapped[str] = mapped_column(String(64), nullable=False)
     max_leads: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -71,6 +72,21 @@ class CampaignModel(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     product: Mapped[ProductModel] = relationship()
+
+
+class CampaignSourceModel(TimestampMixin, Base):
+    __tablename__ = "campaign_sources"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    slot: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provider_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    input: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    budget_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class LeadModel(TimestampMixin, Base):

@@ -12,7 +12,7 @@ from memory.schemas import CampaignMemoryCreate, ObservationType
 from orchestration.slot_runner import SlotRunner
 from products.schemas import ProductRead
 from tools.base import ToolExecutionMode, ToolSlot
-from tools.signal.public_page import PublicPageSignalTool
+from tools.registry import resolve_tools
 
 
 class SignalWorkflow:
@@ -47,7 +47,7 @@ class SignalWorkflow:
         )
         processed: list[LeadRead] = []
         runner = SlotRunner()
-        tools = [PublicPageSignalTool()]
+        tools = resolve_tools(self.slot_config)
         for lead_model in self.leads.list_by_campaign(campaign.id):
             lead = LeadRead.model_validate(lead_model)
             if lead.status != LeadStatus.RESEARCHED:

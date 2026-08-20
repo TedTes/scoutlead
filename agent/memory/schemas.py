@@ -10,6 +10,7 @@ class ObservationType(StrEnum):
     RESPONSE = "response"
     CAMPAIGN_SUMMARY = "campaign_summary"
     MANUAL_NOTE = "manual_note"
+    TOOL_HIT_RATE = "tool_hit_rate"
 
 
 class CampaignMemoryCreate(BaseModel):

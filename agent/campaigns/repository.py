@@ -11,6 +11,7 @@ from db.models import (
     CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
+    CampaignSourceModel,
     ConversationEventModel,
     ConversationModel,
     DiscoveryCandidateModel,
@@ -30,6 +31,8 @@ class CampaignRepository:
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:
         data = campaign.model_dump(mode="json")
+        data.pop("source_input", None)
+        data.pop("source_inputs", None)
         model = CampaignModel(
             id=new_id("campaign"),
             name=data.pop("name") or f"Campaign {utcnow().date().isoformat()}",
@@ -73,6 +76,7 @@ class CampaignRepository:
         self.session.execute(delete(ToolCallModel).where(ToolCallModel.campaign_id == campaign_id))
         self.session.execute(delete(AgentStepModel).where(AgentStepModel.campaign_id == campaign_id))
         self.session.execute(delete(AgentRunModel).where(AgentRunModel.campaign_id == campaign_id))
+        self.session.execute(delete(CampaignSourceModel).where(CampaignSourceModel.campaign_id == campaign_id))
         self.session.execute(delete(ConversationModel).where(ConversationModel.campaign_id == campaign_id))
         self.session.execute(delete(MessageModel).where(MessageModel.campaign_id == campaign_id))
         self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.campaign_id == campaign_id))
