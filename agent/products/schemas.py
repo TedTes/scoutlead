@@ -73,6 +73,7 @@ class ProductIcpSuggestion(BaseModel):
     likely_pain: str = Field(min_length=1)
     value_hypothesis: str = Field(min_length=1)
     discovery_query: str = Field(min_length=1)
+    suggested_locations: list[str] = Field(default_factory=list, max_length=6)
     qualification_signals: list[str] = Field(min_length=3, max_length=6)
     risks: list[str] = Field(default_factory=list, max_length=5)
 

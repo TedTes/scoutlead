@@ -153,7 +153,8 @@ class IcpSuggestionLLM:
                     "why_this_segment": "They quote jobs during or after walkthroughs.",
                     "likely_pain": "Quotes are delayed or rebuilt manually after site visits.",
                     "value_hypothesis": "Send professional quotes before leaving the job.",
-                    "discovery_query": "residential painters Austin TX",
+                    "discovery_query": "residential painters",
+                    "suggested_locations": ["Austin, TX, United States", "Toronto, ON, Canada"],
                     "qualification_signals": [
                         "Offers residential painting",
                         "Offers free estimates",
@@ -507,7 +508,11 @@ def test_product_icp_suggestions_are_generated_from_description_with_llm() -> No
         assert result.product_description.startswith("QuoteVan helps")
         assert result.target_geography == "Austin TX"
         assert result.suggestions[0].segment_name == "Residential painters"
-        assert result.suggestions[0].discovery_query == "residential painters Austin TX"
+        assert result.suggestions[0].discovery_query == "residential painters"
+        assert result.suggestions[0].suggested_locations == [
+            "Austin, TX, United States",
+            "Toronto, ON, Canada",
+        ]
 
 
 def test_product_description_creation_succeeds_without_llm() -> None:

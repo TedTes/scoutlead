@@ -94,7 +94,10 @@ Rules:
 - Do not propose competitors, software vendors, directories, blogs, or review sites as customers.
 - Keep each segment narrow enough to test with one campaign.
 - Qualification signals must be public facts a workflow can verify.
-- Discovery query should be a concise Google-Places-friendly query: business category + location.
+- Discovery query should be only the concise business category/search intent, without city,
+  state, province, or country.
+- Suggested locations should be specific test markets inside the target geography, such as
+  "Toronto, ON, Canada" or "Austin, TX, United States".
 """.strip()
 
 ICP_SUGGESTION_PROMPT = """
@@ -106,7 +109,8 @@ For each segment include:
 - why this segment might need the product
 - likely pain/workflow problem
 - value hypothesis
-- suggested discovery query
+- suggested discovery query without location
+- 2 to 5 suggested test locations
 - 3 to 5 qualification signals
 - 1 to 3 risks or reasons this segment may be a weak fit
 
