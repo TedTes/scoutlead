@@ -120,7 +120,7 @@ class GooglePlacesDiscoveryAdapter:
                 {"campaign_source_id": source.id, "provider_id": source.provider_id},
             )
         geography = str(source.input.get("geography") or product.target_geography or "").strip()
-        if geography and geography.lower() not in query.lower():
+        if geography and not _is_broad_geography(geography) and geography.lower() not in query.lower():
             return f"{query} {geography}"
         return query
 
@@ -155,3 +155,17 @@ class GooglePlacesDiscoveryAdapter:
             source="google_places",
             raw={**place, "query": query, "website_url": website_url, "google_maps_url": maps_url},
         )
+
+
+def _is_broad_geography(value: str) -> bool:
+    normalized = value.lower().replace("&", "and")
+    broad_terms = {
+        "united states",
+        "usa",
+        "us",
+        "canada",
+        "north america",
+        "united states, canada",
+        "united states and canada",
+    }
+    return normalized in broad_terms

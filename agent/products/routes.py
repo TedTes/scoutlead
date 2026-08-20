@@ -6,6 +6,8 @@ from app.dependencies import AppServices, DbSession, get_services
 from products.schemas import (
     ProductCreate,
     ProductDescriptionCreate,
+    ProductIcpSuggestionRequest,
+    ProductIcpSuggestionResponse,
     ProductRead,
     ProductUpdate,
 )
@@ -42,6 +44,15 @@ def create_product_from_description(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return _service(session, services).create_from_description(request)
+
+
+@router.post("/icp-suggestions", response_model=ProductIcpSuggestionResponse)
+def suggest_product_icps(
+    request: ProductIcpSuggestionRequest,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return _service(session, services).suggest_icps(request)
 
 
 @router.get("", response_model=list[ProductRead])

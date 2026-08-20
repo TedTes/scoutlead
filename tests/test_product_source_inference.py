@@ -8,6 +8,7 @@ from products.schemas import (
     DiscoverySourceType,
     ProductCreate,
     ProductDescriptionCreate,
+    ProductIcpSuggestionResponse,
     ProductSourceCreate,
     ProductSourceEvidence,
     QualificationCriterion,
@@ -121,6 +122,46 @@ class DescriptionConfigLLM:
             ],
             outreach_objective="Ask for a short customer discovery conversation.",
             constraints=["Human approval required before outbound messages are sent."],
+        )
+
+
+class IcpSuggestionLLM:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.context = {}
+
+    def generate_object(
+        self,
+        *,
+        task: str,
+        system: str,
+        prompt: str,
+        response_model,
+        context: dict | None = None,
+    ):
+        self.calls.append(task)
+        self.context = context or {}
+        assert response_model is ProductIcpSuggestionResponse
+        return ProductIcpSuggestionResponse(
+            product_name="Wrong Name",
+            product_description="Wrong description",
+            target_geography="Wrong geography",
+            suggestions=[
+                {
+                    "segment_name": "Residential painters",
+                    "target_customer": "Owner-operated residential painting companies",
+                    "why_this_segment": "They quote jobs during or after walkthroughs.",
+                    "likely_pain": "Quotes are delayed or rebuilt manually after site visits.",
+                    "value_hypothesis": "Send professional quotes before leaving the job.",
+                    "discovery_query": "residential painters Austin TX",
+                    "qualification_signals": [
+                        "Offers residential painting",
+                        "Offers free estimates",
+                        "Has phone or website",
+                    ],
+                    "risks": ["Some larger franchises may already use estimating software."],
+                }
+            ],
         )
 
 
@@ -435,6 +476,38 @@ def test_product_can_be_created_from_description_without_llm_or_scraping() -> No
         assert product.qualification_criteria
         assert product.preferred_discovery_sources == []
         assert product.source_evidence["config_generated_by"] == "deterministic_draft"
+
+
+def test_product_icp_suggestions_are_generated_from_description_with_llm() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    llm = IcpSuggestionLLM()
+
+    with session_factory() as session:
+        result = ProductService(
+            session,
+            llm=llm,
+            browser=ExplodingBrowser(),
+        ).suggest_icps(
+            ProductDescriptionCreate(
+                product_name="QuoteVan",
+                description=(
+                    "QuoteVan helps home-service painters capture job scope during a "
+                    "walkthrough, send a professional quote before leaving the job, and "
+                    "keep customer history in one place."
+                ),
+                target_geography="Austin TX",
+            )
+        )
+
+        assert llm.calls == ["product_icp_suggestions"]
+        assert llm.context["product_name"] == "QuoteVan"
+        assert result.product_name == "QuoteVan"
+        assert result.product_description.startswith("QuoteVan helps")
+        assert result.target_geography == "Austin TX"
+        assert result.suggestions[0].segment_name == "Residential painters"
+        assert result.suggestions[0].discovery_query == "residential painters Austin TX"
 
 
 def test_product_description_creation_succeeds_without_llm() -> None:

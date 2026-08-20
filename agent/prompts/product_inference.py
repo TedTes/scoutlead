@@ -82,3 +82,33 @@ The output should make the product immediately usable for a validation campaign:
 Avoid generic labels such as "customers likely to benefit" when the description gives
 enough detail to name a more specific ICP.
 """.strip()
+
+ICP_SUGGESTION_SYSTEM = """
+You propose testable customer segments for customer discovery.
+
+Rules:
+- Use only the operator-written product name, description, and geography.
+- Do not assume the operator already knows the ICP.
+- Propose concrete customer segments that could plausibly buy or use the product.
+- Prefer segments discoverable through public business sources such as Google Places.
+- Do not propose competitors, software vendors, directories, blogs, or review sites as customers.
+- Keep each segment narrow enough to test with one campaign.
+- Qualification signals must be public facts a workflow can verify.
+- Discovery query should be a concise Google-Places-friendly query: business category + location.
+""".strip()
+
+ICP_SUGGESTION_PROMPT = """
+Generate 3 to 5 possible customer segments to test for the submitted product.
+
+For each segment include:
+- segment name
+- target customer description
+- why this segment might need the product
+- likely pain/workflow problem
+- value hypothesis
+- suggested discovery query
+- 3 to 5 qualification signals
+- 1 to 3 risks or reasons this segment may be a weak fit
+
+The user will choose and edit one segment before a campaign can run.
+""".strip()

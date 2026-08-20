@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from agents.llm import LLMClient
 from db.models import ProductModel
 from prompts.product_inference import (
+    ICP_SUGGESTION_PROMPT,
+    ICP_SUGGESTION_SYSTEM,
     PRODUCT_CONFIG_PROMPT,
     PRODUCT_CONFIG_SYSTEM,
     PRODUCT_EVIDENCE_PROMPT,
@@ -18,6 +20,8 @@ from products.repository import ProductRepository
 from products.schemas import (
     ProductCreate,
     ProductDescriptionCreate,
+    ProductIcpSuggestionResponse,
+    ProductIcpSuggestionRequest,
     ProductInferenceRead,
     ProductRead,
     ProductSourceCreate,
@@ -49,6 +53,39 @@ class ProductService:
 
     def create_from_description(self, request: ProductDescriptionCreate) -> ProductModel:
         return self.products.create(self.product_from_description(request))
+
+    def suggest_icps(self, request: ProductIcpSuggestionRequest) -> ProductIcpSuggestionResponse:
+        if self.llm is None:
+            raise ConfigurationError(
+                "LLM provider is required to suggest customer segments",
+                {"task": "product_icp_suggestions"},
+            )
+        description = normalize_text(request.description)
+        if len(description) < 20:
+            raise ValidationError(
+                "product description is too short",
+                {"minimum_length": 20},
+            )
+        name = normalize_text(request.product_name)
+        target_geography = normalize_text(request.target_geography) or "United States, Canada"
+        suggestions = self.llm.generate_object(
+            task="product_icp_suggestions",
+            system=ICP_SUGGESTION_SYSTEM,
+            prompt=ICP_SUGGESTION_PROMPT,
+            response_model=ProductIcpSuggestionResponse,
+            context={
+                "product_name": name,
+                "product_description": description,
+                "target_geography": target_geography,
+            },
+        )
+        return suggestions.model_copy(
+            update={
+                "product_name": name,
+                "product_description": description,
+                "target_geography": target_geography,
+            }
+        )
 
     def product_from_description(self, request: ProductDescriptionCreate) -> ProductCreate:
         description = normalize_text(request.description)
