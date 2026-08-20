@@ -162,17 +162,14 @@ export function ProductScreen({
     const nextMaxLeads = Number.isFinite(parsedMaxLeads) ? Math.max(1, Math.min(parsedMaxLeads, 100)) : 10;
     const source = campaignSource.trim();
     try {
-      if (source) {
-        await updateProduct(detailProduct.id, {
-          preferred_discovery_sources: [{ type: "web_search", value: source, limit: nextMaxLeads }],
-        });
-      }
       const date = new Date().toISOString().slice(0, 10);
       const input: CampaignCreateInput = {
         product_id: detailProduct.id,
         name: `${displayProductName(detailProduct)} validation ${date}`,
         goal_type: goalType,
         icp_preset_id: icpPresets[0]?.id || "default-web-validation",
+        source_preset_id: "google-places-local-business",
+        source_input: source || null,
         max_leads: nextMaxLeads,
         channels: ["email"],
         discovery_seeds: [],
@@ -395,10 +392,10 @@ export function ProductScreen({
               </label>
             </div>
             <label className="field">
-              <span>Discovery query override</span>
+              <span>Discovery source</span>
               <input
                 autoFocus
-                placeholder="Optional: residential painters in Texas, seed URL, or company list"
+                placeholder="Example: residential painters in Austin, TX"
                 value={campaignSource}
                 onChange={(event) => setCampaignSource(event.target.value)}
               />

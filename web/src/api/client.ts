@@ -7,6 +7,7 @@ import type {
   CampaignPreflight,
   CampaignInsight,
   CampaignRunSummary,
+  CampaignSource,
   CampaignTrace,
   ConnectionStatus,
   Conversation,
@@ -66,6 +67,10 @@ export class ApiClient {
 
   getCampaign(id: string) {
     return this.request<Campaign>(`/campaigns/${id}`);
+  }
+
+  getCampaignSources(id: string) {
+    return this.request<CampaignSource[]>(`/campaigns/${id}/sources`);
   }
 
   getCampaignPreflight(id: string) {

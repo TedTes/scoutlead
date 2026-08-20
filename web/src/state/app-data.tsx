@@ -63,6 +63,7 @@ type AppDataContextValue = {
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
 const emptySnapshot: CampaignSnapshot = {
+  campaignSources: [],
   leads: [],
   discoveryCandidates: [],
   messages: [],
@@ -154,6 +155,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       }
       const [
         campaign,
+        campaignSources,
         leads,
         discoveryCandidates,
         messages,
@@ -164,6 +166,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         trace,
       ] = await Promise.all([
         api.getCampaign(campaignId),
+        api.getCampaignSources(campaignId).catch(() => []),
         api.getLeads(campaignId),
         api.getDiscoveryCandidates(campaignId).catch(() => []),
         api.getMessages(campaignId),
@@ -177,6 +180,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const agentRuns = trace?.runs ?? [];
       setSnapshot({
         campaign,
+        campaignSources,
         leads,
         discoveryCandidates,
         messages,

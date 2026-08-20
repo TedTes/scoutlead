@@ -72,6 +72,9 @@ export type Campaign = {
   name?: string | null;
   goal_type: "learn" | "sell";
   icp_preset_id?: string | null;
+  source_preset_id?: string | null;
+  source_input?: string | null;
+  source_inputs?: Record<string, unknown>;
   status: string;
   stage: string;
   max_leads: number;
@@ -84,11 +87,29 @@ export type Campaign = {
   updated_at: string;
 };
 
+export type CampaignSource = {
+  id: string;
+  campaign_id: string;
+  slot: "discovery" | "contact" | "verify" | "signal";
+  provider_id: string;
+  mode: "accumulate" | "first_good";
+  input: Record<string, unknown>;
+  config: Record<string, unknown>;
+  priority: number;
+  enabled: boolean;
+  budget_limit?: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type CampaignCreateInput = {
   product_id: string;
   name: string;
   goal_type?: "learn" | "sell";
   icp_preset_id?: string | null;
+  source_preset_id?: string | null;
+  source_input?: string | null;
+  source_inputs?: Record<string, unknown>;
   max_leads: number;
   channels: string[];
   discovery_seeds?: LeadSeedInput[];
@@ -358,6 +379,7 @@ export type CampaignPreflight = {
 
 export type CampaignSnapshot = {
   campaign?: Campaign;
+  campaignSources: CampaignSource[];
   leads: Lead[];
   discoveryCandidates: DiscoveryCandidate[];
   messages: Message[];

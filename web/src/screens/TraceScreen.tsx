@@ -1,6 +1,6 @@
 import { Card, StatusPill } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { AgentRunDetail, AgentStep, DiscoveryCandidate, ToolCall } from "../types/domain";
+import type { AgentRunDetail, AgentStep, CampaignSource, DiscoveryCandidate, ToolCall } from "../types/domain";
 import { statusTone } from "../utils/status";
 
 export function TraceScreen() {
@@ -26,6 +26,7 @@ export function TraceScreen() {
 
   return (
     <div className="trace-page">
+      <CampaignSourceTrace sources={snapshot.campaignSources} />
       <CandidateTrace candidates={snapshot.discoveryCandidates} />
 
       <Card
@@ -66,6 +67,35 @@ export function TraceScreen() {
         </Card>
       ) : null}
     </div>
+  );
+}
+
+function CampaignSourceTrace({ sources }: { sources: CampaignSource[] }) {
+  if (!sources.length) return null;
+
+  return (
+    <Card title="Campaign sources" meta={<span className="muted-count">{sources.length} configured</span>}>
+      <div className="trace-candidate-list">
+        {sources.map((source) => (
+          <details className="trace-call" key={source.id}>
+            <summary>
+              <div>
+                <strong>{source.provider_id}</strong>
+                <span>{source.slot} / {source.mode}</span>
+                <span>{getSourceQuery(source)}</span>
+              </div>
+              <StatusPill tone={source.enabled ? "green" : "gray"}>
+                {source.enabled ? "enabled" : "disabled"}
+              </StatusPill>
+            </summary>
+            <div className="trace-call-body">
+              <TraceJson title="Input" value={source.input} />
+              <TraceJson title="Config" value={source.config} />
+            </div>
+          </details>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -210,12 +240,22 @@ function getCallQuery(args: Record<string, unknown>) {
   if (typeof query === "string" && query.trim()) return query.trim();
 
   const source = args.source;
+  if (source && typeof source === "object" && "input" in source) {
+    const input = (source as { input?: Record<string, unknown> }).input;
+    const value = input?.query;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
   if (source && typeof source === "object" && "value" in source) {
     const value = (source as { value?: unknown }).value;
     if (typeof value === "string" && value.trim()) return value.trim();
   }
 
   return "";
+}
+
+function getSourceQuery(source: CampaignSource) {
+  const query = source.input.query;
+  return typeof query === "string" ? query : "";
 }
 
 function TraceJson({ title, value }: { title: string; value: unknown }) {

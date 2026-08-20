@@ -39,7 +39,9 @@ function AppShell() {
     snapshot,
   } = useAppData();
   const productCampaigns = campaigns.filter((campaign) => campaign.product_id === selectedProductId);
-  const visibleConnections = connections.filter((connection) => connection.category !== "persistence");
+  const visibleConnections = connections.filter(
+    (connection) => connection.category !== "persistence" && !connection.category.endsWith("_provider"),
+  );
   const connectedCount = visibleConnections.filter((connection) => connection.status === "connected").length;
   const connectionTotal = visibleConnections.length || 3;
   const navCounts: Partial<Record<Screen, string>> = {
