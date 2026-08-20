@@ -13,6 +13,7 @@ from db.models import (
     CampaignModel,
     ConversationEventModel,
     ConversationModel,
+    DiscoveryCandidateModel,
     LeadModel,
     LearningSummaryModel,
     MessageModel,
@@ -74,6 +75,7 @@ class CampaignRepository:
         self.session.execute(delete(AgentRunModel).where(AgentRunModel.campaign_id == campaign_id))
         self.session.execute(delete(ConversationModel).where(ConversationModel.campaign_id == campaign_id))
         self.session.execute(delete(MessageModel).where(MessageModel.campaign_id == campaign_id))
+        self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.campaign_id == campaign_id))
         self.session.execute(delete(LeadModel).where(LeadModel.campaign_id == campaign_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.campaign_id == campaign_id))
         self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.campaign_id == campaign_id))

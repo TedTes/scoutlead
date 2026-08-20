@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead
+from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead, CampaignTrace
 from agent_runs.service import AgentRunService
 from app.dependencies import DbSession
 
@@ -22,8 +22,18 @@ def list_campaign_agent_runs(campaign_id: str, session: DbSession):
     return AgentRunService(session).list_by_campaign(campaign_id)
 
 
+@router.get("/campaigns/{campaign_id}/trace", response_model=CampaignTrace)
+def get_campaign_trace(campaign_id: str, session: DbSession):
+    return AgentRunService(session).trace_by_campaign(campaign_id)
+
+
 @router.get("/agent-runs/{run_id}", response_model=AgentRunDetail)
 def get_agent_run(run_id: str, session: DbSession):
+    return AgentRunService(session).get(run_id)
+
+
+@router.get("/agent-runs/{run_id}/trace", response_model=AgentRunDetail)
+def get_agent_run_trace(run_id: str, session: DbSession):
     return AgentRunService(session).get(run_id)
 
 

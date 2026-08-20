@@ -11,6 +11,7 @@ from db.models import (
     CampaignModel,
     ConversationEventModel,
     ConversationModel,
+    DiscoveryCandidateModel,
     LeadModel,
     LearningSummaryModel,
     MessageModel,
@@ -221,6 +222,7 @@ class ProductRepository:
 
         self.session.execute(delete(ConversationModel).where(ConversationModel.product_id == product_id))
         self.session.execute(delete(MessageModel).where(MessageModel.product_id == product_id))
+        self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.product_id == product_id))
         self.session.execute(delete(LeadModel).where(LeadModel.product_id == product_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))
         self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.product_id == product_id))

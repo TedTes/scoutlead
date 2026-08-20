@@ -443,9 +443,13 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
 
         summary = campaign_service.run_campaign(campaign.id, agent_run_id=agent_run.id)
         detail = AgentRunService(session).get(agent_run.id)
+        trace = AgentRunService(session).trace_by_campaign(campaign.id)
 
         assert summary.discovered_lead_count == 1
         assert detail.status == "completed"
+        assert trace.run_count == 1
+        assert trace.latest_run is not None
+        assert trace.latest_run.id == agent_run.id
         assert [step.phase for step in detail.steps] == [
             "discovery",
             "research",
@@ -470,6 +474,19 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
             "llm:outreach_draft",
         ]
         assert all(tool_call.status == "completed" for tool_call in detail.tool_calls)
+        search_call = next(tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "search")
+        assert search_call.args["source"]["type"] == "seed"
+        assert (
+            search_call.args["resolved_query"]
+            == "Agentic Lead|https://example.com|Matches target customer|Test geography|hello@example.com"
+        )
+        assert isinstance(search_call.observation, list)
+        research_call = next(
+            tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "llm:lead_research"
+        )
+        assert research_call.args["system"] == "Extract structured lead research from public evidence only."
+        assert "Classify this search result as a potential customer" in research_call.args["prompt"]
+        assert research_call.observation["summary"] == "Matches target customer"
 
         with pytest.raises(ConflictError, match="draft or paused"):
             AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))

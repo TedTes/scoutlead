@@ -21,6 +21,7 @@ from campaigns.schemas import (
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
 from db.models import CampaignModel
+from discovery.repository import DiscoveryCandidateRepository
 from evaluation.campaign_metrics import calculate_campaign_metrics
 from evaluation.schemas import CampaignMetrics
 from icp.service import ICPPresetService
@@ -32,6 +33,7 @@ from messages.schemas import MessageRead
 from products.repository import ProductRepository
 from products.schemas import DiscoverySourceType, ProductRead
 from shared.errors import ConflictError
+from shared.utils import truncate
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
@@ -113,6 +115,8 @@ class RecordingLLMClient:
             args={
                 "task": task,
                 "response_model": response_model.__name__,
+                "system": system,
+                "prompt": truncate(prompt, 30000),
                 "context": CampaignService._json_safe(context or {}),
             },
         )
@@ -150,6 +154,7 @@ class CampaignService:
         self.campaigns = CampaignRepository(session)
         self.agent_runs = AgentRunRepository(session)
         self.icp_presets = ICPPresetService()
+        self.discovery_candidates = DiscoveryCandidateRepository(session)
         self.leads = LeadRepository(session)
         self.messages = MessageRepository(session)
         self.conversations = ConversationRepository(session)
@@ -216,6 +221,7 @@ class CampaignService:
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda step_id: DiscoveryWorkflow(
                     campaigns=self.campaigns,
+                    candidates=self.discovery_candidates,
                     leads=self.leads,
                     memory=self.memory,
                     search_tool=self.search_tool,

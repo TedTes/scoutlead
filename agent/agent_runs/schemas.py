@@ -107,3 +107,10 @@ class ToolCallRead(BaseModel):
 class AgentRunDetail(AgentRunRead):
     steps: list[AgentStepRead] = Field(default_factory=list)
     tool_calls: list[ToolCallRead] = Field(default_factory=list)
+
+
+class CampaignTrace(BaseModel):
+    campaign_id: str
+    run_count: int
+    latest_run: AgentRunDetail | None = None
+    runs: list[AgentRunDetail] = Field(default_factory=list)

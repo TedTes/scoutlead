@@ -403,7 +403,7 @@ def test_product_can_be_created_from_single_source() -> None:
         assert product.preferred_discovery_sources
 
 
-def test_product_can_be_created_from_description_using_llm_without_scraping() -> None:
+def test_product_can_be_created_from_description_without_llm_or_scraping() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -426,37 +426,40 @@ def test_product_can_be_created_from_description_using_llm_without_scraping() ->
         )
 
         assert product.product_name == "QuoteVan"
-        assert llm.calls == ["product_config_from_description"]
-        assert "painters" in product.target_customer.lower()
-        assert "driveway" in product.product_description.lower()
-        assert product.target_geography == "United States"
+        assert llm.calls == []
+        assert product.target_customer == "Define target customer before running discovery."
+        assert "walkthrough" in product.product_description.lower()
+        assert product.target_geography == "United States, Canada"
         assert product.source_url is None
         assert product.source_fingerprint is None
         assert product.qualification_criteria
-        assert product.preferred_discovery_sources
+        assert product.preferred_discovery_sources == []
+        assert product.source_evidence["config_generated_by"] == "deterministic_draft"
 
 
-def test_product_description_creation_requires_llm() -> None:
+def test_product_description_creation_succeeds_without_llm() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory() as session:
-        with pytest.raises(ConfigurationError):
-            ProductService(
-                session,
-                llm=None,
-                browser=ExplodingBrowser(),
-            ).create_from_description(
-                ProductDescriptionCreate(
-                    product_name="QuoteVan",
-                    description=(
-                        "QuoteVan helps home-service painters capture job scope during a "
-                        "walkthrough, send a professional quote before leaving the job, and "
-                        "keep customer history in one place."
-                    )
+        product = ProductService(
+            session,
+            llm=None,
+            browser=ExplodingBrowser(),
+        ).create_from_description(
+            ProductDescriptionCreate(
+                product_name="QuoteVan",
+                description=(
+                    "QuoteVan helps home-service painters capture job scope during a "
+                    "walkthrough, send a professional quote before leaving the job, and "
+                    "keep customer history in one place."
                 )
             )
+        )
+
+        assert product.product_name == "QuoteVan"
+        assert product.target_geography == "United States, Canada"
 
 
 def test_same_source_reuses_existing_product_without_refetching() -> None:

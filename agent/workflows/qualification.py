@@ -6,7 +6,14 @@ from leads.schemas import LeadRead, LeadStatus, QualificationResult
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
-from prompts.qualification import disqualified_by_research, qualification_prompt
+from prompts.qualification import (
+    DISQUALIFYING_LEAD_TYPES,
+    disqualified_by_research,
+    qualification_prompt,
+)
+
+
+MIN_QUALIFICATION_SCORE = 65
 
 
 class QualificationWorkflow:
@@ -42,8 +49,7 @@ class QualificationWorkflow:
                     "lead": lead.model_dump(mode="json"),
                 },
             )
-            if lead.research and lead.research.disqualifiers:
-                result = disqualified_by_research(product, lead)
+            result = enforce_qualification_boundary(product, lead, result)
             updated = LeadRead.model_validate(self.leads.attach_qualification(lead.id, result))
             qualified.append(updated)
             self.memory.create_observation(
@@ -57,3 +63,35 @@ class QualificationWorkflow:
                 )
             )
         return qualified
+
+
+def enforce_qualification_boundary(
+    product: ProductRead,
+    lead: LeadRead,
+    result: QualificationResult,
+) -> QualificationResult:
+    if lead.research and lead.research.disqualifiers:
+        return disqualified_by_research(product, lead)
+
+    if lead.research and lead.research.lead_type in DISQUALIFYING_LEAD_TYPES:
+        lead_type = lead.research.lead_type.value.replace("_", " ")
+        return disqualified_by_research(
+            product,
+            lead,
+            reason=f"Lead was disqualified before outreach because it is classified as {lead_type}, not a target customer.",
+            score=min(25, result.score),
+        )
+
+    if result.qualified and result.score < MIN_QUALIFICATION_SCORE:
+        return result.model_copy(
+            update={
+                "qualified": False,
+                "rationale": (
+                    f"{result.rationale} Disqualified because the score is below "
+                    f"the {MIN_QUALIFICATION_SCORE} qualification threshold."
+                ),
+                "recommended_next_step": "Do not send outreach.",
+            }
+        )
+
+    return result

@@ -38,7 +38,7 @@ class ProductBase(BaseModel):
     target_geography: str = Field(min_length=1)
     validation_goal: str = Field(min_length=1)
     qualification_criteria: list[QualificationCriterion] = Field(min_length=1)
-    preferred_discovery_sources: list[DiscoverySource] = Field(min_length=1)
+    preferred_discovery_sources: list[DiscoverySource] = Field(default_factory=list)
     outreach_objective: str = Field(min_length=1)
     constraints: list[str] = Field(default_factory=list)
     source_url: str | None = None
@@ -59,7 +59,7 @@ class ProductCreate(ProductBase):
 class ProductDescriptionCreate(BaseModel):
     product_name: str = Field(min_length=1)
     description: str = Field(min_length=20)
-    target_geography: str = Field(default="United States", min_length=1)
+    target_geography: str = Field(default="United States, Canada", min_length=1)
 
 
 class ProductSourceCreate(BaseModel):

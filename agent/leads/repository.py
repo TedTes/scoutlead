@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from campaigns.schemas import LeadSeedInput
-from db.models import LeadModel
+from db.models import DiscoveryCandidateModel, LeadModel
 from leads.schemas import LeadResearch, LeadStatus, QualificationResult
 from shared.errors import NotFoundError
 from shared.utils import new_id, normalize_url
@@ -61,6 +61,43 @@ class LeadRepository:
             source=result.get("source") or "search",
             status=LeadStatus.DISCOVERED.value,
             raw_sources=[result],
+        )
+        self.session.add(model)
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
+    def create_from_candidate(self, candidate: DiscoveryCandidateModel) -> LeadModel:
+        existing = self.find_existing(candidate.campaign_id, candidate.title, candidate.url)
+        if existing:
+            return existing
+
+        model = LeadModel(
+            id=new_id("lead"),
+            campaign_id=candidate.campaign_id,
+            product_id=candidate.product_id,
+            company_name=candidate.title,
+            website_url=normalize_url(candidate.url),
+            contact_email=candidate.contact_email,
+            geography=candidate.geography,
+            description=candidate.snippet,
+            source=candidate.source,
+            status=LeadStatus.DISCOVERED.value,
+            raw_sources=[
+                {
+                    "candidate_id": candidate.id,
+                    "query": candidate.query,
+                    "title": candidate.title,
+                    "url": candidate.url,
+                    "snippet": candidate.snippet,
+                    "geography": candidate.geography,
+                    "contact_email": candidate.contact_email,
+                    "source": candidate.source,
+                    "candidate_type": candidate.candidate_type,
+                    "confidence": candidate.confidence,
+                    "raw": candidate.raw,
+                }
+            ],
         )
         self.session.add(model)
         self.session.commit()

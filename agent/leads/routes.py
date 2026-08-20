@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from app.dependencies import DbSession
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import LeadSeedInput
+from discovery.repository import DiscoveryCandidateRepository
+from discovery.schemas import DiscoveryCandidateRead
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 
@@ -12,6 +14,12 @@ router = APIRouter(tags=["leads"])
 @router.get("/campaigns/{campaign_id}/leads", response_model=list[LeadRead])
 def list_campaign_leads(campaign_id: str, session: DbSession):
     return LeadRepository(session).list_by_campaign(campaign_id)
+
+
+@router.get("/campaigns/{campaign_id}/discovery-candidates", response_model=list[DiscoveryCandidateRead])
+def list_campaign_discovery_candidates(campaign_id: str, session: DbSession):
+    CampaignRepository(session).get(campaign_id)
+    return DiscoveryCandidateRepository(session).list_by_campaign(campaign_id)
 
 
 @router.post("/campaigns/{campaign_id}/leads/seeds", response_model=list[LeadRead])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Protocol
 from urllib.parse import urlencode, urlparse
 
@@ -24,7 +25,13 @@ class SearchResult(BaseModel):
 
 class SearchToolProtocol(Protocol):
     def search(
-        self, *, product: ProductRead, campaign: CampaignRead, source: DiscoverySource, limit: int
+        self,
+        *,
+        product: ProductRead,
+        campaign: CampaignRead,
+        source: DiscoverySource,
+        limit: int,
+        query: str | None = None,
     ) -> list[SearchResult]:
         raise NotImplementedError
 
@@ -58,9 +65,16 @@ class SearchTool:
         campaign = CampaignRead.model_validate(args["campaign"])
         source = DiscoverySource.model_validate(args["source"])
         limit = int(args["limit"])
+        query = str(args.get("resolved_query") or "").strip() or None
         return [
             result.model_dump(mode="json")
-            for result in self.search(product=product, campaign=campaign, source=source, limit=limit)
+            for result in self.search(
+                product=product,
+                campaign=campaign,
+                source=source,
+                limit=limit,
+                query=query,
+            )
         ]
 
     def lookup(self, query: str, limit: int = 5) -> list[SearchResult]:
@@ -80,7 +94,13 @@ class SearchTool:
         return self._lookup_generic(query, limit)
 
     def search(
-        self, *, product: ProductRead, campaign: CampaignRead, source: DiscoverySource, limit: int
+        self,
+        *,
+        product: ProductRead,
+        campaign: CampaignRead,
+        source: DiscoverySource,
+        limit: int,
+        query: str | None = None,
     ) -> list[SearchResult]:
         if source.type == DiscoverySourceType.SEED:
             return [self._parse_seed(source.value, product.target_geography)]
@@ -93,22 +113,25 @@ class SearchTool:
                 )
             return []
 
-        query = " ".join(
-            [
-                source.value,
-                product.target_customer,
-                product.target_geography,
-                product.problem_being_solved,
-            ]
-        )
+        query = query or self.build_query(product=product, campaign=campaign, source=source)
         if self.provider == "tavily":
-            return self._filter_business_results(self._search_tavily(query, source, limit), limit)
+            return self._search_tavily(query, source, limit)
         if self.provider == "brave":
-            return self._filter_business_results(self._search_brave(query, limit), limit)
-        return self._filter_business_results(
-            self._search_generic(query, product, campaign, source, limit),
-            limit,
-        )
+            return self._search_brave(query, limit)
+        return self._search_generic(query, product, campaign, source, limit)
+
+    @staticmethod
+    def build_query(
+        *,
+        product: ProductRead,
+        campaign: CampaignRead,
+        source: DiscoverySource,
+    ) -> str:
+        del product, campaign
+        query = source.value.strip()
+        if not query:
+            raise ValueError("discovery source query is empty")
+        return query
 
     def _search_generic(
         self,
@@ -174,7 +197,7 @@ class SearchTool:
                 url=row.get("url"),
                 snippet=row.get("content"),
                 source="tavily",
-                raw=row,
+                raw={**row, "query": query, "source_value": source.value},
             )
             for row in rows[:limit]
         ]
@@ -195,7 +218,7 @@ class SearchTool:
                 url=row.get("url"),
                 snippet=row.get("description"),
                 source="brave",
-                raw=row,
+                raw={**row, "query": query},
             )
             for row in rows[:limit]
         ]
@@ -222,18 +245,23 @@ class SearchTool:
         cls,
         results: list[SearchResult],
         limit: int,
+        product: ProductRead | None = None,
     ) -> list[SearchResult]:
-        filtered = [result for result in results if cls._looks_like_business_result(result)]
+        filtered = [result for result in results if cls._looks_like_business_result(result, product)]
         return filtered[:limit]
 
     @staticmethod
-    def _looks_like_business_result(result: SearchResult) -> bool:
+    def _looks_like_business_result(
+        result: SearchResult,
+        product: ProductRead | None = None,
+    ) -> bool:
         if not result.url:
             return False
         parsed = urlparse(result.url)
         host = parsed.netloc.lower().removeprefix("www.")
         path = parsed.path.lower()
         title = result.title.lower()
+        snippet = (result.snippet or "").lower()
         blocked_hosts = {
             "youtube.com",
             "youtu.be",
@@ -291,4 +319,45 @@ class SearchTool:
             "podcast",
             "template",
         )
-        return not any(phrase in title for phrase in blocked_title_phrases)
+        if any(phrase in title for phrase in blocked_title_phrases):
+            return False
+        if product and SearchTool._looks_like_solution_vendor_result(title, snippet, path, product):
+            return False
+        return True
+
+    @staticmethod
+    def _looks_like_solution_vendor_result(
+        title: str,
+        snippet: str,
+        path: str,
+        product: ProductRead,
+    ) -> bool:
+        target_customer = product.target_customer.lower()
+        software_target_terms = (
+            "software",
+            "saas",
+            "technology",
+            "tech company",
+            "developer",
+            "engineering",
+            "it team",
+            "startup",
+        )
+        if any(term in target_customer for term in software_target_terms):
+            return False
+
+        text = " ".join([title, snippet, path.replace("-", " ").replace("_", " ")])
+        vendor_pattern = re.compile(
+            r"\b(software|app|apps|platform|tool|tools|saas|crm|cpq|automation|solution|solutions)\b",
+            re.I,
+        )
+        solution_phrases = (
+            "online approvals",
+            "quote in ",
+            "quotes in ",
+            "estimate in ",
+            "estimates in ",
+            "in seconds",
+            "in minutes",
+        )
+        return bool(vendor_pattern.search(text)) or any(phrase in text for phrase in solution_phrases)

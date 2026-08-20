@@ -18,8 +18,18 @@ class LeadStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class LeadFitType(StrEnum):
+    TARGET_CUSTOMER = "target_customer"
+    COMPETITOR_OR_ALTERNATIVE = "competitor_or_alternative"
+    VENDOR_TO_TARGET_CUSTOMER = "vendor_to_target_customer"
+    CONTENT_OR_DIRECTORY = "content_or_directory"
+    IRRELEVANT = "irrelevant"
+    UNKNOWN = "unknown"
+
+
 class LeadResearch(BaseModel):
     summary: str
+    lead_type: LeadFitType = LeadFitType.UNKNOWN
     business_type: str | None = None
     geography: str | None = None
     website_url: str | None = None

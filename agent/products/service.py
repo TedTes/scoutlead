@@ -9,8 +9,6 @@ from sqlalchemy.orm import Session
 from agents.llm import LLMClient
 from db.models import ProductModel
 from prompts.product_inference import (
-    PRODUCT_DESCRIPTION_CONFIG_PROMPT,
-    PRODUCT_DESCRIPTION_CONFIG_SYSTEM,
     PRODUCT_CONFIG_PROMPT,
     PRODUCT_CONFIG_SYSTEM,
     PRODUCT_EVIDENCE_PROMPT,
@@ -60,27 +58,36 @@ class ProductService:
                 {"minimum_length": 20},
             )
         name = normalize_text(request.product_name)
-        if self.llm is None:
-            raise ConfigurationError(
-                "LLM provider is required to create a product profile",
-                {"task": "product_config_from_description"},
-            )
-        product = self.llm.generate_object(
-            task="product_config_from_description",
-            system=PRODUCT_DESCRIPTION_CONFIG_SYSTEM,
-            prompt=PRODUCT_DESCRIPTION_CONFIG_PROMPT,
-            response_model=ProductCreate,
-            context={
-                "product_name": name,
-                "product_description": description,
-                "target_geography": request.target_geography,
+        target_geography = normalize_text(request.target_geography) or "United States, Canada"
+        return ProductCreate(
+            product_name=name,
+            product_description=description,
+            target_customer="Define target customer before running discovery.",
+            problem_being_solved="Define the customer problem before running discovery.",
+            value_proposition="Define the value proposition before running discovery.",
+            target_geography=target_geography,
+            validation_goal="Book customer discovery interviews.",
+            qualification_criteria=[
+                {
+                    "label": "Target customer fit needs setup",
+                    "description": "Replace this draft criterion with public signals for the intended ICP.",
+                    "weight": 1,
+                    "required": True,
+                    "evidence_required": True,
+                }
+            ],
+            preferred_discovery_sources=[],
+            outreach_objective="Ask for a short customer discovery conversation.",
+            constraints=["Human approval required before outbound messages are sent."],
+            source_url=None,
+            source_fingerprint=None,
+            source_last_checked_at=None,
+            source_evidence={
+                "source": "user_description",
+                "description": description,
+                "config_generated_by": "deterministic_draft",
+                "profile_status": "draft",
             },
-        )
-        return self._normalize_description_product(
-            product,
-            name=name,
-            description=description,
-            target_geography=request.target_geography,
         )
 
     @staticmethod

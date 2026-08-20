@@ -3,7 +3,14 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from agent_runs.repository import AgentRunRepository
-from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead, AgentStepRead, ToolCallRead
+from agent_runs.schemas import (
+    AgentRunCreate,
+    AgentRunDetail,
+    AgentRunRead,
+    AgentStepRead,
+    CampaignTrace,
+    ToolCallRead,
+)
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStatus
 from products.repository import ProductRepository
@@ -62,6 +69,16 @@ class AgentRunService:
             ToolCallRead.model_validate(model) for model in self.agent_runs.list_tool_calls(run_id)
         ]
         return detail
+
+    def trace_by_campaign(self, campaign_id: str) -> CampaignTrace:
+        self.campaigns.get(campaign_id)
+        runs = [self.get(model.id) for model in self.agent_runs.list_by_campaign(campaign_id)]
+        return CampaignTrace(
+            campaign_id=campaign_id,
+            run_count=len(runs),
+            latest_run=runs[0] if runs else None,
+            runs=runs,
+        )
 
     def cancel(self, run_id: str) -> AgentRunRead:
         return AgentRunRead.model_validate(self.agent_runs.cancel(run_id))

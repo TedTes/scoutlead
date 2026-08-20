@@ -91,6 +91,27 @@ class LeadModel(TimestampMixin, Base):
     qualification: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
+class DiscoveryCandidateModel(TimestampMixin, Base):
+    __tablename__ = "discovery_candidates"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    lead_id: Mapped[str | None] = mapped_column(ForeignKey("leads.id"), nullable=True, index=True)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(String(1000), nullable=False)
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    geography: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    source: Mapped[str] = mapped_column(String(255), nullable=False)
+    raw: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    candidate_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class MessageModel(TimestampMixin, Base):
     __tablename__ = "messages"
 
