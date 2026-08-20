@@ -2,7 +2,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card, Modal, StatusPill, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { Campaign, CampaignCreateInput, Product } from "../types/domain";
+import type { Campaign, CampaignCreateInput, Product, ProductIcpSuggestion } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { statusTone } from "../utils/status";
 
@@ -25,7 +25,8 @@ export function ProductScreen({
     setSelectedProductId,
     setSelectedCampaignId,
     campaigns,
-    createProductFromDescription,
+    createProduct,
+    suggestProductIcps,
     createCampaign,
     deleteProduct,
     updateProduct,
@@ -38,8 +39,17 @@ export function ProductScreen({
   const [detailProductId, setDetailProductId] = useState("");
   const [productName, setProductName] = useState("");
   const [description, setDescription] = useState("");
+  const [setupGeography, setSetupGeography] = useState("United States, Canada");
+  const [icpSuggestions, setIcpSuggestions] = useState<ProductIcpSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number | null>(null);
+  const [targetCustomerDraft, setTargetCustomerDraft] = useState("");
+  const [problemDraft, setProblemDraft] = useState("");
+  const [valueDraft, setValueDraft] = useState("");
+  const [discoveryQueryDraft, setDiscoveryQueryDraft] = useState("");
+  const [qualificationSignalsDraft, setQualificationSignalsDraft] = useState("");
   const [geographyDraft, setGeographyDraft] = useState("United States, Canada");
   const [creating, setCreating] = useState(false);
+  const [generatingSegments, setGeneratingSegments] = useState(false);
   const [localError, setLocalError] = useState("");
   const [showNewCampaign, setShowNewCampaign] = useState(false);
   const [campaignSource, setCampaignSource] = useState("");
@@ -47,7 +57,16 @@ export function ProductScreen({
   const [goalType, setGoalType] = useState<"learn" | "sell">("learn");
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const showProductCreator = isCreatingProduct;
-  const canCreate = productName.trim().length > 0 && description.trim().length >= 20 && !creating;
+  const canGenerateSegments =
+    productName.trim().length > 0 && description.trim().length >= 20 && !generatingSegments;
+  const canCreate =
+    selectedSuggestionIndex !== null &&
+    targetCustomerDraft.trim().length > 0 &&
+    problemDraft.trim().length > 0 &&
+    valueDraft.trim().length > 0 &&
+    discoveryQueryDraft.trim().length > 0 &&
+    qualificationSignalsDraft.split("\n").some((signal) => signal.trim()) &&
+    !creating;
   const detailProduct = products.find((product) => product.id === detailProductId);
   const detailCampaigns = detailProduct
     ? campaigns.filter((campaign) => campaign.product_id === detailProduct.id)
@@ -60,6 +79,14 @@ export function ProductScreen({
     if (!isCreatingProduct) return;
     setProductName("");
     setDescription("");
+    setSetupGeography("United States, Canada");
+    setIcpSuggestions([]);
+    setSelectedSuggestionIndex(null);
+    setTargetCustomerDraft("");
+    setProblemDraft("");
+    setValueDraft("");
+    setDiscoveryQueryDraft("");
+    setQualificationSignalsDraft("");
     setGeographyDraft("United States, Canada");
     setLocalError("");
   }, [isCreatingProduct]);
@@ -86,6 +113,14 @@ export function ProductScreen({
   const startCreatingProduct = () => {
     setProductName("");
     setDescription("");
+    setSetupGeography("United States, Canada");
+    setIcpSuggestions([]);
+    setSelectedSuggestionIndex(null);
+    setTargetCustomerDraft("");
+    setProblemDraft("");
+    setValueDraft("");
+    setDiscoveryQueryDraft("");
+    setQualificationSignalsDraft("");
     setLocalError("");
     onCreatingProductChange(true);
     setDetailProductId("");
@@ -98,25 +133,101 @@ export function ProductScreen({
     setDetailProductId(productId);
   };
 
-  const createFromDescription = async () => {
+  const generateIcpSuggestions = async () => {
+    if (!canGenerateSegments) return;
+    setGeneratingSegments(true);
+    setLocalError("");
+    try {
+      const result = await suggestProductIcps({
+        product_name: productName.trim(),
+        description: description.trim(),
+        target_geography: setupGeography.trim() || "United States, Canada",
+      });
+      if (result?.suggestions.length) {
+        setIcpSuggestions(result.suggestions);
+        selectSuggestion(result.suggestions[0], 0);
+        showToast({ title: "Segments generated", message: "Pick one customer segment to test.", tone: "green" });
+      } else {
+        showToast({ title: "No segments generated", message: "Add more product context and try again.", tone: "red" });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setLocalError(message);
+      showToast({ title: "Could not generate segments", message, tone: "red" });
+    } finally {
+      setGeneratingSegments(false);
+    }
+  };
+
+  const selectSuggestion = (suggestion: ProductIcpSuggestion, index: number) => {
+    setSelectedSuggestionIndex(index);
+    setTargetCustomerDraft(suggestion.target_customer);
+    setProblemDraft(suggestion.likely_pain);
+    setValueDraft(suggestion.value_hypothesis);
+    setDiscoveryQueryDraft(suggestion.discovery_query);
+    setQualificationSignalsDraft(suggestion.qualification_signals.join("\n"));
+  };
+
+  const createFromSelectedIcp = async () => {
     if (!canCreate) return;
+    const selectedSuggestion =
+      selectedSuggestionIndex === null ? null : icpSuggestions[selectedSuggestionIndex] || null;
     setCreating(true);
     setLocalError("");
     try {
-      const created = await createProductFromDescription({
-        product_name: productName.trim(),
-        description: description.trim(),
-        target_geography: "United States, Canada",
+      const name = productName.trim();
+      const desc = description.trim();
+      const signals = qualificationSignalsDraft
+        .split("\n")
+        .map((signal) => signal.trim())
+        .filter(Boolean);
+      const created = await createProduct({
+        product_name: name,
+        product_description: desc,
+        target_customer: targetCustomerDraft.trim(),
+        problem_being_solved: problemDraft.trim(),
+        value_proposition: valueDraft.trim(),
+        target_geography: setupGeography.trim() || "United States, Canada",
+        validation_goal: `Book customer discovery interviews with ${targetCustomerDraft.trim()}.`,
+        qualification_criteria: signals.map((signal, index) => ({
+          label: signal,
+          description: null,
+          weight: index === 0 ? 3 : 2,
+          required: index === 0,
+          evidence_required: true,
+        })),
+        preferred_discovery_sources: [
+          {
+            type: "web_search",
+            value: discoveryQueryDraft.trim(),
+            limit: null,
+            notes: "Generated from selected customer segment.",
+          },
+        ],
+        outreach_objective: "Ask for a short customer discovery conversation.",
+        constraints: ["Human approval required before outbound messages are sent."],
+        source_url: null,
+        source_fingerprint: null,
+        source_last_checked_at: null,
+        source_evidence: {
+          source: "user_description",
+          description: desc,
+          selected_icp: selectedSuggestion,
+          config_generated_by: "llm_icp_suggestion",
+          profile_status: "confirmed",
+        },
       });
       if (created) {
         setProductName("");
         setDescription("");
+        setIcpSuggestions([]);
+        setSelectedSuggestionIndex(null);
         onCreatingProductChange(false);
         setSelectedProductId(created.id);
         setDetailProductId(created.id);
-        showToast({ title: "Product created", message: `${productName.trim()} is ready for campaigns.`, tone: "green" });
+        showToast({ title: "Product created", message: `${displayProductName(created)} is ready for campaigns.`, tone: "green" });
       } else {
-        showToast({ title: "Product was not created", message: "Check the product details and try again.", tone: "red" });
+        showToast({ title: "Product was not created", message: "Check the selected segment and try again.", tone: "red" });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -193,13 +304,7 @@ export function ProductScreen({
     <div className="product-page">
       {showProductCreator ? (
         <Modal title="Add product" onClose={() => onCreatingProductChange(false)}>
-          <form
-            className="product-description-create"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void createFromDescription();
-            }}
-          >
+          <div className="product-description-create">
             <label className="field">
               <span>Product name</span>
               <input
@@ -217,17 +322,87 @@ export function ProductScreen({
                 onChange={(event) => setDescription(event.target.value)}
               />
             </label>
+            <label className="field">
+              <span>Starting geography</span>
+              <input
+                placeholder="Example: Austin TX"
+                value={setupGeography}
+                onChange={(event) => setSetupGeography(event.target.value)}
+              />
+            </label>
             <div className="form-actions">
               {products.length > 0 ? (
                 <button className="secondary" type="button" onClick={() => onCreatingProductChange(false)}>
                   Cancel
                 </button>
               ) : null}
-              <button disabled={!canCreate} type="submit">
-                {creating ? "Creating..." : "Create product"}
+              <button disabled={!canGenerateSegments} type="button" onClick={generateIcpSuggestions}>
+                {generatingSegments ? "Generating..." : "Generate segments"}
               </button>
             </div>
-          </form>
+
+            {icpSuggestions.length ? (
+              <div className="icp-suggestion-flow">
+                <div className="icp-suggestion-list">
+                  {icpSuggestions.map((suggestion, index) => (
+                    <button
+                      className={selectedSuggestionIndex === index ? "icp-suggestion-card active" : "icp-suggestion-card"}
+                      key={`${suggestion.segment_name}:${index}`}
+                      type="button"
+                      onClick={() => selectSuggestion(suggestion, index)}
+                    >
+                      <strong>{suggestion.segment_name}</strong>
+                      <span>{suggestion.why_this_segment}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="icp-edit-grid">
+                  <label className="field">
+                    <span>Target customer</span>
+                    <input
+                      value={targetCustomerDraft}
+                      onChange={(event) => setTargetCustomerDraft(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Discovery query</span>
+                    <input
+                      value={discoveryQueryDraft}
+                      onChange={(event) => setDiscoveryQueryDraft(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Problem to validate</span>
+                    <textarea
+                      value={problemDraft}
+                      onChange={(event) => setProblemDraft(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Value hypothesis</span>
+                    <textarea
+                      value={valueDraft}
+                      onChange={(event) => setValueDraft(event.target.value)}
+                    />
+                  </label>
+                  <label className="field icp-signals-field">
+                    <span>Qualification signals</span>
+                    <textarea
+                      value={qualificationSignalsDraft}
+                      onChange={(event) => setQualificationSignalsDraft(event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="form-actions">
+                  <button disabled={!canCreate} type="button" onClick={createFromSelectedIcp}>
+                    {creating ? "Creating..." : "Create product"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
 
           {localError ? <p className="form-error">{localError}</p> : null}
         </Modal>

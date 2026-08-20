@@ -16,6 +16,7 @@ import type {
   ManualClassificationInput,
   Product,
   ProductDescriptionInput,
+  ProductIcpSuggestionResponse,
 } from "../types/domain";
 
 type AppDataContextValue = {
@@ -38,6 +39,7 @@ type AppDataContextValue = {
   refreshSnapshot: (campaignId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<Product | null>;
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
+  suggestProductIcps: (input: ProductDescriptionInput) => Promise<ProductIcpSuggestionResponse | null>;
   deleteProduct: (productId?: string) => Promise<void>;
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
@@ -297,6 +299,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           created = product;
         });
         return created;
+      },
+      suggestProductIcps: async (input) => {
+        setError("");
+        try {
+          return await api.suggestProductIcps(input);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
       },
       deleteProduct: (productId = selectedProductIdState) =>
         mutate(async () => {

@@ -1006,6 +1006,68 @@ textarea {
   justify-self: end;
 }
 
+.icp-suggestion-flow {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  margin-top: 4px;
+  padding-top: 14px;
+}
+
+.icp-suggestion-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-description-create .icp-suggestion-card {
+  align-items: start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  color: var(--tx);
+  display: grid;
+  gap: 5px;
+  justify-self: stretch;
+  padding: 12px;
+  text-align: left;
+}
+
+.product-description-create .icp-suggestion-card.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.icp-suggestion-card strong {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semi);
+  line-height: 1.35;
+}
+
+.icp-suggestion-card span {
+  color: var(--tx-2);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.icp-edit-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.icp-edit-grid .field {
+  margin-bottom: 0;
+}
+
+.icp-edit-grid textarea {
+  min-height: 90px;
+}
+
+.icp-signals-field {
+  grid-column: 1 / -1;
+}
+
 .campaign-create-modal {
   display: grid;
   gap: 14px;
@@ -2505,7 +2567,9 @@ textarea {
 
   .stat-grid.four,
   .stat-grid.six,
-  .form-grid.two {
+  .form-grid.two,
+  .icp-suggestion-list,
+  .icp-edit-grid {
     grid-template-columns: 1fr;
   }
 

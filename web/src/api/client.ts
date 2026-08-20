@@ -19,6 +19,7 @@ import type {
   ManualClassificationInput,
   Product,
   ProductDescriptionInput,
+  ProductIcpSuggestionResponse,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -43,6 +44,13 @@ export class ApiClient {
 
   createProductFromDescription(input: ProductDescriptionInput) {
     return this.request<Product>("/products/from-description", { method: "POST", body: input });
+  }
+
+  suggestProductIcps(input: ProductDescriptionInput) {
+    return this.request<ProductIcpSuggestionResponse>("/products/icp-suggestions", {
+      method: "POST",
+      body: input,
+    });
   }
 
   updateProduct(id: string, product: unknown) {

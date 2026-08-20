@@ -26,6 +26,24 @@ export type ProductDescriptionInput = {
   target_geography?: string;
 };
 
+export type ProductIcpSuggestion = {
+  segment_name: string;
+  target_customer: string;
+  why_this_segment: string;
+  likely_pain: string;
+  value_hypothesis: string;
+  discovery_query: string;
+  qualification_signals: string[];
+  risks: string[];
+};
+
+export type ProductIcpSuggestionResponse = {
+  product_name: string;
+  product_description: string;
+  target_geography: string;
+  suggestions: ProductIcpSuggestion[];
+};
+
 export type QualificationCriterion = {
   id?: string | null;
   label: string;
