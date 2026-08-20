@@ -1020,7 +1020,7 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.product-description-create .icp-suggestion-card {
+.icp-suggestion-card {
   align-items: start;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1033,7 +1033,7 @@ textarea {
   text-align: left;
 }
 
-.product-description-create .icp-suggestion-card.active {
+.icp-suggestion-card.active {
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 var(--accent);
 }
@@ -1048,6 +1048,35 @@ textarea {
   color: var(--tx-2);
   font-size: var(--fs-sm);
   line-height: 1.45;
+}
+
+.icp-suggestion-card em {
+  color: var(--tx-3);
+  font-size: var(--fs-sm);
+  font-style: normal;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.icp-suggestion-card small {
+  color: var(--tx-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.icp-suggestion-flow.no-divider {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 12px;
+}
+
+.icp-selected-editor {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
 }
 
 .icp-edit-grid {
@@ -1071,6 +1100,28 @@ textarea {
 .campaign-create-modal {
   display: grid;
   gap: 14px;
+}
+
+.location-suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--tx-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  padding: 6px 10px;
+}
+
+.chip-button.active {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .campaign-create-context {
@@ -1315,6 +1366,17 @@ textarea {
   line-height: 1.55;
   margin: 14px 0 0;
   max-width: 880px;
+}
+
+.product-setup-note {
+  background: var(--warn-bg);
+  border: 1px solid #f2d6a6;
+  border-radius: var(--r-lg);
+  color: #7a4b00;
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  margin: 14px 0 0;
+  padding: 10px 12px;
 }
 
 .product-facts {

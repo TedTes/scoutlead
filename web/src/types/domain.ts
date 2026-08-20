@@ -33,6 +33,7 @@ export type ProductIcpSuggestion = {
   likely_pain: string;
   value_hypothesis: string;
   discovery_query: string;
+  suggested_locations?: string[];
   qualification_signals: string[];
   risks: string[];
 };
