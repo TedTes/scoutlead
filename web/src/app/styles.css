@@ -1011,29 +1011,230 @@ textarea {
   gap: 14px;
 }
 
-.tool-toggle-list {
+.campaign-create-context {
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   display: grid;
-  gap: 10px;
+  gap: 3px;
   padding: 12px;
 }
 
-.tool-toggle-list > strong {
+.campaign-create-context span {
+  color: var(--tx-3);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-semi);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+.campaign-create-context strong {
+  color: var(--tx);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+}
+
+.campaign-create-context em {
+  color: var(--tx-2);
+  font-size: var(--fs-sm);
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.campaign-create-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 140px;
+}
+
+.campaign-create-grid .field,
+.campaign-create-modal .field {
+  margin-bottom: 0;
+}
+
+.campaign-setup-warning {
+  background: #fff7e6;
+  border: 1px solid #f1d29a;
+  border-radius: var(--r-lg);
+  color: #6f4500;
+  display: grid;
+  font-size: var(--fs-base);
+  gap: 8px;
+  padding: 12px;
+}
+
+.campaign-setup-warning strong {
+  font-weight: var(--fw-semi);
+}
+
+.campaign-setup-warning ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.advanced-settings-row {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.trace-page,
+.trace-step-list,
+.trace-call-list {
+  display: grid;
+  gap: 14px;
+}
+
+.trace-run-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.trace-run-summary div {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.trace-run-summary span,
+.trace-meta-row,
+.trace-run-row span {
+  color: var(--tx-3);
+  font-size: var(--fs-sm);
+}
+
+.trace-run-summary strong,
+.trace-run-row strong {
+  color: var(--tx);
+  display: block;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semi);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.trace-objective {
+  color: var(--tx-2);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+
+.trace-candidate-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trace-candidate-summary span {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--tx-2);
+  font-size: var(--fs-sm);
+  padding: 6px 8px;
+}
+
+.trace-candidate-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.trace-io-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.trace-json,
+.trace-call {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.trace-json summary,
+.trace-call summary {
+  align-items: center;
+  background: var(--surface);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.trace-json summary {
+  color: var(--tx);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+}
+
+.trace-json pre {
+  color: var(--tx-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.trace-call summary > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.trace-call summary strong {
+  color: var(--tx);
   font-size: var(--fs-base);
   font-weight: var(--fw-semi);
 }
 
-.tool-toggle-list label {
-  align-items: center;
+.trace-call summary span {
   color: var(--tx-2);
-  display: flex;
-  font-size: var(--fs-base);
-  gap: 8px;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.tool-toggle-list input {
-  width: auto;
+.trace-call-body {
+  padding: 12px;
+}
+
+.trace-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.trace-run-list {
+  display: grid;
+}
+
+.trace-run-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(150px, 1fr) auto minmax(170px, 0.7fr) auto auto;
+  padding: 12px 0;
+}
+
+.trace-run-row:last-child {
+  border-bottom: 0;
 }
 
 .form-error {
@@ -2199,6 +2400,8 @@ textarea {
   .product-profile-grid,
   .product-facts,
   .product-selector-row,
+  .trace-run-summary,
+  .trace-io-grid,
   .conversation-grid,
   .integration-grid,
   .insight-summary,
@@ -2215,6 +2418,11 @@ textarea {
 
   .campaign-history-row time {
     text-align: left;
+  }
+
+  .trace-run-row {
+    align-items: start;
+    grid-template-columns: 1fr;
   }
 
   .product-table-head {

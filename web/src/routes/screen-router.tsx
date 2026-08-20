@@ -6,6 +6,7 @@ import { LeadsScreen } from "../screens/LeadsScreen";
 import { InsightsScreen } from "../screens/InsightsScreen";
 import { OverviewScreen } from "../screens/OverviewScreen";
 import { ProductScreen } from "../screens/ProductScreen";
+import { TraceScreen } from "../screens/TraceScreen";
 import type { Screen } from "../types/navigation";
 
 export function renderScreen(
@@ -26,6 +27,8 @@ export function renderScreen(
       return <LeadsScreen />;
     case "insights":
       return <InsightsScreen />;
+    case "trace":
+      return <TraceScreen />;
     case "approvals":
       return <ApprovalsScreen />;
     case "conversations":

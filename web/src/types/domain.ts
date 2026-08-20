@@ -144,6 +144,37 @@ export type Lead = {
   };
 };
 
+export type DiscoveryCandidate = {
+  id: string;
+  campaign_id: string;
+  product_id: string;
+  lead_id?: string | null;
+  query: string;
+  title: string;
+  url?: string | null;
+  snippet?: string | null;
+  geography?: string | null;
+  contact_email?: string | null;
+  source: string;
+  raw: Record<string, unknown>;
+  candidate_type:
+    | "target_business"
+    | "competitor"
+    | "vendor"
+    | "directory"
+    | "content"
+    | "salary"
+    | "job"
+    | "social"
+    | "irrelevant"
+    | "unknown";
+  confidence: number;
+  rejection_reason?: string | null;
+  promoted_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Message = {
   id: string;
   campaign_id: string;
@@ -305,6 +336,13 @@ export type AgentRunDetail = AgentRun & {
   tool_calls: ToolCall[];
 };
 
+export type CampaignTrace = {
+  campaign_id: string;
+  run_count: number;
+  latest_run?: AgentRunDetail | null;
+  runs: AgentRunDetail[];
+};
+
 export type CampaignPreflightCheck = {
   name: string;
   status: string;
@@ -321,11 +359,13 @@ export type CampaignPreflight = {
 export type CampaignSnapshot = {
   campaign?: Campaign;
   leads: Lead[];
+  discoveryCandidates: DiscoveryCandidate[];
   messages: Message[];
   conversations: Conversation[];
   metrics?: Metrics;
   insight?: CampaignInsight;
   preflight?: CampaignPreflight;
+  trace?: CampaignTrace;
   agentRuns: AgentRun[];
   latestAgentRun?: AgentRunDetail;
 };

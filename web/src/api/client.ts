@@ -7,8 +7,10 @@ import type {
   CampaignPreflight,
   CampaignInsight,
   CampaignRunSummary,
+  CampaignTrace,
   ConnectionStatus,
   Conversation,
+  DiscoveryCandidate,
   ICPPreset,
   Lead,
   Message,
@@ -86,6 +88,10 @@ export class ApiClient {
     return this.request<AgentRun[]>(`/campaigns/${campaignId}/agent-runs`);
   }
 
+  getCampaignTrace(campaignId: string) {
+    return this.request<CampaignTrace>(`/campaigns/${campaignId}/trace`);
+  }
+
   getAgentRun(id: string) {
     return this.request<AgentRunDetail>(`/agent-runs/${id}`);
   }
@@ -107,6 +113,10 @@ export class ApiClient {
 
   getLeads(campaignId: string) {
     return this.request<Lead[]>(`/campaigns/${campaignId}/leads`);
+  }
+
+  getDiscoveryCandidates(campaignId: string) {
+    return this.request<DiscoveryCandidate[]>(`/campaigns/${campaignId}/discovery-candidates`);
   }
 
   getMessages(campaignId: string) {

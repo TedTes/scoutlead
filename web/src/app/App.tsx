@@ -44,6 +44,7 @@ function AppShell() {
   const connectionTotal = visibleConnections.length || 3;
   const navCounts: Partial<Record<Screen, string>> = {
     leads: String(snapshot.metrics?.lead_count ?? snapshot.leads.length),
+    trace: String(snapshot.latestAgentRun?.tool_call_count ?? 0),
     approvals: String(snapshot.metrics?.pending_approval_count ?? 0),
     conversations: String(snapshot.conversations.length),
     campaigns: String(productCampaigns.length),

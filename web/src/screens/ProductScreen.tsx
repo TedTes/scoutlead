@@ -38,31 +38,36 @@ export function ProductScreen({
   const [detailProductId, setDetailProductId] = useState("");
   const [productName, setProductName] = useState("");
   const [description, setDescription] = useState("");
+  const [geographyDraft, setGeographyDraft] = useState("United States, Canada");
   const [creating, setCreating] = useState(false);
   const [localError, setLocalError] = useState("");
   const [showNewCampaign, setShowNewCampaign] = useState(false);
   const [campaignSource, setCampaignSource] = useState("");
   const [maxLeads, setMaxLeads] = useState("10");
   const [goalType, setGoalType] = useState<"learn" | "sell">("learn");
-  const [toolPlan, setToolPlan] = useState({
-    search: true,
-    websiteResearch: true,
-    reasoning: true,
-    outreachDrafts: true,
-  });
+  const [creatingCampaign, setCreatingCampaign] = useState(false);
   const showProductCreator = isCreatingProduct;
   const canCreate = productName.trim().length > 0 && description.trim().length >= 20 && !creating;
   const detailProduct = products.find((product) => product.id === detailProductId);
   const detailCampaigns = detailProduct
     ? campaigns.filter((campaign) => campaign.product_id === detailProduct.id)
     : [];
+  const campaignSetupGaps = detailProduct ? getCampaignSetupGaps(detailProduct, campaignSource) : [];
+  const savedDiscoverySourceCount = detailProduct ? countDiscoverySources(detailProduct) : 0;
+  const canCreateCampaign = Boolean(detailProduct) && campaignSetupGaps.length === 0 && !creatingCampaign;
 
   useEffect(() => {
     if (!isCreatingProduct) return;
     setProductName("");
     setDescription("");
+    setGeographyDraft("United States, Canada");
     setLocalError("");
   }, [isCreatingProduct]);
+
+  useEffect(() => {
+    if (!detailProduct) return;
+    setGeographyDraft(detailProduct.target_geography || "United States, Canada");
+  }, [detailProduct?.id, detailProduct?.target_geography]);
 
   useEffect(() => {
     if (!newCampaignToken || !selectedProductId) return;
@@ -70,12 +75,6 @@ export function ProductScreen({
     setCampaignSource("");
     setMaxLeads("10");
     setGoalType("learn");
-    setToolPlan({
-      search: true,
-      websiteResearch: true,
-      reasoning: true,
-      outreachDrafts: true,
-    });
     setShowNewCampaign(true);
   }, [newCampaignToken, selectedProductId]);
 
@@ -107,7 +106,7 @@ export function ProductScreen({
       const created = await createProductFromDescription({
         product_name: productName.trim(),
         description: description.trim(),
-        target_geography: "United States",
+        target_geography: "United States, Canada",
       });
       if (created) {
         setProductName("");
@@ -128,6 +127,13 @@ export function ProductScreen({
     }
   };
 
+  const saveAdvancedSettings = async () => {
+    if (!detailProduct) return;
+    const targetGeography = geographyDraft.trim() || "United States, Canada";
+    await updateProduct(detailProduct.id, { target_geography: targetGeography });
+    showToast({ title: "Product settings saved", message: `Target geography set to ${targetGeography}.`, tone: "green" });
+  };
+
   const deleteSelectedProduct = async () => {
     if (!detailProduct) return;
     const campaignCount = detailCampaigns.length;
@@ -142,35 +148,47 @@ export function ProductScreen({
 
   const submitCampaign = async () => {
     if (!detailProduct) return;
+    const gaps = getCampaignSetupGaps(detailProduct, campaignSource);
+    if (gaps.length) {
+      showToast({
+        title: "Campaign needs product setup",
+        message: gaps.join(" "),
+        tone: "red",
+      });
+      return;
+    }
+    setCreatingCampaign(true);
     const parsedMaxLeads = Number.parseInt(maxLeads, 10);
     const nextMaxLeads = Number.isFinite(parsedMaxLeads) ? Math.max(1, Math.min(parsedMaxLeads, 100)) : 10;
     const source = campaignSource.trim();
-    if (source) {
-      await updateProduct(detailProduct.id, {
-        preferred_discovery_sources: [{ type: "web_search", value: source, limit: nextMaxLeads }],
-      });
-    }
-    const enabledTools = Object.entries(toolPlan)
-      .filter(([, enabled]) => enabled)
-      .map(([tool]) => tool.replace(/([A-Z])/g, " $1").toLowerCase());
-    const date = new Date().toISOString().slice(0, 10);
-    const input: CampaignCreateInput = {
-      product_id: detailProduct.id,
-      name: `${displayProductName(detailProduct)} validation ${date}`,
-      goal_type: goalType,
-      icp_preset_id: icpPresets[0]?.id || "default-web-validation",
-      max_leads: nextMaxLeads,
-      channels: ["email"],
-      discovery_seeds: [],
-      goal_override: `Tool plan: ${enabledTools.join(", ")}${source ? `. Discovery source: ${source}` : ""}`,
-    };
-    const created = await createCampaign(input);
-    if (created) {
-      setShowNewCampaign(false);
-      setSelectedCampaignId(created.id);
-      showToast({ title: "Campaign created", message: "Run it from this product page when ready.", tone: "green" });
-    } else {
-      showToast({ title: "Campaign was not created", message: "Check the campaign setup and try again.", tone: "red" });
+    try {
+      if (source) {
+        await updateProduct(detailProduct.id, {
+          preferred_discovery_sources: [{ type: "web_search", value: source, limit: nextMaxLeads }],
+        });
+      }
+      const date = new Date().toISOString().slice(0, 10);
+      const input: CampaignCreateInput = {
+        product_id: detailProduct.id,
+        name: `${displayProductName(detailProduct)} validation ${date}`,
+        goal_type: goalType,
+        icp_preset_id: icpPresets[0]?.id || "default-web-validation",
+        max_leads: nextMaxLeads,
+        channels: ["email"],
+        discovery_seeds: [],
+        goal_override: source ? `Discovery query override: ${source}` : null,
+      };
+      const created = await createCampaign(input);
+      if (created) {
+        setShowNewCampaign(false);
+        setCampaignSource("");
+        setSelectedCampaignId(created.id);
+        showToast({ title: "Campaign created", message: "Run it from this product page when ready.", tone: "green" });
+      } else {
+        showToast({ title: "Campaign was not created", message: "Check the campaign setup and try again.", tone: "red" });
+      }
+    } finally {
+      setCreatingCampaign(false);
     }
   };
 
@@ -302,6 +320,22 @@ export function ProductScreen({
             </Card>
           </div>
 
+          <Card title="Advanced settings">
+            <div className="advanced-settings-row">
+              <label className="field">
+                <span>Target geography</span>
+                <input
+                  value={geographyDraft}
+                  onChange={(event) => setGeographyDraft(event.target.value)}
+                  placeholder="United States, Canada"
+                />
+              </label>
+              <button type="button" onClick={saveAdvancedSettings}>
+                Save
+              </button>
+            </div>
+          </Card>
+
           <Card
             title="Campaigns"
             meta={
@@ -336,54 +370,56 @@ export function ProductScreen({
       {showNewCampaign && detailProduct ? (
         <Modal title="New campaign" onClose={() => setShowNewCampaign(false)}>
           <div className="campaign-create-modal">
+            <div className="campaign-create-context">
+              <span>Product</span>
+              <strong>{displayProductName(detailProduct)}</strong>
+              <em>{detailProduct.target_customer || "No target customer saved"}</em>
+            </div>
+            <div className="campaign-create-grid">
+              <label className="field">
+                <span>Goal</span>
+                <select value={goalType} onChange={(event) => setGoalType(event.target.value as "learn" | "sell")}>
+                  <option value="learn">Learn - validate ICP and book interviews</option>
+                  <option value="sell">Sell - find buyers and drive product interest</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Max leads</span>
+                <input
+                  min={1}
+                  max={100}
+                  type="number"
+                  value={maxLeads}
+                  onChange={(event) => setMaxLeads(event.target.value)}
+                />
+              </label>
+            </div>
             <label className="field">
-              <span>Goal</span>
-              <select value={goalType} onChange={(event) => setGoalType(event.target.value as "learn" | "sell")}>
-                <option value="learn">Learn - validate ICP and book interviews</option>
-                <option value="sell">Sell - find buyers and drive product interest</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Discovery source</span>
+              <span>Discovery query override</span>
               <input
                 autoFocus
-                placeholder="Optional search query, source, or seed list"
+                placeholder="Optional: residential painters in Texas, seed URL, or company list"
                 value={campaignSource}
                 onChange={(event) => setCampaignSource(event.target.value)}
               />
-              <em>Blank uses this product's saved discovery queries.</em>
+              <em>{formatDiscoveryHelp(campaignSource, savedDiscoverySourceCount)}</em>
             </label>
-            <label className="field">
-              <span>Max leads</span>
-              <input
-                min={1}
-                max={100}
-                type="number"
-                value={maxLeads}
-                onChange={(event) => setMaxLeads(event.target.value)}
-              />
-            </label>
-            <div className="tool-toggle-list">
-              <strong>Tools for this campaign</strong>
-              {Object.entries(toolPlan).map(([key, enabled]) => (
-                <label key={key}>
-                  <input
-                    checked={enabled}
-                    type="checkbox"
-                    onChange={(event) =>
-                      setToolPlan((current) => ({ ...current, [key]: event.target.checked }))
-                    }
-                  />
-                  <span>{formatToolName(key)}</span>
-                </label>
-              ))}
-            </div>
+            {campaignSetupGaps.length ? (
+              <div className="campaign-setup-warning" role="alert">
+                <strong>Complete setup before creating this campaign</strong>
+                <ul>
+                  {campaignSetupGaps.map((gap) => (
+                    <li key={gap}>{gap}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="form-actions">
               <button className="secondary" type="button" onClick={() => setShowNewCampaign(false)}>
                 Cancel
               </button>
-              <button type="button" onClick={submitCampaign}>
-                Create campaign
+              <button disabled={!canCreateCampaign} type="button" onClick={submitCampaign}>
+                {creatingCampaign ? "Creating..." : "Create campaign"}
               </button>
             </div>
           </div>
@@ -472,14 +508,41 @@ function formatDiscoveryType(type: string) {
   return type.replace("_", " ");
 }
 
-function formatToolName(value: string) {
-  return value.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
-}
-
 function displayProductName(product: Product) {
   const savedName = product.product_name.trim();
   if (savedName && !isGenericProductName(savedName)) return savedName;
   return inferProductName(product) || savedName || "Unnamed product";
+}
+
+function getCampaignSetupGaps(product: Product, sourceOverride: string) {
+  const gaps: string[] = [];
+  if (!product.target_customer.trim()) {
+    gaps.push("Target customer is missing.");
+  }
+  if (!product.qualification_criteria.some((criterion) => criterion.label.trim())) {
+    gaps.push("Qualification signals are missing.");
+  }
+  if (!sourceOverride.trim() && countDiscoverySources(product) === 0) {
+    gaps.push("Discovery queries are missing.");
+  }
+  return gaps;
+}
+
+function countDiscoverySources(product: Product) {
+  return product.preferred_discovery_sources.filter((source) => source.value.trim()).length;
+}
+
+function formatDiscoveryHelp(sourceOverride: string, savedSourceCount: number) {
+  if (sourceOverride.trim()) {
+    return "This query will be saved on the product and used for this campaign.";
+  }
+  if (savedSourceCount === 1) {
+    return "Leave blank to use the product's generated discovery query.";
+  }
+  if (savedSourceCount > 1) {
+    return `Leave blank to use the product's ${savedSourceCount} generated discovery queries.`;
+  }
+  return "Add a query here, or update the product profile with discovery queries before creating a campaign.";
 }
 
 function isGenericProductName(name: string) {

@@ -4,6 +4,7 @@ export type Screen =
   | "campaigns"
   | "leads"
   | "insights"
+  | "trace"
   | "approvals"
   | "conversations"
   | "connections";

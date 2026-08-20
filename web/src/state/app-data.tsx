@@ -2,9 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { ApiClient } from "../api/client";
 import { getApiBaseUrl } from "../config/env";
 import type {
+  AgentRunDetail,
   Campaign,
   CampaignCreateInput,
   CampaignSnapshot,
+  CampaignTrace,
   ConnectionStatus,
   Conversation,
   ICPPreset,
@@ -62,10 +64,37 @@ const AppDataContext = createContext<AppDataContextValue | null>(null);
 
 const emptySnapshot: CampaignSnapshot = {
   leads: [],
+  discoveryCandidates: [],
   messages: [],
   conversations: [],
   agentRuns: [],
 };
+
+async function getTraceWithFallback(api: ApiClient, campaignId: string): Promise<CampaignTrace | undefined> {
+  try {
+    return await api.getCampaignTrace(campaignId);
+  } catch {
+    const runs = await api.getCampaignAgentRuns(campaignId).catch(() => []);
+    if (!runs.length) return undefined;
+
+    const details = await Promise.all(
+      runs.map(async (run): Promise<AgentRunDetail> => {
+        try {
+          return await api.getAgentRun(run.id);
+        } catch {
+          return { ...run, steps: [], tool_calls: [] };
+        }
+      }),
+    );
+
+    return {
+      campaign_id: campaignId,
+      run_count: details.length,
+      latest_run: details[0] ?? null,
+      runs: details,
+    };
+  }
+}
 
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [apiHealthy, setApiHealthy] = useState(false);
@@ -123,18 +152,42 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         setSnapshot(emptySnapshot);
         return;
       }
-      const [campaign, leads, messages, conversations, metrics, agentRuns, preflight, insight] = await Promise.all([
+      const [
+        campaign,
+        leads,
+        discoveryCandidates,
+        messages,
+        conversations,
+        metrics,
+        preflight,
+        insight,
+        trace,
+      ] = await Promise.all([
         api.getCampaign(campaignId),
         api.getLeads(campaignId),
+        api.getDiscoveryCandidates(campaignId).catch(() => []),
         api.getMessages(campaignId),
         api.getConversations(campaignId),
         api.getMetrics(campaignId),
-        api.getCampaignAgentRuns(campaignId),
         api.getCampaignPreflight(campaignId),
         api.getCampaignInsight(campaignId).catch(() => undefined),
+        getTraceWithFallback(api, campaignId),
       ]);
-      const latestAgentRun = agentRuns[0] ? await api.getAgentRun(agentRuns[0].id) : undefined;
-      setSnapshot({ campaign, leads, messages, conversations, metrics, insight, preflight, agentRuns, latestAgentRun });
+      const latestAgentRun = trace?.latest_run ?? undefined;
+      const agentRuns = trace?.runs ?? [];
+      setSnapshot({
+        campaign,
+        leads,
+        discoveryCandidates,
+        messages,
+        conversations,
+        metrics,
+        insight,
+        preflight,
+        trace,
+        agentRuns,
+        latestAgentRun,
+      });
     },
     [api, selectedCampaignIdState],
   );
