@@ -3,20 +3,15 @@ import { ApiClient } from "../api/client";
 import { getApiBaseUrl } from "../config/env";
 import type {
   AgentRunDetail,
-  Campaign,
-  CampaignCreateInput,
-  CampaignSnapshot,
-  CampaignTrace,
+  DiscoveryRun,
+  DiscoveryRunCreateInput,
+  DiscoverySnapshot,
+  DiscoveryTrace,
   ConnectionStatus,
-  Conversation,
-  ICPPreset,
-  Lead,
   Message,
   Metrics,
-  ManualClassificationInput,
   Product,
   ProductDescriptionInput,
-  ProductIcpSuggestionResponse,
 } from "../types/domain";
 
 type AppDataContextValue = {
@@ -24,60 +19,53 @@ type AppDataContextValue = {
   loading: boolean;
   error: string;
   products: Product[];
-  campaigns: Campaign[];
+  discoveryRuns: DiscoveryRun[];
   selectedProductId: string;
-  selectedCampaignId: string;
+  selectedDiscoveryRunId: string;
   selectedProduct?: Product;
-  selectedCampaign?: Campaign;
-  productCampaigns: Campaign[];
-  snapshot: CampaignSnapshot;
+  selectedDiscoveryRun?: DiscoveryRun;
+  productDiscoveryRuns: DiscoveryRun[];
+  snapshot: DiscoverySnapshot;
   connections: ConnectionStatus[];
-  icpPresets: ICPPreset[];
   setSelectedProductId: (productId: string) => void;
-  setSelectedCampaignId: (campaignId: string) => void;
+  setSelectedDiscoveryRunId: (runId: string) => void;
   refreshAll: () => Promise<void>;
-  refreshSnapshot: (campaignId?: string) => Promise<void>;
+  refreshSnapshot: (runId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<Product | null>;
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
-  suggestProductIcps: (input: ProductDescriptionInput) => Promise<ProductIcpSuggestionResponse | null>;
   deleteProduct: (productId?: string) => Promise<void>;
+  discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
-  createCampaign: (input: CampaignCreateInput) => Promise<Campaign | null>;
-  deleteCampaigns: (campaignIds: string[]) => Promise<void>;
-  runCampaign: (campaignId?: string) => Promise<void>;
-  enqueueCampaign: (campaignId?: string) => Promise<void>;
-  pauseCampaign: (campaignId?: string) => Promise<void>;
-  resumeCampaign: (campaignId?: string) => Promise<void>;
-  addSeedLeads: (seeds: unknown[]) => Promise<void>;
+  createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
+  deleteDiscoveryRuns: (runIds: string[]) => Promise<void>;
+  runDiscovery: (runId?: string) => Promise<void>;
+  enqueueDiscoveryRun: (runId?: string) => Promise<void>;
+  pauseDiscoveryRun: (runId?: string) => Promise<void>;
+  resumeDiscoveryRun: (runId?: string) => Promise<void>;
+  addSeedResults: (seeds: unknown[]) => Promise<void>;
   updateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
   approveMessage: (messageId: string) => Promise<void>;
   sendMessage: (messageId: string) => Promise<void>;
   cancelMessage: (messageId: string) => Promise<void>;
-  recordResponse: (conversationId: string, body: string) => Promise<void>;
-  manuallyClassifyResponse: (
-    conversationId: string,
-    classification: ManualClassificationInput,
-  ) => Promise<void>;
-  generateCampaignInsight: (campaignId?: string) => Promise<void>;
+  generateDiscoveryInsight: (runId?: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
-const emptySnapshot: CampaignSnapshot = {
-  campaignSources: [],
-  leads: [],
+const emptySnapshot: DiscoverySnapshot = {
+  sourceConfigs: [],
+  results: [],
   discoveryCandidates: [],
   messages: [],
-  conversations: [],
   agentRuns: [],
 };
 
-async function getTraceWithFallback(api: ApiClient, campaignId: string): Promise<CampaignTrace | undefined> {
+async function getTraceWithFallback(api: ApiClient, runId: string): Promise<DiscoveryTrace | undefined> {
   try {
-    return await api.getCampaignTrace(campaignId);
+    return await api.getDiscoveryTrace(runId);
   } catch {
-    const runs = await api.getCampaignAgentRuns(campaignId).catch(() => []);
+    const runs = await api.getDiscoveryRunAgentRuns(runId).catch(() => []);
     if (!runs.length) return undefined;
 
     const details = await Promise.all(
@@ -91,7 +79,7 @@ async function getTraceWithFallback(api: ApiClient, campaignId: string): Promise
     );
 
     return {
-      campaign_id: campaignId,
+      campaign_id: runId,
       run_count: details.length,
       latest_run: details[0] ?? null,
       runs: details,
@@ -104,41 +92,40 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [discoveryRuns, setDiscoveryRuns] = useState<DiscoveryRun[]>([]);
   const [selectedProductIdState, setSelectedProductIdState] = useState(
     localStorage.getItem("selectedProductId") || "",
   );
-  const [selectedCampaignIdState, setSelectedCampaignIdState] = useState(
-    localStorage.getItem("selectedCampaignId") || "",
+  const [selectedDiscoveryRunIdState, setSelectedDiscoveryRunIdState] = useState(
+    localStorage.getItem("selectedDiscoveryRunId") || "",
   );
-  const [snapshot, setSnapshot] = useState<CampaignSnapshot>(emptySnapshot);
+  const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
-  const [icpPresets, setIcpPresets] = useState<ICPPreset[]>([]);
 
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const api = useMemo(() => new ApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
 
   const selectedProduct = products.find((product) => product.id === selectedProductIdState);
-  const productCampaigns = campaigns.filter((campaign) => campaign.product_id === selectedProductIdState);
-  const selectedCampaign =
-    snapshot.campaign ?? campaigns.find((campaign) => campaign.id === selectedCampaignIdState);
+  const productDiscoveryRuns = discoveryRuns.filter((run) => run.product_id === selectedProductIdState);
+  const selectedDiscoveryRun =
+    snapshot.run ?? discoveryRuns.find((run) => run.id === selectedDiscoveryRunIdState);
 
   const persistSelectedProductId = useCallback(
-    (productId: string, nextCampaigns = campaigns) => {
+    (productId: string, nextRuns = discoveryRuns) => {
       localStorage.setItem("selectedProductId", productId);
       setSelectedProductIdState(productId);
 
-      const firstCampaignForProduct = nextCampaigns.find((campaign) => campaign.product_id === productId);
-      const nextCampaignId = firstCampaignForProduct?.id || "";
-      localStorage.setItem("selectedCampaignId", nextCampaignId);
-      setSelectedCampaignIdState(nextCampaignId);
+      const firstRunForProduct = nextRuns.find((run) => run.product_id === productId);
+      const nextRunId = firstRunForProduct?.id || "";
+      localStorage.setItem("selectedDiscoveryRunId", nextRunId);
+      setSelectedDiscoveryRunIdState(nextRunId);
     },
-    [campaigns],
+    [discoveryRuns],
   );
 
-  const persistSelectedCampaignId = useCallback((campaignId: string) => {
-    localStorage.setItem("selectedCampaignId", campaignId);
-    setSelectedCampaignIdState(campaignId);
+  const persistSelectedDiscoveryRunId = useCallback((runId: string) => {
+    localStorage.setItem("selectedDiscoveryRunId", runId);
+    setSelectedDiscoveryRunIdState(runId);
   }, []);
 
   const refreshConnections = useCallback(async () => {
@@ -150,43 +137,40 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, [api]);
 
   const refreshSnapshot = useCallback(
-    async (campaignId = selectedCampaignIdState) => {
-      if (!campaignId) {
+    async (runId = selectedDiscoveryRunIdState) => {
+      if (!runId) {
         setSnapshot(emptySnapshot);
         return;
       }
       const [
-        campaign,
-        campaignSources,
-        leads,
+        run,
+        sourceConfigs,
+        results,
         discoveryCandidates,
         messages,
-        conversations,
         metrics,
         preflight,
         insight,
         trace,
       ] = await Promise.all([
-        api.getCampaign(campaignId),
-        api.getCampaignSources(campaignId).catch(() => []),
-        api.getLeads(campaignId),
-        api.getDiscoveryCandidates(campaignId).catch(() => []),
-        api.getMessages(campaignId),
-        api.getConversations(campaignId),
-        api.getMetrics(campaignId),
-        api.getCampaignPreflight(campaignId),
-        api.getCampaignInsight(campaignId).catch(() => undefined),
-        getTraceWithFallback(api, campaignId),
+        api.getDiscoveryRun(runId),
+        api.getDiscoveryRunSources(runId).catch(() => []),
+        api.getResults(runId),
+        api.getDiscoveryCandidates(runId).catch(() => []),
+        api.getMessages(runId),
+        api.getMetrics(runId),
+        api.getDiscoveryRunPreflight(runId),
+        api.getDiscoveryInsight(runId).catch(() => undefined),
+        getTraceWithFallback(api, runId),
       ]);
       const latestAgentRun = trace?.latest_run ?? undefined;
       const agentRuns = trace?.runs ?? [];
       setSnapshot({
-        campaign,
-        campaignSources,
-        leads,
+        run,
+        sourceConfigs,
+        results,
         discoveryCandidates,
         messages,
-        conversations,
         metrics,
         insight,
         preflight,
@@ -195,26 +179,24 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         latestAgentRun,
       });
     },
-    [api, selectedCampaignIdState],
+    [api, selectedDiscoveryRunIdState],
   );
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [health, nextProducts, nextCampaigns] = await Promise.all([
+      const [health, nextProducts, nextRuns] = await Promise.all([
         api.getHealth().then(
           () => true,
           () => false,
         ),
         api.getProducts(),
-        api.getCampaigns(),
+        api.getDiscoveryRuns(),
       ]);
       setApiHealthy(health);
       setProducts(nextProducts);
-      setCampaigns(nextCampaigns);
-      setIcpPresets(await api.getIcpPresets().catch(() => []));
-
+      setDiscoveryRuns(nextRuns);
       const storedProductId = localStorage.getItem("selectedProductId") || "";
       const nextProductId =
         (storedProductId && nextProducts.some((product) => product.id === storedProductId)
@@ -223,18 +205,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setSelectedProductIdState(nextProductId);
       if (nextProductId) localStorage.setItem("selectedProductId", nextProductId);
 
-      const storedCampaignId = localStorage.getItem("selectedCampaignId") || "";
-      const productCampaignList = nextCampaigns.filter((campaign) => campaign.product_id === nextProductId);
-      const nextCampaignId =
-        (storedCampaignId &&
-        productCampaignList.some((campaign) => campaign.id === storedCampaignId)
-          ? storedCampaignId
-          : productCampaignList[0]?.id) || "";
-      setSelectedCampaignIdState(nextCampaignId);
-      localStorage.setItem("selectedCampaignId", nextCampaignId);
+      const storedRunId = localStorage.getItem("selectedDiscoveryRunId") || "";
+      const productRunList = nextRuns.filter((run) => run.product_id === nextProductId);
+      const nextRunId =
+        (storedRunId && productRunList.some((run) => run.id === storedRunId) ? storedRunId : productRunList[0]?.id) || "";
+      setSelectedDiscoveryRunIdState(nextRunId);
+      localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
       await refreshConnections();
-      await refreshSnapshot(nextCampaignId);
+      await refreshSnapshot(nextRunId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -268,17 +247,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       products,
-      campaigns,
+      discoveryRuns,
       selectedProductId: selectedProductIdState,
-      selectedCampaignId: selectedCampaignIdState,
+      selectedDiscoveryRunId: selectedDiscoveryRunIdState,
       selectedProduct,
-      selectedCampaign,
-      productCampaigns,
+      selectedDiscoveryRun,
+      productDiscoveryRuns,
       snapshot,
       connections,
-      icpPresets,
       setSelectedProductId: persistSelectedProductId,
-      setSelectedCampaignId: persistSelectedCampaignId,
+      setSelectedDiscoveryRunId: persistSelectedDiscoveryRunId,
       refreshAll,
       refreshSnapshot,
       createProduct: async (input) => {
@@ -295,19 +273,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         await mutate(async () => {
           const product = await api.createProductFromDescription(input);
           localStorage.setItem("selectedProductId", product.id);
-          localStorage.setItem("selectedCampaignId", "");
+          localStorage.setItem("selectedDiscoveryRunId", "");
           created = product;
         });
         return created;
-      },
-      suggestProductIcps: async (input) => {
-        setError("");
-        try {
-          return await api.suggestProductIcps(input);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
-          throw err;
-        }
       },
       deleteProduct: (productId = selectedProductIdState) =>
         mutate(async () => {
@@ -315,8 +284,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           await api.deleteProduct(productId);
           if (productId === selectedProductIdState) {
             localStorage.removeItem("selectedProductId");
-            localStorage.setItem("selectedCampaignId", "");
+            localStorage.setItem("selectedDiscoveryRunId", "");
           }
+        }),
+      discoverProduct: (productId = selectedProductIdState, maxResults = 10) =>
+        mutate(async () => {
+          if (!productId) return;
+          const summary = await api.discoverProduct(productId, maxResults);
+          localStorage.setItem("selectedDiscoveryRunId", summary.campaign.id);
         }),
       updateProduct: (productId, update) =>
         mutate(async () => {
@@ -328,41 +303,41 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           if (!selectedProductIdState) return;
           await api.updateProduct(selectedProductIdState, update);
         }),
-      createCampaign: async (input) => {
-        let created: Campaign | null = null;
+      createDiscoveryRun: async (input) => {
+        let created: DiscoveryRun | null = null;
         await mutate(async () => {
-          const campaign = await api.createCampaign(input);
-          localStorage.setItem("selectedCampaignId", campaign.id);
-          created = campaign;
+          const run = await api.createDiscoveryRun(input);
+          localStorage.setItem("selectedDiscoveryRunId", run.id);
+          created = run;
         });
         return created;
       },
-      deleteCampaigns: (campaignIds) =>
+      deleteDiscoveryRuns: (runIds) =>
         mutate(async () => {
-          await Promise.all(campaignIds.map((campaignId) => api.deleteCampaign(campaignId)));
-          if (campaignIds.includes(selectedCampaignIdState)) {
-            localStorage.setItem("selectedCampaignId", "");
+          await Promise.all(runIds.map((runId) => api.deleteDiscoveryRun(runId)));
+          if (runIds.includes(selectedDiscoveryRunIdState)) {
+            localStorage.setItem("selectedDiscoveryRunId", "");
           }
         }),
-      runCampaign: (campaignId = selectedCampaignIdState) =>
+      runDiscovery: (runId = selectedDiscoveryRunIdState) =>
         mutate(async () => {
-          if (campaignId) await api.runCampaign(campaignId);
+          if (runId) await api.runDiscovery(runId);
         }),
-      enqueueCampaign: (campaignId = selectedCampaignIdState) =>
+      enqueueDiscoveryRun: (runId = selectedDiscoveryRunIdState) =>
         mutate(async () => {
-          if (campaignId) await api.enqueueCampaign(campaignId);
+          if (runId) await api.enqueueDiscoveryRun(runId);
         }),
-      pauseCampaign: (campaignId = selectedCampaignIdState) =>
+      pauseDiscoveryRun: (runId = selectedDiscoveryRunIdState) =>
         mutate(async () => {
-          if (campaignId) await api.pauseCampaign(campaignId);
+          if (runId) await api.pauseDiscoveryRun(runId);
         }),
-      resumeCampaign: (campaignId = selectedCampaignIdState) =>
+      resumeDiscoveryRun: (runId = selectedDiscoveryRunIdState) =>
         mutate(async () => {
-          if (campaignId) await api.resumeCampaign(campaignId);
+          if (runId) await api.resumeDiscoveryRun(runId);
         }),
-      addSeedLeads: (seeds) =>
+      addSeedResults: (seeds) =>
         mutate(async () => {
-          if (selectedCampaignIdState) await api.addSeedLeads(selectedCampaignIdState, seeds);
+          if (selectedDiscoveryRunIdState) await api.addSeedResults(selectedDiscoveryRunIdState, seeds);
         }),
       updateMessage: (messageId, update) =>
         mutate(async () => {
@@ -380,36 +355,27 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         mutate(async () => {
           await api.cancelMessage(messageId);
         }),
-      recordResponse: (conversationId, body) =>
+      generateDiscoveryInsight: (runId = selectedDiscoveryRunIdState) =>
         mutate(async () => {
-          await api.recordResponse(conversationId, body);
-        }),
-      manuallyClassifyResponse: (conversationId, classification) =>
-        mutate(async () => {
-          await api.manuallyClassifyResponse(conversationId, classification);
-        }),
-      generateCampaignInsight: (campaignId = selectedCampaignIdState) =>
-        mutate(async () => {
-          if (campaignId) await api.generateCampaignInsight(campaignId);
+          if (runId) await api.generateDiscoveryInsight(runId);
         }),
     }),
     [
       api,
       apiHealthy,
-      campaigns,
+      discoveryRuns,
       connections,
       error,
-      icpPresets,
       loading,
       mutate,
-      persistSelectedCampaignId,
+      persistSelectedDiscoveryRunId,
       persistSelectedProductId,
-      productCampaigns,
+      productDiscoveryRuns,
       products,
       refreshAll,
       refreshSnapshot,
-      selectedCampaign,
-      selectedCampaignIdState,
+      selectedDiscoveryRun,
+      selectedDiscoveryRunIdState,
       selectedProduct,
       selectedProductIdState,
       snapshot,

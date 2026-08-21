@@ -1,12 +1,8 @@
 export type Screen =
   | "overview"
   | "product"
-  | "campaigns"
-  | "leads"
-  | "insights"
-  | "trace"
+  | "results"
   | "approvals"
-  | "conversations"
   | "connections";
 
 export type Tone = "blue" | "green" | "amber" | "red" | "gray";

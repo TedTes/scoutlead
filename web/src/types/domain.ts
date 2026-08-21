@@ -26,25 +26,6 @@ export type ProductDescriptionInput = {
   target_geography?: string;
 };
 
-export type ProductIcpSuggestion = {
-  segment_name: string;
-  target_customer: string;
-  why_this_segment: string;
-  likely_pain: string;
-  value_hypothesis: string;
-  discovery_query: string;
-  suggested_locations?: string[];
-  qualification_signals: string[];
-  risks: string[];
-};
-
-export type ProductIcpSuggestionResponse = {
-  product_name: string;
-  product_description: string;
-  target_geography: string;
-  suggestions: ProductIcpSuggestion[];
-};
-
 export type QualificationCriterion = {
   id?: string | null;
   label: string;
@@ -61,31 +42,7 @@ export type DiscoverySource = {
   notes?: string | null;
 };
 
-export type ICPPreset = {
-  id: string;
-  name: string;
-  description?: string | null;
-  budget: {
-    max_cost_usd?: number | null;
-    max_tool_calls: number;
-  };
-  slots: Array<{
-    slot: "discovery" | "contact" | "verify" | "signal";
-    mode: "accumulate" | "first_good";
-    tools: Array<{
-      name: string;
-      provider: string;
-      enabled: boolean;
-      config: Record<string, unknown>;
-    }>;
-    confidence_threshold: number;
-    target_count: number;
-    max_cost_usd?: number | null;
-    max_calls?: number | null;
-  }>;
-};
-
-export type Campaign = {
+export type DiscoveryRun = {
   id: string;
   product_id: string;
   name?: string | null;
@@ -98,7 +55,7 @@ export type Campaign = {
   stage: string;
   max_leads: number;
   channels: string[];
-  discovery_seeds: LeadSeedInput[];
+  discovery_seeds: ResultSeedInput[];
   goal_override?: string | null;
   failure_reason?: string | null;
   completed_at?: string | null;
@@ -106,7 +63,7 @@ export type Campaign = {
   updated_at: string;
 };
 
-export type CampaignSource = {
+export type DiscoveryRunSource = {
   id: string;
   campaign_id: string;
   slot: "discovery" | "contact" | "verify" | "signal";
@@ -121,7 +78,7 @@ export type CampaignSource = {
   updated_at: string;
 };
 
-export type CampaignCreateInput = {
+export type DiscoveryRunCreateInput = {
   product_id: string;
   name: string;
   goal_type?: "learn" | "sell";
@@ -131,11 +88,11 @@ export type CampaignCreateInput = {
   source_inputs?: Record<string, unknown>;
   max_leads: number;
   channels: string[];
-  discovery_seeds?: LeadSeedInput[];
+  discovery_seeds?: ResultSeedInput[];
   goal_override?: string | null;
 };
 
-export type LeadSeedInput = {
+export type ResultSeedInput = {
   company_name: string;
   website_url?: string | null;
   contact_email?: string | null;
@@ -145,7 +102,7 @@ export type LeadSeedInput = {
   raw?: Record<string, unknown> | null;
 };
 
-export type Lead = {
+export type DiscoveryResult = {
   id: string;
   company_name: string;
   website_url?: string;
@@ -234,30 +191,6 @@ export type Message = {
   updated_at: string;
 };
 
-export type Conversation = {
-  id: string;
-  campaign_id: string;
-  product_id: string;
-  lead_id: string;
-  status: string;
-  events: Array<{
-    id: string;
-    direction: string;
-    message_id?: string | null;
-    body: string;
-    created_at: string;
-    classification?: {
-      intent: string;
-      confidence: number;
-      rationale: string;
-      follow_up_action: string;
-      suggested_reply?: string | null;
-    };
-  }>;
-  created_at: string;
-  updated_at: string;
-};
-
 export type Metrics = {
   goal_type: "learn" | "sell";
   north_star_metric: string;
@@ -283,7 +216,7 @@ export type Metrics = {
   }>;
 };
 
-export type CampaignInsight = {
+export type DiscoveryInsight = {
   id: string;
   campaign_id: string;
   product_id: string;
@@ -376,37 +309,36 @@ export type AgentRunDetail = AgentRun & {
   tool_calls: ToolCall[];
 };
 
-export type CampaignTrace = {
+export type DiscoveryTrace = {
   campaign_id: string;
   run_count: number;
   latest_run?: AgentRunDetail | null;
   runs: AgentRunDetail[];
 };
 
-export type CampaignPreflightCheck = {
+export type DiscoveryPreflightCheck = {
   name: string;
   status: string;
   detail: string;
   required: boolean;
 };
 
-export type CampaignPreflight = {
+export type DiscoveryPreflight = {
   campaign_id: string;
   ready: boolean;
-  checks: CampaignPreflightCheck[];
+  checks: DiscoveryPreflightCheck[];
 };
 
-export type CampaignSnapshot = {
-  campaign?: Campaign;
-  campaignSources: CampaignSource[];
-  leads: Lead[];
+export type DiscoverySnapshot = {
+  run?: DiscoveryRun;
+  sourceConfigs: DiscoveryRunSource[];
+  results: DiscoveryResult[];
   discoveryCandidates: DiscoveryCandidate[];
   messages: Message[];
-  conversations: Conversation[];
   metrics?: Metrics;
-  insight?: CampaignInsight;
-  preflight?: CampaignPreflight;
-  trace?: CampaignTrace;
+  insight?: DiscoveryInsight;
+  preflight?: DiscoveryPreflight;
+  trace?: DiscoveryTrace;
   agentRuns: AgentRun[];
   latestAgentRun?: AgentRunDetail;
 };
@@ -416,8 +348,8 @@ export type ApiHealth = {
   service: string;
 };
 
-export type CampaignRunSummary = {
-  campaign: Campaign;
+export type DiscoveryRunSummary = {
+  campaign: DiscoveryRun;
   discovered_lead_count: number;
   researched_lead_count: number;
   contacted_lead_count: number;
@@ -432,19 +364,4 @@ export type ConnectionStatus = {
   category: string;
   status: "connected" | "not_configured" | "degraded";
   detail: string;
-};
-
-export type ManualClassificationInput = {
-  intent:
-    | "interested"
-    | "not_interested"
-    | "question"
-    | "interview_request"
-    | "product_trial_interest"
-    | "out_of_office"
-    | "unknown";
-  confidence: number;
-  rationale: string;
-  follow_up_action: "reply" | "schedule_interview" | "send_trial_info" | "close" | "wait" | "manual_review";
-  suggested_reply?: string | null;
 };

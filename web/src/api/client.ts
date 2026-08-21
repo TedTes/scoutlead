@@ -2,24 +2,20 @@ import type {
   ApiHealth,
   AgentRun,
   AgentRunDetail,
-  Campaign,
-  CampaignCreateInput,
-  CampaignPreflight,
-  CampaignInsight,
-  CampaignRunSummary,
-  CampaignSource,
-  CampaignTrace,
+  DiscoveryRun,
+  DiscoveryRunCreateInput,
+  DiscoveryPreflight,
+  DiscoveryInsight,
+  DiscoveryRunSummary,
+  DiscoveryRunSource,
+  DiscoveryTrace,
   ConnectionStatus,
-  Conversation,
   DiscoveryCandidate,
-  ICPPreset,
-  Lead,
+  DiscoveryResult,
   Message,
   Metrics,
-  ManualClassificationInput,
   Product,
   ProductDescriptionInput,
-  ProductIcpSuggestionResponse,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -46,13 +42,6 @@ export class ApiClient {
     return this.request<Product>("/products/from-description", { method: "POST", body: input });
   }
 
-  suggestProductIcps(input: ProductDescriptionInput) {
-    return this.request<ProductIcpSuggestionResponse>("/products/icp-suggestions", {
-      method: "POST",
-      body: input,
-    });
-  }
-
   updateProduct(id: string, product: unknown) {
     return this.request<Product>(`/products/${id}`, { method: "PATCH", body: product });
   }
@@ -61,79 +50,82 @@ export class ApiClient {
     return this.request<void>(`/products/${id}`, { method: "DELETE" });
   }
 
-  getCampaigns() {
-    return this.request<Campaign[]>("/campaigns");
+  discoverProduct(id: string, maxResults = 10) {
+    return this.request<DiscoveryRunSummary>(`/products/${id}/discover`, {
+      method: "POST",
+      body: { max_results: maxResults },
+    });
   }
 
-  getIcpPresets() {
-    return this.request<ICPPreset[]>("/icp-presets");
+  getDiscoveryRuns() {
+    return this.request<DiscoveryRun[]>("/discovery-runs");
   }
 
-  createCampaign(input: CampaignCreateInput) {
-    return this.request<Campaign>("/campaigns", { method: "POST", body: input });
+  createDiscoveryRun(input: DiscoveryRunCreateInput) {
+    return this.request<DiscoveryRun>("/discovery-runs", { method: "POST", body: input });
   }
 
-  getCampaign(id: string) {
-    return this.request<Campaign>(`/campaigns/${id}`);
+  getDiscoveryRun(id: string) {
+    return this.request<DiscoveryRun>(`/discovery-runs/${id}`);
   }
 
-  getCampaignSources(id: string) {
-    return this.request<CampaignSource[]>(`/campaigns/${id}/sources`);
+  getDiscoveryRunSources(id: string) {
+    return this.request<DiscoveryRunSource[]>(`/discovery-runs/${id}/sources`);
   }
 
-  getCampaignPreflight(id: string) {
-    return this.request<CampaignPreflight>(`/campaigns/${id}/preflight`);
+  getDiscoveryRunPreflight(id: string) {
+    return this.request<DiscoveryPreflight>(`/discovery-runs/${id}/preflight`);
   }
 
-  deleteCampaign(id: string) {
-    return this.request<void>(`/campaigns/${id}`, { method: "DELETE" });
+  deleteDiscoveryRun(id: string) {
+    return this.request<void>(`/discovery-runs/${id}`, { method: "DELETE" });
   }
 
-  runCampaign(id: string) {
-    return this.request<CampaignRunSummary>(`/campaigns/${id}/run`, { method: "POST" });
+  runDiscovery(id: string) {
+    return this.request<DiscoveryRunSummary>(`/discovery-runs/${id}/run`, { method: "POST" });
   }
 
-  enqueueCampaign(id: string) {
-    return this.request<AgentRun>(`/campaigns/${id}/enqueue`, { method: "POST" });
+  enqueueDiscoveryRun(id: string) {
+    return this.request<AgentRun>(`/discovery-runs/${id}/enqueue`, { method: "POST" });
   }
 
-  getCampaignAgentRuns(campaignId: string) {
-    return this.request<AgentRun[]>(`/campaigns/${campaignId}/agent-runs`);
+  getDiscoveryRunAgentRuns(runId: string) {
+    return this.request<AgentRun[]>(`/discovery-runs/${runId}/agent-runs`);
   }
 
-  getCampaignTrace(campaignId: string) {
-    return this.request<CampaignTrace>(`/campaigns/${campaignId}/trace`);
+  getDiscoveryTrace(runId: string) {
+    return this.request<DiscoveryTrace>(`/discovery-runs/${runId}/trace`);
   }
 
   getAgentRun(id: string) {
     return this.request<AgentRunDetail>(`/agent-runs/${id}`);
   }
 
-  pauseCampaign(id: string) {
-    return this.request<Campaign>(`/campaigns/${id}/pause`, { method: "POST" });
+  pauseDiscoveryRun(id: string) {
+    return this.request<DiscoveryRun>(`/discovery-runs/${id}/pause`, { method: "POST" });
   }
 
-  resumeCampaign(id: string) {
-    return this.request<Campaign>(`/campaigns/${id}/resume`, { method: "POST" });
+  resumeDiscoveryRun(id: string) {
+    return this.request<DiscoveryRun>(`/discovery-runs/${id}/resume`, { method: "POST" });
   }
 
-  addSeedLeads(campaignId: string, seeds: unknown[]) {
-    return this.request<Lead[]>(`/campaigns/${campaignId}/leads/seeds`, {
+  addSeedResults(runId: string, seeds: unknown[]) {
+    return this.request<DiscoveryResult[]>(`/discovery-runs/${runId}/results/seeds`, {
       method: "POST",
       body: seeds,
     });
   }
 
-  getLeads(campaignId: string) {
-    return this.request<Lead[]>(`/campaigns/${campaignId}/leads`);
+  getResults(runId: string) {
+    return this.request<DiscoveryResult[]>(`/discovery-runs/${runId}/results`);
   }
 
-  getDiscoveryCandidates(campaignId: string) {
-    return this.request<DiscoveryCandidate[]>(`/campaigns/${campaignId}/discovery-candidates`);
+  getDiscoveryCandidates(runId: string) {
+    return this.request<DiscoveryCandidate[]>(`/discovery-runs/${runId}/discovery-candidates`);
   }
 
-  getMessages(campaignId: string) {
-    return this.request<Message[]>(`/campaigns/${campaignId}/messages`);
+  getMessages(runId: string) {
+    return this.request<Message[]>(`/discovery-runs/${runId}/messages`);
   }
 
   updateMessage(id: string, body: Partial<Message>) {
@@ -155,34 +147,16 @@ export class ApiClient {
     return this.request<Message>(`/messages/${id}/cancel`, { method: "POST" });
   }
 
-  getConversations(campaignId: string) {
-    return this.request<Conversation[]>(`/campaigns/${campaignId}/conversations`);
+  getMetrics(runId: string) {
+    return this.request<Metrics>(`/discovery-runs/${runId}/metrics`);
   }
 
-  recordResponse(conversationId: string, body: string) {
-    return this.request<Conversation>(`/conversations/${conversationId}/responses`, {
-      method: "POST",
-      body: { body },
-    });
+  getDiscoveryInsight(runId: string) {
+    return this.request<DiscoveryInsight>(`/discovery-runs/${runId}/insights`);
   }
 
-  manuallyClassifyResponse(conversationId: string, classification: ManualClassificationInput) {
-    return this.request<Conversation>(`/conversations/${conversationId}/classification`, {
-      method: "POST",
-      body: classification,
-    });
-  }
-
-  getMetrics(campaignId: string) {
-    return this.request<Metrics>(`/campaigns/${campaignId}/metrics`);
-  }
-
-  getCampaignInsight(campaignId: string) {
-    return this.request<CampaignInsight>(`/campaigns/${campaignId}/insights`);
-  }
-
-  generateCampaignInsight(campaignId: string) {
-    return this.request<CampaignInsight>(`/campaigns/${campaignId}/insights`, { method: "POST" });
+  generateDiscoveryInsight(runId: string) {
+    return this.request<DiscoveryInsight>(`/discovery-runs/${runId}/insights`, { method: "POST" });
   }
 
   getConnectionsStatus() {

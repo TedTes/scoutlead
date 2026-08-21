@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
-import type { Campaign, Product } from "../types/domain";
+import type { Product } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { navSections } from "./navigation";
 
@@ -20,8 +20,7 @@ export function App() {
 function AppShell() {
   const [activeScreen, setActiveScreen] = useState<Screen>("overview");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
-  const [newCampaignToken, setNewCampaignToken] = useState(0);
-  const [openContextMenu, setOpenContextMenu] = useState<"product" | "campaign" | null>(null);
+  const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
   const {
@@ -31,30 +30,21 @@ function AppShell() {
     products,
     selectedProductId,
     setSelectedProductId,
-    campaigns,
-    selectedCampaign,
-    selectedCampaignId,
-    setSelectedCampaignId,
     connections,
     snapshot,
   } = useAppData();
-  const productCampaigns = campaigns.filter((campaign) => campaign.product_id === selectedProductId);
   const visibleConnections = connections.filter(
     (connection) => connection.category !== "persistence" && !connection.category.endsWith("_provider"),
   );
   const connectedCount = visibleConnections.filter((connection) => connection.status === "connected").length;
   const connectionTotal = visibleConnections.length || 3;
   const navCounts: Partial<Record<Screen, string>> = {
-    leads: String(snapshot.metrics?.lead_count ?? snapshot.leads.length),
-    trace: String(snapshot.latestAgentRun?.tool_call_count ?? 0),
+    results: String(snapshot.metrics?.lead_count ?? snapshot.results.length),
     approvals: String(snapshot.metrics?.pending_approval_count ?? 0),
-    conversations: String(snapshot.conversations.length),
-    campaigns: String(productCampaigns.length),
   };
 
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
-  const selectedCampaignName = selectedCampaign?.name || "No campaign";
 
   const startNewProduct = () => {
     setOpenContextMenu(null);
@@ -66,19 +56,6 @@ function AppShell() {
     setOpenContextMenu(null);
     setIsCreatingProduct(false);
     setSelectedProductId(productId);
-  };
-
-  const selectCampaign = (campaignId: string) => {
-    setOpenContextMenu(null);
-    setSelectedCampaignId(campaignId);
-  };
-
-  const openNewCampaign = () => {
-    if (!selectedProductId) return;
-    setOpenContextMenu(null);
-    setIsCreatingProduct(false);
-    setActiveScreen("product");
-    setNewCampaignToken((token) => token + 1);
   };
 
   useEffect(() => {
@@ -176,79 +153,19 @@ function AppShell() {
                 </div>
               ) : null}
             </div>
-            <span className="context-separator">/</span>
-            <div className="context-menu-control campaign-context">
-              <button
-                className="context-menu-trigger"
-                type="button"
-                disabled={!selectedProductId}
-                onClick={() => setOpenContextMenu(openContextMenu === "campaign" ? null : "campaign")}
-              >
-                <span>Campaign</span>
-                <strong>{selectedCampaignName}</strong>
-                {selectedCampaign ? <CampaignStatus campaign={selectedCampaign} /> : null}
-                <ChevronDown size={14} />
-              </button>
-              {openContextMenu === "campaign" ? (
-                <div className="context-menu-panel campaign-menu-panel">
-                  {productCampaigns.length ? (
-                    productCampaigns.map((campaign) => (
-                      <button
-                        className={campaign.id === selectedCampaignId ? "context-menu-option active" : "context-menu-option"}
-                        key={campaign.id}
-                        type="button"
-                        onClick={() => selectCampaign(campaign.id)}
-                      >
-                        <strong>{campaign.name || "Untitled campaign"}</strong>
-                        <span>{formatCampaignMeta(campaign)}</span>
-                        <CampaignStatus campaign={campaign} />
-                      </button>
-                    ))
-                  ) : (
-                    <p className="context-menu-empty">No campaigns yet</p>
-                  )}
-                  {selectedProductId ? (
-                    <button className="context-menu-create" type="button" onClick={openNewCampaign}>
-                      <Plus size={14} />
-                      New campaign
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
           </div>
-          {selectedProductId ? (
-            <button className="context-primary-action" type="button" onClick={openNewCampaign}>
-              <Plus size={14} />
-              New campaign
-            </button>
-          ) : null}
         </header>
         {error && <div className="app-banner">{error}</div>}
-        {loading && <div className="app-banner info">Loading campaign data...</div>}
+        {loading && <div className="app-banner info">Loading data...</div>}
         <main className="content">
           {renderScreen(activeScreen, setActiveScreen, {
             isCreatingProduct,
-            newCampaignToken,
             onCreatingProductChange: setIsCreatingProduct,
           })}
         </main>
       </section>
     </div>
   );
-}
-
-function CampaignStatus({ campaign }: { campaign: Campaign }) {
-  return (
-    <span className="context-status">
-      <i />
-      {campaign.status.replace(/_/g, " ")}
-    </span>
-  );
-}
-
-function formatCampaignMeta(campaign: Campaign) {
-  return `${campaign.max_leads} max leads · ${campaign.stage.replace(/_/g, " ")}`;
 }
 
 function displayProductName(product: Product) {

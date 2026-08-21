@@ -47,7 +47,7 @@ export function scoreTone(score: number): Tone {
   return "gray";
 }
 
-const LEAD_STAGE_LABELS: Record<string, string> = {
+const RESULT_STAGE_LABELS: Record<string, string> = {
   discovered: "Researching",
   researching: "Researching",
   researched: "Review",
@@ -61,10 +61,10 @@ const LEAD_STAGE_LABELS: Record<string, string> = {
   archived: "Archived",
 };
 
-export function leadStageLabel(status: string): string {
-  return LEAD_STAGE_LABELS[status.toLowerCase()] ?? status.replace(/_/g, " ");
+export function resultStageLabel(status: string): string {
+  return RESULT_STAGE_LABELS[status.toLowerCase()] ?? status.replace(/_/g, " ");
 }
 
-export function isLiveLeadStage(status: string): boolean {
+export function isLiveResultStage(status: string): boolean {
   return ["discovered", "researching", "outreach_drafted", "sent"].includes(status.toLowerCase());
 }

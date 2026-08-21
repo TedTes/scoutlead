@@ -99,7 +99,7 @@ export function ConnectionsScreen() {
 
       {showAddIntegration ? (
         <Modal title="Add integration" onClose={() => setShowAddIntegration(false)}>
-          <div className="campaign-create-modal">
+          <div className="modal-form-stack">
             <label className="field">
               <span>Integration</span>
               <select value={integrationName} onChange={(event) => setIntegrationName(event.target.value)}>

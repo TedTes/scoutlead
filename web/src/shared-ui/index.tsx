@@ -121,18 +121,6 @@ export function StatCard({ label, value, delta, muted }: { label: string; value:
   );
 }
 
-export function ConversationStat({ label, value, tone }: { label: string; value: string; tone: Tone }) {
-  return (
-    <div className="conversation-stat">
-      <span>
-        <i className={`dot tone-${tone}`} />
-        {label}
-      </span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 export function Field({ label, value, area, hint }: { label: string; value: string; area?: boolean; hint?: string }) {
   return (
     <label className="field">
