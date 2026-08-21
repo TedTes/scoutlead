@@ -133,6 +133,6 @@ def _assert_preflight_ready(preflight: CampaignPreflightRead) -> None:
         return
     failures = [check for check in preflight.checks if check.required and check.status == "failed"]
     raise ConflictError(
-        "campaign cannot run until required integrations are configured",
+        "discovery run cannot start until required integrations are configured",
         {"failures": [failure.model_dump(mode="json") for failure in failures]},
     )

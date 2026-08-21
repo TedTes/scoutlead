@@ -457,7 +457,7 @@ class CampaignService:
         failures = [check for check in preflight.checks if check.required and check.status == "failed"]
         if failures:
             raise ConflictError(
-                "campaign cannot run until required integrations are configured",
+                "discovery run cannot start until required integrations are configured",
                 {"failures": [failure.model_dump(mode="json") for failure in failures]},
             )
 
@@ -475,9 +475,9 @@ class CampaignService:
         ]
         checks = [
             CampaignPreflightCheck(
-                name="Campaign status",
+                name="Run status",
                 status="ok" if campaign.status in {CampaignStatus.DRAFT, CampaignStatus.PAUSED} else "failed",
-                detail=f"Campaign is {campaign.status.value}.",
+                detail=f"Run is {campaign.status.value}.",
             )
         ]
 
@@ -503,7 +503,7 @@ class CampaignService:
             required_failures = [*unregistered, *required_missing_config]
             checks.append(
                 CampaignPreflightCheck(
-                    name="Campaign sources",
+                    name="Discovery sources",
                     status="ok" if not failures else "failed" if required_failures else "warning",
                     detail=(
                         f"{len(sources)} discovery source(s): {', '.join(provider_ids)}"
@@ -516,9 +516,9 @@ class CampaignService:
         else:
             checks.append(
                 CampaignPreflightCheck(
-                    name="Campaign sources",
+                    name="Discovery sources",
                     status="failed",
-                    detail="No campaign discovery sources configured.",
+                    detail="No discovery sources configured.",
                     required=True,
                 )
             )
@@ -540,6 +540,7 @@ class CampaignService:
                     if self.messages_can_send_real_email()
                     else "Configure EMAIL_PROVIDER=resend with RESEND_API_KEY and EMAIL_FROM_ADDRESS."
                 ),
+                required=False,
             )
         )
 

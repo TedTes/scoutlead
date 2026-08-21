@@ -62,33 +62,35 @@ class ProductDescriptionCreate(BaseModel):
     target_geography: str = Field(default="United States, Canada", min_length=1)
 
 
-class ProductIcpSuggestionRequest(ProductDescriptionCreate):
-    pass
-
-
-class ProductIcpSuggestion(BaseModel):
-    segment_name: str = Field(min_length=1)
-    target_customer: str = Field(min_length=1)
-    why_this_segment: str = Field(min_length=1)
-    likely_pain: str = Field(min_length=1)
-    value_hypothesis: str = Field(min_length=1)
-    discovery_query: str = Field(min_length=1)
-    suggested_locations: list[str] = Field(default_factory=list, max_length=6)
-    qualification_signals: list[str] = Field(min_length=3, max_length=6)
-    risks: list[str] = Field(default_factory=list, max_length=5)
-
-
-class ProductIcpSuggestionResponse(BaseModel):
-    product_name: str = Field(min_length=1)
-    product_description: str = Field(min_length=1)
-    target_geography: str = Field(min_length=1)
-    suggestions: list[ProductIcpSuggestion] = Field(min_length=1, max_length=5)
-
-
 class ProductSourceCreate(BaseModel):
     source: str = Field(min_length=1)
     context: str | None = Field(default=None, min_length=1)
     target_geography: str = Field(default="United States", min_length=1)
+
+
+class ProductDiscoveryProvider(StrEnum):
+    GOOGLE_PLACES = "google_places"
+    CONFIGURED_SEARCH = "configured_search"
+
+
+class ProductDiscoveryPlan(BaseModel):
+    product_name: str = Field(min_length=1)
+    product_description: str = Field(min_length=20)
+    target_customer: str = Field(min_length=1)
+    problem_being_solved: str = Field(min_length=1)
+    value_proposition: str = Field(min_length=1)
+    target_geography: str = Field(default="United States, Canada", min_length=1)
+    validation_goal: str = Field(min_length=1)
+    qualification_criteria: list[QualificationCriterion] = Field(min_length=1, max_length=6)
+    discovery_query: str = Field(min_length=2)
+    source_provider: ProductDiscoveryProvider = ProductDiscoveryProvider.CONFIGURED_SEARCH
+    region_code: str | None = None
+    outreach_objective: str = Field(default="Ask for a short customer discovery conversation.", min_length=1)
+    rationale: str = Field(min_length=1)
+
+
+class ProductDiscoveryStart(BaseModel):
+    max_results: int = Field(default=10, gt=0, le=100)
 
 
 class ProductRead(ProductBase):

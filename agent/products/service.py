@@ -7,10 +7,9 @@ from urllib.parse import urljoin, urlparse
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
+from prompts.discovery_plan import DISCOVERY_PLAN_PROMPT, DISCOVERY_PLAN_SYSTEM
 from db.models import ProductModel
 from prompts.product_inference import (
-    ICP_SUGGESTION_PROMPT,
-    ICP_SUGGESTION_SYSTEM,
     PRODUCT_CONFIG_PROMPT,
     PRODUCT_CONFIG_SYSTEM,
     PRODUCT_EVIDENCE_PROMPT,
@@ -18,10 +17,11 @@ from prompts.product_inference import (
 )
 from products.repository import ProductRepository
 from products.schemas import (
+    DiscoverySource,
+    DiscoverySourceType,
     ProductCreate,
     ProductDescriptionCreate,
-    ProductIcpSuggestionResponse,
-    ProductIcpSuggestionRequest,
+    ProductDiscoveryPlan,
     ProductInferenceRead,
     ProductRead,
     ProductSourceCreate,
@@ -53,39 +53,6 @@ class ProductService:
 
     def create_from_description(self, request: ProductDescriptionCreate) -> ProductModel:
         return self.products.create(self.product_from_description(request))
-
-    def suggest_icps(self, request: ProductIcpSuggestionRequest) -> ProductIcpSuggestionResponse:
-        if self.llm is None:
-            raise ConfigurationError(
-                "LLM provider is required to suggest customer segments",
-                {"task": "product_icp_suggestions"},
-            )
-        description = normalize_text(request.description)
-        if len(description) < 20:
-            raise ValidationError(
-                "product description is too short",
-                {"minimum_length": 20},
-            )
-        name = normalize_text(request.product_name)
-        target_geography = normalize_text(request.target_geography) or "United States, Canada"
-        suggestions = self.llm.generate_object(
-            task="product_icp_suggestions",
-            system=ICP_SUGGESTION_SYSTEM,
-            prompt=ICP_SUGGESTION_PROMPT,
-            response_model=ProductIcpSuggestionResponse,
-            context={
-                "product_name": name,
-                "product_description": description,
-                "target_geography": target_geography,
-            },
-        )
-        return suggestions.model_copy(
-            update={
-                "product_name": name,
-                "product_description": description,
-                "target_geography": target_geography,
-            }
-        )
 
     def product_from_description(self, request: ProductDescriptionCreate) -> ProductCreate:
         description = normalize_text(request.description)
@@ -297,6 +264,58 @@ class ProductService:
 
     def delete(self, product_id: str) -> None:
         self.products.delete(product_id)
+
+    def plan_discovery(self, product_id: str) -> ProductDiscoveryPlan:
+        if self.llm is None:
+            raise ConfigurationError(
+                "LLM provider is required to plan discovery from a product description",
+                {"task": "product_discovery_plan"},
+            )
+        product = ProductRead.model_validate(self.products.get(product_id))
+        plan = self.llm.generate_object(
+            task="product_discovery_plan",
+            system=DISCOVERY_PLAN_SYSTEM,
+            prompt=DISCOVERY_PLAN_PROMPT,
+            response_model=ProductDiscoveryPlan,
+            context={
+                "product_name": product.product_name,
+                "product_description": product.product_description,
+                "existing_target_geography": product.target_geography,
+            },
+        )
+        return plan.model_copy(
+            update={
+                "product_name": product.product_name,
+                "product_description": product.product_description,
+            }
+        )
+
+    def apply_discovery_plan(self, product_id: str, plan: ProductDiscoveryPlan) -> ProductModel:
+        return self.products.update(
+            product_id,
+            ProductUpdate(
+                target_customer=plan.target_customer,
+                problem_being_solved=plan.problem_being_solved,
+                value_proposition=plan.value_proposition,
+                target_geography=plan.target_geography,
+                validation_goal=plan.validation_goal,
+                qualification_criteria=plan.qualification_criteria,
+                preferred_discovery_sources=[
+                    DiscoverySource(
+                        type=DiscoverySourceType.WEB_SEARCH,
+                        value=plan.discovery_query,
+                    )
+                ],
+                outreach_objective=plan.outreach_objective,
+                constraints=["Human approval required before outbound messages are sent."],
+                source_evidence={
+                    "source": "product_description_discovery_plan",
+                    "rationale": plan.rationale,
+                    "source_provider": plan.source_provider.value,
+                    "region_code": plan.region_code,
+                },
+            ),
+        )
 
     def _inspect_source(self, source: str) -> WebsiteInspection | None:
         if self.browser is None:

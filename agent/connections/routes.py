@@ -24,7 +24,7 @@ def list_connection_status() -> list[ConnectionStatus]:
             name="Database",
             category="persistence",
             status="connected" if settings.database_url else "not_configured",
-            detail="Campaign state and outcomes",
+            detail="Discovery results, drafts, and outcomes",
         ),
         ConnectionStatus(
             name="LLM provider",

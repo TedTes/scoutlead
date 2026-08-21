@@ -69,6 +69,10 @@ class SourcePresetService:
 
     @staticmethod
     def _discovery_inputs(*, campaign: CampaignCreate, product: ProductRead) -> list[dict[str, Any]]:
+        provider_context = {
+            "region_code": _region_code_for_geography(product.target_geography),
+            **campaign.source_inputs,
+        }
         explicit_query = (campaign.source_input or "").strip()
         if explicit_query:
             return [
@@ -77,6 +81,7 @@ class SourcePresetService:
                     "source_type": DiscoverySourceType.WEB_SEARCH.value,
                     "limit": campaign.max_leads,
                     "geography": product.target_geography,
+                    **provider_context,
                 }
             ]
 
@@ -89,6 +94,7 @@ class SourcePresetService:
                     "limit": source.limit or campaign.max_leads,
                     "geography": product.target_geography,
                     "notes": source.notes,
+                    **provider_context,
                 }
             )
         return inputs
@@ -102,3 +108,12 @@ class SourcePresetService:
             else:
                 rendered[key] = value
         return rendered
+
+
+def _region_code_for_geography(value: str | None) -> str | None:
+    normalized = (value or "").lower()
+    if "canada" in normalized:
+        return "CA"
+    if "united states" in normalized or "usa" in normalized or normalized in {"us", "u.s."}:
+        return "US"
+    return None

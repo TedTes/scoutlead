@@ -13,7 +13,7 @@
       },
       "config": {
         "limit": "{{limit}}",
-        "region_code": "US",
+        "region_code": "{{region_code}}",
         "include_pure_service_area_businesses": true
       },
       "priority": 10,

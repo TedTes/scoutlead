@@ -33,6 +33,15 @@ class ProductRepository:
     def create(self, product: ProductCreate) -> ProductModel:
         data = product.model_dump(mode="python")
         self._ensure_criterion_ids(data)
+        existing_name_match = self.find_any_active_by_product_name(data["product_name"])
+        if existing_name_match is not None:
+            raise ConflictError(
+                "product already exists with this name",
+                {
+                    "product_id": existing_name_match.id,
+                    "product_name": existing_name_match.product_name,
+                },
+            )
         source_fingerprint = data.get("source_fingerprint")
         if source_fingerprint:
             existing = self.find_by_source_fingerprint(source_fingerprint)
@@ -70,16 +79,37 @@ class ProductRepository:
     def find_active_by_product_name(self, product_name: str | None) -> ProductModel | None:
         if not product_name:
             return None
+        normalized_name = product_name.strip().lower()
         results = list(
             self.session.scalars(
                 select(ProductModel)
-                .where(func.lower(ProductModel.product_name) == product_name.lower())
+                .where(func.lower(func.trim(ProductModel.product_name)) == normalized_name)
                 .where(ProductModel.archived_at.is_(None))
                 .order_by(ProductModel.created_at.desc())
                 .limit(2)
             )
         )
         return results[0] if len(results) == 1 else None
+
+    def find_any_active_by_product_name(
+        self,
+        product_name: str | None,
+        *,
+        exclude_product_id: str | None = None,
+    ) -> ProductModel | None:
+        if not product_name:
+            return None
+        normalized_name = product_name.strip().lower()
+        statement = (
+            select(ProductModel)
+            .where(func.lower(func.trim(ProductModel.product_name)) == normalized_name)
+            .where(ProductModel.archived_at.is_(None))
+            .order_by(ProductModel.created_at.desc())
+            .limit(1)
+        )
+        if exclude_product_id:
+            statement = statement.where(ProductModel.id != exclude_product_id)
+        return self.session.scalar(statement)
 
     def find_source_draft(
         self,
@@ -175,6 +205,19 @@ class ProductRepository:
     def update(self, product_id: str, update: ProductUpdate) -> ProductModel:
         model = self.get(product_id)
         data = update.model_dump(mode="python", exclude_unset=True)
+        if "product_name" in data:
+            existing_name_match = self.find_any_active_by_product_name(
+                data["product_name"],
+                exclude_product_id=product_id,
+            )
+            if existing_name_match is not None:
+                raise ConflictError(
+                    "product already exists with this name",
+                    {
+                        "product_id": existing_name_match.id,
+                        "product_name": existing_name_match.product_name,
+                    },
+                )
         if "qualification_criteria" in data:
             self._ensure_criterion_ids(data)
         for field, value in data.items():

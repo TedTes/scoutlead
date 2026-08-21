@@ -8,13 +8,13 @@ from products.schemas import (
     DiscoverySourceType,
     ProductCreate,
     ProductDescriptionCreate,
-    ProductIcpSuggestionResponse,
+    ProductDiscoveryPlan,
     ProductSourceCreate,
     ProductSourceEvidence,
     QualificationCriterion,
 )
 from products.service import ProductService
-from shared.errors import ConfigurationError, ValidationError
+from shared.errors import ConfigurationError, ConflictError, ValidationError
 from tools.browser import WebsiteInspection
 from tools.search import SearchResult
 
@@ -125,7 +125,7 @@ class DescriptionConfigLLM:
         )
 
 
-class IcpSuggestionLLM:
+class DiscoveryPlanLLM:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.context = {}
@@ -141,28 +141,25 @@ class IcpSuggestionLLM:
     ):
         self.calls.append(task)
         self.context = context or {}
-        assert response_model is ProductIcpSuggestionResponse
-        return ProductIcpSuggestionResponse(
+        assert response_model is ProductDiscoveryPlan
+        return ProductDiscoveryPlan(
             product_name="Wrong Name",
-            product_description="Wrong description",
-            target_geography="Wrong geography",
-            suggestions=[
-                {
-                    "segment_name": "Residential painters",
-                    "target_customer": "Owner-operated residential painting companies",
-                    "why_this_segment": "They quote jobs during or after walkthroughs.",
-                    "likely_pain": "Quotes are delayed or rebuilt manually after site visits.",
-                    "value_hypothesis": "Send professional quotes before leaving the job.",
-                    "discovery_query": "residential painters",
-                    "suggested_locations": ["Austin, TX, United States", "Toronto, ON, Canada"],
-                    "qualification_signals": [
-                        "Offers residential painting",
-                        "Offers free estimates",
-                        "Has phone or website",
-                    ],
-                    "risks": ["Some larger franchises may already use estimating software."],
-                }
+            product_description="Wrong description that should be overwritten by the service.",
+            target_customer="Owner-operated residential painting companies",
+            problem_being_solved="Quotes are delayed or rebuilt manually after site visits.",
+            value_proposition="Send professional quotes before leaving the job.",
+            target_geography="Canada",
+            validation_goal="Book customer discovery interviews with residential painters.",
+            qualification_criteria=[
+                QualificationCriterion(label="Offers residential painting", required=True),
+                QualificationCriterion(label="Offers free estimates"),
+                QualificationCriterion(label="Has phone or website"),
             ],
+            discovery_query="residential painters Toronto ON",
+            source_provider="google_places",
+            region_code="CA",
+            outreach_objective="Ask for a customer discovery conversation.",
+            rationale="Local painters are discoverable through Google Places.",
         )
 
 
@@ -479,40 +476,41 @@ def test_product_can_be_created_from_description_without_llm_or_scraping() -> No
         assert product.source_evidence["config_generated_by"] == "deterministic_draft"
 
 
-def test_product_icp_suggestions_are_generated_from_description_with_llm() -> None:
+def test_product_discovery_plan_is_generated_from_saved_description() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    llm = IcpSuggestionLLM()
+    llm = DiscoveryPlanLLM()
 
     with session_factory() as session:
-        result = ProductService(
+        service = ProductService(
             session,
             llm=llm,
             browser=ExplodingBrowser(),
-        ).suggest_icps(
+        )
+        product = service.create_from_description(
             ProductDescriptionCreate(
                 product_name="QuoteVan",
                 description=(
                     "QuoteVan helps home-service painters capture job scope during a "
                     "walkthrough, send a professional quote before leaving the job, and "
-                    "keep customer history in one place."
+                    "keep customer history in one place. Start testing in Toronto, Canada."
                 ),
-                target_geography="Austin TX",
             )
         )
+        result = service.plan_discovery(product.id)
+        updated = service.apply_discovery_plan(product.id, result)
 
-        assert llm.calls == ["product_icp_suggestions"]
+        assert llm.calls == ["product_discovery_plan"]
         assert llm.context["product_name"] == "QuoteVan"
         assert result.product_name == "QuoteVan"
         assert result.product_description.startswith("QuoteVan helps")
-        assert result.target_geography == "Austin TX"
-        assert result.suggestions[0].segment_name == "Residential painters"
-        assert result.suggestions[0].discovery_query == "residential painters"
-        assert result.suggestions[0].suggested_locations == [
-            "Austin, TX, United States",
-            "Toronto, ON, Canada",
-        ]
+        assert result.target_geography == "Canada"
+        assert result.discovery_query == "residential painters Toronto ON"
+        assert result.source_provider == "google_places"
+        assert result.region_code == "CA"
+        assert updated.target_customer == "Owner-operated residential painting companies"
+        assert updated.preferred_discovery_sources[0]["value"] == "residential painters Toronto ON"
 
 
 def test_product_description_creation_succeeds_without_llm() -> None:
@@ -538,6 +536,40 @@ def test_product_description_creation_succeeds_without_llm() -> None:
 
         assert product.product_name == "QuoteVan"
         assert product.target_geography == "United States, Canada"
+
+
+def test_duplicate_product_name_is_rejected() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        service = ProductService(
+            session,
+            llm=None,
+            browser=ExplodingBrowser(),
+        )
+        request = ProductDescriptionCreate(
+            product_name="QuoteVan",
+            description=(
+                "QuoteVan helps home-service painters capture job scope during a "
+                "walkthrough, send a professional quote before leaving the job, and "
+                "keep customer history in one place."
+            ),
+        )
+
+        service.create_from_description(request)
+
+        with pytest.raises(ConflictError):
+            service.create_from_description(
+                ProductDescriptionCreate(
+                    product_name=" quotevan ",
+                    description=(
+                        "A second description for the same product name should not create "
+                        "another active product record."
+                    ),
+                )
+            )
 
 
 def test_same_source_reuses_existing_product_without_refetching() -> None:
