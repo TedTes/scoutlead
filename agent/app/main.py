@@ -83,7 +83,23 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str):
+    """Lazily initialize the FastAPI app on first access.
+
+    This allows uvicorn to start and bind to the port even if create_app()
+    would fail (e.g. due to a missing/invalid DATABASE_URL). The failure
+    then surfaces as a real, logged exception on the first request instead
+    of a silent crash during import.
+    """
+    if name == "app":
+        global _app
+        if _app is None:
+            _app = create_app()
+        return _app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def run() -> None:
