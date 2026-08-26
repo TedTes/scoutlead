@@ -1,15 +1,14 @@
 {
-  "id": "google-places-local-business",
-  "name": "Google Places local business",
-  "description": "Use Google Places Text Search to discover real local businesses for service-business validation campaigns.",
+  "id": "apify-actor-source",
+  "name": "Configured Apify actor source",
+  "description": "Run a configured Apify actor as a discovery source. The actor, source name, input template, and output mapping are configured outside the workflow.",
   "sources": [
     {
       "slot": "discovery",
-      "provider_id": "google_places",
+      "provider_id": "{{source_provider_id}}",
       "mode": "accumulate",
       "input": {
         "query": "{{query}}",
-        "geography": "{{geography}}",
         "source_selection": "{{source_selection}}",
         "source_selection_reason": "{{source_selection_reason}}",
         "source_request_prompt": "{{source_request_prompt}}",
@@ -17,9 +16,7 @@
         "source_request_source": "{{source_request_source}}"
       },
       "config": {
-        "limit": "{{limit}}",
-        "region_code": "{{region_code}}",
-        "include_pure_service_area_businesses": true
+        "limit": "{{limit}}"
       },
       "priority": 10,
       "enabled": true

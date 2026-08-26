@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     search_provider: Literal["generic", "tavily", "brave"] = "generic"
     google_places_api_key: str | None = None
     google_places_api_endpoint: str | None = None
+    apify_api_token: str | None = None
+    apify_api_base_url: str = "https://api.apify.com/v2"
+    apify_source_provider_id: str = "apify_actor"
+    apify_source_label: str = "Apify actor"
+    apify_actor_id: str | None = None
+    apify_actor_input_template: str | None = None
+    apify_actor_result_mapping: str | None = None
+    apify_actor_max_charge_usd: float | None = Field(default=None, ge=0)
 
     allow_mock_providers: bool = False
     require_real_search: bool = False

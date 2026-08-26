@@ -19,6 +19,7 @@ def list_connection_status() -> list[ConnectionStatus]:
         if settings.email_provider == "resend"
         else not strict and not settings.require_real_email
     )
+    apify_ready = bool(settings.apify_api_token and settings.apify_actor_id)
     return [
         ConnectionStatus(
             name="Database",
@@ -37,6 +38,12 @@ def list_connection_status() -> list[ConnectionStatus]:
             category="discovery",
             status="connected" if search_ready else "not_configured" if strict else "degraded",
             detail=settings.search_provider,
+        ),
+        ConnectionStatus(
+            name=settings.apify_source_label,
+            category="discovery",
+            status="connected" if apify_ready else "not_configured",
+            detail=f"Apify actor source: {settings.apify_source_provider_id}",
         ),
         ConnectionStatus(
             name="Email provider",

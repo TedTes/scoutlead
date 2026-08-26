@@ -35,7 +35,7 @@ class SourcePresetService:
                     provider_id = (
                         "seed"
                         if source_input.get("source_type") == DiscoverySourceType.SEED.value
-                        else template.provider_id
+                        else self._render_value(template.provider_id, source_input)
                     )
                     rows.append(
                         CampaignSourceCreate(
@@ -56,7 +56,7 @@ class SourcePresetService:
                 CampaignSourceCreate(
                     campaign_id=campaign_id,
                     slot=template.slot,
-                    provider_id=template.provider_id,
+                    provider_id=str(self._render_value(template.provider_id, campaign.source_inputs)),
                     mode=template.mode,
                     input=self._render_payload(template.input, campaign.source_inputs),
                     config=self._render_payload(template.config, campaign.source_inputs),
@@ -103,11 +103,14 @@ class SourcePresetService:
     def _render_payload(template: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
         rendered: dict[str, Any] = {}
         for key, value in template.items():
-            if isinstance(value, str) and value.startswith("{{") and value.endswith("}}"):
-                rendered[key] = values.get(value[2:-2].strip())
-            else:
-                rendered[key] = value
+            rendered[key] = SourcePresetService._render_value(value, values)
         return rendered
+
+    @staticmethod
+    def _render_value(value: Any, values: dict[str, Any]) -> Any:
+        if isinstance(value, str) and value.startswith("{{") and value.endswith("}}"):
+            return values.get(value[2:-2].strip())
+        return value
 
 
 def _region_code_for_geography(value: str | None) -> str | None:

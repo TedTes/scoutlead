@@ -27,7 +27,7 @@ from products.schemas import (
     ProductCreate,
     QualificationCriterion,
 )
-from shared.errors import ConflictError
+from shared.errors import ConflictError, ValidationError
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
@@ -556,5 +556,91 @@ def test_google_places_source_preset_creates_campaign_source_row() -> None:
         assert sources[0].provider_id == "google_places"
         assert sources[0].input["query"] == "residential painters Austin TX"
         assert sources[0].input["geography"] == "United States"
+        assert sources[0].input["source_selection"] is None
         assert sources[0].config["region_code"] == "US"
         assert sources[0].config["include_pure_service_area_businesses"] is True
+
+
+def test_explicit_source_input_without_preset_defaults_to_google_places() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            ProductCreate(
+                product_name="Painter Quote Tool",
+                product_description="Quoting tool for residential painters.",
+                target_customer="Residential painting companies",
+                problem_being_solved="Creating professional quotes after walkthroughs is slow.",
+                value_proposition="Create customer-ready quotes faster.",
+                target_geography="United States",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Residential painting company", required=True)
+                ],
+                preferred_discovery_sources=[],
+                outreach_objective="Ask for a discovery conversation.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+
+        campaign = CampaignService(
+            session=session,
+            llm=FakeWorkflowLLM(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+        ).create(
+            CampaignCreate(
+                product_id=product.id,
+                name="Implicit places source campaign",
+                max_leads=10,
+                source_input="residential painters Austin TX",
+            )
+        )
+
+        sources = CampaignSourceRepository(session).list_by_campaign(campaign.id)
+
+        assert len(sources) == 1
+        assert sources[0].provider_id == "google_places"
+        assert sources[0].input["source_selection"] == "google_places_local_business"
+
+
+def test_broad_explicit_source_input_without_preset_is_rejected() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            ProductCreate(
+                product_name="Painter Quote Tool",
+                product_description="Quoting tool for residential painters.",
+                target_customer="Residential painting companies",
+                problem_being_solved="Creating professional quotes after walkthroughs is slow.",
+                value_proposition="Create customer-ready quotes faster.",
+                target_geography="United States",
+                validation_goal="Book customer discovery interviews.",
+                qualification_criteria=[
+                    QualificationCriterion(label="Residential painting company", required=True)
+                ],
+                preferred_discovery_sources=[],
+                outreach_objective="Ask for a discovery conversation.",
+                constraints=["Human approval required before sending."],
+            )
+        )
+
+        with pytest.raises(ValidationError):
+            CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ).create(
+                CampaignCreate(
+                    product_id=product.id,
+                    name="Broad source campaign",
+                    max_leads=10,
+                    source_input="solo painter OR independent painter OR field service technician",
+                )
+            )

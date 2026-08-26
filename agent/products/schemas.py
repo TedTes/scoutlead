@@ -68,11 +68,6 @@ class ProductSourceCreate(BaseModel):
     target_geography: str = Field(default="United States", min_length=1)
 
 
-class ProductDiscoveryProvider(StrEnum):
-    GOOGLE_PLACES = "google_places"
-    CONFIGURED_SEARCH = "configured_search"
-
-
 class ProductDiscoveryPlan(BaseModel):
     product_name: str = Field(min_length=1)
     product_description: str = Field(min_length=20)
@@ -83,7 +78,6 @@ class ProductDiscoveryPlan(BaseModel):
     validation_goal: str = Field(min_length=1)
     qualification_criteria: list[QualificationCriterion] = Field(min_length=1, max_length=6)
     discovery_query: str = Field(min_length=2)
-    source_provider: ProductDiscoveryProvider = ProductDiscoveryProvider.CONFIGURED_SEARCH
     region_code: str | None = None
     outreach_objective: str = Field(default="Ask for a short customer discovery conversation.", min_length=1)
     rationale: str = Field(min_length=1)

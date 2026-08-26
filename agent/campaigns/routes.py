@@ -24,6 +24,13 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         email=services.email,
         google_places_api_key=services.settings.google_places_api_key,
         google_places_api_endpoint=services.settings.google_places_api_endpoint,
+        apify_api_token=services.settings.apify_api_token,
+        apify_api_base_url=services.settings.apify_api_base_url,
+        apify_source_provider_id=services.settings.apify_source_provider_id,
+        apify_actor_id=services.settings.apify_actor_id,
+        apify_actor_input_template=services.settings.apify_actor_input_template,
+        apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
+        apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 

@@ -311,7 +311,8 @@ class ProductService:
                 source_evidence={
                     "source": "product_description_discovery_plan",
                     "rationale": plan.rationale,
-                    "source_provider": plan.source_provider.value,
+                    "source_provider": "google_places",
+                    "source_provider_selected_by": "application_policy",
                     "region_code": plan.region_code,
                 },
             ),

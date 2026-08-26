@@ -19,7 +19,15 @@ from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
+from products.repository import ProductRepository
 from shared.errors import ConflictError
+from source_requests.schemas import (
+    GOOGLE_PLACES_PROVIDER_ID,
+    SourceProviderRead,
+    SourceRequestCreate,
+    SourceRequestRun,
+)
+from source_requests.service import SourceRequestService
 
 router = APIRouter(prefix="/discovery-runs", tags=["discovery-runs"])
 
@@ -33,6 +41,13 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         email=services.email,
         google_places_api_key=services.settings.google_places_api_key,
         google_places_api_endpoint=services.settings.google_places_api_endpoint,
+        apify_api_token=services.settings.apify_api_token,
+        apify_api_base_url=services.settings.apify_api_base_url,
+        apify_source_provider_id=services.settings.apify_source_provider_id,
+        apify_actor_id=services.settings.apify_actor_id,
+        apify_actor_input_template=services.settings.apify_actor_input_template,
+        apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
+        apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 
@@ -44,6 +59,45 @@ def create_discovery_run(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return _service(session, services).create(run)
+
+
+@router.post("/source-request", response_model=SourceRequestRun)
+def create_source_request(
+    request: SourceRequestCreate,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return SourceRequestService(
+        products=ProductRepository(session),
+        campaigns=_service(session, services),
+        agent_runs=AgentRunService(session),
+        apify_source_provider_id=services.settings.apify_source_provider_id,
+    ).create(request)
+
+
+@router.get("/source-providers", response_model=list[SourceProviderRead])
+def list_source_providers(
+    services: Annotated[AppServices, Depends(get_services)],
+) -> list[SourceProviderRead]:
+    settings = services.settings
+    providers = [
+        SourceProviderRead(
+            id=GOOGLE_PLACES_PROVIDER_ID,
+            label="Google Places",
+            configured=bool(settings.google_places_api_key),
+            detail="Local business discovery",
+        )
+    ]
+    if settings.apify_source_provider_id:
+        providers.append(
+            SourceProviderRead(
+                id=settings.apify_source_provider_id,
+                label=settings.apify_source_label,
+                configured=bool(settings.apify_api_token and settings.apify_actor_id),
+                detail="Configured Apify actor",
+            )
+        )
+    return providers
 
 
 @router.get("", response_model=list[CampaignRead])

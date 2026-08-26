@@ -10,10 +10,13 @@ from campaigns.service import CampaignService
 from products.schemas import (
     ProductCreate,
     ProductDescriptionCreate,
-    ProductDiscoveryProvider,
     ProductDiscoveryStart,
     ProductRead,
     ProductUpdate,
+)
+from products.discovery_policy import (
+    normalize_places_region_code,
+    validate_google_places_query,
 )
 from products.service import ProductService
 from shared.utils import utcnow
@@ -45,6 +48,13 @@ def _campaign_service(
         email=services.email,
         google_places_api_key=services.settings.google_places_api_key,
         google_places_api_endpoint=services.settings.google_places_api_endpoint,
+        apify_api_token=services.settings.apify_api_token,
+        apify_api_base_url=services.settings.apify_api_base_url,
+        apify_source_provider_id=services.settings.apify_source_provider_id,
+        apify_actor_id=services.settings.apify_actor_id,
+        apify_actor_input_template=services.settings.apify_actor_input_template,
+        apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
+        apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 
@@ -76,32 +86,37 @@ def start_product_discovery(
 ):
     product_service = _service(session, services)
     plan = product_service.plan_discovery(product_id)
+    validate_google_places_query(plan.discovery_query)
     product = ProductRead.model_validate(product_service.apply_discovery_plan(product_id, plan))
     campaign_service = _campaign_service(session, services)
-    source_preset_id = (
-        "google-places-local-business"
-        if plan.source_provider == ProductDiscoveryProvider.GOOGLE_PLACES
-        else "default-web-validation"
+    region_code = normalize_places_region_code(plan.region_code) or normalize_places_region_code(
+        plan.target_geography
     )
-    region_code = _normalize_region_code(plan.region_code)
+    source_selection_reason = (
+        "Product discovery uses the precise local-business discovery source and does not "
+        "fall back to broad web search."
+    )
     run = campaign_service.create(
         CampaignCreate(
             product_id=product.id,
             name=f"{product.product_name} discovery {utcnow().strftime('%Y-%m-%d %H:%M')}",
-            source_preset_id=source_preset_id,
+            source_preset_id="google-places-local-business",
             source_input=plan.discovery_query,
-            source_inputs={"region_code": region_code} if region_code else {},
+            source_inputs={
+                key: value
+                for key, value in {
+                    "region_code": region_code,
+                    "source_selection": "google_places_local_business",
+                    "source_selection_reason": source_selection_reason,
+                }.items()
+                if value
+            },
             max_leads=request.max_results,
             channels=["email"],
         )
     )
     agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=run.id))
     return campaign_service.run_campaign(run.id, agent_run_id=agent_run.id)
-
-
-def _normalize_region_code(value: str | None) -> str | None:
-    normalized = (value or "").strip().upper()
-    return normalized if normalized in {"CA", "US"} else None
 
 
 @router.get("", response_model=list[ProductRead])

@@ -34,6 +34,7 @@ from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
 from orchestration.hit_rate import calculate_hit_rates
+from products.discovery_policy import validate_google_places_query
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from shared.errors import ConflictError
@@ -152,6 +153,13 @@ class CampaignService:
         email: EmailTool | None = None,
         google_places_api_key: str | None = None,
         google_places_api_endpoint: str | None = None,
+        apify_api_token: str | None = None,
+        apify_api_base_url: str | None = None,
+        apify_source_provider_id: str = "apify_actor",
+        apify_actor_id: str | None = None,
+        apify_actor_input_template: str | None = None,
+        apify_actor_result_mapping: str | None = None,
+        apify_actor_max_charge_usd: float | None = None,
         timeout_seconds: float = 20.0,
     ) -> None:
         self.session = session
@@ -161,6 +169,13 @@ class CampaignService:
         self.email = email or EmailTool()
         self.google_places_api_key = google_places_api_key
         self.google_places_api_endpoint = google_places_api_endpoint
+        self.apify_api_token = apify_api_token
+        self.apify_api_base_url = apify_api_base_url
+        self.apify_source_provider_id = apify_source_provider_id
+        self.apify_actor_id = apify_actor_id
+        self.apify_actor_input_template = apify_actor_input_template
+        self.apify_actor_result_mapping = apify_actor_result_mapping
+        self.apify_actor_max_charge_usd = apify_actor_max_charge_usd
         self.timeout_seconds = timeout_seconds
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)
@@ -176,6 +191,7 @@ class CampaignService:
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
+        campaign = self._apply_source_preset_policy(campaign)
         campaign_model = self.campaigns.create(campaign)
         sources = self.source_presets.expand_for_campaign(
             campaign_id=campaign_model.id,
@@ -185,6 +201,26 @@ class CampaignService:
         if sources:
             self.campaign_sources.create_many(sources)
         return campaign_model
+
+    @staticmethod
+    def _apply_source_preset_policy(campaign: CampaignCreate) -> CampaignCreate:
+        if campaign.source_preset_id or not campaign.source_input:
+            return campaign
+        validate_google_places_query(campaign.source_input)
+        source_inputs = {
+            **campaign.source_inputs,
+            "source_selection": "google_places_local_business",
+            "source_selection_reason": (
+                "Explicit discovery query without a source preset defaults to the "
+                "precise local-business source, not broad web search."
+            ),
+        }
+        return campaign.model_copy(
+            update={
+                "source_preset_id": "google-places-local-business",
+                "source_inputs": source_inputs,
+            }
+        )
 
     def list(self) -> list[CampaignModel]:
         return self.campaigns.list()
@@ -222,7 +258,13 @@ class CampaignService:
             campaign_id, stage_to_status.get(campaign.stage, CampaignStatus.TRACKING)
         )
 
-    def run_campaign(self, campaign_id: str, *, agent_run_id: str | None = None) -> CampaignRunSummary:
+    def run_campaign(
+        self,
+        campaign_id: str,
+        *,
+        agent_run_id: str | None = None,
+        draft_outreach: bool = True,
+    ) -> CampaignRunSummary:
         campaign = self.campaigns.get(campaign_id)
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
         campaign_read = CampaignRead.model_validate(campaign)
@@ -250,6 +292,13 @@ class CampaignService:
                     search_tool=self.search_tool,
                     google_places_api_key=self.google_places_api_key,
                     google_places_api_endpoint=self.google_places_api_endpoint,
+                    apify_api_token=self.apify_api_token,
+                    apify_api_base_url=self.apify_api_base_url,
+                    apify_source_provider_id=self.apify_source_provider_id,
+                    apify_actor_id=self.apify_actor_id,
+                    apify_actor_input_template=self.apify_actor_input_template,
+                    apify_actor_result_mapping=self.apify_actor_result_mapping,
+                    apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
                     timeout_seconds=self.timeout_seconds,
                     **self._tool_call_callbacks(
                         agent_run_id=agent_run_id,
@@ -355,22 +404,30 @@ class CampaignService:
                 ).run(product, campaign_read),
             )
 
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            drafts = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=CampaignStage.OUTREACH.value,
-                sequence=7,
-                objective="Draft personalized outreach and queue messages for human approval.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: OutreachWorkflow(
-                    campaigns=self.campaigns,
-                    leads=self.leads,
-                    messages=self.messages,
-                    memory=self.memory,
-                    llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
-                ).run(product, campaign_read),
-            )
+            if draft_outreach:
+                campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+                drafts = self._run_agent_step(
+                    agent_run_id=agent_run_id,
+                    campaign_id=campaign_id,
+                    phase=CampaignStage.OUTREACH.value,
+                    sequence=7,
+                    objective="Draft personalized outreach and queue messages for human approval.",
+                    input_snapshot=self._campaign_step_input(product, campaign_read),
+                    action=lambda _step_id: OutreachWorkflow(
+                        campaigns=self.campaigns,
+                        leads=self.leads,
+                        messages=self.messages,
+                        memory=self.memory,
+                        llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
+                    ).run(product, campaign_read),
+                )
+            else:
+                drafts = []
+                self.campaigns.update_status(
+                    campaign_id,
+                    CampaignStatus.COMPLETED,
+                    stage=CampaignStage.COMPLETE,
+                )
 
             if agent_run_id:
                 self._log_hit_rates(agent_run_id=agent_run_id, campaign_id=campaign_id, product_id=product.id)
@@ -396,6 +453,18 @@ class CampaignService:
             if agent_run_id:
                 self.agent_runs.fail(agent_run_id, str(exc))
             raise
+
+    def run_contact_listing(
+        self,
+        campaign_id: str,
+        *,
+        agent_run_id: str | None = None,
+    ) -> CampaignRunSummary:
+        return self.run_campaign(
+            campaign_id,
+            agent_run_id=agent_run_id,
+            draft_outreach=False,
+        )
 
     def _log_hit_rates(self, *, agent_run_id: str, campaign_id: str, product_id: str) -> None:
         """Surface per-provider hit-rate for this run as a readable observation.
@@ -486,6 +555,13 @@ class CampaignService:
                 search_tool=self.search_tool,
                 google_places_api_key=self.google_places_api_key,
                 google_places_api_endpoint=self.google_places_api_endpoint,
+                apify_api_token=self.apify_api_token,
+                apify_api_base_url=self.apify_api_base_url,
+                apify_source_provider_id=self.apify_source_provider_id,
+                apify_actor_id=self.apify_actor_id,
+                apify_actor_input_template=self.apify_actor_input_template,
+                apify_actor_result_mapping=self.apify_actor_result_mapping,
+                apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
                 timeout_seconds=self.timeout_seconds,
             )
             provider_ids = list(dict.fromkeys(source.provider_id for source in sources))

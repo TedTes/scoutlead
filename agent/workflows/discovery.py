@@ -29,6 +29,13 @@ class DiscoveryWorkflow:
         search_tool: SearchTool,
         google_places_api_key: str | None = None,
         google_places_api_endpoint: str | None = None,
+        apify_api_token: str | None = None,
+        apify_api_base_url: str | None = None,
+        apify_source_provider_id: str = "apify_actor",
+        apify_actor_id: str | None = None,
+        apify_actor_input_template: str | None = None,
+        apify_actor_result_mapping: str | None = None,
+        apify_actor_max_charge_usd: float | None = None,
         timeout_seconds: float = 20.0,
         on_tool_start: Callable[[ToolAction, int], str | None] | None = None,
         on_tool_success: Callable[[str, Any], None] | None = None,
@@ -42,6 +49,13 @@ class DiscoveryWorkflow:
         self.search_tool = search_tool
         self.google_places_api_key = google_places_api_key
         self.google_places_api_endpoint = google_places_api_endpoint
+        self.apify_api_token = apify_api_token
+        self.apify_api_base_url = apify_api_base_url
+        self.apify_source_provider_id = apify_source_provider_id
+        self.apify_actor_id = apify_actor_id
+        self.apify_actor_input_template = apify_actor_input_template
+        self.apify_actor_result_mapping = apify_actor_result_mapping
+        self.apify_actor_max_charge_usd = apify_actor_max_charge_usd
         self.timeout_seconds = timeout_seconds
         self.on_tool_start = on_tool_start
         self.on_tool_success = on_tool_success
@@ -72,6 +86,13 @@ class DiscoveryWorkflow:
                 search_tool=self.search_tool,
                 google_places_api_key=self.google_places_api_key,
                 google_places_api_endpoint=self.google_places_api_endpoint,
+                apify_api_token=self.apify_api_token,
+                apify_api_base_url=self.apify_api_base_url,
+                apify_source_provider_id=self.apify_source_provider_id,
+                apify_actor_id=self.apify_actor_id,
+                apify_actor_input_template=self.apify_actor_input_template,
+                apify_actor_result_mapping=self.apify_actor_result_mapping,
+                apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
                 timeout_seconds=self.timeout_seconds,
             )
         )
