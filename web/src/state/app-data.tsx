@@ -5,6 +5,7 @@ import type {
   AgentRunDetail,
   DiscoveryRun,
   DiscoveryRunCreateInput,
+  DiscoveryResult,
   DiscoverySnapshot,
   DiscoveryTrace,
   ConnectionStatus,
@@ -12,6 +13,9 @@ import type {
   Metrics,
   Product,
   ProductDescriptionInput,
+  SourceRequestInput,
+  SourceRequestRun,
+  SourceProvider,
 } from "../types/domain";
 
 type AppDataContextValue = {
@@ -25,8 +29,10 @@ type AppDataContextValue = {
   selectedProduct?: Product;
   selectedDiscoveryRun?: DiscoveryRun;
   productDiscoveryRuns: DiscoveryRun[];
+  productContacts: DiscoveryResult[];
   snapshot: DiscoverySnapshot;
   connections: ConnectionStatus[];
+  sourceProviders: SourceProvider[];
   setSelectedProductId: (productId: string) => void;
   setSelectedDiscoveryRunId: (runId: string) => void;
   refreshAll: () => Promise<void>;
@@ -35,6 +41,7 @@ type AppDataContextValue = {
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
   deleteProduct: (productId?: string) => Promise<void>;
   discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
+  runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
@@ -100,7 +107,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     localStorage.getItem("selectedDiscoveryRunId") || "",
   );
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
+  const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
+  const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
 
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const api = useMemo(() => new ApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
@@ -135,6 +144,25 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setConnections([]);
     }
   }, [api]);
+
+  const refreshProductContacts = useCallback(
+    async (productId: string, runs: DiscoveryRun[]) => {
+      if (!productId) {
+        setProductContacts([]);
+        return;
+      }
+      const productRuns = runs.filter((run) => run.product_id === productId);
+      if (!productRuns.length) {
+        setProductContacts([]);
+        return;
+      }
+      const resultGroups = await Promise.all(
+        productRuns.map((run) => api.getResults(run.id).catch(() => [])),
+      );
+      setProductContacts(dedupeContacts(resultGroups.flat()));
+    },
+    [api],
+  );
 
   const refreshSnapshot = useCallback(
     async (runId = selectedDiscoveryRunIdState) => {
@@ -186,17 +214,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setError("");
     try {
-      const [health, nextProducts, nextRuns] = await Promise.all([
+      const [health, nextProducts, nextRuns, nextSourceProviders] = await Promise.all([
         api.getHealth().then(
           () => true,
           () => false,
         ),
         api.getProducts(),
         api.getDiscoveryRuns(),
+        api.getSourceProviders().catch(() => []),
       ]);
       setApiHealthy(health);
       setProducts(nextProducts);
       setDiscoveryRuns(nextRuns);
+      setSourceProviders(nextSourceProviders);
       const storedProductId = localStorage.getItem("selectedProductId") || "";
       const nextProductId =
         (storedProductId && nextProducts.some((product) => product.id === storedProductId)
@@ -213,13 +243,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
       await refreshConnections();
+      await refreshProductContacts(nextProductId, nextRuns);
       await refreshSnapshot(nextRunId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [api, refreshConnections, refreshSnapshot]);
+  }, [api, refreshConnections, refreshProductContacts, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -241,6 +272,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     void refreshAll();
   }, [refreshAll]);
 
+  useEffect(() => {
+    void refreshProductContacts(selectedProductIdState, discoveryRuns);
+  }, [discoveryRuns, refreshProductContacts, selectedProductIdState]);
+
   const value = useMemo<AppDataContextValue>(
     () => ({
       apiHealthy,
@@ -253,8 +288,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       selectedProduct,
       selectedDiscoveryRun,
       productDiscoveryRuns,
+      productContacts,
       snapshot,
       connections,
+      sourceProviders,
       setSelectedProductId: persistSelectedProductId,
       setSelectedDiscoveryRunId: persistSelectedDiscoveryRunId,
       refreshAll,
@@ -293,6 +330,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           const summary = await api.discoverProduct(productId, maxResults);
           localStorage.setItem("selectedDiscoveryRunId", summary.campaign.id);
         }),
+      runSourceRequest: async (input) => {
+        let created: SourceRequestRun | null = null;
+        await mutate(async () => {
+          const result = await api.createSourceRequest(input);
+          localStorage.setItem("selectedDiscoveryRunId", result.run.id);
+          created = result;
+        });
+        return created;
+      },
       updateProduct: (productId, update) =>
         mutate(async () => {
           if (!productId) return;
@@ -371,6 +417,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       persistSelectedDiscoveryRunId,
       persistSelectedProductId,
       productDiscoveryRuns,
+      productContacts,
       products,
       refreshAll,
       refreshSnapshot,
@@ -378,11 +425,30 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       selectedDiscoveryRunIdState,
       selectedProduct,
       selectedProductIdState,
+      sourceProviders,
       snapshot,
     ],
   );
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
+}
+
+function dedupeContacts(contacts: DiscoveryResult[]) {
+  const seen = new Set<string>();
+  const deduped: DiscoveryResult[] = [];
+  for (const contact of contacts) {
+    const key = contactKey(contact);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(contact);
+  }
+  return deduped;
+}
+
+function contactKey(contact: DiscoveryResult) {
+  const website = (contact.website_url || contact.research?.website_url || "").trim().toLowerCase();
+  if (website) return `website:${website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}`;
+  return `name:${contact.company_name.trim().toLowerCase()}|${(contact.geography || contact.research?.geography || "").trim().toLowerCase()}`;
 }
 
 export function useAppData() {

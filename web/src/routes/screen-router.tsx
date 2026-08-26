@@ -1,4 +1,3 @@
-import { ApprovalsScreen } from "../screens/ApprovalsScreen";
 import { ConnectionsScreen } from "../screens/ConnectionsScreen";
 import { OverviewScreen } from "../screens/OverviewScreen";
 import { ProductScreen } from "../screens/ProductScreen";
@@ -18,8 +17,6 @@ export function renderScreen(
       return <ProductScreen {...productEditor} onNavigate={setActiveScreen} />;
     case "results":
       return <ResultsScreen />;
-    case "approvals":
-      return <ApprovalsScreen />;
     case "connections":
       return <ConnectionsScreen />;
     default:

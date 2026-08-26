@@ -1,4 +1,4 @@
-import { Play, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card, Modal, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -22,14 +22,12 @@ export function ProductScreen({
     setSelectedProductId,
     createProductFromDescription,
     deleteProduct,
-    discoverProduct,
   } = useAppData();
   const { showToast } = useToast();
   const [detailProductId, setDetailProductId] = useState("");
   const [productName, setProductName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
-  const [discovering, setDiscovering] = useState(false);
   const [localError, setLocalError] = useState("");
   const detailProduct = products.find((product) => product.id === detailProductId);
   const normalizedProductName = productName.trim().toLowerCase();
@@ -104,25 +102,6 @@ export function ProductScreen({
     await deleteProduct(detailProduct.id);
     setDetailProductId("");
     showToast({ title: "Product deleted", message: `${displayProductName(detailProduct)} was removed.`, tone: "green" });
-  };
-
-  const startDiscovery = async () => {
-    if (!detailProduct || discovering) return;
-    setDiscovering(true);
-    try {
-      await discoverProduct(detailProduct.id, 10);
-      showToast({
-        title: "Discovery complete",
-        message: "Review the results and approval queue.",
-        tone: "green",
-      });
-      onNavigate("results");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      showToast({ title: "Discovery failed", message, tone: "red" });
-    } finally {
-      setDiscovering(false);
-    }
   };
 
   return (
@@ -213,9 +192,8 @@ export function ProductScreen({
                 <button className="secondary" type="button" onClick={() => setDetailProductId("")}>
                   Back
                 </button>
-                <button type="button" onClick={startDiscovery} disabled={discovering}>
-                  <Play size={14} />
-                  {discovering ? "Finding..." : "Find results"}
+                <button type="button" onClick={() => onNavigate("overview")}>
+                  List contacts
                 </button>
                 <button className="danger" onClick={deleteSelectedProduct}>
                   <Trash2 size={14} />

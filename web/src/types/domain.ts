@@ -92,6 +92,36 @@ export type DiscoveryRunCreateInput = {
   goal_override?: string | null;
 };
 
+export type SourceRequestSource = string;
+
+export type SourceProvider = {
+  id: string;
+  label: string;
+  configured: boolean;
+  detail?: string | null;
+};
+
+export type SourceRequestInput = {
+  product_id: string;
+  source: SourceRequestSource;
+  prompt: string;
+  max_results: number;
+  run_immediately?: boolean;
+};
+
+export type SourceRequestRun = {
+  plan: {
+    source: SourceRequestSource;
+    action: "list_contacts";
+    query: string;
+    max_results: number;
+    source_preset_id: string;
+    explanation: string;
+  };
+  run: DiscoveryRun;
+  summary?: DiscoveryRunSummary | null;
+};
+
 export type ResultSeedInput = {
   company_name: string;
   website_url?: string | null;
@@ -104,12 +134,15 @@ export type ResultSeedInput = {
 
 export type DiscoveryResult = {
   id: string;
+  campaign_id: string;
+  product_id: string;
   company_name: string;
   website_url?: string;
   contact_email?: string;
   geography?: string;
   description?: string;
   source: string;
+  raw_sources?: Array<Record<string, unknown>>;
   status: string;
   created_at: string;
   updated_at: string;

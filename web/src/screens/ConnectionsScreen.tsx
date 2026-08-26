@@ -79,7 +79,7 @@ export function ConnectionsScreen() {
           </span>
           <div>
             <strong>Add integration</strong>
-            <p>Connect a discovery, reasoning, enrichment, or outreach provider.</p>
+            <p>Connect a discovery, reasoning, enrichment, or export provider.</p>
           </div>
         </button>
 
@@ -115,7 +115,7 @@ export function ConnectionsScreen() {
               <select value={integrationCategory} onChange={(event) => setIntegrationCategory(event.target.value)}>
                 <option value="discovery">Discovery</option>
                 <option value="reasoning">Reasoning</option>
-                <option value="outreach">Outreach</option>
+                <option value="export">Export</option>
                 <option value="enrichment">Enrichment</option>
               </select>
             </label>

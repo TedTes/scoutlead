@@ -16,6 +16,9 @@ import type {
   Metrics,
   Product,
   ProductDescriptionInput,
+  SourceRequestInput,
+  SourceRequestRun,
+  SourceProvider,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -63,6 +66,14 @@ export class ApiClient {
 
   createDiscoveryRun(input: DiscoveryRunCreateInput) {
     return this.request<DiscoveryRun>("/discovery-runs", { method: "POST", body: input });
+  }
+
+  createSourceRequest(input: SourceRequestInput) {
+    return this.request<SourceRequestRun>("/discovery-runs/source-request", { method: "POST", body: input });
+  }
+
+  getSourceProviders() {
+    return this.request<SourceProvider[]>("/discovery-runs/source-providers");
   }
 
   getDiscoveryRun(id: string) {
@@ -174,7 +185,16 @@ export class ApiClient {
     });
     const payload = response.status === 204 ? undefined : await response.json().catch(() => undefined);
     if (!response.ok) {
-      const message = payload?.error?.message ?? `Request failed with ${response.status}`;
+      const details = payload?.error?.details;
+      const detailText =
+        details && typeof details === "object"
+          ? [details.required_shape, details.query ? `Query: ${details.query}` : undefined]
+              .filter(Boolean)
+              .join(" ")
+          : "";
+      const message = [payload?.error?.message ?? `Request failed with ${response.status}`, detailText]
+        .filter(Boolean)
+        .join(" ");
       throw new Error(message);
     }
     return payload as T;
