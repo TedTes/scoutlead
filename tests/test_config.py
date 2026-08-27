@@ -30,6 +30,26 @@ def test_settings_accepts_dev_environment(monkeypatch) -> None:
     assert settings.environment == "dev"
 
 
+def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
+    monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
+    monkeypatch.setenv(
+        "APIFY_SOURCES",
+        (
+            '[{"id":"kijiji","label":"Kijiji","actor_id":"owner/kijiji"},'
+            '{"id":"homestars","label":"HomeStars","actor_id":"owner/homestars",'
+            '"input_template":{"search":"{{query}}","maxResults":"{{limit}}"}}]'
+        ),
+    )
+
+    settings = Settings()
+    sources = settings.apify_source_configs
+
+    assert [source["id"] for source in sources] == ["kijiji", "homestars"]
+    assert sources[0]["api_token"] == "global-token"
+    assert sources[1]["label"] == "HomeStars"
+    assert sources[1]["input_template"] == {"search": "{{query}}", "maxResults": "{{limit}}"}
+
+
 def test_database_url_normalizes_railway_postgres_url() -> None:
     assert (
         normalize_database_url("postgresql://user:pass@host:5432/db")

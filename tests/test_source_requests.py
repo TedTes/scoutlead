@@ -96,6 +96,45 @@ def test_source_request_creates_configured_apify_run_without_running() -> None:
         assert sources[0].input["source_request_source"] == "classifieds"
 
 
+def test_source_request_accepts_multiple_apify_sources() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            agent_runs=AgentRunService(session),
+            apify_sources=[
+                {"id": "kijiji", "label": "Kijiji"},
+                {"id": "homestars", "label": "HomeStars"},
+            ],
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="homestars",
+                prompt="List painting service contacts in Toronto ON",
+                max_results=6,
+                run_immediately=False,
+            )
+        )
+
+        sources = CampaignSourceRepository(session).list_by_campaign(result.run.id)
+
+        assert result.plan.source == "homestars"
+        assert "HomeStars" in result.plan.explanation
+        assert sources[0].provider_id == "homestars"
+        assert sources[0].input["source_selection"] == "homestars"
+
+
 def test_source_request_rejects_unconfigured_source_adapter() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

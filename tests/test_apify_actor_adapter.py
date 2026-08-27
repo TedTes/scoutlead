@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from campaign_sources.schemas import CampaignSourceMode, CampaignSourceRead, CampaignSourceSlot
 from tools.discovery.apify_actor import ApifyActorDiscoveryAdapter
+from tools.search import SearchTool
+from tools.source_registry import SourceAdapterRegistry
 
 
 class FakeResponse:
@@ -110,3 +112,18 @@ def test_apify_actor_adapter_uses_configured_provider_and_template(monkeypatch) 
     assert result.data[0]["title"] == "Cedar Painting"
     assert result.data[0]["url"] == "https://example.test/listing/1"
     assert result.data[0]["contact_email"] == "owner@example.test"
+
+
+def test_source_registry_registers_multiple_apify_sources() -> None:
+    registry = SourceAdapterRegistry(
+        search_tool=SearchTool(),
+        apify_api_token="global-token",
+        apify_sources=[
+            {"id": "kijiji", "actor_id": "owner/kijiji"},
+            {"id": "homestars", "actor_id": None},
+        ],
+    )
+
+    assert "kijiji" in registry.adapters
+    assert "homestars" in registry.adapters
+    assert registry.missing_configuration(["kijiji", "homestars"]) == ["homestars"]
