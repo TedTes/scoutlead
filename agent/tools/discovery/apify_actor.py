@@ -17,11 +17,76 @@ from tools.search import SearchResult
 
 DEFAULT_APIFY_API_BASE_URL = "https://api.apify.com/v2"
 DEFAULT_RESULT_MAPPING = {
-    "title": ["title", "name", "listingTitle", "adTitle", "headline"],
-    "url": ["url", "listingUrl", "adUrl", "link", "canonicalUrl"],
-    "snippet": ["description", "details", "summary", "body", "snippet", "shortDescription"],
-    "geography": ["location", "address", "city"],
-    "contact_email": ["email", "contactEmail", "sellerEmail"],
+    "title": [
+        "title",
+        "name",
+        "listingTitle",
+        "adTitle",
+        "headline",
+        "ad.title",
+        "listing.title",
+        "data.title",
+    ],
+    "url": [
+        "url",
+        "listingUrl",
+        "adUrl",
+        "link",
+        "href",
+        "canonicalUrl",
+        "ad.url",
+        "listing.url",
+        "data.url",
+    ],
+    "snippet": [
+        "description",
+        "details",
+        "summary",
+        "body",
+        "snippet",
+        "shortDescription",
+        "ad.description",
+        "listing.description",
+        "data.description",
+    ],
+    "geography": [
+        "location",
+        "address",
+        "city",
+        "location.name",
+        "location.address",
+        "formattedAddress",
+        "fullAddress",
+        "data.location",
+    ],
+    "contact_email": [
+        "email",
+        "contactEmail",
+        "sellerEmail",
+        "ownerEmail",
+        "seller.email",
+        "contact.email",
+        "data.email",
+    ],
+    "contact_name": [
+        "contactName",
+        "sellerName",
+        "ownerName",
+        "seller.name",
+        "contact.name",
+        "data.sellerName",
+    ],
+    "contact_phone": [
+        "phone",
+        "phoneNumber",
+        "telephone",
+        "contactPhone",
+        "sellerPhone",
+        "ownerPhone",
+        "seller.phone",
+        "contact.phone",
+        "data.phone",
+    ],
 }
 
 
@@ -205,6 +270,8 @@ class ApifyActorDiscoveryAdapter:
         snippet = _first_text(row, mapping.get("snippet", []))
         geography = _first_text(row, mapping.get("geography", []))
         contact_email = _first_text(row, mapping.get("contact_email", []))
+        contact_name = _first_text(row, mapping.get("contact_name", []))
+        contact_phone = _first_text(row, mapping.get("contact_phone", []))
         return SearchResult(
             title=title,
             url=url,
@@ -212,7 +279,12 @@ class ApifyActorDiscoveryAdapter:
             geography=geography,
             contact_email=contact_email,
             source=provider_id,
-            raw={**row, "query": query},
+            raw={
+                **row,
+                "query": query,
+                "normalized_contact_name": contact_name,
+                "normalized_contact_phone": contact_phone,
+            },
         )
 
 
@@ -269,7 +341,15 @@ def _first_text(row: dict[str, Any], keys: list[str]) -> str | None:
         if value is None:
             continue
         if isinstance(value, dict):
-            value = value.get("text") or value.get("name") or value.get("value")
+            value = (
+                value.get("text")
+                or value.get("name")
+                or value.get("value")
+                or value.get("formatted")
+                or value.get("display")
+            )
+        if isinstance(value, list):
+            value = next((item for item in value if isinstance(item, str) and item.strip()), None)
         if isinstance(value, (int, float)):
             value = str(value)
         if isinstance(value, str) and value.strip():

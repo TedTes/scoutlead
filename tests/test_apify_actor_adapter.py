@@ -118,6 +118,79 @@ def test_apify_actor_adapter_uses_configured_provider_and_template(monkeypatch) 
     assert result.data[0]["contact_email"] == "owner@example.test"
 
 
+def test_apify_actor_adapter_normalizes_nested_contact_fields(monkeypatch) -> None:
+    class NestedResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict]:
+            return [
+                {
+                    "ad": {
+                        "title": "North Star Painting",
+                        "url": "https://example.test/ad/1",
+                        "description": "Owner-operated painting service",
+                    },
+                    "seller": {"name": "Daniel Park", "phone": "416-555-0148"},
+                    "location": {"address": "Toronto, ON"},
+                }
+            ]
+
+    def fake_post(url, *, params, timeout, headers, json):
+        del url, params, timeout, headers, json
+        return NestedResponse()
+
+    monkeypatch.setattr("tools.discovery.apify_actor.httpx.post", fake_post)
+
+    source = CampaignSourceRead(
+        id="campaign_source_1",
+        campaign_id="campaign_1",
+        slot=CampaignSourceSlot.DISCOVERY,
+        provider_id="kijiji",
+        mode=CampaignSourceMode.ACCUMULATE,
+        input={"query": "painting service Toronto ON"},
+        config={"limit": 5, "actor_input": {"urls": [{"url": "{{query}}"}]}},
+        priority=10,
+        enabled=True,
+        created_at="2026-08-20T00:00:00Z",
+        updated_at="2026-08-20T00:00:00Z",
+    )
+    adapter = ApifyActorDiscoveryAdapter(
+        provider_id="kijiji",
+        api_token="secret-token",
+        actor_id="owner/kijiji",
+    )
+
+    result = adapter.run(
+        source,
+        {
+            "campaign": {
+                "id": "campaign_1",
+                "product_id": "product_1",
+                "name": "Source request",
+                "max_leads": 5,
+                "channels": ["manual"],
+                "discovery_seeds": [],
+                "status": "draft",
+                "stage": "discovery",
+                "goal_type": "learn",
+                "icp_preset_id": "default",
+                "source_preset_id": "apify-actor-source",
+                "source_input": None,
+                "source_inputs": {},
+                "created_at": "2026-08-20T00:00:00Z",
+                "updated_at": "2026-08-20T00:00:00Z",
+            },
+        },
+    )
+
+    assert result.data[0]["title"] == "North Star Painting"
+    assert result.data[0]["url"] == "https://example.test/ad/1"
+    assert result.data[0]["geography"] == "Toronto, ON"
+    assert result.data[0]["raw"]["normalized_contact_name"] == "Daniel Park"
+    assert result.data[0]["raw"]["normalized_contact_phone"] == "416-555-0148"
+
+
 def test_source_registry_registers_multiple_apify_sources() -> None:
     registry = SourceAdapterRegistry(
         search_tool=SearchTool(),

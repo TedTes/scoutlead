@@ -276,10 +276,14 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
   const website = contact?.website_url || contact?.research?.website_url || "";
   const email = contact?.contact_email || contact?.research?.contact_email || "";
   const phone = contact ? getPhone(contact) : "";
+  const contactName = contact ? getContactName(contact) : "";
   const address = contact ? getAddress(contact) : "";
   const rating = contact ? getRating(contact) : "";
   const reviewCount = contact ? getReviewCount(contact) : "";
+  const price = contact ? getPrice(contact) : "";
+  const posted = contact ? getPostedDate(contact) : "";
   const confidence = contact?.research?.confidence ? `${contact.research.confidence}%` : "—";
+  const sourceDataRows = contact ? getSourceDataRows(contact) : [];
   const evidenceNotes = contact
     ? [
         ...(contact.research?.pain_indicators || []),
@@ -357,6 +361,9 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
                     <span>No website found</span>
                   )}
                 </DrawerRow>
+                <DrawerRow icon={<Mail size={16} />} label="Contact">
+                  {contactName || contact?.research?.contact_name || "No contact name found"}
+                </DrawerRow>
                 <DrawerRow icon={<Mail size={16} />} label="Email">
                   {email ? (
                     <button type="button" onClick={() => copy(email, "Email")}>
@@ -375,6 +382,8 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
               <div className="drawer-mini-grid">
                 <Mini label="Rating" value={rating || "—"} />
                 <Mini label="Reviews" value={reviewCount || "—"} />
+                <Mini label="Price" value={price || "—"} />
+                <Mini label="Posted" value={posted || "—"} />
                 <Mini label="Confidence" value={confidence} />
               </div>
 
@@ -391,6 +400,20 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
                       <li key={note}>{note}</li>
                     ))}
                   </ul>
+                </section>
+              ) : null}
+
+              {sourceDataRows.length ? (
+                <section className="drawer-section">
+                  <h3>Source data</h3>
+                  <dl className="drawer-source-data">
+                    {sourceDataRows.map((row) => (
+                      <div key={row.key}>
+                        <dt>{humanizeSourceKey(row.key)}</dt>
+                        <dd>{row.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </section>
               ) : null}
             </div>
@@ -530,28 +553,88 @@ function displayUrl(value: string) {
 }
 
 function getAddress(contact: DiscoveryResult) {
-  return getRawString(contact, ["formattedAddress", "formatted_address", "address", "streetAddress", "fullAddress"]);
+  return getRawString(contact, [
+    "formattedAddress",
+    "formatted_address",
+    "address",
+    "streetAddress",
+    "fullAddress",
+    "location.address",
+    "location.name",
+    "data.location",
+  ]);
 }
 
 function getRating(contact: DiscoveryResult) {
-  const value = getRawNumber(contact, ["rating", "averageRating", "stars"]);
+  const value = getRawNumber(contact, ["rating", "averageRating", "stars", "reviewRating", "stats.rating"]);
   return value ? value.toFixed(1) : "";
 }
 
 function getReviewCount(contact: DiscoveryResult) {
-  const value = getRawNumber(contact, ["userRatingCount", "user_ratings_total", "reviewCount", "reviewsCount", "reviews"]);
+  const value = getRawNumber(contact, [
+    "userRatingCount",
+    "user_ratings_total",
+    "reviewCount",
+    "reviewsCount",
+    "reviews",
+    "stats.reviews",
+  ]);
   return value ? String(value) : "";
 }
 
 function getPhone(contact: DiscoveryResult) {
-  return getRawString(contact, ["nationalPhoneNumber", "internationalPhoneNumber", "phone", "phoneNumber", "telephone"]);
+  return getRawString(contact, [
+    "normalized_contact_phone",
+    "contact_phone",
+    "nationalPhoneNumber",
+    "internationalPhoneNumber",
+    "phone",
+    "phoneNumber",
+    "phone_number",
+    "telephone",
+    "contactPhone",
+    "sellerPhone",
+    "ownerPhone",
+    "seller.phone",
+    "contact.phone",
+    "data.phone",
+  ]);
+}
+
+function getContactName(contact: DiscoveryResult) {
+  return getRawString(contact, [
+    "normalized_contact_name",
+    "contact_name",
+    "contactName",
+    "sellerName",
+    "ownerName",
+    "seller.name",
+    "contact.name",
+    "data.sellerName",
+  ]);
+}
+
+function getPrice(contact: DiscoveryResult) {
+  return getRawString(contact, ["price", "priceText", "price.text", "amount", "listing.price", "data.price"]);
+}
+
+function getPostedDate(contact: DiscoveryResult) {
+  return getRawString(contact, [
+    "postedAt",
+    "posted_at",
+    "datePosted",
+    "publishedAt",
+    "createdAt",
+    "listing.postedAt",
+    "data.postedAt",
+  ]);
 }
 
 function getRawString(contact: DiscoveryResult, keys: string[]) {
   for (const raw of getRawObjects(contact)) {
     for (const key of keys) {
-      const value = raw[key];
-      if (typeof value === "string" && value.trim()) return value.trim();
+      const text = rawValueToString(getRawValue(raw, key));
+      if (text) return text;
     }
   }
   return "";
@@ -560,7 +643,7 @@ function getRawString(contact: DiscoveryResult, keys: string[]) {
 function getRawNumber(contact: DiscoveryResult, keys: string[]) {
   for (const raw of getRawObjects(contact)) {
     for (const key of keys) {
-      const value = raw[key];
+      const value = getRawValue(raw, key);
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
     }
@@ -580,11 +663,94 @@ function getRawObjects(contact: DiscoveryResult) {
   return values;
 }
 
+function getSourceDataRows(contact: DiscoveryResult) {
+  const rows: Array<{ key: string; value: string }> = [];
+  const seen = new Set<string>();
+  const skipKeys = new Set(["query", "raw", "normalized_contact_name", "normalized_contact_phone"]);
+
+  for (const raw of getRawObjects(contact)) {
+    for (const [key, value] of flattenRawObject(raw)) {
+      if (skipKeys.has(key) || seen.has(key)) continue;
+      const text = rawSourceValueToString(value);
+      if (!text) continue;
+      seen.add(key);
+      rows.push({ key, value: text });
+      if (rows.length >= 14) return rows;
+    }
+  }
+
+  return rows;
+}
+
+function flattenRawObject(value: unknown, prefix = "", depth = 0): Array<[string, unknown]> {
+  if (!isRecord(value) || depth > 2) return [];
+  return Object.entries(value).flatMap(([key, child]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (isRecord(child) && depth < 2) return flattenRawObject(child, path, depth + 1);
+    return [[path, child]];
+  });
+}
+
+function getRawValue(raw: Record<string, unknown>, key: string): unknown {
+  if (key in raw) return raw[key];
+  return key.split(".").reduce<unknown>((value, part) => {
+    if (Array.isArray(value)) {
+      const index = Number(part);
+      return Number.isInteger(index) ? value[index] : undefined;
+    }
+    if (!isRecord(value)) return undefined;
+    return value[part];
+  }, raw);
+}
+
+function rawValueToString(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (isRecord(value)) {
+    return rawValueToString(
+      value.text ?? value.name ?? value.value ?? value.formatted ?? value.display ?? value.label,
+    );
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = rawValueToString(item);
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+function rawSourceValueToString(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (Array.isArray(value)) {
+    const values = value.map(rawSourceValueToString).filter(Boolean);
+    return values.slice(0, 4).join(", ");
+  }
+  if (isRecord(value)) {
+    return rawValueToString(value) || JSON.stringify(value);
+  }
+  return "";
+}
+
+function humanizeSourceKey(key: string) {
+  return key
+    .split(".")
+    .pop()!
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]/g, " ")
+    .trim();
+}
+
 function exportContactsCsv(contacts: DiscoveryResult[], runName: string) {
   const rows = contacts.map((contact) => ({
     company: contact.company_name,
     email: contact.contact_email || contact.research?.contact_email || "",
+    contact_name: getContactName(contact) || contact.research?.contact_name || "",
     phone: getPhone(contact),
+    price: getPrice(contact),
+    posted: getPostedDate(contact),
     website: contact.website_url || contact.research?.website_url || "",
     geography: contact.geography || contact.research?.geography || "",
     score: String(contactScore(contact)),

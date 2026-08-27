@@ -1070,6 +1070,47 @@ a {
   padding: 0;
 }
 
+.drawer-source-data {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 0;
+  margin: 7px 0 0;
+  overflow: hidden;
+}
+
+.drawer-source-data div {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 92px 1fr;
+  padding: 9px 11px;
+}
+
+.drawer-source-data div:first-child {
+  border-top: 0;
+}
+
+.drawer-source-data dt {
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.drawer-source-data dd {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .drawer-footer {
   border-top: 1px solid var(--line);
   display: flex;
