@@ -12,6 +12,10 @@ class ApifySourceSettings(BaseModel):
     actor_id: str | None = None
     api_token: str | None = None
     api_base_url: str | None = None
+    input_kind: str | None = None
+    search_url_template: str | None = None
+    category_slug: str | None = None
+    location_code: str | None = None
     input_template: str | dict[str, Any] | None = None
     result_mapping: str | dict[str, Any] | None = None
     max_charge_usd: float | None = Field(default=None, ge=0)
@@ -115,6 +119,10 @@ class Settings(BaseSettings):
             "actor_id": parsed.actor_id,
             "api_token": parsed.api_token or self.apify_api_token,
             "api_base_url": parsed.api_base_url or self.apify_api_base_url,
+            "input_kind": parsed.input_kind,
+            "search_url_template": parsed.search_url_template,
+            "category_slug": parsed.category_slug,
+            "location_code": parsed.location_code,
             "input_template": parsed.input_template,
             "result_mapping": parsed.result_mapping,
             "max_charge_usd": parsed.max_charge_usd,

@@ -13,10 +13,14 @@
         "source_selection_reason": "{{source_selection_reason}}",
         "source_request_prompt": "{{source_request_prompt}}",
         "source_request_action": "{{source_request_action}}",
-        "source_request_source": "{{source_request_source}}"
+        "source_request_source": "{{source_request_source}}",
+        "source_request_intent": "{{source_request_intent}}"
       },
       "config": {
-        "limit": "{{limit}}"
+        "limit": "{{limit}}",
+        "actor_input": "{{actor_input}}",
+        "compiled_provider_input": "{{compiled_provider_input}}",
+        "result_mapping": "{{result_mapping}}"
       },
       "priority": 10,
       "enabled": true

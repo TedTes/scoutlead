@@ -23,6 +23,7 @@ from products.repository import ProductRepository
 from shared.errors import ConflictError
 from source_requests.schemas import (
     GOOGLE_PLACES_PROVIDER_ID,
+    SourceProviderKind,
     SourceProviderRead,
     SourceRequestCreate,
     SourceRequestRun,
@@ -72,6 +73,7 @@ def create_source_request(
         products=ProductRepository(session),
         campaigns=_service(session, services),
         agent_runs=AgentRunService(session),
+        llm=services.llm,
         apify_source_provider_id=services.settings.apify_source_provider_id,
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,
@@ -98,11 +100,23 @@ def list_source_providers(
             SourceProviderRead(
                 id=source_id,
                 label=label,
-                configured=bool(source.get("api_token") and source.get("actor_id")),
+                configured=_apify_source_is_configured(source),
                 detail=str(source.get("detail") or f"{label} listings"),
             )
         )
     return providers
+
+
+def _apify_source_is_configured(source: dict) -> bool:
+    if not (source.get("api_token") and source.get("actor_id")):
+        return False
+    if source.get("input_template") or source.get("search_url_template"):
+        return True
+    return source.get("input_kind") in {
+        SourceProviderKind.URL_LIST.value,
+        SourceProviderKind.SEARCH_URL.value,
+        SourceProviderKind.CLASSIFIED_SEARCH_URL.value,
+    }
 
 
 @router.get("", response_model=list[CampaignRead])

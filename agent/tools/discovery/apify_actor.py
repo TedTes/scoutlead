@@ -172,9 +172,17 @@ class ApifyActorDiscoveryAdapter:
         if self.input_template:
             parsed = _json_object(self.input_template, "APIFY_ACTOR_INPUT_TEMPLATE")
             return _render_template(parsed, values)
-        if _is_url(query):
-            return {"startUrls": [query], "maxResults": limit}
-        return {"query": query, "maxResults": limit}
+        raise ConfigurationError(
+            "Apify actor input template is missing",
+            {
+                "provider_id": self.provider_id,
+                "campaign_source_id": source.id,
+                "required_config": (
+                    "Set actor_input on the campaign source or input_template on the "
+                    "Apify source configuration."
+                ),
+            },
+        )
 
     def _result_mapping(self, source: CampaignSourceRead) -> dict[str, list[str]]:
         configured_mapping = source.config.get("result_mapping")
