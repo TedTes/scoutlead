@@ -209,27 +209,31 @@ function AppShell() {
           </div>
 
           <div className="list-nav-section">
-            {productDiscoveryRuns.slice(0, 12).map((run) => (
-              <button
-                className={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id ? "list-row active" : "list-row"}
-                key={run.id}
-                type="button"
-                onClick={() => {
-                  setSelectedDiscoveryRunId(run.id);
-                  void refreshSnapshot(run.id);
-                  selectScreen("results");
-                }}
-              >
-                <span className="list-run-marker" />
-                <span>
-                  <strong>{listLabel(run)}</strong>
-                  <small>
-                    <span>{run.status.replace(/_/g, " ")}</span>
-                    <em>{formatRunDate(run.created_at)}</em>
-                  </small>
-                </span>
-              </button>
-            ))}
+            {productDiscoveryRuns.slice(0, 12).map((run) => {
+              const title = listLabel(run);
+              return (
+                <button
+                  className={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id ? "list-row active" : "list-row"}
+                  key={run.id}
+                  title={getRunPrompt(run) || title}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDiscoveryRunId(run.id);
+                    void refreshSnapshot(run.id);
+                    selectScreen("results");
+                  }}
+                >
+                  <span className="list-run-marker" />
+                  <span>
+                    <strong>{title}</strong>
+                    <small>
+                      <span>{listMeta(run, allSourceProviders)}</span>
+                      <em>{formatRunDate(run.created_at)}</em>
+                    </small>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </nav>
 
@@ -486,10 +490,27 @@ function displayProductName(product: Product) {
 }
 
 function listLabel(run: DiscoveryRun) {
-  const prompt = run.source_inputs?.source_request_prompt;
-  if (typeof prompt === "string" && prompt.trim()) return truncateLabel(titleFromQuery(prompt.trim()) || prompt.trim(), 38);
+  const intent = run.source_inputs?.source_request_intent;
+  if (isRecord(intent)) {
+    const category = typeof intent.business_category === "string" ? intent.business_category.trim() : "";
+    const location = typeof intent.location === "string" ? intent.location.trim() : "";
+    if (category && location) return truncateLabel(`${titleCase(category)} · ${titleCase(location)}`, 38);
+    if (category) return truncateLabel(titleCase(category), 38);
+  }
+  const prompt = getRunPrompt(run);
+  if (prompt) return truncateLabel(titleFromQuery(prompt) || prompt, 38);
   if (run.name) return truncateLabel(run.name, 38);
   return "Untitled list";
+}
+
+function listMeta(run: DiscoveryRun, providers: SourceProvider[]) {
+  const source = run.source_inputs?.source_request_source;
+  const sourceLabel =
+    typeof source === "string"
+      ? providers.find((provider) => provider.id === source)?.label || titleCase(source.replace(/_/g, " "))
+      : "";
+  const status = run.status.replace(/_/g, " ");
+  return sourceLabel ? `${status} · ${sourceLabel}` : status;
 }
 
 function truncateLabel(value: string, maxLength: number) {
@@ -504,7 +525,8 @@ function formatRunDate(value: string) {
 
 function titleFromQuery(query: string) {
   const clean = query
-    .replace(/^(list|find|get|show)\s+/i, "")
+    .replace(/^(list|find|get|show|search for)\s+/i, "")
+    .replace(/\bcontacts?\b/gi, "")
     .replace(/^(independent|local|small)\s+/i, "")
     .trim();
   const match = clean.match(/^(.+?)\s+(?:in|near|around)\s+(.+?)(?:\s+(?:with|that|who|which|where)\b|$)/i);
@@ -518,10 +540,25 @@ function titleFromQuery(query: string) {
   return `${titleCase(subject)} · ${titleCase(location)}`;
 }
 
+function getRunPrompt(run: DiscoveryRun) {
+  const prompt = run.source_inputs?.source_request_prompt;
+  if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
+  const compiledQuery = run.source_inputs?.compiled_query;
+  if (typeof compiledQuery === "string" && compiledQuery.trim() && !compiledQuery.startsWith("http")) {
+    return compiledQuery.trim();
+  }
+  if (run.source_input?.trim() && !run.source_input.trim().startsWith("http")) return run.source_input.trim();
+  return "";
+}
+
 function titleCase(value: string) {
   return value
     .split(/\s+/)
     .filter(Boolean)
     .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
     .join(" ");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

@@ -85,6 +85,18 @@
   }
 }
 
+@keyframes sl-submit-slide {
+  0% {
+    transform: translateX(0) scale(1);
+  }
+  45% {
+    transform: translateX(2px) scale(1.06);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+  }
+}
+
 .results-workspace > *,
 .discovery-workspace > *,
 .product-page > *,
@@ -236,15 +248,33 @@
   transform: translateY(-1px);
 }
 
-.searchbar svg {
+.searchbar > svg {
   transition:
     color var(--dur) var(--ease),
     transform var(--dur) var(--ease);
 }
 
-.searchbar:focus-within svg {
+.searchbar:focus-within > svg {
   color: var(--accent);
   transform: scale(1.05);
+}
+
+.searchbar.is-running,
+.composer-panel.is-running {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 4px rgba(124, 216, 96, 0.11);
+}
+
+.runbtn.icon-run:not(:disabled) svg,
+.composer-submit.icon-run:not(:disabled) svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.runbtn.icon-run:active svg,
+.composer-submit.icon-run:active svg,
+.searchbar.is-running .runbtn.icon-run svg,
+.composer-panel.is-running .composer-submit.icon-run svg {
+  animation: sl-submit-slide var(--dur) var(--ease-out);
 }
 
 .score-ring {

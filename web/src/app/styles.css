@@ -428,12 +428,26 @@ a {
   width: 100%;
 }
 
+.list-row::before {
+  background: transparent;
+  border-radius: 4px;
+  content: "";
+  inset: 5px auto 5px 0;
+  position: absolute;
+  width: 2px;
+}
+
 .list-row:hover {
   background: var(--panel-2);
 }
 
 .list-row.active {
   background: var(--accent-bg);
+  box-shadow: inset 0 0 0 1px rgba(124, 216, 96, 0.12);
+}
+
+.list-row.active::before {
+  background: var(--accent);
 }
 
 .list-run-marker {
@@ -443,6 +457,10 @@ a {
   height: 6px;
   margin-top: 7px;
   width: 6px;
+}
+
+.list-row > span:last-child {
+  min-width: 0;
 }
 
 .list-row strong {
@@ -467,6 +485,13 @@ a {
   font-size: 10.5px;
   gap: 8px;
   margin-top: 1px;
+  min-width: 0;
+}
+
+.list-row small span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .list-row em {
@@ -608,6 +633,21 @@ a {
   justify-content: center;
   padding: 0 15px;
   white-space: nowrap;
+}
+
+.runbtn.icon-run,
+.composer-submit.icon-run {
+  border-radius: 8px;
+  flex: 0 0 auto;
+  padding: 0;
+  width: 36px;
+}
+
+.runbtn.icon-run svg,
+.composer-submit.icon-run svg {
+  color: currentColor;
+  opacity: 1;
+  visibility: visible;
 }
 
 .runbtn:hover,
@@ -1794,17 +1834,17 @@ a {
   }
 
   .searchbar {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .searchbar input {
-    flex: 1 1 calc(100% - 28px);
+    flex: 1 1 auto;
     min-height: 28px;
   }
 
   .searchbar .runbtn {
-    flex: 1 1 100%;
-    width: 100%;
+    flex: 0 0 38px;
+    width: 38px;
   }
 
   .results-hero {

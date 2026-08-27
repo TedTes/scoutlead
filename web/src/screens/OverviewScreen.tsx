@@ -105,7 +105,7 @@ export function OverviewScreen() {
       </header>
 
       <form
-        className="composer-panel"
+        className={running ? "composer-panel is-running" : "composer-panel"}
         onSubmit={(event) => {
           event.preventDefault();
           void submitSourceRequest(prompt);
@@ -153,9 +153,14 @@ export function OverviewScreen() {
             {!running && promptValue.length > 0 && promptValue.length < 4 ? (
               <span className="composer-hint">Type at least 4 characters</span>
             ) : null}
-            <button className="composer-submit" disabled={!ready || running} type="submit">
+            <button
+              aria-label={running ? "Finding contacts" : "Find contacts"}
+              className="composer-submit icon-run"
+              disabled={!ready || running}
+              title={running ? "Finding contacts" : "Find contacts"}
+              type="submit"
+            >
               <Play size={14} />
-              {running ? "Finding..." : "Find contacts"}
             </button>
           </div>
         </div>
@@ -197,7 +202,11 @@ function SourceOption({
 function getRunPrompt(run: { source_input?: string | null; source_inputs?: Record<string, unknown> } | undefined) {
   const prompt = run?.source_inputs?.source_request_prompt;
   if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
-  if (run?.source_input?.trim()) return run.source_input.trim();
+  const compiledQuery = run?.source_inputs?.compiled_query;
+  if (typeof compiledQuery === "string" && compiledQuery.trim() && !compiledQuery.startsWith("http")) {
+    return compiledQuery.trim();
+  }
+  if (run?.source_input?.trim() && !run.source_input.trim().startsWith("http")) return run.source_input.trim();
   return "";
 }
 

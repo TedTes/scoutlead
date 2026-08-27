@@ -54,6 +54,7 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert result.plan.source == GOOGLE_PLACES_PROVIDER_ID
         assert result.plan.action == "list_contacts"
         assert result.plan.query == "painting service in Toronto ON"
+        assert result.run.name == "Painting Service · Toronto ON"
         assert result.summary is None
         assert sources[0].provider_id == "google_places"
         assert sources[0].input["source_request_prompt"] == request.prompt

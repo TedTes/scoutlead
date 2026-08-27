@@ -73,7 +73,7 @@ class SourceRequestService:
         run = self.campaigns.create(
             CampaignCreate(
                 product_id=product.id,
-                name=f"{product.product_name} source request {utcnow().strftime('%Y-%m-%d %H:%M')}",
+                name=_source_request_run_name(plan=plan, request=request),
                 goal_type=CampaignGoalType.LEARN,
                 source_preset_id=plan.source_preset_id,
                 source_input=plan.query,
@@ -121,3 +121,34 @@ class SourceRequestService:
             if source_id:
                 mapped[source_id] = source_config
         return mapped
+
+
+def _source_request_run_name(
+    *,
+    plan: SourceRequestPlan,
+    request: SourceRequestCreate,
+) -> str:
+    if plan.intent:
+        category = _title_text(plan.intent.business_category)
+        location = _title_text(plan.intent.location or plan.intent.country)
+        if category and location:
+            return _truncate_name(f"{category} · {location}")
+        if category:
+            return _truncate_name(category)
+
+    prompt = request.prompt.strip()
+    if prompt:
+        return _truncate_name(prompt)
+    return f"Contact list {utcnow().strftime('%Y-%m-%d %H:%M')}"
+
+
+def _title_text(value: str) -> str:
+    words = value.replace("_", " ").replace("-", " ").split()
+    return " ".join(word if word.isupper() else word.capitalize() for word in words)
+
+
+def _truncate_name(value: str, max_length: int = 64) -> str:
+    cleaned = " ".join(value.split())
+    if len(cleaned) <= max_length:
+        return cleaned
+    return f"{cleaned[: max_length - 1].rstrip()}…"

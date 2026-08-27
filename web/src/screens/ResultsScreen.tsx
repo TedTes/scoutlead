@@ -198,7 +198,7 @@ function SearchStrip({
 }) {
   return (
     <form
-      className="searchbar"
+      className={running ? "searchbar is-running" : "searchbar"}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
@@ -211,9 +211,14 @@ function SearchStrip({
         value={draftPrompt}
         onChange={(event) => onChange(event.target.value)}
       />
-      <button className="runbtn" disabled={!ready || running} type="submit">
+      <button
+        aria-label={running ? "Finding contacts" : "Find contacts"}
+        className="runbtn icon-run"
+        disabled={!ready || running}
+        title={running ? "Finding contacts" : "Find contacts"}
+        type="submit"
+      >
         <Play size={13} />
-        {running ? "Running" : "Run"}
       </button>
     </form>
   );
@@ -454,7 +459,11 @@ function Mini({ label, value }: { label: string; value: string }) {
 function getRunPrompt(run: { source_input?: string | null; source_inputs?: Record<string, unknown> } | undefined) {
   const prompt = run?.source_inputs?.source_request_prompt;
   if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
-  if (run?.source_input?.trim()) return run.source_input.trim();
+  const compiledQuery = run?.source_inputs?.compiled_query;
+  if (typeof compiledQuery === "string" && compiledQuery.trim() && !compiledQuery.startsWith("http")) {
+    return compiledQuery.trim();
+  }
+  if (run?.source_input?.trim() && !run.source_input.trim().startsWith("http")) return run.source_input.trim();
   return "";
 }
 
