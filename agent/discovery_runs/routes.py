@@ -48,6 +48,7 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         apify_actor_input_template=services.settings.apify_actor_input_template,
         apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
         apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
+        apify_sources=services.settings.apify_source_configs,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 
@@ -73,6 +74,7 @@ def create_source_request(
         agent_runs=AgentRunService(session),
         apify_source_provider_id=services.settings.apify_source_provider_id,
         apify_source_label=services.settings.apify_source_label,
+        apify_sources=services.settings.apify_source_configs,
     ).create(request)
 
 
@@ -89,13 +91,15 @@ def list_source_providers(
             detail="Local business discovery",
         )
     ]
-    if settings.apify_source_provider_id:
+    for source in settings.apify_source_configs:
+        source_id = str(source["id"])
+        label = str(source.get("label") or source_id)
         providers.append(
             SourceProviderRead(
-                id=settings.apify_source_provider_id,
-                label=settings.apify_source_label,
-                configured=bool(settings.apify_api_token and settings.apify_actor_id),
-                detail=f"{settings.apify_source_label} listings",
+                id=source_id,
+                label=label,
+                configured=bool(source.get("api_token") and source.get("actor_id")),
+                detail=str(source.get("detail") or f"{label} listings"),
             )
         )
     return providers

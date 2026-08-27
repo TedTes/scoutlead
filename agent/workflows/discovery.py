@@ -36,6 +36,7 @@ class DiscoveryWorkflow:
         apify_actor_input_template: str | None = None,
         apify_actor_result_mapping: str | None = None,
         apify_actor_max_charge_usd: float | None = None,
+        apify_sources: list[dict[str, Any]] | None = None,
         timeout_seconds: float = 20.0,
         on_tool_start: Callable[[ToolAction, int], str | None] | None = None,
         on_tool_success: Callable[[str, Any], None] | None = None,
@@ -56,6 +57,7 @@ class DiscoveryWorkflow:
         self.apify_actor_input_template = apify_actor_input_template
         self.apify_actor_result_mapping = apify_actor_result_mapping
         self.apify_actor_max_charge_usd = apify_actor_max_charge_usd
+        self.apify_sources = apify_sources
         self.timeout_seconds = timeout_seconds
         self.on_tool_start = on_tool_start
         self.on_tool_success = on_tool_success
@@ -93,6 +95,7 @@ class DiscoveryWorkflow:
                 apify_actor_input_template=self.apify_actor_input_template,
                 apify_actor_result_mapping=self.apify_actor_result_mapping,
                 apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
+                apify_sources=self.apify_sources,
                 timeout_seconds=self.timeout_seconds,
             )
         )

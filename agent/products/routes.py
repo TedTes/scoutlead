@@ -55,6 +55,7 @@ def _campaign_service(
         apify_actor_input_template=services.settings.apify_actor_input_template,
         apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
         apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
+        apify_sources=services.settings.apify_source_configs,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 

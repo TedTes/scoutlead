@@ -42,6 +42,7 @@ def run_once() -> bool:
                     apify_actor_input_template=services.settings.apify_actor_input_template,
                     apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
                     apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
+                    apify_sources=services.settings.apify_source_configs,
                     timeout_seconds=services.settings.request_timeout_seconds,
                 ).run_campaign(agent_run.campaign_id, agent_run_id=agent_run.id)
             except Exception:
@@ -69,6 +70,7 @@ def run_once() -> bool:
                     apify_actor_input_template=services.settings.apify_actor_input_template,
                     apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
                     apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
+                    apify_sources=services.settings.apify_source_configs,
                     timeout_seconds=services.settings.request_timeout_seconds,
                 ).run_campaign(str(job.payload["campaign_id"]))
             elif job.type == JobType.MESSAGE_SEND.value:

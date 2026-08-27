@@ -32,8 +32,8 @@ class ApifyActorDiscoveryAdapter:
         api_token: str | None,
         actor_id: str | None,
         api_base_url: str | None = None,
-        input_template: str | None = None,
-        result_mapping: str | None = None,
+        input_template: str | dict[str, Any] | None = None,
+        result_mapping: str | dict[str, Any] | None = None,
         max_charge_usd: float | None = None,
         timeout_seconds: float = 20.0,
     ) -> None:
@@ -53,7 +53,7 @@ class ApifyActorDiscoveryAdapter:
     def run(self, source: CampaignSourceRead, context: dict[str, Any]) -> ToolResult:
         if not self.is_configured:
             raise ConfigurationError(
-                "APIFY_API_TOKEN, APIFY_ACTOR_ID, and APIFY_SOURCE_PROVIDER_ID are required for Apify actor sources",
+                "Apify actor source is missing api_token, actor_id, or provider id",
                 {"campaign_source_id": source.id, "provider_id": source.provider_id},
             )
 
@@ -186,7 +186,9 @@ def _is_url(value: str) -> bool:
     return value.startswith("https://") or value.startswith("http://")
 
 
-def _json_object(value: str, name: str) -> dict[str, Any]:
+def _json_object(value: str | dict[str, Any], name: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:

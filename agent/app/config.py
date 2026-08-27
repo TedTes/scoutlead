@@ -1,9 +1,21 @@
 from functools import lru_cache
 import json
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ApifySourceSettings(BaseModel):
+    id: str = Field(min_length=1)
+    label: str | None = None
+    actor_id: str | None = None
+    api_token: str | None = None
+    api_base_url: str | None = None
+    input_template: str | dict[str, Any] | None = None
+    result_mapping: str | dict[str, Any] | None = None
+    max_charge_usd: float | None = Field(default=None, ge=0)
+    detail: str | None = None
 
 
 class Settings(BaseSettings):
@@ -25,6 +37,7 @@ class Settings(BaseSettings):
     google_places_api_endpoint: str | None = None
     apify_api_token: str | None = None
     apify_api_base_url: str = "https://api.apify.com/v2"
+    apify_sources: str | None = None
     apify_source_provider_id: str = "apify_actor"
     apify_source_label: str = "Kijiji"
     apify_actor_id: str | None = None
@@ -56,6 +69,57 @@ class Settings(BaseSettings):
     @property
     def strict_external_providers(self) -> bool:
         return self.environment in {"staging", "production"} and not self.allow_mock_providers
+
+    @property
+    def apify_source_configs(self) -> list[dict[str, Any]]:
+        parsed_sources = self._parse_apify_sources()
+        if parsed_sources:
+            return [self._normalize_apify_source(source) for source in parsed_sources]
+
+        if not self.apify_source_provider_id:
+            return []
+
+        return [
+            self._normalize_apify_source(
+                {
+                    "id": self.apify_source_provider_id,
+                    "label": self.apify_source_label,
+                    "actor_id": self.apify_actor_id,
+                    "api_token": self.apify_api_token,
+                    "api_base_url": self.apify_api_base_url,
+                    "input_template": self.apify_actor_input_template,
+                    "result_mapping": self.apify_actor_result_mapping,
+                    "max_charge_usd": self.apify_actor_max_charge_usd,
+                    "detail": f"{self.apify_source_label} listings",
+                }
+            )
+        ]
+
+    def _parse_apify_sources(self) -> list[dict[str, Any]]:
+        if not self.apify_sources:
+            return []
+        parsed = json.loads(self.apify_sources)
+        if not isinstance(parsed, list):
+            raise ValueError("APIFY_SOURCES must be a JSON array")
+        return [dict(item) for item in parsed if isinstance(item, dict)]
+
+    def _normalize_apify_source(self, source: dict[str, Any]) -> dict[str, Any]:
+        data = dict(source)
+        if "id" not in data:
+            data["id"] = data.get("provider_id") or data.get("source_provider_id")
+        parsed = ApifySourceSettings.model_validate(data)
+        label = parsed.label or parsed.id
+        return {
+            "id": parsed.id,
+            "label": label,
+            "actor_id": parsed.actor_id,
+            "api_token": parsed.api_token or self.apify_api_token,
+            "api_base_url": parsed.api_base_url or self.apify_api_base_url,
+            "input_template": parsed.input_template,
+            "result_mapping": parsed.result_mapping,
+            "max_charge_usd": parsed.max_charge_usd,
+            "detail": parsed.detail or f"{label} listings",
+        }
 
     @field_validator("cors_origins", mode="after")
     @classmethod

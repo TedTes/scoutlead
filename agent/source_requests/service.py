@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from agent_runs.schemas import AgentRunCreate
 from agent_runs.service import AgentRunService
@@ -29,12 +30,18 @@ class SourceRequestService:
         agent_runs: AgentRunService,
         apify_source_provider_id: str = "apify_actor",
         apify_source_label: str = "Kijiji",
+        apify_sources: list[dict[str, Any]] | None = None,
     ) -> None:
         self.products = products
         self.campaigns = campaigns
         self.agent_runs = agent_runs
         self.apify_source_provider_id = apify_source_provider_id
         self.apify_source_label = apify_source_label
+        self.apify_sources = self._apify_source_map(
+            apify_sources=apify_sources,
+            fallback_provider_id=apify_source_provider_id,
+            fallback_label=apify_source_label,
+        )
 
     def plan(self, request: SourceRequestCreate) -> SourceRequestPlan:
         self.products.get(request.product_id)
@@ -53,7 +60,9 @@ class SourceRequestService:
                     "No outreach drafts are created for source requests."
                 ),
             )
-        if source == self.apify_source_provider_id:
+        source_config = self.apify_sources.get(source)
+        if source_config is not None:
+            source_label = str(source_config.get("label") or source)
             return SourceRequestPlan(
                 source=source,
                 action=SourceRequestAction.LIST_CONTACTS,
@@ -61,13 +70,11 @@ class SourceRequestService:
                 max_results=request.max_results,
                 source_preset_id="apify-actor-source",
                 explanation=(
-                    f"List contacts by searching {self.apify_source_label}. "
+                    f"List contacts by searching {source_label}. "
                     "No outreach drafts are created for source requests."
                 ),
             )
-        supported_sources = [GOOGLE_PLACES_PROVIDER_ID]
-        if self.apify_source_provider_id:
-            supported_sources.append(self.apify_source_provider_id)
+        supported_sources = [GOOGLE_PLACES_PROVIDER_ID, *self.apify_sources.keys()]
         raise ValidationError(
             "source provider is not configured",
             {"source": source, "supported_sources": supported_sources},
@@ -79,7 +86,7 @@ class SourceRequestService:
         source_selection = (
             "google_places_local_business"
             if plan.source == GOOGLE_PLACES_PROVIDER_ID
-            else self.apify_source_provider_id
+            else plan.source
         )
         run = self.campaigns.create(
             CampaignCreate(
@@ -106,6 +113,28 @@ class SourceRequestService:
         agent_run = self.agent_runs.create(AgentRunCreate(campaign_id=run.id))
         summary = self.campaigns.run_contact_listing(run.id, agent_run_id=agent_run.id)
         return SourceRequestRun(plan=plan, run=summary.campaign, summary=summary)
+
+    @staticmethod
+    def _apify_source_map(
+        *,
+        apify_sources: list[dict[str, Any]] | None,
+        fallback_provider_id: str,
+        fallback_label: str,
+    ) -> dict[str, dict[str, Any]]:
+        source_configs = apify_sources
+        if source_configs is None:
+            source_configs = [{"id": fallback_provider_id, "label": fallback_label}]
+        mapped: dict[str, dict[str, Any]] = {}
+        for source_config in source_configs:
+            source_id = str(
+                source_config.get("id")
+                or source_config.get("provider_id")
+                or source_config.get("source_provider_id")
+                or ""
+            ).strip()
+            if source_id:
+                mapped[source_id] = source_config
+        return mapped
 
 
 def _prompt_to_source_query(prompt: str) -> str:
