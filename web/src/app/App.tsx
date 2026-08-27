@@ -438,11 +438,11 @@ function SourceSettingsDialog({
         </header>
 
         <div className="source-toggle-list">
-          {providers.map((provider) => {
+          {configuredProviders.length ? configuredProviders.map((provider) => {
             const active = activeSourceIds.includes(provider.id) && provider.configured;
             return (
               <button
-                className={`source-toggle-row${active ? " active" : ""}${provider.configured ? "" : " disabled"}`}
+                className={`source-toggle-row${active ? " active" : ""}`}
                 key={provider.id}
                 type="button"
                 onClick={() => toggleProvider(provider)}
@@ -456,7 +456,9 @@ function SourceSettingsDialog({
                 </em>
               </button>
             );
-          })}
+          }) : (
+            <p className="context-menu-empty">No source providers are configured.</p>
+          )}
         </div>
 
         <footer>

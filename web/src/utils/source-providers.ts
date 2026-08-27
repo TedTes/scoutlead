@@ -2,7 +2,6 @@ import type { SourceProvider, SourceRequestSource } from "../types/domain";
 
 export const sourceCatalog: SourceProvider[] = [
   { id: "google_places", label: "Google Places", configured: false, detail: "Local business discovery" },
-  { id: "apify_actor", label: "Kijiji", configured: false, detail: "Classified service listings" },
   { id: "directories", label: "Directories", configured: false, detail: "Trade associations" },
   { id: "website_list", label: "Website lookup", configured: false, detail: "Known web presence" },
 ];

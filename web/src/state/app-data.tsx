@@ -57,7 +57,6 @@ type AppDataContextValue = {
   approveMessage: (messageId: string) => Promise<void>;
   sendMessage: (messageId: string) => Promise<void>;
   cancelMessage: (messageId: string) => Promise<void>;
-  generateDiscoveryInsight: (runId?: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -192,7 +191,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         messages,
         metrics,
         preflight,
-        insight,
         trace,
       ] = await Promise.all([
         api.getDiscoveryRun(runId),
@@ -202,7 +200,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         api.getMessages(runId),
         api.getMetrics(runId),
         api.getDiscoveryRunPreflight(runId),
-        api.getDiscoveryInsight(runId).catch(() => undefined),
         getTraceWithFallback(api, runId),
       ]);
       const latestAgentRun = trace?.latest_run ?? undefined;
@@ -214,7 +211,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         discoveryCandidates,
         messages,
         metrics,
-        insight,
         preflight,
         trace,
         agentRuns,
@@ -417,10 +413,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       cancelMessage: (messageId) =>
         mutate(async () => {
           await api.cancelMessage(messageId);
-        }),
-      generateDiscoveryInsight: (runId = selectedDiscoveryRunIdState) =>
-        mutate(async () => {
-          if (runId) await api.generateDiscoveryInsight(runId);
         }),
     }),
     [

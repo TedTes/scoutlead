@@ -5,7 +5,6 @@ import type {
   DiscoveryRun,
   DiscoveryRunCreateInput,
   DiscoveryPreflight,
-  DiscoveryInsight,
   DiscoveryRunSummary,
   DiscoveryRunSource,
   DiscoveryTrace,
@@ -159,14 +158,6 @@ export class ApiClient {
 
   getMetrics(runId: string) {
     return this.request<Metrics>(`/discovery-runs/${runId}/metrics`);
-  }
-
-  getDiscoveryInsight(runId: string) {
-    return this.request<DiscoveryInsight>(`/discovery-runs/${runId}/insights`);
-  }
-
-  generateDiscoveryInsight(runId: string) {
-    return this.request<DiscoveryInsight>(`/discovery-runs/${runId}/insights`, { method: "POST" });
   }
 
   private async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {

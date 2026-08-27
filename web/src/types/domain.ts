@@ -249,30 +249,6 @@ export type Metrics = {
   }>;
 };
 
-export type DiscoveryInsight = {
-  id: string;
-  campaign_id: string;
-  product_id: string;
-  goal_type: string;
-  summary: string;
-  findings: Array<{
-    theme: string;
-    summary: string;
-    evidence: string[];
-    count: number;
-    confidence: number;
-  }>;
-  icp_verdict: {
-    verdict: "strong" | "mixed" | "weak" | "invalid" | "insufficient_data";
-    rationale: string;
-    recommended_action: string;
-  };
-  metrics_snapshot: Record<string, unknown>;
-  evidence: string[];
-  created_at: string;
-  updated_at: string;
-};
-
 export type AgentRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 
 export type AgentStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
@@ -369,7 +345,6 @@ export type DiscoverySnapshot = {
   discoveryCandidates: DiscoveryCandidate[];
   messages: Message[];
   metrics?: Metrics;
-  insight?: DiscoveryInsight;
   preflight?: DiscoveryPreflight;
   trace?: DiscoveryTrace;
   agentRuns: AgentRun[];
