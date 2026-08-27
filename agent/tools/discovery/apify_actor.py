@@ -10,6 +10,7 @@ import httpx
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignRead
 from shared.errors import ConfigurationError
+from shared.utils import truncate
 from tools.base import ToolResult, ToolSlot, measured_tool_result
 from tools.search import SearchResult
 
@@ -83,14 +84,43 @@ class ApifyActorDiscoveryAdapter:
         endpoint = f"{self.api_base_url}/actors/{quote(actor_id, safe='~')}/run-sync-get-dataset-items"
 
         def action() -> list[dict[str, Any]]:
-            response = httpx.post(
-                endpoint,
-                params=params,
-                timeout=max(self.timeout_seconds, 60.0),
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                json=actor_input,
-            )
-            response.raise_for_status()
+            try:
+                response = httpx.post(
+                    endpoint,
+                    params=params,
+                    timeout=max(self.timeout_seconds, 60.0),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    json=actor_input,
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise ConfigurationError(
+                    "Apify actor request failed",
+                    {
+                        "provider_id": self.provider_id,
+                        "actor_id": actor_id,
+                        "status_code": exc.response.status_code,
+                        "response_body": truncate(exc.response.text, 1000),
+                    },
+                ) from exc
+            except httpx.TimeoutException as exc:
+                raise ConfigurationError(
+                    "Apify actor request timed out",
+                    {
+                        "provider_id": self.provider_id,
+                        "actor_id": actor_id,
+                        "timeout_seconds": max(self.timeout_seconds, 60.0),
+                    },
+                ) from exc
+            except httpx.RequestError as exc:
+                raise ConfigurationError(
+                    "Apify actor request could not be completed",
+                    {
+                        "provider_id": self.provider_id,
+                        "actor_id": actor_id,
+                        "error": exc.__class__.__name__,
+                    },
+                ) from exc
             rows = response.json()
             if isinstance(rows, dict):
                 rows = rows.get("items", rows.get("results", []))
