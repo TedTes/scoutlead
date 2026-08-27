@@ -153,7 +153,7 @@ def test_apify_actor_adapter_wraps_provider_http_errors(monkeypatch) -> None:
         provider_id="kijiji",
         mode=CampaignSourceMode.ACCUMULATE,
         input={"query": "painting service Toronto ON"},
-        config={"limit": 5},
+        config={"limit": 5, "actor_input": {"query": "{{query}}", "maxResults": "{{limit}}"}},
         priority=10,
         enabled=True,
         created_at="2026-08-20T00:00:00Z",

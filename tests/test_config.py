@@ -37,6 +37,7 @@ def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
         (
             '[{"id":"kijiji","label":"Kijiji","actor_id":"owner/kijiji"},'
             '{"id":"homestars","label":"HomeStars","actor_id":"owner/homestars",'
+            '"input_kind":"text_query","search_url_template":"https://example.test/{{query_slug}}",'
             '"input_template":{"search":"{{query}}","maxResults":"{{limit}}"}}]'
         ),
     )
@@ -47,6 +48,8 @@ def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
     assert [source["id"] for source in sources] == ["kijiji", "homestars"]
     assert sources[0]["api_token"] == "global-token"
     assert sources[1]["label"] == "HomeStars"
+    assert sources[1]["input_kind"] == "text_query"
+    assert sources[1]["search_url_template"] == "https://example.test/{{query_slug}}"
     assert sources[1]["input_template"] == {"search": "{{query}}", "maxResults": "{{limit}}"}
 
 

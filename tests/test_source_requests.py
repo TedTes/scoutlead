@@ -46,6 +46,7 @@ def test_source_request_creates_structured_google_places_run_without_running() -
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
             agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
         ).create(request)
 
         sources = CampaignSourceRepository(session).list_by_campaign(result.run.id)
@@ -76,7 +77,17 @@ def test_source_request_creates_configured_apify_run_without_running() -> None:
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
             agent_runs=AgentRunService(session),
-            apify_source_provider_id="classifieds",
+            llm=FakeWorkflowLLM(),
+            apify_sources=[
+                {
+                    "id": "classifieds",
+                    "label": "Classifieds",
+                    "input_template": {
+                        "searchQueries": ["{{query}}"],
+                        "maxResults": "{{limit}}",
+                    },
+                }
+            ],
         ).create(
             SourceRequestCreate(
                 product_id=product.id,
@@ -94,6 +105,10 @@ def test_source_request_creates_configured_apify_run_without_running() -> None:
         assert result.plan.query == "painting service in Toronto ON"
         assert sources[0].provider_id == "classifieds"
         assert sources[0].input["source_request_source"] == "classifieds"
+        assert sources[0].config["actor_input"] == {
+            "searchQueries": ["painting service in Toronto ON"],
+            "maxResults": 7,
+        }
 
 
 def test_source_request_accepts_multiple_apify_sources() -> None:
@@ -113,9 +128,18 @@ def test_source_request_accepts_multiple_apify_sources() -> None:
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
             agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
             apify_sources=[
-                {"id": "kijiji", "label": "Kijiji"},
-                {"id": "homestars", "label": "HomeStars"},
+                {
+                    "id": "kijiji",
+                    "label": "Kijiji",
+                    "input_template": {"query": "{{query}}", "maxResults": "{{limit}}"},
+                },
+                {
+                    "id": "homestars",
+                    "label": "HomeStars",
+                    "input_template": {"query": "{{query}}", "maxResults": "{{limit}}"},
+                },
             ],
         ).create(
             SourceRequestCreate(
@@ -153,6 +177,7 @@ def test_source_request_rejects_unconfigured_source_adapter() -> None:
                     browser=DirectHttpBrowserTool(timeout_seconds=0.1),
                 ),
                 agent_runs=AgentRunService(session),
+                llm=FakeWorkflowLLM(),
                 apify_source_provider_id="configured_apify",
             ).plan(
                 SourceRequestCreate(
@@ -189,6 +214,61 @@ def test_contact_listing_run_does_not_create_outreach_drafts() -> None:
         assert summary.drafted_message_count == 0
         assert summary.campaign.status == "completed"
         assert session.execute(text("select count(*) from messages")).scalar_one() == 0
+
+
+def test_source_request_compiles_url_actor_input_from_source_template() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+            apify_sources=[
+                {
+                    "id": "kijiji",
+                    "label": "Kijiji",
+                    "input_kind": "classified_search_url",
+                    "search_url_template": (
+                        "https://example.test/{{location_slug}}/{{business_slug}}"
+                    ),
+                    "input_template": {
+                        "urls": [{"url": "{{source_url}}"}],
+                        "maxRecords": "{{limit}}",
+                    },
+                    "result_mapping": {"url": ["listingUrl"]},
+                }
+            ],
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="kijiji",
+                prompt="List painting service contacts in Toronto ON",
+                max_results=9,
+                run_immediately=False,
+            )
+        )
+
+        sources = CampaignSourceRepository(session).list_by_campaign(result.run.id)
+
+        assert result.plan.query == "https://example.test/toronto-on/painting-service"
+        assert result.plan.intent is not None
+        assert result.plan.intent.business_category == "painting service"
+        assert sources[0].config["actor_input"] == {
+            "urls": [{"url": "https://example.test/toronto-on/painting-service"}],
+            "maxRecords": 9,
+        }
+        assert sources[0].input["source_request_intent"]["business_category"] == "painting service"
 
 
 def _product() -> ProductCreate:

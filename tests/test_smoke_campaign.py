@@ -28,6 +28,7 @@ from products.schemas import (
     QualificationCriterion,
 )
 from shared.errors import ConflictError, ValidationError
+from source_requests.schemas import SourceRequestIntent
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
@@ -44,6 +45,23 @@ class FakeWorkflowLLM:
         context: dict | None = None,
     ):
         context = context or {}
+        if response_model is SourceRequestIntent:
+            request = context["request"]
+            prompt = request["prompt"]
+            location = "Toronto ON" if "Toronto" in prompt else ""
+            return SourceRequestIntent(
+                business_category="painting service",
+                location=location,
+                country="Canada",
+                required_signals=["contact details"],
+                excluded_result_types=["directories", "marketplaces"],
+                search_query="painting service in Toronto ON",
+                search_url="https://example.test/search/painting-service-toronto-on"
+                if "url source" in prompt
+                else "",
+                confidence=80,
+                rationale="Parsed the local business category and market from the request.",
+            )
         if response_model is LeadResearch:
             lead = context["lead"]
             product = context["product"]
