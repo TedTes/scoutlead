@@ -165,10 +165,11 @@ RESEND_API_KEY=...
 EMAIL_FROM_ADDRESS=founder@example.com
 GOOGLE_PLACES_API_KEY=...
 APIFY_API_TOKEN=...
-APIFY_SOURCES=[{"id":"kijiji","label":"Kijiji","actor_id":"actor-owner/kijiji-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}},{"id":"homestars","label":"HomeStars","actor_id":"actor-owner/homestars-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}}]
+APIFY_SOURCE_KIJIJI={"id":"kijiji","label":"Kijiji","enabled":true,"actor_id":"actor-owner/kijiji-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}}
+APIFY_SOURCE_HOMESTARS={"id":"homestars","label":"HomeStars","enabled":true,"actor_id":"actor-owner/homestars-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}}
 ```
 
-Use `APIFY_SOURCES` when more than one Apify-backed source is available. Each item becomes a selectable source provider by its `id`. Each source must define an `input_template` or URL template that matches that actor's expected input shape; ScoutLead interprets the user's plain-language request once, then renders that source-specific template. Template values include `{{query}}`, `{{business_category}}`, `{{business_slug}}`, `{{location}}`, `{{location_slug}}`, `{{city}}`, `{{region}}`, `{{country}}`, `{{limit}}`, and `{{source_url}}`.
+Use one `APIFY_SOURCE_<NAME>` env var per Apify-backed source. The suffix must match the object `id`, so `APIFY_SOURCE_KIJIJI` maps to source id `kijiji`. Each source must define an `input_template` or URL template that matches that actor's expected input shape; ScoutLead interprets the user's plain-language request once, then renders that source-specific template. Template values include `{{query}}`, `{{business_category}}`, `{{business_slug}}`, `{{location}}`, `{{location_slug}}`, `{{city}}`, `{{region}}`, `{{country}}`, `{{limit}}`, and `{{source_url}}`. The old `APIFY_SOURCES` array is still read only when no per-source env vars are present.
 
 Before running a campaign, check provider readiness:
 

@@ -33,24 +33,79 @@ def test_settings_accepts_dev_environment(monkeypatch) -> None:
 def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
     monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
     monkeypatch.setenv(
-        "APIFY_SOURCES",
+        "APIFY_SOURCE_KIJIJI",
         (
-            '[{"id":"kijiji","label":"Kijiji","actor_id":"owner/kijiji"},'
+            '{"id":"kijiji","label":"Kijiji","actor_id":"owner/kijiji",'
+            '"input_template":{"search":"{{query}}","maxResults":"{{limit}}"}}'
+        ),
+    )
+    monkeypatch.setenv(
+        "APIFY_SOURCE_HOMESTARS",
+        (
             '{"id":"homestars","label":"HomeStars","actor_id":"owner/homestars",'
             '"input_kind":"text_query","search_url_template":"https://example.test/{{query_slug}}",'
-            '"input_template":{"search":"{{query}}","maxResults":"{{limit}}"}}]'
+            '"input_template":{"search":"{{query}}","maxResults":"{{limit}}"}}'
         ),
     )
 
     settings = Settings()
     sources = settings.apify_source_configs
+    sources_by_id = {source["id"]: source for source in sources}
 
-    assert [source["id"] for source in sources] == ["kijiji", "homestars"]
-    assert sources[0]["api_token"] == "global-token"
-    assert sources[1]["label"] == "HomeStars"
-    assert sources[1]["input_kind"] == "text_query"
-    assert sources[1]["search_url_template"] == "https://example.test/{{query_slug}}"
-    assert sources[1]["input_template"] == {"search": "{{query}}", "maxResults": "{{limit}}"}
+    assert sorted(source["id"] for source in sources) == ["homestars", "kijiji"]
+    assert sources_by_id["kijiji"]["api_token"] == "global-token"
+    assert sources_by_id["homestars"]["label"] == "HomeStars"
+    assert sources_by_id["homestars"]["input_kind"] == "text_query"
+    assert (
+        sources_by_id["homestars"]["search_url_template"]
+        == "https://example.test/{{query_slug}}"
+    )
+    assert sources_by_id["homestars"]["input_template"] == {
+        "search": "{{query}}",
+        "maxResults": "{{limit}}",
+    }
+
+
+def test_settings_derives_apify_source_id_from_env_name(monkeypatch) -> None:
+    monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
+    monkeypatch.setenv(
+        "APIFY_SOURCE_KIJIJI",
+        '{"label":"Kijiji","actor_id":"owner/kijiji","input_template":{"query":"{{query}}"}}',
+    )
+
+    sources = Settings().apify_source_configs
+
+    assert len(sources) == 1
+    assert sources[0]["id"] == "kijiji"
+    assert sources[0]["label"] == "Kijiji"
+
+
+def test_settings_rejects_apify_source_id_that_does_not_match_env_name(monkeypatch) -> None:
+    monkeypatch.setenv("APIFY_SOURCE_KIJIJI", '{"id":"homestars","actor_id":"owner/source"}')
+
+    with pytest.raises(ValueError, match="does not match source 'kijiji'"):
+        Settings().apify_source_configs
+
+
+def test_settings_skips_disabled_apify_source_env(monkeypatch) -> None:
+    monkeypatch.setenv("APIFY_SOURCE_KIJIJI", '{"id":"kijiji","enabled":false}')
+
+    assert Settings().apify_source_configs == []
+
+
+def test_settings_keeps_legacy_apify_sources_when_no_per_source_env_exists(monkeypatch) -> None:
+    monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
+    monkeypatch.setenv(
+        "APIFY_SOURCES",
+        (
+            '[{"id":"kijiji","label":"Kijiji","actor_id":"owner/kijiji",'
+            '"input_template":{"search":"{{query}}","maxResults":"{{limit}}"}}]'
+        ),
+    )
+
+    sources = Settings().apify_source_configs
+
+    assert [source["id"] for source in sources] == ["kijiji"]
 
 
 def test_database_url_normalizes_railway_postgres_url() -> None:

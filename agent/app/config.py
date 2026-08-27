@@ -1,5 +1,8 @@
 from functools import lru_cache
 import json
+import os
+from pathlib import Path
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -9,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ApifySourceSettings(BaseModel):
     id: str = Field(min_length=1)
     label: str | None = None
+    enabled: bool = True
     actor_id: str | None = None
     api_token: str | None = None
     api_base_url: str | None = None
@@ -76,9 +80,13 @@ class Settings(BaseSettings):
 
     @property
     def apify_source_configs(self) -> list[dict[str, Any]]:
-        parsed_sources = self._parse_apify_sources()
+        parsed_sources = self._parse_apify_source_envs() or self._parse_apify_sources()
         if parsed_sources:
-            return [self._normalize_apify_source(source) for source in parsed_sources]
+            return [
+                source
+                for source in (self._normalize_apify_source(source) for source in parsed_sources)
+                if source["enabled"]
+            ]
 
         if not self.apify_source_provider_id:
             return []
@@ -116,6 +124,7 @@ class Settings(BaseSettings):
         return {
             "id": parsed.id,
             "label": label,
+            "enabled": parsed.enabled,
             "actor_id": parsed.actor_id,
             "api_token": parsed.api_token or self.apify_api_token,
             "api_base_url": parsed.api_base_url or self.apify_api_base_url,
@@ -128,6 +137,27 @@ class Settings(BaseSettings):
             "max_charge_usd": parsed.max_charge_usd,
             "detail": parsed.detail or f"{label} listings",
         }
+
+    def _parse_apify_source_envs(self) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        for env_name, raw_value in sorted(_merged_env_values().items()):
+            if not _is_apify_source_env(env_name):
+                continue
+            source_id = _source_id_from_env_name(env_name)
+            parsed = _json_object_env(raw_value, env_name)
+            configured_id = str(
+                parsed.get("id")
+                or parsed.get("provider_id")
+                or parsed.get("source_provider_id")
+                or source_id
+            ).strip()
+            if not _same_source_id(configured_id, source_id):
+                raise ValueError(
+                    f"{env_name} config id '{configured_id}' does not match source '{source_id}'"
+                )
+            parsed["id"] = configured_id or source_id
+            sources.append(parsed)
+        return sources
 
     @field_validator("cors_origins", mode="after")
     @classmethod
@@ -146,3 +176,72 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+_APIFY_SOURCE_ENV_PREFIX = "APIFY_SOURCE_"
+_RESERVED_APIFY_SOURCE_ENV_NAMES = {
+    "APIFY_SOURCE_PROVIDER_ID",
+    "APIFY_SOURCE_LABEL",
+}
+
+
+def _is_apify_source_env(env_name: str) -> bool:
+    return (
+        env_name.startswith(_APIFY_SOURCE_ENV_PREFIX)
+        and env_name not in _RESERVED_APIFY_SOURCE_ENV_NAMES
+        and len(env_name) > len(_APIFY_SOURCE_ENV_PREFIX)
+    )
+
+
+def _source_id_from_env_name(env_name: str) -> str:
+    suffix = env_name[len(_APIFY_SOURCE_ENV_PREFIX) :]
+    normalized = re.sub(r"[^a-z0-9_]+", "_", suffix.lower()).strip("_")
+    normalized = re.sub(r"_+", "_", normalized)
+    if not normalized:
+        raise ValueError(f"{env_name} is missing a source id suffix")
+    return normalized
+
+
+def _same_source_id(configured_id: str, env_source_id: str) -> bool:
+    compact_configured = re.sub(r"[^a-z0-9]+", "", configured_id.lower())
+    compact_env = re.sub(r"[^a-z0-9]+", "", env_source_id.lower())
+    return compact_configured == compact_env
+
+
+def _json_object_env(raw_value: str, env_name: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{env_name} must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{env_name} must be a JSON object")
+    return dict(parsed)
+
+
+def _merged_env_values() -> dict[str, str]:
+    values = _dotenv_values(Path(".env"))
+    values.update(os.environ)
+    return values
+
+
+def _dotenv_values(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = value
+    return values
