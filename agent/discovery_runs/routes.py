@@ -72,6 +72,7 @@ def create_source_request(
         campaigns=_service(session, services),
         agent_runs=AgentRunService(session),
         apify_source_provider_id=services.settings.apify_source_provider_id,
+        apify_source_label=services.settings.apify_source_label,
     ).create(request)
 
 
@@ -94,7 +95,7 @@ def list_source_providers(
                 id=settings.apify_source_provider_id,
                 label=settings.apify_source_label,
                 configured=bool(settings.apify_api_token and settings.apify_actor_id),
-                detail="Configured Apify actor",
+                detail=f"{settings.apify_source_label} listings",
             )
         )
     return providers

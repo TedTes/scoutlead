@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     apify_api_token: str | None = None
     apify_api_base_url: str = "https://api.apify.com/v2"
     apify_source_provider_id: str = "apify_actor"
-    apify_source_label: str = "Apify actor"
+    apify_source_label: str = "Kijiji"
     apify_actor_id: str | None = None
     apify_actor_input_template: str | None = None
     apify_actor_result_mapping: str | None = None

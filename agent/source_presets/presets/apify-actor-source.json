@@ -1,7 +1,7 @@
 {
   "id": "apify-actor-source",
-  "name": "Configured Apify actor source",
-  "description": "Run a configured Apify actor as a discovery source. The actor, source name, input template, and output mapping are configured outside the workflow.",
+  "name": "Configured listing source",
+  "description": "Run the configured listing site. The source name, input template, and output mapping are configured outside the workflow.",
   "sources": [
     {
       "slot": "discovery",

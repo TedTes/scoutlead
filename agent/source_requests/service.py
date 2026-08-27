@@ -28,11 +28,13 @@ class SourceRequestService:
         campaigns: CampaignService,
         agent_runs: AgentRunService,
         apify_source_provider_id: str = "apify_actor",
+        apify_source_label: str = "Kijiji",
     ) -> None:
         self.products = products
         self.campaigns = campaigns
         self.agent_runs = agent_runs
         self.apify_source_provider_id = apify_source_provider_id
+        self.apify_source_label = apify_source_label
 
     def plan(self, request: SourceRequestCreate) -> SourceRequestPlan:
         self.products.get(request.product_id)
@@ -47,7 +49,7 @@ class SourceRequestService:
                 max_results=request.max_results,
                 source_preset_id="google-places-local-business",
                 explanation=(
-                    "List contacts by running a precise local-business source adapter. "
+                    "List contacts by searching Google Places for local businesses. "
                     "No outreach drafts are created for source requests."
                 ),
             )
@@ -59,7 +61,7 @@ class SourceRequestService:
                 max_results=request.max_results,
                 source_preset_id="apify-actor-source",
                 explanation=(
-                    "List contacts by running the configured Apify actor source adapter. "
+                    f"List contacts by searching {self.apify_source_label}. "
                     "No outreach drafts are created for source requests."
                 ),
             )

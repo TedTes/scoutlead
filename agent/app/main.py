@@ -8,7 +8,6 @@ from app.config import get_settings
 from app.dependencies import create_app_services
 from agent_runs.routes import router as agent_runs_router
 from campaigns.routes import router as campaigns_router
-from connections.routes import router as connections_router
 from db.session import create_database
 from discovery_runs.routes import router as discovery_runs_router
 from insights.routes import router as insights_router
@@ -76,7 +75,6 @@ def create_app() -> FastAPI:
     app.include_router(agent_runs_router)
     app.include_router(campaigns_router)
     app.include_router(discovery_runs_router)
-    app.include_router(connections_router)
     app.include_router(insights_router)
     app.include_router(leads_router)
     app.include_router(messages_router)
