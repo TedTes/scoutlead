@@ -391,10 +391,3 @@ export type DiscoveryRunSummary = {
   qualified_lead_count: number;
   drafted_message_count: number;
 };
-
-export type ConnectionStatus = {
-  name: string;
-  category: string;
-  status: "connected" | "not_configured" | "degraded";
-  detail: string;
-};

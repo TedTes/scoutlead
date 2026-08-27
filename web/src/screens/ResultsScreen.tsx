@@ -1,112 +1,452 @@
-import { Download } from "lucide-react";
-import { useState } from "react";
-import { ChipSet, StatusPill } from "../shared-ui";
+import { Copy, Download, Globe, Mail, MapPin, Phone, Play, Search, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { DiscoveryResult } from "../types/domain";
-import { isLiveResultStage, resultStageLabel, scoreTone, statusTone } from "../utils/status";
+import type { DiscoveryResult, SourceRequestSource } from "../types/domain";
+import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
-type ResultFilter = "qualified" | "review" | "disqualified";
+type ResultFilter = "all" | "qualified" | "review";
 
 export function ResultsScreen() {
-  const { selectedDiscoveryRun, selectedDiscoveryRunId, selectedProduct, snapshot } = useAppData();
-  const [expandedContactId, setExpandedContactId] = useState("");
-  const [filter, setFilter] = useState<ResultFilter>("qualified");
+  const {
+    activeSourceIds,
+    runSourceRequest,
+    selectedDiscoveryRun,
+    selectedDiscoveryRunId,
+    selectedProduct,
+    selectedProductId,
+    snapshot,
+    sourceProviders,
+  } = useAppData();
+  const { showToast } = useToast();
+  const [selectedContactId, setSelectedContactId] = useState("");
+  const [draftPrompt, setDraftPrompt] = useState("");
+  const [filter, setFilter] = useState<ResultFilter>("all");
+  const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
+  const [running, setRunning] = useState(false);
+
   const contacts = selectedDiscoveryRunId ? snapshot.results : [];
-  const qualified = contacts.filter((contact) => contact.qualification?.qualified).length;
-  const review = contacts.filter((contact) => isReviewContact(contact)).length;
-  const disqualified = contacts.filter((contact) => contact.status === "disqualified").length;
-  const visibleContacts = contacts.filter((contact) => {
-    if (filter === "qualified") return Boolean(contact.qualification?.qualified);
-    if (filter === "disqualified") return contact.status === "disqualified";
-    return isReviewContact(contact);
-  });
+  const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
+  const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
+  const runPrompt = getRunPrompt(selectedDiscoveryRun);
+  const query = draftPrompt.trim() || runPrompt;
+  const counts = getCounts(contacts);
+  const averageScore = contacts.length
+    ? Math.round(contacts.reduce((sum, contact) => sum + contactScore(contact), 0) / contacts.length)
+    : 0;
+  const ownerEmails = contacts.filter((contact) => contact.contact_email || contact.research?.contact_email).length;
+  const visibleContacts = contacts
+    .filter((contact) => {
+      if (filter === "qualified") return Boolean(contact.qualification?.qualified);
+      if (filter === "review") return isReviewContact(contact);
+      return true;
+    })
+    .sort((a, b) => {
+      return contactScore(b) - contactScore(a);
+    });
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
+  const selectedContact = contacts.find((contact) => contact.id === selectedContactId);
+
+  useEffect(() => {
+    setDraftPrompt(runPrompt);
+    setSelectedContactId("");
+    setFilter("all");
+  }, [selectedDiscoveryRunId, runPrompt]);
+
+  useEffect(() => {
+    setSelectedSources((current) => {
+      const fromRun = getRunSource(selectedDiscoveryRun);
+      const validCurrent = current.filter((sourceId) => connectedProviders.some((provider) => provider.id === sourceId));
+      const validActive = normalizeActiveSourceIds(activeSourceIds, connectedProviders);
+      if (validActive.length) return validActive;
+      if (validCurrent.length) return validCurrent;
+      if (fromRun && connectedProviders.some((provider) => provider.id === fromRun)) return [fromRun];
+      return connectedProviders[0] ? [connectedProviders[0].id] : [];
+    });
+  }, [activeSourceIds, connectedProviders, selectedDiscoveryRun]);
+
+  const updateSearch = async () => {
+    const request = draftPrompt.trim();
+    if (!selectedProductId || !request || !selectedSources.length || running) return;
+    setRunning(true);
+    try {
+      const completed = [];
+      for (const source of selectedSources) {
+        const result = await runSourceRequest({
+          product_id: selectedProductId,
+          source,
+          prompt: request,
+          max_results: selectedDiscoveryRun?.max_leads || 25,
+          run_immediately: true,
+        });
+        if (result) completed.push(result);
+      }
+      if (completed.length) {
+        showToast({
+          title: "Updated search complete",
+          message: "Created a new run from the edited search.",
+          tone: "green",
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Search failed", message, tone: "red" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (!selectedDiscoveryRun) {
+    return (
+      <section className="empty-discovery compact">
+        <div className="empty-compass" aria-hidden="true" />
+        <h1>No list selected</h1>
+        <p>Start a contact search or choose a saved run from the left side.</p>
+      </section>
+    );
+  }
 
   return (
-    <>
-      <section className="contacts-header">
-        <div>
-          <h1>Contacts</h1>
-          <p>
-            {selectedDiscoveryRun
-              ? selectedDiscoveryRun.name
-              : "Run a source request to create a saved contact list."}
-          </p>
-        </div>
-      </section>
+    <section className="results-workspace">
+      <SearchStrip
+        draftPrompt={draftPrompt}
+        onChange={setDraftPrompt}
+        onSubmit={updateSearch}
+        query={runPrompt}
+        running={running}
+        ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSources.length)}
+      />
 
-      <div className="results-toolbar">
-        <div className="tabs">
-          <button className={filter === "qualified" ? "active" : ""} onClick={() => setFilter("qualified")}>
-            Qualified · {qualified}
-          </button>
-          <button className={filter === "review" ? "active" : ""} onClick={() => setFilter("review")}>
-            Review · {review}
-          </button>
-          {disqualified ? (
-            <button className={filter === "disqualified" ? "active" : ""} onClick={() => setFilter("disqualified")}>
-              Filtered out · {disqualified}
-            </button>
-          ) : null}
+      <header className="results-hero">
+        <div>
+          <h1>{runTitle(selectedDiscoveryRun.name || "", query)}</h1>
+          <p>{query || "No search prompt was saved for this run."}</p>
         </div>
         <button
-          className="secondary"
+          className="secondary export-button"
           type="button"
           disabled={!visibleContacts.length}
-          onClick={() => exportContactsCsv(visibleContacts, exportName)}
+          onClick={() => exportContactsCsv(visibleContacts.length ? visibleContacts : contacts, exportName)}
         >
-          <Download size={14} />
+          <Download size={15} />
           Export CSV
         </button>
+      </header>
+
+      <dl className="results-stats">
+        <Stat label="Matched" value={String(contacts.length)} />
+        <Stat label="Avg score" value={String(averageScore)} />
+        <Stat label="Owner emails" value={String(ownerEmails)} />
+        <Stat label="Qualified" value={String(counts.qualified)} />
+      </dl>
+
+      <div className="results-filterbar">
+        <div>
+          <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
+            All
+          </button>
+          <button className={filter === "qualified" ? "active" : ""} type="button" onClick={() => setFilter("qualified")}>
+            Qualified
+          </button>
+          <button className={filter === "review" ? "active" : ""} type="button" onClick={() => setFilter("review")}>
+            Review
+          </button>
+        </div>
       </div>
 
-      <div className="lead-list-shell">
-        {visibleContacts.length === 0 ? (
-          <div className="lead-list-empty">
-            <p className="empty-copy">{emptyStateCopy(filter, contacts.length, disqualified)}</p>
-            {filter !== "disqualified" && disqualified && contacts.length === disqualified ? (
-              <button className="secondary" type="button" onClick={() => setFilter("disqualified")}>
-                View filtered out contacts
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <div className="lead-list">
-            <div className="lead-list-head" aria-hidden="true">
-              <span>Company</span>
-              <span>Contact</span>
-              <span>Signals</span>
-              <span>Score</span>
-              <span>Status</span>
-            </div>
-            {visibleContacts.map((contact) => (
-              <ResultRow
-                contact={contact}
-                expanded={expandedContactId === contact.id}
-                onToggle={() => setExpandedContactId(expandedContactId === contact.id ? "" : contact.id)}
-                key={contact.id}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </>
+      {visibleContacts.length ? (
+        <ul className="contact-card-list">
+          {visibleContacts.map((contact) => (
+            <ContactCard
+              contact={contact}
+              key={contact.id}
+              onOpen={() => setSelectedContactId(contact.id)}
+            />
+          ))}
+        </ul>
+      ) : (
+        <section className="result-empty-card">
+          <strong>No contacts match this view.</strong>
+          <p>
+            {contacts.length
+              ? "Change the filter to inspect the contacts in this run."
+              : "This run has no contacts yet."}
+          </p>
+        </section>
+      )}
+
+      <ContactDrawer contact={selectedContact} onClose={() => setSelectedContactId("")} />
+    </section>
   );
 }
 
-function emptyStateCopy(filter: ResultFilter, totalContacts: number, disqualifiedCount: number) {
-  if (totalContacts === 0) {
-    return "No contacts in this list yet. Use Find to create or rerun a source request.";
-  }
-  if (filter === "qualified") {
-    return disqualifiedCount === totalContacts
-      ? `All ${totalContacts} contact${totalContacts === 1 ? "" : "s"} found so far were filtered out.`
-      : "No qualified contacts yet. Check Review for contacts still being evaluated.";
-  }
-  if (filter === "review") {
-    return "Nothing waiting for review right now.";
-  }
-  return "No contacts have been filtered out.";
+function SearchStrip({
+  draftPrompt,
+  onChange,
+  onSubmit,
+  query,
+  ready,
+  running,
+}: {
+  draftPrompt: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  query: string;
+  ready: boolean;
+  running: boolean;
+}) {
+  return (
+    <form
+      className="searchbar"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <Search size={15} />
+      <input
+        aria-label="Search prompt"
+        placeholder={query || "Describe the businesses to find"}
+        value={draftPrompt}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <button className="runbtn" disabled={!ready || running} type="submit">
+        <Play size={13} />
+        {running ? "Running" : "Run"}
+      </button>
+    </form>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: () => void }) {
+  const score = contactScore(contact);
+
+  return (
+    <li>
+      <article
+        className="contact-card"
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+      >
+        <div className="contact-main">
+          <span className={`score-ring ${scoreClass(score)}`}>
+            <strong>{score}</strong>
+          </span>
+          <span className="contact-identity">
+            <strong>{contact.company_name}</strong>
+            <small>
+              {contact.research?.business_type || contact.description || "Business"}
+              {contact.geography || contact.research?.geography ? (
+                <>
+                  <MapPin size={12} />
+                  {contact.geography || contact.research?.geography}
+                </>
+              ) : null}
+            </small>
+          </span>
+        </div>
+
+      </article>
+    </li>
+  );
+}
+
+function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefined; onClose: () => void }) {
+  const { showToast } = useToast();
+  const open = Boolean(contact);
+  const score = contact ? contactScore(contact) : 0;
+  const signals = contact ? contactSignals(contact) : [];
+  const website = contact?.website_url || contact?.research?.website_url || "";
+  const email = contact?.contact_email || contact?.research?.contact_email || "";
+  const phone = contact ? getPhone(contact) : "";
+  const address = contact ? getAddress(contact) : "";
+  const rating = contact ? getRating(contact) : "";
+  const reviewCount = contact ? getReviewCount(contact) : "";
+  const confidence = contact?.research?.confidence ? `${contact.research.confidence}%` : "—";
+  const evidenceNotes = contact
+    ? [
+        ...(contact.research?.pain_indicators || []),
+        ...(contact.research?.disqualifiers || []),
+        ...(contact.qualification?.criteria || []).flatMap((criterion) => criterion.evidence || []),
+      ].filter(Boolean)
+    : [];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose, open]);
+
+  const copy = async (value: string, label: string) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast({ title: `${label} copied`, tone: "green" });
+    } catch {
+      showToast({ title: "Copy failed", message: `Could not copy ${label.toLowerCase()}.`, tone: "red" });
+    }
+  };
+
+  return (
+    <div className={`contact-drawer-overlay${open ? " open" : ""}`} aria-hidden={!open}>
+      <button className="contact-drawer-backdrop" type="button" aria-label="Close details" onClick={onClose} />
+      <aside className="contact-drawer-panel" aria-label="Contact details">
+        {contact ? (
+          <>
+            <header className="contact-drawer-header">
+              <div className="drawer-title-row">
+                <span className={`score-ring large ${scoreClass(score)}`}>
+                  <strong>{score}</strong>
+                </span>
+                <div>
+                  <h2>{contact.company_name}</h2>
+                  <p>
+                    {contact.research?.business_type || contact.description || "Business"}
+                    {contact.geography || contact.research?.geography ? ` · ${contact.geography || contact.research?.geography}` : ""}
+                  </p>
+                </div>
+              </div>
+              <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">
+                <X size={18} />
+              </button>
+            </header>
+
+            <div className="drawer-body">
+              <p className="drawer-summary">{contact.research?.summary || contact.description || "No research captured yet."}</p>
+
+              <div className="drawer-chip-row">
+                {signals.slice(0, 6).map((signal) => (
+                  <span key={signal}>{signal}</span>
+                ))}
+              </div>
+
+              <dl className="drawer-detail-list">
+                <DrawerRow icon={<MapPin size={16} />} label="Address">
+                  {address || contact.geography || contact.research?.geography || "No address found"}
+                </DrawerRow>
+                <DrawerRow icon={<Globe size={16} />} label="Website">
+                  {website ? (
+                    <a href={website} target="_blank" rel="noreferrer">
+                      {displayUrl(website)}
+                    </a>
+                  ) : (
+                    <span>No website found</span>
+                  )}
+                </DrawerRow>
+                <DrawerRow icon={<Mail size={16} />} label="Email">
+                  {email ? (
+                    <button type="button" onClick={() => copy(email, "Email")}>
+                      {email}
+                      <Copy size={13} />
+                    </button>
+                  ) : (
+                    <span>No email found</span>
+                  )}
+                </DrawerRow>
+                <DrawerRow icon={<Phone size={16} />} label="Phone">
+                  {phone || "No phone found"}
+                </DrawerRow>
+              </dl>
+
+              <div className="drawer-mini-grid">
+                <Mini label="Rating" value={rating || "—"} />
+                <Mini label="Reviews" value={reviewCount || "—"} />
+                <Mini label="Confidence" value={confidence} />
+              </div>
+
+              <section className="drawer-section">
+                <h3>{contact.status === "disqualified" ? "Disqualification reason" : "Qualification"}</h3>
+                <p>{disqualificationReason(contact) || contact.qualification?.rationale || "No qualification summary yet."}</p>
+              </section>
+
+              {evidenceNotes.length ? (
+                <section className="drawer-section">
+                  <h3>Evidence notes</h3>
+                  <ul className="drawer-notes">
+                    {evidenceNotes.slice(0, 5).map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+            </div>
+
+            <footer className="drawer-footer">
+              <button className="secondary" type="button" onClick={onClose}>
+                Close
+              </button>
+            </footer>
+          </>
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
+function DrawerRow({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <div className="drawer-row">
+      <dt>
+        <span>{icon}</span>
+        {label}
+      </dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+function Mini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="drawer-mini">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function getRunPrompt(run: { source_input?: string | null; source_inputs?: Record<string, unknown> } | undefined) {
+  const prompt = run?.source_inputs?.source_request_prompt;
+  if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
+  if (run?.source_input?.trim()) return run.source_input.trim();
+  return "";
+}
+
+function getRunSource(run: { source_inputs?: Record<string, unknown> } | undefined) {
+  const source = run?.source_inputs?.source_request_source;
+  return typeof source === "string" && source.trim() ? source.trim() : "";
+}
+
+function getCounts(contacts: DiscoveryResult[]) {
+  return {
+    all: contacts.length,
+    qualified: contacts.filter((contact) => contact.qualification?.qualified).length,
+    review: contacts.filter((contact) => isReviewContact(contact)).length,
+    filtered: contacts.filter((contact) => contact.status === "disqualified").length,
+  };
 }
 
 function isReviewContact(contact: DiscoveryResult) {
@@ -114,69 +454,30 @@ function isReviewContact(contact: DiscoveryResult) {
   return ["discovered", "researching", "researched"].includes(contact.status);
 }
 
-function ResultRow({ contact, expanded, onToggle }: { contact: DiscoveryResult; expanded: boolean; onToggle: () => void }) {
-  const score = contact.qualification?.score ?? contact.research?.confidence;
-  const url = contact.website_url || contact.research?.website_url || "";
-  const preResearch = contact.status === "discovered" || contact.status === "researching";
-  const phone = getPhone(contact);
-  const owner = contact.research?.contact_name || contact.contact_email || contact.research?.contact_email || phone || "";
-  const ownerDetail = preResearch
-    ? "researching..."
-    : contact.research?.contact_email && contact.research.contact_email !== owner
-      ? contact.research.contact_email
-      : "";
+function contactStatusLabel(contact: DiscoveryResult) {
+  if (contact.qualification?.qualified) return "Qualified";
+  if (contact.status === "disqualified") return "Disqualified";
+  return "Review";
+}
+
+function contactScore(contact: DiscoveryResult) {
+  return Math.max(0, Math.min(100, Math.round(contact.qualification?.score ?? contact.research?.confidence ?? 0)));
+}
+
+function scoreClass(score: number) {
+  if (score >= 90) return "score-great";
+  if (score >= 80) return "score-good";
+  if (score >= 70) return "score-warn";
+  return "score-low";
+}
+
+function contactSignals(contact: DiscoveryResult) {
   const signals = [
     ...(contact.research?.signals || []),
-    ...(contact.research?.pain_indicators || []).map((signal) => `pain: ${signal}`),
-  ].slice(0, 3);
-
-  return (
-    <article
-      className={`lead-row-card${expanded ? " expanded" : ""}`}
-      onClick={onToggle}
-      role="button"
-      aria-expanded={expanded}
-    >
-      <div className="lead-row-main">
-        <div className="lead-company-cell">
-          <strong>{contact.company_name}</strong>
-          <span>{contact.geography || contact.research?.geography || "-"}</span>
-        </div>
-        <div className="lead-contact-cell">
-          <strong>{owner || "-"}</strong>
-          <span className={preResearch ? "muted" : ""}>{ownerDetail || "-"}</span>
-        </div>
-        <div className="lead-signal-cell">
-          {signals.length ? <ChipSet values={signals} small /> : <span>{contact.description || "No signal captured"}</span>}
-        </div>
-        <div className="lead-score-cell">
-          {score === undefined ? <span className="muted">-</span> : <StatusPill tone={scoreTone(score)}>{score}</StatusPill>}
-        </div>
-        <div className="lead-stage-cell">
-          <StatusPill tone={statusTone(contact.status)} dot={isLiveResultStage(contact.status)}>
-            {resultStageLabel(contact.status)}
-          </StatusPill>
-        </div>
-      </div>
-      {expanded ? (
-        <div className="lead-dossier">
-          <section>
-            <strong>Research</strong>
-            {url ? <p className="dossier-website">{displayUrl(url)}</p> : null}
-            <p>{contact.research?.summary || "No research captured yet."}</p>
-          </section>
-          <section>
-            <strong>{contact.status === "disqualified" ? "Why it was filtered out" : "Why it matched"}</strong>
-            <p>{disqualificationReason(contact) || contact.qualification?.rationale || "No qualification result yet."}</p>
-          </section>
-          <section>
-            <strong>Source evidence</strong>
-            <p>{sourceEvidence(contact) || contact.qualification?.recommended_next_step || "Review manually."}</p>
-          </section>
-        </div>
-      ) : null}
-    </article>
-  );
+    ...(contact.research?.pain_indicators || []).map((signal) => `Pain: ${signal}`),
+    ...(contact.qualification?.criteria || []).flatMap((criterion) => criterion.evidence || []),
+  ];
+  return signals.length ? [...new Set(signals)].slice(0, 5) : [contact.status.replace(/_/g, " ")];
 }
 
 function disqualificationReason(contact: DiscoveryResult) {
@@ -185,7 +486,41 @@ function disqualificationReason(contact: DiscoveryResult) {
   return [contact.qualification?.rationale, flags].filter(Boolean).join(" ");
 }
 
+function runTitle(runName: string, query: string) {
+  const cleaned = runName.replace(/\s+discovery\s+\d{4}-.*/i, "").trim();
+  if (cleaned && !/^contacts$/i.test(cleaned) && !/\bdiscovery\b/i.test(runName)) return titleCase(cleaned);
+  const intentTitle = titleFromQuery(query);
+  if (intentTitle) return intentTitle;
+  const beforeWith = query.split(/\s+with\s+/i)[0]?.trim();
+  return titleCase(beforeWith || "Contact list");
+}
+
+function titleFromQuery(query: string) {
+  const clean = query
+    .replace(/^(list|find|get|show)\s+/i, "")
+    .replace(/^(independent|local|small)\s+/i, "")
+    .trim();
+  const match = clean.match(/^(.+?)\s+(?:in|near|around)\s+(.+?)(?:\s+(?:with|that|who|which|where)\b|$)/i);
+  if (!match) return "";
+  const subject = match[1]
+    .replace(/\bcontacts?\b/gi, "")
+    .replace(/\bcompanies\b/gi, "businesses")
+    .trim();
+  const location = match[2].replace(/[,.].*$/, "").trim();
+  if (!subject || !location) return "";
+  return `${titleCase(subject)} · ${titleCase(location)}`;
+}
+
+function titleCase(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+}
+
 function displayUrl(value: string) {
+  if (!value) return "";
   try {
     const parsed = new URL(value);
     return parsed.hostname.replace(/^www\./, "");
@@ -194,52 +529,69 @@ function displayUrl(value: string) {
   }
 }
 
+function getAddress(contact: DiscoveryResult) {
+  return getRawString(contact, ["formattedAddress", "formatted_address", "address", "streetAddress", "fullAddress"]);
+}
+
+function getRating(contact: DiscoveryResult) {
+  const value = getRawNumber(contact, ["rating", "averageRating", "stars"]);
+  return value ? value.toFixed(1) : "";
+}
+
+function getReviewCount(contact: DiscoveryResult) {
+  const value = getRawNumber(contact, ["userRatingCount", "user_ratings_total", "reviewCount", "reviewsCount", "reviews"]);
+  return value ? String(value) : "";
+}
+
 function getPhone(contact: DiscoveryResult) {
-  for (const source of contact.raw_sources || []) {
-    const raw = source.raw;
-    if (isRecord(raw)) {
-      const directPhone = raw.nationalPhoneNumber || raw.internationalPhoneNumber || raw.phone;
-      if (typeof directPhone === "string" && directPhone.trim()) return directPhone;
-      const nestedRaw = raw.raw;
-      if (isRecord(nestedRaw)) {
-        const nestedPhone = nestedRaw.nationalPhoneNumber || nestedRaw.internationalPhoneNumber || nestedRaw.phone;
-        if (typeof nestedPhone === "string" && nestedPhone.trim()) return nestedPhone;
-      }
+  return getRawString(contact, ["nationalPhoneNumber", "internationalPhoneNumber", "phone", "phoneNumber", "telephone"]);
+}
+
+function getRawString(contact: DiscoveryResult, keys: string[]) {
+  for (const raw of getRawObjects(contact)) {
+    for (const key of keys) {
+      const value = raw[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
     }
   }
   return "";
 }
 
-function sourceEvidence(contact: DiscoveryResult) {
-  const source = contact.raw_sources?.[0];
-  if (!source) return "";
-  const parts = [
-    typeof source.source === "string" ? source.source : contact.source,
-    typeof source.query === "string" ? `query: ${source.query}` : "",
-    getPhone(contact) ? `phone: ${getPhone(contact)}` : "",
-  ].filter(Boolean);
-  return parts.join(" | ");
+function getRawNumber(contact: DiscoveryResult, keys: string[]) {
+  for (const raw of getRawObjects(contact)) {
+    for (const key of keys) {
+      const value = raw[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+    }
+  }
+  return 0;
+}
+
+function getRawObjects(contact: DiscoveryResult) {
+  const values: Record<string, unknown>[] = [];
+  for (const source of contact.raw_sources || []) {
+    values.push(source);
+    if (isRecord(source.raw)) {
+      values.push(source.raw);
+      if (isRecord(source.raw.raw)) values.push(source.raw.raw);
+    }
+  }
+  return values;
 }
 
 function exportContactsCsv(contacts: DiscoveryResult[], runName: string) {
-  const rows = contacts.map((contact) => {
-    const signals = [
-      ...(contact.research?.signals || []),
-      ...(contact.research?.pain_indicators || []).map((signal) => `pain: ${signal}`),
-    ];
-    return {
-      company: contact.company_name,
-      contact: contact.research?.contact_name || "",
-      email: contact.contact_email || contact.research?.contact_email || "",
-      phone: getPhone(contact),
-      website: contact.website_url || contact.research?.website_url || "",
-      geography: contact.geography || contact.research?.geography || "",
-      score: String(contact.qualification?.score ?? contact.research?.confidence ?? ""),
-      status: resultStageLabel(contact.status),
-      signals: signals.join("; "),
-      rationale: contact.qualification?.rationale || "",
-    };
-  });
+  const rows = contacts.map((contact) => ({
+    company: contact.company_name,
+    email: contact.contact_email || contact.research?.contact_email || "",
+    phone: getPhone(contact),
+    website: contact.website_url || contact.research?.website_url || "",
+    geography: contact.geography || contact.research?.geography || "",
+    score: String(contactScore(contact)),
+    status: contactStatusLabel(contact),
+    signals: contactSignals(contact).join("; "),
+    rationale: contact.qualification?.rationale || "",
+  }));
   const headers = Object.keys(rows[0] || { company: "" });
   const csv = [
     headers.join(","),
@@ -262,7 +614,7 @@ function csvCell(value: string | number | undefined) {
 }
 
 function slugify(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "scoutlead";
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "contacts";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

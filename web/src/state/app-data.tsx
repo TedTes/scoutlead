@@ -8,7 +8,6 @@ import type {
   DiscoveryResult,
   DiscoverySnapshot,
   DiscoveryTrace,
-  ConnectionStatus,
   Message,
   Metrics,
   Product,
@@ -16,7 +15,9 @@ import type {
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
+  SourceRequestSource,
 } from "../types/domain";
+import { normalizeActiveSourceIds } from "../utils/source-providers";
 
 type AppDataContextValue = {
   apiHealthy: boolean;
@@ -31,10 +32,11 @@ type AppDataContextValue = {
   productDiscoveryRuns: DiscoveryRun[];
   productContacts: DiscoveryResult[];
   snapshot: DiscoverySnapshot;
-  connections: ConnectionStatus[];
   sourceProviders: SourceProvider[];
+  activeSourceIds: SourceRequestSource[];
   setSelectedProductId: (productId: string) => void;
   setSelectedDiscoveryRunId: (runId: string) => void;
+  setActiveSourceIds: (sourceIds: SourceRequestSource[]) => void;
   refreshAll: () => Promise<void>;
   refreshSnapshot: (runId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<Product | null>;
@@ -67,6 +69,17 @@ const emptySnapshot: DiscoverySnapshot = {
   messages: [],
   agentRuns: [],
 };
+
+const activeSourcesStorageKey = "scoutlead.activeSourceIds";
+
+function readStoredActiveSourceIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(activeSourcesStorageKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((value): value is SourceRequestSource => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 async function getTraceWithFallback(api: ApiClient, runId: string): Promise<DiscoveryTrace | undefined> {
   try {
@@ -108,8 +121,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
-  const [connections, setConnections] = useState<ConnectionStatus[]>([]);
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
+  const [activeSourceIds, setActiveSourceIdsState] = useState<SourceRequestSource[]>(readStoredActiveSourceIds);
 
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const api = useMemo(() => new ApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
@@ -137,13 +150,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setSelectedDiscoveryRunIdState(runId);
   }, []);
 
-  const refreshConnections = useCallback(async () => {
-    try {
-      setConnections(await api.getConnectionsStatus());
-    } catch {
-      setConnections([]);
-    }
-  }, [api]);
+  const persistActiveSourceIds = useCallback(
+    (sourceIds: SourceRequestSource[]) => {
+      const normalized = normalizeActiveSourceIds(sourceIds, sourceProviders);
+      localStorage.setItem(activeSourcesStorageKey, JSON.stringify(normalized));
+      setActiveSourceIdsState(normalized);
+    },
+    [sourceProviders],
+  );
 
   const refreshProductContacts = useCallback(
     async (productId: string, runs: DiscoveryRun[]) => {
@@ -227,6 +241,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setProducts(nextProducts);
       setDiscoveryRuns(nextRuns);
       setSourceProviders(nextSourceProviders);
+      const nextActiveSourceIds = normalizeActiveSourceIds(readStoredActiveSourceIds(), nextSourceProviders);
+      localStorage.setItem(activeSourcesStorageKey, JSON.stringify(nextActiveSourceIds));
+      setActiveSourceIdsState(nextActiveSourceIds);
       const storedProductId = localStorage.getItem("selectedProductId") || "";
       const nextProductId =
         (storedProductId && nextProducts.some((product) => product.id === storedProductId)
@@ -242,7 +259,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setSelectedDiscoveryRunIdState(nextRunId);
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
-      await refreshConnections();
       await refreshProductContacts(nextProductId, nextRuns);
       await refreshSnapshot(nextRunId);
     } catch (err) {
@@ -250,7 +266,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [api, refreshConnections, refreshProductContacts, refreshSnapshot]);
+  }, [api, refreshProductContacts, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -290,10 +306,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       productDiscoveryRuns,
       productContacts,
       snapshot,
-      connections,
+      activeSourceIds,
       sourceProviders,
       setSelectedProductId: persistSelectedProductId,
       setSelectedDiscoveryRunId: persistSelectedDiscoveryRunId,
+      setActiveSourceIds: persistActiveSourceIds,
       refreshAll,
       refreshSnapshot,
       createProduct: async (input) => {
@@ -410,12 +427,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       api,
       apiHealthy,
       discoveryRuns,
-      connections,
       error,
       loading,
       mutate,
       persistSelectedDiscoveryRunId,
       persistSelectedProductId,
+      persistActiveSourceIds,
       productDiscoveryRuns,
       productContacts,
       products,
@@ -426,6 +443,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       selectedProduct,
       selectedProductIdState,
       sourceProviders,
+      activeSourceIds,
       snapshot,
     ],
   );

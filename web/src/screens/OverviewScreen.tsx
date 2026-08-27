@@ -1,51 +1,64 @@
-import { Play } from "lucide-react";
+import { Check, Play, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
 import type { SourceProvider, SourceRequestSource } from "../types/domain";
+import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
-const providerCatalog: SourceProvider[] = [
-  { id: "google_places", label: "Google Places", configured: false, detail: "Local businesses" },
-  { id: "apify_actor", label: "Kijiji / marketplace", configured: false, detail: "Classifieds and source-specific actors" },
-  { id: "directories", label: "Directories", configured: false, detail: "Trade associations and business directories" },
-  { id: "website_list", label: "Website list", configured: false, detail: "Known websites or imported lists" },
+const starterPrompts = [
+  {
+    label: "Residential painters in Toronto",
+    hint: "Local shops with websites and quote forms",
+    query: "independent residential painters in Toronto with a website, quote-request form, strong reviews, and owner contact details",
+  },
+  {
+    label: "Small HVAC in Vancouver",
+    hint: "Service businesses with direct contact paths",
+    query: "small HVAC companies in Vancouver with a website, strong reviews, and reachable owner contact details",
+  },
+  {
+    label: "Auto detailers in Calgary",
+    hint: "Owner-led shops with public booking signals",
+    query: "independent mobile auto detailers in Calgary with strong reviews, a website, and owner contact details",
+  },
 ];
 
 export function OverviewScreen() {
   const {
+    runSourceRequest,
+    selectedDiscoveryRun,
+    selectedDiscoveryRunId,
     selectedProduct,
     selectedProductId,
-    runSourceRequest,
     sourceProviders,
+    activeSourceIds,
+    setActiveSourceIds,
   } = useAppData();
   const { showToast } = useToast();
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>(["google_places"]);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
-  const visibleProviders = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
-  const selectedProviderCount = selectedSources.length;
-  const selectedProviderLabels = visibleProviders
+  const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
+  const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
+  const selectedProviderLabels = connectedProviders
     .filter((provider) => selectedSources.includes(provider.id))
     .map((provider) => provider.label);
-  const selectedUnconfiguredProvider = visibleProviders.find(
-    (provider) => selectedSources.includes(provider.id) && !provider.configured,
-  );
+  const promptValue = prompt.trim();
+  const currentQuery = promptValue || getRunPrompt(selectedDiscoveryRun) || "";
+  const promptTags = parsePromptTags(currentQuery);
+  const ready = Boolean(selectedProductId && promptValue.length >= 4 && selectedSources.length);
 
   useEffect(() => {
-    if (!visibleProviders.length) return;
-    setSelectedSources((current) => {
-      const validSelected = current.filter((sourceId) =>
-        visibleProviders.some((provider) => provider.id === sourceId && provider.configured),
-      );
-      if (validSelected.length) return validSelected;
-      const firstConfigured = visibleProviders.find((provider) => provider.configured);
-      return firstConfigured ? [firstConfigured.id] : [];
-    });
-  }, [visibleProviders]);
+    setSelectedSources(normalizeActiveSourceIds(activeSourceIds, connectedProviders));
+  }, [activeSourceIds, connectedProviders]);
 
-  const submitSourceRequest = async () => {
-    const request = prompt.trim();
-    if (!selectedProductId || !request || running || !selectedProviderCount) return;
+  useEffect(() => {
+    setPrompt(selectedDiscoveryRunId ? getRunPrompt(selectedDiscoveryRun) : "");
+  }, [selectedDiscoveryRunId, selectedDiscoveryRun]);
+
+  const submitSourceRequest = async (nextPrompt = prompt) => {
+    const request = nextPrompt.trim();
+    if (!selectedProductId || !request || running || !selectedSources.length) return;
     setRunning(true);
     try {
       const results = [];
@@ -61,97 +74,110 @@ export function OverviewScreen() {
       }
       if (results.length) {
         showToast({
-          title: "List created",
-          message: `Added a saved list from ${selectedProviderLabels.join(" + ")}`,
+          title: "Search complete",
+          message: `Searched ${selectedProviderLabels.join(" + ") || "selected sources"}`,
           tone: "green",
         });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      showToast({ title: "Source request failed", message, tone: "red" });
+      showToast({ title: "Search failed", message, tone: "red" });
     } finally {
       setRunning(false);
     }
   };
 
+  const runStarter = (query: string) => {
+    setPrompt(query);
+    void submitSourceRequest(query);
+  };
+
   return (
-    <>
-      <section className="finder-stage">
-        <header className="finder-hero">
-          <h1>Who are {selectedProduct ? `${selectedProduct.product_name}'s` : "this product's"} customers?</h1>
-          <p>Tell ScoutLead what kind of businesses to look for. Pick the sources that should contribute.</p>
-        </header>
-        <form
-          className="source-request-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitSourceRequest();
-          }}
-        >
-          <div className="source-prompt-box">
-            <label className="prompt-field">
-              <span>Find contacts for...</span>
-              <textarea
-                placeholder="Example: independent residential painters in Toronto with a website, quote request form, strong reviews, and owner contact details"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-              />
-            </label>
+    <section className="discovery-workspace">
+      <header className="discovery-hero">
+        <span className="discovery-hero-icon" aria-hidden="true">
+          <Search size={20} />
+        </span>
+        <h1>Who should we find?</h1>
+        <p>
+          Describe the shop in plain language. ScoutLead scores each result against this product, source signals, and reachable contact details.
+        </p>
+      </header>
 
-            <div className="source-picker">
-              <div>
-                <span>Sources</span>
-                <small>Use more than one source when coverage matters.</small>
-              </div>
-              <div className="source-checkbox-list">
-                {visibleProviders.map((provider) => (
-                  <SourceCheckbox
-                    provider={provider}
-                    key={provider.id}
-                    checked={selectedSources.includes(provider.id)}
-                    onToggle={() => {
-                      if (!provider.configured) return;
-                      setSelectedSources((current) =>
-                        current.includes(provider.id)
-                          ? current.filter((sourceId) => sourceId !== provider.id)
-                          : [...current, provider.id],
-                      );
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
+      <form
+        className="composer-panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitSourceRequest(prompt);
+        }}
+      >
+        <label className="composer-query">
+          <span>Search</span>
+          <textarea
+            aria-label={`Find contacts for ${selectedProduct?.product_name || "selected product"}`}
+            placeholder="Independent residential painters in Toronto with a website, quote form, and owner contact"
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+        </label>
 
-            <div className="source-request-actions">
-              <span>
-                {selectedUnconfiguredProvider
-                  ? `${selectedUnconfiguredProvider.label} needs setup before it can run.`
-                  : selectedProviderCount
-                    ? `${selectedProviderCount} source${selectedProviderCount === 1 ? "" : "s"} selected`
-                    : "Select at least one source"}
-              </span>
-              <button
-                disabled={
-                  !selectedProductId ||
-                  !prompt.trim() ||
-                  running ||
-                  !selectedProviderCount ||
-                  Boolean(selectedUnconfiguredProvider)
-                }
-                type="submit"
-              >
-                <Play size={14} />
-                {running ? "Finding..." : `Find contacts`}
-              </button>
-            </div>
+        {promptTags.length ? (
+          <div className="composer-tags" aria-label="Search signals">
+            {promptTags.map((tag) => (
+              <span key={tag}>{tag}</span>
+            ))}
           </div>
-        </form>
-      </section>
-    </>
+        ) : null}
+
+        <div className="composer-footer">
+          <div className="source-pill-row">
+            <span className="source-label">Sources</span>
+            {connectedProviders.map((provider) => (
+              <SourceOption
+                provider={provider}
+                key={provider.id}
+                checked={selectedSources.includes(provider.id)}
+                onToggle={() => {
+                  setSelectedSources((current) => {
+                    const next = current.includes(provider.id)
+                      ? current.filter((sourceId) => sourceId !== provider.id)
+                      : [...current, provider.id];
+                    setActiveSourceIds(next);
+                    return next;
+                  });
+                }}
+              />
+            ))}
+          </div>
+          <div className="composer-submit-group">
+            {!running && promptValue.length > 0 && promptValue.length < 4 ? (
+              <span className="composer-hint">Type at least 4 characters</span>
+            ) : null}
+            <button className="composer-submit" disabled={!ready || running} type="submit">
+              <Play size={14} />
+              {running ? "Finding..." : "Find contacts"}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div className="starter-section">
+        <span className="starter-section-label">Or start from an example</span>
+        <div className="starter-grid">
+          {starterPrompts.map((starter) => (
+            <button key={starter.label} type="button" onClick={() => runStarter(starter.query)}>
+              <strong>{starter.label}</strong>
+              <span>{starter.hint}</span>
+              <em>Run this search</em>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
-function SourceCheckbox({
+function SourceOption({
   provider,
   checked,
   onToggle,
@@ -161,32 +187,32 @@ function SourceCheckbox({
   onToggle: () => void;
 }) {
   return (
-    <label className={!provider.configured ? "source-checkbox disabled" : checked ? "source-checkbox selected" : "source-checkbox"}>
-      <input checked={checked} disabled={!provider.configured} onChange={onToggle} type="checkbox" />
-      <span>
-        <strong>{provider.label}</strong>
-        {provider.detail ? <small>{provider.detail}</small> : null}
-      </span>
-      {!provider.configured ? <em>Setup needed</em> : null}
-    </label>
+    <button className={checked ? "source-pill selected" : "source-pill"} type="button" onClick={onToggle}>
+      {checked ? <Check size={13} /> : null}
+      {provider.label}
+    </button>
   );
 }
 
-function mergeSourceProviders(providers: SourceProvider[]) {
-  const byId = new Map<string, SourceProvider>();
-  for (const provider of providerCatalog) byId.set(provider.id, provider);
-  for (const provider of providers) {
-    const catalogProvider = byId.get(provider.id);
-    const label =
-      provider.id === "apify_actor" && provider.label.toLowerCase() === "apify actor" && catalogProvider
-        ? catalogProvider.label
-        : provider.label;
-    byId.set(provider.id, {
-      ...catalogProvider,
-      ...provider,
-      label,
-      detail: provider.detail || catalogProvider?.detail || null,
-    });
-  }
-  return Array.from(byId.values());
+function getRunPrompt(run: { source_input?: string | null; source_inputs?: Record<string, unknown> } | undefined) {
+  const prompt = run?.source_inputs?.source_request_prompt;
+  if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
+  if (run?.source_input?.trim()) return run.source_input.trim();
+  return "";
+}
+
+function parsePromptTags(prompt: string) {
+  const lower = prompt.toLowerCase();
+  const tags: string[] = [];
+  if (lower.includes("paint")) tags.push("Painting");
+  if (lower.includes("hvac")) tags.push("HVAC");
+  if (lower.includes("auto")) tags.push("Auto");
+  if (lower.includes("toronto")) tags.push("Toronto");
+  if (lower.includes("vancouver")) tags.push("Vancouver");
+  if (lower.includes("calgary")) tags.push("Calgary");
+  if (lower.includes("website")) tags.push("Website");
+  if (lower.includes("quote")) tags.push("Quote form");
+  if (lower.includes("review")) tags.push("Strong reviews");
+  if (lower.includes("owner")) tags.push("Owner contact");
+  return tags.slice(0, 8);
 }

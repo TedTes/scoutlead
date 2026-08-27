@@ -1,4 +1,3 @@
-import { ConnectionsScreen } from "../screens/ConnectionsScreen";
 import { OverviewScreen } from "../screens/OverviewScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
@@ -6,10 +5,13 @@ import type { Screen } from "../types/navigation";
 
 export function renderScreen(
   screen: Screen,
-  setActiveScreen: (screen: Screen) => void,
+  setActiveScreen: (screen: Screen) => void = () => undefined,
   productEditor: {
     isCreatingProduct: boolean;
     onCreatingProductChange: (isCreating: boolean) => void;
+  } = {
+    isCreatingProduct: false,
+    onCreatingProductChange: () => undefined,
   },
 ) {
   switch (screen) {
@@ -17,8 +19,6 @@ export function renderScreen(
       return <ProductScreen {...productEditor} onNavigate={setActiveScreen} />;
     case "results":
       return <ResultsScreen />;
-    case "connections":
-      return <ConnectionsScreen />;
     default:
       return <OverviewScreen />;
   }

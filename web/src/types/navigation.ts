@@ -1,7 +1,6 @@
 export type Screen =
   | "overview"
   | "product"
-  | "results"
-  | "connections";
+  | "results";
 
 export type Tone = "blue" | "green" | "amber" | "red" | "gray";

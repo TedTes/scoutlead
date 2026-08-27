@@ -9,7 +9,6 @@ import type {
   DiscoveryRunSummary,
   DiscoveryRunSource,
   DiscoveryTrace,
-  ConnectionStatus,
   DiscoveryCandidate,
   DiscoveryResult,
   Message,
@@ -168,10 +167,6 @@ export class ApiClient {
 
   generateDiscoveryInsight(runId: string) {
     return this.request<DiscoveryInsight>(`/discovery-runs/${runId}/insights`, { method: "POST" });
-  }
-
-  getConnectionsStatus() {
-    return this.request<ConnectionStatus[]>("/connections/status");
   }
 
   private async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
