@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClient } from "../api/client";
 import { getApiBaseUrl } from "../config/env";
 import type {
@@ -119,6 +119,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [selectedDiscoveryRunIdState, setSelectedDiscoveryRunIdState] = useState(
     localStorage.getItem("selectedDiscoveryRunId") || "",
   );
+  const selectedDiscoveryRunIdRef = useRef(selectedDiscoveryRunIdState);
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
@@ -129,8 +130,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const selectedProduct = products.find((product) => product.id === selectedProductIdState);
   const productDiscoveryRuns = discoveryRuns.filter((run) => run.product_id === selectedProductIdState);
-  const selectedDiscoveryRun =
-    snapshot.run ?? discoveryRuns.find((run) => run.id === selectedDiscoveryRunIdState);
+  const selectedDiscoveryRun = selectedDiscoveryRunIdState
+    ? snapshot.run?.id === selectedDiscoveryRunIdState
+      ? snapshot.run
+      : discoveryRuns.find((run) => run.id === selectedDiscoveryRunIdState)
+    : undefined;
 
   const persistSelectedProductId = useCallback(
     (productId: string, nextRuns = discoveryRuns) => {
@@ -140,6 +144,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const firstRunForProduct = nextRuns.find((run) => run.product_id === productId);
       const nextRunId = firstRunForProduct?.id || "";
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
+      selectedDiscoveryRunIdRef.current = nextRunId;
       setSelectedDiscoveryRunIdState(nextRunId);
     },
     [discoveryRuns],
@@ -147,7 +152,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const persistSelectedDiscoveryRunId = useCallback((runId: string) => {
     localStorage.setItem("selectedDiscoveryRunId", runId);
+    selectedDiscoveryRunIdRef.current = runId;
     setSelectedDiscoveryRunIdState(runId);
+    if (!runId) setSnapshot(emptySnapshot);
   }, []);
 
   const persistActiveSourceIds = useCallback(
@@ -179,8 +186,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refreshSnapshot = useCallback(
-    async (runId = selectedDiscoveryRunIdState) => {
-      if (!runId) {
+    async (runId?: string) => {
+      const targetRunId = runId ?? selectedDiscoveryRunIdRef.current;
+      if (!targetRunId) {
         setSnapshot(emptySnapshot);
         return;
       }
@@ -194,14 +202,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         preflight,
         trace,
       ] = await Promise.all([
-        api.getDiscoveryRun(runId),
-        api.getDiscoveryRunSources(runId).catch(() => []),
-        api.getResults(runId),
-        api.getDiscoveryCandidates(runId).catch(() => []),
-        api.getMessages(runId),
-        api.getMetrics(runId),
-        api.getDiscoveryRunPreflight(runId),
-        getTraceWithFallback(api, runId),
+        api.getDiscoveryRun(targetRunId),
+        api.getDiscoveryRunSources(targetRunId).catch(() => []),
+        api.getResults(targetRunId),
+        api.getDiscoveryCandidates(targetRunId).catch(() => []),
+        api.getMessages(targetRunId),
+        api.getMetrics(targetRunId),
+        api.getDiscoveryRunPreflight(targetRunId),
+        getTraceWithFallback(api, targetRunId),
       ]);
       const latestAgentRun = trace?.latest_run ?? undefined;
       const agentRuns = trace?.runs ?? [];
@@ -218,7 +226,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         latestAgentRun,
       });
     },
-    [api, selectedDiscoveryRunIdState],
+    [api],
   );
 
   const refreshAll = useCallback(async () => {
@@ -254,6 +262,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const nextRunId =
         (storedRunId && productRunList.some((run) => run.id === storedRunId) ? storedRunId : productRunList[0]?.id) || "";
       setSelectedDiscoveryRunIdState(nextRunId);
+      selectedDiscoveryRunIdRef.current = nextRunId;
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
       await refreshProductContacts(nextProductId, nextRuns);
