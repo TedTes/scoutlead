@@ -64,6 +64,10 @@ class CampaignCreate(BaseModel):
     goal_override: str | None = None
 
 
+class CampaignUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+
+
 class CampaignRead(CampaignCreate):
     model_config = ConfigDict(from_attributes=True)
 

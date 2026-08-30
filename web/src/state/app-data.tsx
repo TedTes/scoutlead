@@ -47,6 +47,7 @@ type AppDataContextValue = {
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
+  renameDiscoveryRun: (runId: string, name: string) => Promise<void>;
   deleteDiscoveryRuns: (runIds: string[]) => Promise<void>;
   runDiscovery: (runId?: string) => Promise<void>;
   enqueueDiscoveryRun: (runId?: string) => Promise<void>;
@@ -371,6 +372,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         });
         return created;
       },
+      renameDiscoveryRun: (runId, name) =>
+        mutate(async () => {
+          if (!runId || !name.trim()) return;
+          await api.updateDiscoveryRun(runId, { name: name.trim() });
+        }),
       deleteDiscoveryRuns: (runIds) =>
         mutate(async () => {
           await Promise.all(runIds.map((runId) => api.deleteDiscoveryRun(runId)));

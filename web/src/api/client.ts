@@ -78,6 +78,10 @@ export class ApiClient {
     return this.request<DiscoveryRun>(`/discovery-runs/${id}`);
   }
 
+  updateDiscoveryRun(id: string, body: Partial<Pick<DiscoveryRun, "name">>) {
+    return this.request<DiscoveryRun>(`/discovery-runs/${id}`, { method: "PATCH", body });
+  }
+
   getDiscoveryRunSources(id: string) {
     return this.request<DiscoveryRunSource[]>(`/discovery-runs/${id}/sources`);
   }

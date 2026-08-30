@@ -19,6 +19,7 @@ from campaigns.schemas import (
     CampaignRunSummary,
     CampaignStage,
     CampaignStatus,
+    CampaignUpdate,
 )
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
@@ -229,6 +230,9 @@ class CampaignService:
 
     def get(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.get(campaign_id)
+
+    def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
+        return self.campaigns.update(campaign_id, update)
 
     def delete(self, campaign_id: str) -> None:
         self.campaigns.delete(campaign_id)

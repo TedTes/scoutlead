@@ -7,7 +7,7 @@ from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, DbSession, get_services
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
-from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary
+from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary, CampaignUpdate
 from campaigns.service import CampaignService
 from evaluation.schemas import CampaignMetrics
 from shared.errors import ConflictError
@@ -60,6 +60,16 @@ def get_campaign(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return _service(session, services).get(campaign_id)
+
+
+@router.patch("/{campaign_id}", response_model=CampaignRead)
+def update_campaign(
+    campaign_id: str,
+    update: CampaignUpdate,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return _service(session, services).update(campaign_id, update)
 
 
 @router.get("/{campaign_id}/sources", response_model=list[CampaignSourceRead])

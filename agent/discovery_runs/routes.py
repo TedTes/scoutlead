@@ -8,7 +8,14 @@ from app.dependencies import AppServices, DbSession, get_services
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary, LeadSeedInput
+from campaigns.schemas import (
+    CampaignCreate,
+    CampaignPreflightRead,
+    CampaignRead,
+    CampaignRunSummary,
+    CampaignUpdate,
+    LeadSeedInput,
+)
 from campaigns.service import CampaignService
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateRead
@@ -134,6 +141,16 @@ def get_discovery_run(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return _service(session, services).get(run_id)
+
+
+@router.patch("/{run_id}", response_model=CampaignRead)
+def update_discovery_run(
+    run_id: str,
+    update: CampaignUpdate,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return _service(session, services).update(run_id, update)
 
 
 @router.get("/{run_id}/sources", response_model=list[CampaignSourceRead])

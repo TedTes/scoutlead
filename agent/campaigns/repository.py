@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from campaigns.schemas import CampaignCreate, CampaignStage, CampaignStatus
+from campaigns.schemas import CampaignCreate, CampaignStage, CampaignStatus, CampaignUpdate
 from campaigns.state import assert_campaign_transition
 from db.models import (
     AgentRunModel,
@@ -89,6 +89,16 @@ class CampaignRepository:
         )
         self.session.delete(model)
         self.session.commit()
+
+    def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
+        model = self.get(campaign_id)
+        data = update.model_dump(mode="python", exclude_unset=True)
+        for field, value in data.items():
+            setattr(model, field, value)
+        model.updated_at = utcnow()
+        self.session.commit()
+        self.session.refresh(model)
+        return model
 
     def update_status(
         self,

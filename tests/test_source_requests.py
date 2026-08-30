@@ -33,6 +33,7 @@ def test_source_request_creates_structured_google_places_run_without_running() -
             product_id=product.id,
             source=GOOGLE_PLACES_PROVIDER_ID,
             prompt="List painting service contacts in Toronto ON",
+            name="Painters Toronto shortlist",
             max_results=12,
             run_immediately=False,
         )
@@ -54,7 +55,7 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert result.plan.source == GOOGLE_PLACES_PROVIDER_ID
         assert result.plan.action == "list_contacts"
         assert result.plan.query == "painting service in Toronto ON"
-        assert result.run.name == "Painting Service · Toronto ON"
+        assert result.run.name == "Painters Toronto shortlist"
         assert result.summary is None
         assert sources[0].provider_id == "google_places"
         assert sources[0].input["source_request_prompt"] == request.prompt

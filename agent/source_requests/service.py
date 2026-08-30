@@ -128,6 +128,9 @@ def _source_request_run_name(
     plan: SourceRequestPlan,
     request: SourceRequestCreate,
 ) -> str:
+    if request.name and request.name.strip():
+        return _truncate_name(request.name)
+
     if plan.intent:
         category = _title_text(plan.intent.business_category)
         location = _title_text(plan.intent.location or plan.intent.country)

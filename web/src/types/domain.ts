@@ -104,6 +104,7 @@ export type SourceProvider = {
 export type SourceRequestInput = {
   product_id: string;
   source: SourceRequestSource;
+  name?: string;
   prompt: string;
   max_results: number;
   run_immediately?: boolean;

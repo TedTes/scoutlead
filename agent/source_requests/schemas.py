@@ -26,6 +26,7 @@ class SourceRequestCreate(BaseModel):
     product_id: str = Field(min_length=1)
     source: str = Field(min_length=1)
     prompt: str = Field(min_length=3)
+    name: str | None = Field(default=None, min_length=1)
     max_results: int = Field(default=25, gt=0, le=100)
     run_immediately: bool = True
 
