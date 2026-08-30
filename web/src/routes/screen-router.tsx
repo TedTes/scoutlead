@@ -13,6 +13,10 @@ export function renderScreen(
     isCreatingProduct: false,
     onCreatingProductChange: () => undefined,
   },
+  discoveryDraft: {
+    draftRunName?: string;
+    onRunCreated?: () => void;
+  } = {},
 ) {
   switch (screen) {
     case "product":
@@ -20,6 +24,6 @@ export function renderScreen(
     case "results":
       return <ResultsScreen />;
     default:
-      return <OverviewScreen />;
+      return <OverviewScreen {...discoveryDraft} />;
   }
 }

@@ -7,7 +7,7 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --lift: 0 6px 20px rgba(0, 0, 0, 0.28);
+  --lift: 0 10px 28px rgba(20, 20, 20, 0.12);
 }
 
 @keyframes sl-fade-up {
@@ -176,7 +176,8 @@
 }
 
 .contact-card,
-.list-row {
+.list-row,
+.list-row-shell {
   transition:
     background var(--dur-fast) var(--ease),
     box-shadow var(--dur) var(--ease),
@@ -186,12 +187,14 @@
 
 .contact-card:hover,
 .contact-card:focus,
-.list-row:hover {
+.list-row:hover,
+.list-row-shell:hover {
   transform: translateX(2px);
 }
 
 .contact-card:active,
-.list-row:active {
+.list-row:active,
+.list-row-shell:active {
   transform: translateX(2px) scale(0.997);
 }
 
@@ -230,7 +233,7 @@
 
 .runbtn:hover,
 .composer-submit:hover {
-  box-shadow: 0 0 0 3px rgba(124, 216, 96, 0.18);
+  box-shadow: 0 0 0 3px rgba(23, 23, 23, 0.1);
 }
 
 .searchbar,
@@ -244,7 +247,7 @@
 .searchbar:focus-within,
 .composer-panel:focus-within {
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 4px rgba(124, 216, 96, 0.14);
+  box-shadow: 0 0 0 4px rgba(23, 23, 23, 0.1);
   transform: translateY(-1px);
 }
 
@@ -262,7 +265,7 @@
 .searchbar.is-running,
 .composer-panel.is-running {
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 4px rgba(124, 216, 96, 0.11);
+  box-shadow: 0 0 0 4px rgba(23, 23, 23, 0.1);
 }
 
 .runbtn.icon-run:not(:disabled) svg,
@@ -344,7 +347,8 @@
   transition: left var(--dur) var(--ease-spring);
 }
 
-.list-nav-section .list-row {
+.list-nav-section .list-row,
+.list-nav-section .list-row-shell {
   animation: sl-fade-in var(--dur) var(--ease) both;
 }
 
@@ -352,9 +356,9 @@
   animation: sl-shimmer 1.2s linear infinite;
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.03) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.03) 100%
+    rgba(23, 23, 23, 0.03) 0%,
+    rgba(23, 23, 23, 0.08) 50%,
+    rgba(23, 23, 23, 0.03) 100%
   );
   background-size: 320px 100%;
   border-radius: 6px;
@@ -363,7 +367,7 @@
 
 .sl-spin {
   animation: sl-spin 0.7s linear infinite;
-  border: 2px solid rgba(124, 216, 96, 0.3);
+  border: 2px solid rgba(23, 23, 23, 0.18);
   border-radius: 50%;
   border-top-color: var(--accent);
   display: inline-block;

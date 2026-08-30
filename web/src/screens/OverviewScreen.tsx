@@ -23,7 +23,13 @@ const starterPrompts = [
   },
 ];
 
-export function OverviewScreen() {
+export function OverviewScreen({
+  draftRunName,
+  onRunCreated,
+}: {
+  draftRunName?: string;
+  onRunCreated?: () => void;
+}) {
   const {
     runSourceRequest,
     selectedDiscoveryRun,
@@ -59,6 +65,7 @@ export function OverviewScreen() {
   const submitSourceRequest = async (nextPrompt = prompt) => {
     const request = nextPrompt.trim();
     if (!selectedProductId || !request || running || !selectedSources.length) return;
+    const requestedName = draftRunName?.trim();
     setRunning(true);
     try {
       const results = [];
@@ -66,6 +73,7 @@ export function OverviewScreen() {
         const result = await runSourceRequest({
           product_id: selectedProductId,
           source,
+          name: requestedName && requestedName.toLowerCase() !== "page name" ? requestedName : undefined,
           prompt: request,
           max_results: 25,
           run_immediately: true,
@@ -78,6 +86,7 @@ export function OverviewScreen() {
           message: `Searched ${selectedProviderLabels.join(" + ") || "selected sources"}`,
           tone: "green",
         });
+        onRunCreated?.();
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -99,9 +108,6 @@ export function OverviewScreen() {
           <Search size={20} />
         </span>
         <h1>Who should we find?</h1>
-        <p>
-          Describe the shop in plain language. ScoutLead scores each result against this product, source signals, and reachable contact details.
-        </p>
       </header>
 
       <form

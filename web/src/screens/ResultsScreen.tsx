@@ -1,6 +1,7 @@
 import { Copy, Download, Globe, Mail, MapPin, Phone, Play, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { OverviewScreen } from "./OverviewScreen";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type { DiscoveryResult, SourceRequestSource } from "../types/domain";
@@ -76,6 +77,7 @@ export function ResultsScreen() {
         const result = await runSourceRequest({
           product_id: selectedProductId,
           source,
+          name: selectedDiscoveryRun?.name || undefined,
           prompt: request,
           max_results: selectedDiscoveryRun?.max_leads || 25,
           run_immediately: true,
@@ -98,13 +100,7 @@ export function ResultsScreen() {
   };
 
   if (!selectedDiscoveryRun) {
-    return (
-      <section className="empty-discovery compact">
-        <div className="empty-compass" aria-hidden="true" />
-        <h1>No list selected</h1>
-        <p>Start a contact search or choose a saved run from the left side.</p>
-      </section>
-    );
+    return <OverviewScreen />;
   }
 
   return (

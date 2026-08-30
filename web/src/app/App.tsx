@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Menu, Plus, SlidersHorizontal, X } from "lucide-react";
+import { Check, ChevronDown, Menu, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
@@ -24,6 +24,7 @@ function AppShell() {
   const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
   const [showSourceSettings, setShowSourceSettings] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const [draftRunName, setDraftRunName] = useState<string | null>(null);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
@@ -41,6 +42,9 @@ function AppShell() {
     activeSourceIds,
     setActiveSourceIds,
     createProductFromDescription,
+    deleteProduct,
+    deleteDiscoveryRuns,
+    renameDiscoveryRun,
     refreshSnapshot,
   } = useAppData();
   const allSourceProviders = mergeSourceProviders(sourceProviders);
@@ -66,6 +70,16 @@ function AppShell() {
     setIsCreatingProduct(true);
   };
 
+  const startNewList = () => {
+    if (isTraceRoute) returnToApp();
+    setOpenContextMenu(null);
+    setMobileRailOpen(false);
+    setIsCreatingProduct(false);
+    setSelectedDiscoveryRunId("");
+    setActiveScreen("overview");
+    setDraftRunName((current) => current ?? "Page name");
+  };
+
   const selectScreen = (screen: Screen) => {
     if (isTraceRoute) returnToApp();
     setActiveScreen(screen);
@@ -78,7 +92,36 @@ function AppShell() {
     setSelectedProductId(productId);
     setSelectedDiscoveryRunId("");
     setActiveScreen("overview");
+    setDraftRunName(null);
     setMobileRailOpen(false);
+  };
+
+  const handleDeleteSelectedProduct = async () => {
+    if (!selectedProduct) return;
+    const confirmed = window.confirm(`Delete ${selectedProductName}? This also removes its contact lists and results.`);
+    if (!confirmed) return;
+    setOpenContextMenu(null);
+    await deleteProduct(selectedProduct.id);
+    setSelectedDiscoveryRunId("");
+    setActiveScreen("overview");
+    setDraftRunName(null);
+    showToast({ title: "Product deleted", message: `${selectedProductName} was removed.`, tone: "green" });
+  };
+
+  const handleRenameRun = async (runId: string, name: string) => {
+    await renameDiscoveryRun(runId, name);
+    showToast({ title: "List renamed", tone: "green" });
+  };
+
+  const handleDeleteRun = async (run: DiscoveryRun) => {
+    const confirmed = window.confirm(`Delete ${listLabel(run)}? This removes the saved results for this run.`);
+    if (!confirmed) return;
+    await deleteDiscoveryRuns([run.id]);
+    if (selectedDiscoveryRunId === run.id) {
+      setSelectedDiscoveryRunId("");
+      setActiveScreen("overview");
+    }
+    showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
 
   useEffect(() => {
@@ -108,6 +151,10 @@ function AppShell() {
     if (!hasSelectedRun) setActiveScreen("overview");
   }, [activeScreen, productDiscoveryRuns, selectedDiscoveryRunId]);
 
+  useEffect(() => {
+    if (selectedDiscoveryRunId && draftRunName) setDraftRunName(null);
+  }, [draftRunName, selectedDiscoveryRunId]);
+
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
       <header className="mobile-topbar">
@@ -125,10 +172,7 @@ function AppShell() {
           aria-label="New contact list"
           className="mobile-icon-button mobile-add-button"
           type="button"
-          onClick={() => {
-            setSelectedDiscoveryRunId("");
-            selectScreen("overview");
-          }}
+          onClick={startNewList}
         >
           <Plus size={18} />
         </button>
@@ -152,86 +196,40 @@ function AppShell() {
           </div>
         </div>
 
-        <div className="rail-product" ref={contextMenuRef}>
-          <div className={openContextMenu === "product" ? "context-menu-control product-selector is-open" : "context-menu-control product-selector"}>
-            <button
-              className="rail-product-trigger"
-              type="button"
-              aria-expanded={openContextMenu === "product"}
-              onClick={() => setOpenContextMenu(openContextMenu === "product" ? null : "product")}
-            >
-              <span>
-                <strong>{selectedProductName}</strong>
-                <small>{selectedProduct?.value_proposition || selectedProduct?.product_description || "Product profile"}</small>
-              </span>
-              <ChevronDown className="product-selector-caret" size={15} />
-            </button>
-            {openContextMenu === "product" ? (
-              <div className="context-menu-panel product-menu-panel rail-product-menu">
-                {products.length ? (
-                  products.map((product) => (
-                    <button
-                      className={product.id === selectedProductId ? "context-menu-option active" : "context-menu-option"}
-                      key={product.id}
-                      type="button"
-                      onClick={() => selectProduct(product.id)}
-                    >
-                      <strong>{displayProductName(product)}</strong>
-                      <Check className="product-selector-check" size={14} />
-                    </button>
-                  ))
-                ) : (
-                  <p className="context-menu-empty">No products yet</p>
-                )}
-                <button className="context-menu-create" type="button" onClick={startNewProduct}>
-                  <Plus size={14} />
-                  Add product
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
         <nav className="list-nav" aria-label="Contact lists">
           <div className="list-nav-header">
             <p>Run history</p>
             <button
-              aria-label="New contact list"
-              className={!isTraceRoute && activeScreen === "overview" ? "rail-add-list active" : "rail-add-list"}
+              aria-label="New contact search"
+              className={!isTraceRoute && activeScreen === "overview" && draftRunName ? "rail-add-list active" : "rail-add-list"}
               type="button"
-              onClick={() => {
-                setSelectedDiscoveryRunId("");
-                selectScreen("overview");
-              }}
+              onClick={startNewList}
             >
               <Plus size={16} />
             </button>
           </div>
 
           <div className="list-nav-section">
+            {draftRunName !== null ? (
+              <RunHistoryDraft value={draftRunName} onChange={setDraftRunName} />
+            ) : null}
             {productDiscoveryRuns.slice(0, 12).map((run) => {
               const title = listLabel(run);
               return (
-                <button
-                  className={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id ? "list-row active" : "list-row"}
+                <RunHistoryItem
+                  active={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id}
+                  providers={allSourceProviders}
+                  run={run}
                   key={run.id}
-                  title={getRunPrompt(run) || title}
-                  type="button"
-                  onClick={() => {
+                  onSelect={() => {
                     setSelectedDiscoveryRunId(run.id);
                     void refreshSnapshot(run.id);
                     selectScreen("results");
                   }}
-                >
-                  <span className="list-run-marker" />
-                  <span>
-                    <strong>{title}</strong>
-                    <small>
-                      <span>{listMeta(run, allSourceProviders)}</span>
-                      <em>{formatRunDate(run.created_at)}</em>
-                    </small>
-                  </span>
-                </button>
+                  onRename={handleRenameRun}
+                  onDelete={() => void handleDeleteRun(run)}
+                  title={title}
+                />
               );
             })}
           </div>
@@ -252,13 +250,45 @@ function AppShell() {
       </aside>
 
       <section className="main">
+        <header className="app-topbar">
+          <div className="top-product-area" ref={contextMenuRef}>
+            <ProductSelector
+              isOpen={openContextMenu === "product"}
+              products={products}
+              selectedProductId={selectedProductId}
+              selectedProductName={selectedProductName}
+              onAddProduct={startNewProduct}
+              onDeleteProduct={() => void handleDeleteSelectedProduct()}
+              onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
+              onSelectProduct={selectProduct}
+            />
+          </div>
+        </header>
         {error && <div className="app-banner">{error}</div>}
-        {loading && <div className="app-banner info">Loading data...</div>}
+        {loading ? (
+          <div className="loading-overlay" aria-live="polite">
+            <div className="loading-indicator">
+              <span className="sl-spin" />
+              Loading
+            </div>
+          </div>
+        ) : null}
         <main className="content">
           {isTraceRoute ? (
             <TraceDebugScreen onExit={returnToApp} />
           ) : (
-            renderScreen(activeScreen)
+            renderScreen(
+              activeScreen,
+              selectScreen,
+              { isCreatingProduct: false, onCreatingProductChange: setIsCreatingProduct },
+              {
+                draftRunName: draftRunName ?? undefined,
+                onRunCreated: () => {
+                  setDraftRunName(null);
+                  setActiveScreen("results");
+                },
+              },
+            )
           )}
         </main>
       </section>
@@ -287,6 +317,189 @@ function AppShell() {
           onClose={() => setShowSourceSettings(false)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function ProductSelector({
+  isOpen,
+  products,
+  selectedProductId,
+  selectedProductName,
+  onAddProduct,
+  onDeleteProduct,
+  onOpenChange,
+  onSelectProduct,
+}: {
+  isOpen: boolean;
+  products: Product[];
+  selectedProductId: string;
+  selectedProductName: string;
+  onAddProduct: () => void;
+  onDeleteProduct: () => void;
+  onOpenChange: (isOpen: boolean) => void;
+  onSelectProduct: (productId: string) => void;
+}) {
+  return (
+    <>
+      <div className={isOpen ? "top-product-control product-selector is-open" : "top-product-control product-selector"}>
+        <button
+          className="top-product-trigger"
+          type="button"
+          aria-expanded={isOpen}
+          onClick={() => onOpenChange(!isOpen)}
+        >
+          <span className="selector-label">Product</span>
+          <strong>{selectedProductName}</strong>
+          <ChevronDown className="product-selector-caret" size={15} />
+        </button>
+        {isOpen ? (
+          <div className="context-menu-panel product-menu-panel top-product-menu">
+            {products.length ? (
+              products.map((product) => (
+                <button
+                  className={product.id === selectedProductId ? "context-menu-option active" : "context-menu-option"}
+                  key={product.id}
+                  type="button"
+                  onClick={() => onSelectProduct(product.id)}
+                >
+                  <strong>{displayProductName(product)}</strong>
+                  <Check className="product-selector-check" size={14} />
+                </button>
+              ))
+            ) : (
+              <p className="context-menu-empty">No products yet</p>
+            )}
+            <button className="context-menu-create" type="button" onClick={onAddProduct}>
+              <Plus size={14} />
+              Add product
+            </button>
+            {selectedProductId ? (
+              <button className="context-menu-delete" type="button" onClick={onDeleteProduct}>
+                <Trash2 size={14} />
+                Delete selected product
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <button className="top-product-add" type="button" aria-label="Add product" onClick={onAddProduct}>
+        <Plus size={16} />
+      </button>
+    </>
+  );
+}
+
+function RunHistoryDraft({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="list-row-shell draft active">
+      <div className="list-row-editor">
+        <span className="list-run-marker" />
+        <input
+          aria-label="New list name"
+          autoFocus
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
+        />
+      </div>
+      <small>new search</small>
+    </div>
+  );
+}
+
+function RunHistoryItem({
+  active,
+  providers,
+  run,
+  title,
+  onDelete,
+  onRename,
+  onSelect,
+}: {
+  active: boolean;
+  providers: SourceProvider[];
+  run: DiscoveryRun;
+  title: string;
+  onDelete: () => void;
+  onRename: (runId: string, name: string) => Promise<void>;
+  onSelect: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(title);
+
+  useEffect(() => {
+    if (!editing) setName(title);
+  }, [editing, title]);
+
+  const commitName = async () => {
+    const nextName = name.trim();
+    if (!nextName) {
+      setName(title);
+      setEditing(false);
+      return;
+    }
+    if (nextName !== title) await onRename(run.id, nextName);
+    setEditing(false);
+  };
+
+  return (
+    <div className={active ? "list-row-shell active" : "list-row-shell"} title={getRunPrompt(run) || title}>
+      {editing ? (
+        <div className="list-row-editor">
+          <span className="list-run-marker" />
+          <input
+            aria-label="Rename run"
+            autoFocus
+            value={name}
+            onBlur={() => void commitName()}
+            onChange={(event) => setName(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setName(title);
+                setEditing(false);
+              }
+              if (event.key === "Enter") void commitName();
+            }}
+          />
+        </div>
+      ) : (
+        <button className="list-row-main" type="button" onClick={onSelect} onDoubleClick={() => setEditing(true)}>
+          <span className="list-run-marker" />
+          <span>
+            <strong>{title}</strong>
+            <small>
+              <span>{listMeta(run, providers)}</span>
+              <em>{formatRunDate(run.created_at)}</em>
+            </small>
+          </span>
+        </button>
+      )}
+      <div className="list-row-actions">
+        <button
+          aria-label={`Rename ${title}`}
+          className="list-row-action"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setEditing(true);
+          }}
+        >
+          <Pencil size={12} />
+        </button>
+        <button
+          aria-label={`Delete ${title}`}
+          className="list-row-action danger"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -490,6 +703,7 @@ function displayProductName(product: Product) {
 }
 
 function listLabel(run: DiscoveryRun) {
+  if (run.name && !isGeneratedRunName(run.name)) return truncateLabel(run.name, 38);
   const intent = run.source_inputs?.source_request_intent;
   if (isRecord(intent)) {
     const category = typeof intent.business_category === "string" ? intent.business_category.trim() : "";
@@ -501,6 +715,10 @@ function listLabel(run: DiscoveryRun) {
   if (prompt) return truncateLabel(titleFromQuery(prompt) || prompt, 38);
   if (run.name) return truncateLabel(run.name, 38);
   return "Untitled list";
+}
+
+function isGeneratedRunName(value: string) {
+  return /\b(source request|discovery|validation)\b.*\d{4}-\d{2}-\d{2}/i.test(value);
 }
 
 function listMeta(run: DiscoveryRun, providers: SourceProvider[]) {
