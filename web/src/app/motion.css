@@ -1,13 +1,12 @@
-/* ScoutLead motion and responsive polish for the real app classes. */
+/* Motion polish mapped to the real ScoutLead app classes. */
 
 :root {
   --dur-fast: 120ms;
-  --dur: 200ms;
-  --dur-slow: 320ms;
+  --dur: 190ms;
+  --dur-slow: 280ms;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --lift: 0 10px 28px rgba(20, 20, 20, 0.12);
 }
 
 @keyframes sl-fade-up {
@@ -15,6 +14,7 @@
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -25,6 +25,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -35,6 +36,7 @@
     opacity: 0;
     transform: scale(0.96);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
@@ -44,44 +46,12 @@
 @keyframes sl-slide-in-right {
   from {
     opacity: 0;
-    transform: translateX(24px);
+    transform: translateX(28px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
-  }
-}
-
-@keyframes sl-ring-draw {
-  from {
-    stroke-dashoffset: 126;
-  }
-}
-
-@keyframes sl-shimmer {
-  from {
-    background-position: -320px 0;
-  }
-  to {
-    background-position: 320px 0;
-  }
-}
-
-@keyframes sl-pop {
-  0% {
-    transform: scale(1);
-  }
-  40% {
-    transform: scale(1.12);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-@keyframes sl-spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 
@@ -89,11 +59,27 @@
   0% {
     transform: translateX(0) scale(1);
   }
+
   45% {
     transform: translateX(2px) scale(1.06);
   }
+
   100% {
     transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes sl-pop {
+  0% {
+    transform: scale(1);
+  }
+
+  45% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1);
   }
 }
 
@@ -102,29 +88,6 @@
 .product-page > *,
 .trace-debug-page > * {
   animation: sl-fade-up var(--dur-slow) var(--ease-out) both;
-}
-
-.searchbar,
-.composer-panel,
-.results-hero,
-.results-stats,
-.results-filterbar,
-.starter-section,
-.result-empty-card {
-  animation: sl-fade-up var(--dur) var(--ease-out) both;
-}
-
-.results-hero {
-  animation-delay: 40ms;
-}
-
-.results-stats {
-  animation-delay: 70ms;
-}
-
-.results-filterbar,
-.starter-section {
-  animation-delay: 100ms;
 }
 
 .contact-card-list > li {
@@ -136,66 +99,62 @@
 }
 
 .contact-card-list > li:nth-child(2) {
-  animation-delay: 50ms;
+  animation-delay: 45ms;
 }
 
 .contact-card-list > li:nth-child(3) {
-  animation-delay: 80ms;
+  animation-delay: 70ms;
 }
 
 .contact-card-list > li:nth-child(4) {
-  animation-delay: 110ms;
+  animation-delay: 95ms;
 }
 
 .contact-card-list > li:nth-child(5) {
-  animation-delay: 140ms;
+  animation-delay: 120ms;
 }
 
-.contact-card-list > li:nth-child(6) {
-  animation-delay: 170ms;
-}
-
-.contact-card-list > li:nth-child(n + 7) {
-  animation-delay: 190ms;
-}
-
-.starter-grid button {
-  animation: sl-fade-up var(--dur) var(--ease-out) both;
-}
-
-.starter-grid button:nth-child(1) {
-  animation-delay: 60ms;
-}
-
-.starter-grid button:nth-child(2) {
-  animation-delay: 100ms;
-}
-
-.starter-grid button:nth-child(3) {
-  animation-delay: 140ms;
+.contact-card-list > li:nth-child(n + 6) {
+  animation-delay: 135ms;
 }
 
 .contact-card,
-.list-row,
-.list-row-shell {
+.list-row-shell,
+.top-product-trigger,
+.top-product-add,
+.rail-add-list,
+.rail-settings,
+.secondary,
+.link-button,
+.icon-action,
+.danger,
+.menu-button,
+.runbtn,
+.composer-submit,
+.source-pill,
+.source-toggle-row,
+.results-filterbar button {
   transition:
     background var(--dur-fast) var(--ease),
-    box-shadow var(--dur) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease);
-  will-change: transform;
 }
 
 .contact-card:hover,
-.contact-card:focus,
-.list-row:hover,
-.list-row-shell:hover {
-  transform: translateX(2px);
+.contact-card:focus {
+  transform: translateY(-1px);
 }
 
 .contact-card:active,
-.list-row:active,
-.list-row-shell:active {
-  transform: translateX(2px) scale(0.997);
+.runbtn:active,
+.composer-submit:active,
+.secondary:active,
+.menu-button:active,
+.top-product-add:active {
+  transform: scale(0.985);
 }
 
 .contact-card:hover .score-ring,
@@ -203,69 +162,28 @@
   animation: sl-pop var(--dur) var(--ease-spring);
 }
 
-.secondary,
-.link-button,
-.icon-action,
-.danger,
-.runbtn,
-.composer-submit,
-.results-filterbar button,
-.source-pill,
-.starter-grid button,
-.rail-add-list,
-.rail-settings {
-  transition:
-    background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease);
-}
-
-.secondary:active,
-.link-button:active,
-.icon-action:active,
-.danger:active,
-.runbtn:active,
-.composer-submit:active {
-  transform: scale(0.96);
-}
-
-.runbtn:hover,
-.composer-submit:hover {
-  box-shadow: 0 0 0 3px rgba(23, 23, 23, 0.1);
-}
-
-.searchbar,
-.composer-panel {
+.composer-panel,
+.searchbar {
   transition:
     border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease),
     transform var(--dur) var(--ease);
 }
 
-.searchbar:focus-within,
-.composer-panel:focus-within {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 4px rgba(23, 23, 23, 0.1);
-  transform: translateY(-1px);
-}
-
-.searchbar > svg {
-  transition:
-    color var(--dur) var(--ease),
-    transform var(--dur) var(--ease);
+.composer-panel:focus-within,
+.searchbar:focus-within {
+  border-color: var(--black);
+  box-shadow: 0 0 0 4px rgba(27, 31, 36, 0.08);
 }
 
 .searchbar:focus-within > svg {
-  color: var(--accent);
   transform: scale(1.05);
 }
 
-.searchbar.is-running,
-.composer-panel.is-running {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 4px rgba(23, 23, 23, 0.1);
+.composer-panel.is-running,
+.searchbar.is-running {
+  border-color: var(--black);
+  box-shadow: 0 0 0 4px rgba(27, 31, 36, 0.08);
 }
 
 .runbtn.icon-run:not(:disabled) svg,
@@ -280,19 +198,22 @@
   animation: sl-submit-slide var(--dur) var(--ease-out);
 }
 
-.score-ring {
+.context-menu-panel,
+.action-menu {
   animation: sl-scale-in var(--dur) var(--ease-out) both;
 }
 
-.sl-ring-arc {
-  animation: sl-ring-draw var(--dur-slow) var(--ease-out) both;
+.modal-backdrop,
+.source-dialog-backdrop,
+.contact-drawer-overlay.open .contact-drawer-backdrop,
+.mobile-rail-backdrop {
+  animation: sl-fade-in var(--dur) var(--ease) both;
 }
 
-.contact-drawer-overlay.open .contact-drawer-backdrop,
-.mobile-rail-backdrop,
-.modal-backdrop,
-.source-dialog-backdrop {
-  animation: sl-fade-in var(--dur) var(--ease) both;
+.modal-card,
+.source-dialog-card {
+  animation: sl-scale-in var(--dur-slow) var(--ease-spring) both;
+  transform-origin: center;
 }
 
 .contact-drawer-panel {
@@ -310,178 +231,42 @@
 }
 
 .drawer-row:nth-of-type(1) {
-  animation-delay: 40ms;
+  animation-delay: 30ms;
 }
 
 .drawer-row:nth-of-type(2) {
-  animation-delay: 70ms;
+  animation-delay: 55ms;
 }
 
 .drawer-row:nth-of-type(3) {
-  animation-delay: 100ms;
+  animation-delay: 80ms;
 }
 
 .drawer-row:nth-of-type(4) {
-  animation-delay: 130ms;
+  animation-delay: 105ms;
 }
 
 .drawer-mini-grid {
-  animation-delay: 150ms;
+  animation-delay: 125ms;
 }
 
 .drawer-section {
-  animation-delay: 180ms;
+  animation-delay: 150ms;
 }
 
-.modal-card,
-.source-dialog-card {
-  animation: sl-scale-in var(--dur) var(--ease-spring) both;
-  transform-origin: center;
-}
-
-.source-toggle-row em {
-  transition: background var(--dur) var(--ease);
-}
-
+.source-toggle-row em,
 .source-toggle-row em i {
-  transition: left var(--dur) var(--ease-spring);
+  transition:
+    background var(--dur) var(--ease),
+    left var(--dur) var(--ease-spring);
 }
 
-.list-nav-section .list-row,
-.list-nav-section .list-row-shell {
-  animation: sl-fade-in var(--dur) var(--ease) both;
+.list-row-actions {
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
-.sk {
-  animation: sl-shimmer 1.2s linear infinite;
-  background: linear-gradient(
-    90deg,
-    rgba(23, 23, 23, 0.03) 0%,
-    rgba(23, 23, 23, 0.08) 50%,
-    rgba(23, 23, 23, 0.03) 100%
-  );
-  background-size: 320px 100%;
-  border-radius: 6px;
-  display: inline-block;
-}
-
-.sl-spin {
-  animation: sl-spin 0.7s linear infinite;
-  border: 2px solid rgba(23, 23, 23, 0.18);
-  border-radius: 50%;
-  border-top-color: var(--accent);
-  display: inline-block;
-  height: 13px;
-  width: 13px;
-}
-
-@media (max-width: 1024px) {
-  .rail {
-    flex-basis: 210px;
-    width: 210px;
-  }
-
-  .content {
-    padding: 16px 18px 36px;
-  }
-
-  .results-stats {
-    gap: 16px;
-  }
-}
-
-@media (max-width: 820px) {
-  .rail {
-    flex-basis: auto;
-    box-shadow: var(--lift);
-    width: min(288px, 84vw);
-  }
-
-  .main {
-    width: 100%;
-  }
-
-  .contact-drawer-panel {
-    width: min(430px, 92vw);
-  }
-
-  .starter-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 560px) {
-  .content {
-    padding: 14px 12px 32px;
-  }
-
-  .searchbar {
-    flex-wrap: wrap;
-  }
-
-  .searchbar input {
-    flex-basis: 100%;
-  }
-
-  .results-hero {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .results-hero .export-button {
-    margin-left: 0;
-  }
-
-  .results-stats {
-    gap: 12px 18px;
-  }
-
-  .results-filterbar {
-    flex-wrap: wrap;
-  }
-
-  .contact-card {
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
-
-  .contact-main {
-    flex: 1 1 auto;
-    width: auto;
-  }
-
-  .starter-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .contact-drawer-panel {
-    width: 100vw;
-  }
-
-  .modal-card,
-  .source-dialog-card {
-    width: min(420px, 92vw);
-  }
-}
-
-.content::-webkit-scrollbar,
-.list-nav-section::-webkit-scrollbar,
-.drawer-body::-webkit-scrollbar {
-  width: 10px;
-}
-
-.content::-webkit-scrollbar-thumb,
-.list-nav-section::-webkit-scrollbar-thumb,
-.drawer-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  background-clip: content-box;
-  border: 2px solid transparent;
-  border-radius: 6px;
-}
-
-.content::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.16);
-  background-clip: content-box;
+.rail {
+  transition: transform var(--dur-slow) var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
