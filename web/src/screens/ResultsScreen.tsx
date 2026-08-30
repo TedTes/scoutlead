@@ -1,5 +1,5 @@
 import { AlertTriangle, Copy, Download, Globe, Mail, MapPin, MoreVertical, Phone, Play, RotateCw, Search, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { OverviewScreen } from "./OverviewScreen";
 import { useToast } from "../shared-ui";
@@ -32,17 +32,13 @@ export function ResultsScreen() {
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
   const [running, setRunning] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const runMenuRef = useRef<HTMLDivElement | null>(null);
 
   const contacts = selectedDiscoveryRunId ? snapshot.results : [];
   const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = draftPrompt.trim() || runPrompt;
-  const counts = getCounts(contacts);
-  const averageScore = contacts.length
-    ? Math.round(contacts.reduce((sum, contact) => sum + contactScore(contact), 0) / contacts.length)
-    : 0;
-  const ownerEmails = contacts.filter((contact) => contact.contact_email || contact.research?.contact_email).length;
   const reachableContacts = contacts.filter((contact) => isReachableContact(contact)).length;
   const visibleContacts = contacts
     .filter((contact) => {
@@ -56,8 +52,6 @@ export function ResultsScreen() {
     });
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId);
-  const selectedRunSourceLabel = getRunSourceLabel(selectedDiscoveryRun, providers);
-  const selectedRunDate = selectedDiscoveryRun ? formatRunDateTime(selectedDiscoveryRun.created_at) : "";
 
   useEffect(() => {
     setDraftPrompt(runPrompt);
@@ -68,6 +62,17 @@ export function ResultsScreen() {
   useEffect(() => {
     setRunMenuOpen(false);
   }, [selectedDiscoveryRunId]);
+
+  useEffect(() => {
+    if (!runMenuOpen) return undefined;
+    const closeMenu = (event: MouseEvent) => {
+      if (!runMenuRef.current?.contains(event.target as Node)) {
+        setRunMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", closeMenu);
+    return () => document.removeEventListener("mousedown", closeMenu);
+  }, [runMenuOpen]);
 
   useEffect(() => {
     setSelectedSources((current) => {
@@ -152,22 +157,9 @@ export function ResultsScreen() {
         ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSources.length)}
       />
 
-      <header className="results-hero">
-        <div>
-          <h1>{runTitle(selectedDiscoveryRun.name || "", query)}</h1>
-          <p>{[selectedRunSourceLabel, selectedRunDate].filter(Boolean).join(" · ") || "Saved contact list"}</p>
-        </div>
+      <header className="results-hero compact">
         <div className="results-actions">
-          <button
-            className="secondary export-button"
-            type="button"
-            disabled={!visibleContacts.length}
-            onClick={() => exportContactsCsv(visibleContacts.length ? visibleContacts : contacts, exportName)}
-          >
-            <Download size={15} />
-            Export CSV
-          </button>
-          <div className="results-menu-control">
+          <div className="results-menu-control" ref={runMenuRef}>
             <button
               aria-expanded={runMenuOpen}
               aria-label="Run actions"
@@ -179,6 +171,14 @@ export function ResultsScreen() {
             </button>
             {runMenuOpen ? (
               <div className="action-menu">
+                <button
+                  type="button"
+                  disabled={!visibleContacts.length}
+                  onClick={() => exportContactsCsv(visibleContacts.length ? visibleContacts : contacts, exportName)}
+                >
+                  <Download size={14} />
+                  Export CSV
+                </button>
                 <button type="button" onClick={() => void renameCurrentRun()}>
                   Rename run
                 </button>
@@ -196,18 +196,11 @@ export function ResultsScreen() {
         </div>
       </header>
 
-      <dl className="results-stats">
-        <Stat hero label="Reachable" suffix={` / ${contacts.length}`} value={String(reachableContacts)} />
-        <Stat label="Owner emails" value={String(ownerEmails)} />
-        <Stat label="Matched" value={String(contacts.length)} />
-        <Stat label="Avg score" value={String(averageScore)} />
-      </dl>
-
       <div className="results-filterbar">
         <div>
           <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
             All
-            <span>{counts.all}</span>
+            <span>{contacts.length}</span>
           </button>
           <button className={filter === "reachable" ? "active" : ""} type="button" onClick={() => setFilter("reachable")}>
             Reachable
@@ -293,18 +286,6 @@ function SearchStrip({
         <Play size={13} />
       </button>
     </form>
-  );
-}
-
-function Stat({ hero, label, suffix, value }: { hero?: boolean; label: string; suffix?: string; value: string }) {
-  return (
-    <div className={hero ? "hero" : undefined}>
-      <dt>{label}</dt>
-      <dd>
-        {value}
-        {suffix ? <small>{suffix}</small> : null}
-      </dd>
-    </div>
   );
 }
 
@@ -572,37 +553,8 @@ function getRunSource(run: { source_inputs?: Record<string, unknown> } | undefin
   return typeof source === "string" && source.trim() ? source.trim() : "";
 }
 
-function getRunSourceLabel(
-  run: { source_inputs?: Record<string, unknown> } | undefined,
-  providers: Array<{ id: string; label: string }>,
-) {
-  const source = getRunSource(run);
-  if (!source) return "";
-  return providers.find((provider) => provider.id === source)?.label || titleCase(source.replace(/_/g, " "));
-}
-
-function formatRunDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function getCounts(contacts: DiscoveryResult[]) {
-  return {
-    all: contacts.length,
-    qualified: contacts.filter((contact) => contact.qualification?.qualified).length,
-    review: contacts.filter((contact) => isReviewContact(contact)).length,
-    filtered: contacts.filter((contact) => contact.status === "disqualified").length,
-  };
-}
-
 function isReachableContact(contact: DiscoveryResult) {
   return Boolean(contact.contact_email || contact.research?.contact_email || getPhone(contact));
-}
-
-function isReviewContact(contact: DiscoveryResult) {
-  if (contact.status === "disqualified" || contact.qualification?.qualified) return false;
-  return ["discovered", "researching", "researched"].includes(contact.status);
 }
 
 function contactStatusLabel(contact: DiscoveryResult) {

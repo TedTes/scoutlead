@@ -1,10 +1,10 @@
-import { Check, ChevronDown, Menu, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Download, Menu, Pencil, Plug, Plus, Settings, Trash2, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
-import type { DiscoveryRun, Product, SourceProvider, SourceRequestSource } from "../types/domain";
+import type { DiscoveryResult, DiscoveryRun, Product, SourceProvider, SourceRequestSource } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { mergeSourceProviders } from "../utils/source-providers";
 
@@ -29,7 +29,6 @@ function AppShell() {
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
   const {
-    apiHealthy,
     loading,
     error,
     products,
@@ -37,7 +36,9 @@ function AppShell() {
     setSelectedProductId,
     selectedDiscoveryRunId,
     setSelectedDiscoveryRunId,
+    selectedDiscoveryRun,
     productDiscoveryRuns,
+    productContacts,
     sourceProviders,
     activeSourceIds,
     setActiveSourceIds,
@@ -51,11 +52,12 @@ function AppShell() {
   const connectedProviders = allSourceProviders.filter((provider) => provider.configured);
   const activeSourceProviders = connectedProviders.filter((provider) => activeSourceIds.includes(provider.id));
   const connectedSourceCount = activeSourceProviders.length;
-  const sourceStatusLabel =
-    connectedSourceCount === 1 ? "1 source connected" : `${connectedSourceCount} sources connected`;
-  const sourceDetailLabel = activeSourceProviders.map((provider) => provider.label).join(", ") || "No source enabled";
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
+  const selectedRunLabel =
+    selectedDiscoveryRunId && selectedDiscoveryRun
+      ? listLabel(selectedDiscoveryRun)
+      : draftRunName?.trim() || "";
   const isTraceRoute = routePath === "/trace" || routePath === "/debug/trace";
 
   const returnToApp = () => {
@@ -98,8 +100,6 @@ function AppShell() {
 
   const handleDeleteSelectedProduct = async () => {
     if (!selectedProduct) return;
-    const confirmed = window.confirm(`Delete ${selectedProductName}? This also removes its contact lists and results.`);
-    if (!confirmed) return;
     setOpenContextMenu(null);
     await deleteProduct(selectedProduct.id);
     setSelectedDiscoveryRunId("");
@@ -122,6 +122,19 @@ function AppShell() {
       setActiveScreen("overview");
     }
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
+  };
+
+  const handleExportProductContacts = () => {
+    if (!productContacts.length) {
+      showToast({
+        title: "No contacts to export",
+        message: "Run a search before exporting contacts for this product.",
+        tone: "amber",
+      });
+      return;
+    }
+    exportProductContactsCsv(productContacts, selectedProductName);
+    showToast({ title: "Contacts exported", message: `${productContacts.length} contacts downloaded.`, tone: "green" });
   };
 
   useEffect(() => {
@@ -151,10 +164,6 @@ function AppShell() {
     if (!hasSelectedRun) setActiveScreen("overview");
   }, [activeScreen, productDiscoveryRuns, selectedDiscoveryRunId]);
 
-  useEffect(() => {
-    if (selectedDiscoveryRunId && draftRunName) setDraftRunName(null);
-  }, [draftRunName, selectedDiscoveryRunId]);
-
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
       <header className="mobile-topbar">
@@ -169,12 +178,11 @@ function AppShell() {
         <span className="brand-mark">S</span>
         <strong>{selectedProduct ? selectedProductName : "ScoutLead"}</strong>
         <button
-          aria-label="New contact list"
-          className="mobile-icon-button mobile-add-button"
+          aria-label="Account"
+          className="mobile-icon-button mobile-avatar-button"
           type="button"
-          onClick={startNewList}
         >
-          <Plus size={18} />
+          <User size={17} />
         </button>
       </header>
 
@@ -222,6 +230,7 @@ function AppShell() {
                   run={run}
                   key={run.id}
                   onSelect={() => {
+                    setDraftRunName(null);
                     setSelectedDiscoveryRunId(run.id);
                     void refreshSnapshot(run.id);
                     selectScreen("results");
@@ -235,18 +244,15 @@ function AppShell() {
           </div>
         </nav>
 
-        <div className="rail-status source-status">
-          <span className={apiHealthy && connectedSourceCount ? "health good" : "health warn"}>
-            <span>
-              <i />
-              <strong>{apiHealthy && connectedSourceCount ? sourceStatusLabel : "Sources need setup"}</strong>
-            </span>
-            <small>{apiHealthy && connectedSourceCount ? sourceDetailLabel : "Connect a source to run searches"}</small>
-          </span>
-          <button aria-label="Source settings" className="rail-settings" type="button" onClick={() => setShowSourceSettings(true)}>
-            <SlidersHorizontal size={14} />
-          </button>
-        </div>
+        <ProductManagementSection
+          connectedSourceCount={connectedSourceCount}
+          hasProduct={Boolean(selectedProduct)}
+          hasContacts={productContacts.length > 0}
+          onDelete={handleDeleteSelectedProduct}
+          onExport={handleExportProductContacts}
+          onProductSettings={() => selectScreen("product")}
+          onSources={() => setShowSourceSettings(true)}
+        />
       </aside>
 
       <section className="main">
@@ -257,11 +263,14 @@ function AppShell() {
               products={products}
               selectedProductId={selectedProductId}
               selectedProductName={selectedProductName}
+              selectedRunLabel={selectedRunLabel}
               onAddProduct={startNewProduct}
-              onDeleteProduct={() => void handleDeleteSelectedProduct()}
               onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
               onSelectProduct={selectProduct}
             />
+            <button className="top-avatar" type="button" aria-label="Account">
+              <User size={16} />
+            </button>
           </div>
         </header>
         {error && <div className="app-banner">{error}</div>}
@@ -326,8 +335,8 @@ function ProductSelector({
   products,
   selectedProductId,
   selectedProductName,
+  selectedRunLabel,
   onAddProduct,
-  onDeleteProduct,
   onOpenChange,
   onSelectProduct,
 }: {
@@ -335,24 +344,28 @@ function ProductSelector({
   products: Product[];
   selectedProductId: string;
   selectedProductName: string;
+  selectedRunLabel: string;
   onAddProduct: () => void;
-  onDeleteProduct: () => void;
   onOpenChange: (isOpen: boolean) => void;
   onSelectProduct: (productId: string) => void;
 }) {
   return (
     <>
-      <div className={isOpen ? "top-product-control product-selector is-open" : "top-product-control product-selector"}>
-        <button
-          className="top-product-trigger"
-          type="button"
-          aria-expanded={isOpen}
-          onClick={() => onOpenChange(!isOpen)}
-        >
-          <span className="selector-label">Product</span>
-          <strong>{selectedProductName}</strong>
-          <ChevronDown className="product-selector-caret" size={15} />
-        </button>
+      <div className="top-product-cluster">
+        <div className={isOpen ? "top-product-control product-selector is-open" : "top-product-control product-selector"}>
+          <button
+            className="top-product-trigger"
+            type="button"
+            aria-expanded={isOpen}
+            onClick={() => onOpenChange(!isOpen)}
+          >
+            <span className="top-product-primary">
+              <span className="selector-label">Product</span>
+              <strong>{selectedProductName}</strong>
+              {selectedRunLabel ? <span className="top-product-run">- {selectedRunLabel}</span> : null}
+              <ChevronDown className="product-selector-caret" size={15} />
+            </span>
+          </button>
         {isOpen ? (
           <div className="context-menu-panel product-menu-panel top-product-menu">
             {products.length ? (
@@ -370,23 +383,99 @@ function ProductSelector({
             ) : (
               <p className="context-menu-empty">No products yet</p>
             )}
-            <button className="context-menu-create" type="button" onClick={onAddProduct}>
-              <Plus size={14} />
-              Add product
-            </button>
-            {selectedProductId ? (
-              <button className="context-menu-delete" type="button" onClick={onDeleteProduct}>
-                <Trash2 size={14} />
-                Delete selected product
-              </button>
-            ) : null}
           </div>
         ) : null}
+        </div>
+        <button className="top-product-add" type="button" aria-label="Add product" onClick={onAddProduct}>
+          <Plus size={15} />
+        </button>
       </div>
-      <button className="top-product-add" type="button" aria-label="Add product" onClick={onAddProduct}>
-        <Plus size={16} />
-      </button>
     </>
+  );
+}
+
+function ProductManagementSection({
+  connectedSourceCount,
+  hasContacts,
+  hasProduct,
+  onDelete,
+  onExport,
+  onProductSettings,
+  onSources,
+}: {
+  connectedSourceCount: number;
+  hasContacts: boolean;
+  hasProduct: boolean;
+  onDelete: () => Promise<void> | void;
+  onExport: () => void;
+  onProductSettings: () => void;
+  onSources: () => void;
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <section className="mng" aria-label="Product management">
+      <p className="mng-label">Manage</p>
+      <button className={hasProduct ? "mng-item" : "mng-item is-disabled"} disabled={!hasProduct} type="button" onClick={onProductSettings}>
+        <span className="mng-icon">
+          <Settings size={13} />
+        </span>
+        <span className="mng-label-text">Product settings</span>
+      </button>
+      <button className="mng-item" type="button" onClick={onSources}>
+        <span className="mng-icon">
+          <Plug size={13} />
+        </span>
+        <span className="mng-label-text">Sources</span>
+        <span className="mng-count">· {connectedSourceCount} connected</span>
+      </button>
+      <button className={hasContacts ? "mng-item" : "mng-item is-disabled"} disabled={!hasContacts} type="button" onClick={onExport}>
+        <span className="mng-icon">
+          <Download size={13} />
+        </span>
+        <span className="mng-label-text">Export all contacts</span>
+      </button>
+      <div className="mng-divider" />
+      {confirmingDelete ? (
+        <div className="mng-confirm">
+          <div className="q">
+            Delete this product and its <b>runs, contacts, and history</b>?
+          </div>
+          <div className="btns">
+            <button className="cancel" type="button" onClick={() => setConfirmingDelete(false)}>
+              Cancel
+            </button>
+            <button className="delete" disabled={deleting} type="button" onClick={() => void confirmDelete()}>
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          className={hasProduct ? "mng-danger" : "mng-danger is-disabled"}
+          disabled={!hasProduct}
+          type="button"
+          onClick={() => setConfirmingDelete(true)}
+        >
+          <span className="mng-icon">
+            <Trash2 size={13} />
+          </span>
+          <span className="mng-label-text">Delete product</span>
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -779,4 +868,54 @@ function titleCase(value: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function exportProductContactsCsv(contacts: DiscoveryResult[], productName: string) {
+  const rows = contacts.map((contact) => ({
+    company: contact.company_name,
+    email: contact.contact_email || contact.research?.contact_email || "",
+    contact_name: contact.research?.contact_name || "",
+    phone: rawContactValue(contact, ["phone", "telephone", "contact_phone", "phoneNumber"]),
+    website: contact.website_url || contact.research?.website_url || "",
+    geography: contact.geography || contact.research?.geography || "",
+    source: contact.source,
+    score: String(Math.round(contact.qualification?.score ?? contact.research?.confidence ?? 0)),
+    status: contact.status,
+    summary: contact.research?.summary || contact.description || "",
+  }));
+  const headers = Object.keys(rows[0] || { company: "" });
+  const csv = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => csvCell(row[header as keyof typeof row])).join(",")),
+  ].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${slugify(productName)}-contacts.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function rawContactValue(contact: DiscoveryResult, keys: string[]) {
+  const rawSources = contact.raw_sources || [];
+  for (const source of rawSources) {
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+  }
+  return "";
+}
+
+function csvCell(value: string | number | undefined) {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "contacts";
 }

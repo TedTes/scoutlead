@@ -120,10 +120,13 @@
 
 .contact-card,
 .list-row-shell,
+.mng-item,
+.mng-danger,
+.prompt-template-grid button,
 .top-product-trigger,
 .top-product-add,
+.top-avatar,
 .rail-add-list,
-.rail-settings,
 .secondary,
 .link-button,
 .icon-action,
@@ -154,6 +157,10 @@
 .secondary:active,
 .menu-button:active,
 .top-product-add:active {
+  transform: scale(0.985);
+}
+
+.top-avatar:active {
   transform: scale(0.985);
 }
 

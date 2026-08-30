@@ -1,9 +1,9 @@
-import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Card, Modal, useToast } from "../shared-ui";
+import { ArrowLeft, Save } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { Product } from "../types/domain";
 import type { Screen } from "../types/navigation";
+import { formatDate } from "../utils/format";
 
 type ProductScreenProps = {
   isCreatingProduct: boolean;
@@ -12,232 +12,150 @@ type ProductScreenProps = {
 };
 
 export function ProductScreen({
-  isCreatingProduct,
   onCreatingProductChange,
   onNavigate,
 }: ProductScreenProps) {
   const {
     products,
+    selectedProduct,
     selectedProductId,
-    setSelectedProductId,
-    createProductFromDescription,
-    deleteProduct,
+    productContacts,
+    productDiscoveryRuns,
+    updateProduct,
   } = useAppData();
   const { showToast } = useToast();
-  const [detailProductId, setDetailProductId] = useState("");
-  const [productName, setProductName] = useState("");
+  const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [localError, setLocalError] = useState("");
-  const detailProduct = products.find((product) => product.id === detailProductId);
-  const normalizedProductName = productName.trim().toLowerCase();
-  const hasDuplicateProductName =
-    normalizedProductName.length > 0 &&
-    products.some((product) => product.product_name.trim().toLowerCase() === normalizedProductName);
-  const canCreateProduct =
-    productName.trim().length > 0 &&
-    description.trim().length >= 20 &&
-    !hasDuplicateProductName &&
-    !creating;
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!isCreatingProduct) return;
-    setProductName("");
-    setDescription("");
-    setLocalError("");
-  }, [isCreatingProduct]);
+    setName(selectedProduct?.product_name || "");
+    setDescription(selectedProduct?.product_description || "");
+  }, [selectedProduct?.id, selectedProduct?.product_description, selectedProduct?.product_name]);
 
-  const startCreatingProduct = () => {
-    setProductName("");
-    setDescription("");
-    setLocalError("");
-    onCreatingProductChange(true);
-  };
+  const duplicateName = useMemo(() => {
+    const normalized = name.trim().toLowerCase();
+    return Boolean(
+      normalized &&
+        products.some(
+          (product) =>
+            product.id !== selectedProductId &&
+            product.product_name.trim().toLowerCase() === normalized,
+        ),
+    );
+  }, [name, products, selectedProductId]);
 
-  const selectProduct = (product: Product) => {
-    setSelectedProductId(product.id);
-    setDetailProductId(product.id);
-    onCreatingProductChange(false);
-    setLocalError("");
-  };
+  const hasChanges = Boolean(
+    selectedProduct &&
+      (name.trim() !== selectedProduct.product_name.trim() ||
+        description.trim() !== selectedProduct.product_description.trim()),
+  );
+  const canSave = Boolean(
+    selectedProduct &&
+      name.trim() &&
+      description.trim().length >= 20 &&
+      hasChanges &&
+      !duplicateName &&
+      !saving,
+  );
 
-  const createFromDescription = async () => {
-    if (!canCreateProduct) return;
-    setCreating(true);
-    setLocalError("");
+  const saveProduct = async () => {
+    if (!selectedProduct || !canSave) return;
+    setSaving(true);
     try {
-      const created = await createProductFromDescription({
-        product_name: productName.trim(),
-        description: description.trim(),
+      await updateProduct(selectedProduct.id, {
+        product_name: name.trim(),
+        product_description: description.trim(),
       });
-      if (!created) {
-        showToast({ title: "Product was not created", message: "Check the product details and try again.", tone: "red" });
-        return;
-      }
-      setProductName("");
-      setDescription("");
-      onCreatingProductChange(false);
-      setSelectedProductId(created.id);
-      setDetailProductId(created.id);
+      showToast({ title: "Product saved", message: "Discovery will use the updated context.", tone: "green" });
+    } catch (error) {
       showToast({
-        title: "Product created",
-        message: "Use the product description as the discovery context.",
-        tone: "green",
+        title: "Product was not saved",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
       });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setLocalError(message);
-      showToast({ title: "Product was not created", message, tone: "red" });
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   };
 
-  const deleteSelectedProduct = async () => {
-    if (!detailProduct) return;
-    const confirmed = window.confirm(
-      `Delete ${displayProductName(detailProduct)}? This also removes related discovery results, drafts, and run records for this product.`,
+  if (!selectedProduct) {
+    return (
+      <div className="product-page product-settings-page">
+        <section className="product-settings-empty">
+          <h1>No product selected</h1>
+          <p>Create a product from the top bar before changing product settings.</p>
+          <button className="runbtn" type="button" onClick={() => onCreatingProductChange(true)}>
+            Add product
+          </button>
+        </section>
+      </div>
     );
-    if (!confirmed) return;
-    await deleteProduct(detailProduct.id);
-    setDetailProductId("");
-    showToast({ title: "Product deleted", message: `${displayProductName(detailProduct)} was removed.`, tone: "green" });
-  };
+  }
 
   return (
-    <div className="product-page">
-      {isCreatingProduct ? (
-        <Modal title="Add product" onClose={() => onCreatingProductChange(false)}>
-          <form
-            className="product-description-create"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void createFromDescription();
-            }}
-          >
-            <label className="field">
-              <span>Product name</span>
-              <input
-                autoFocus
-                placeholder="Product name"
-                value={productName}
-                onChange={(event) => setProductName(event.target.value)}
-              />
-              {hasDuplicateProductName ? <em>A product with this name already exists.</em> : null}
-            </label>
-            <label className="field">
-              <span>Product description</span>
-              <textarea
-                placeholder="Describe what the product does, who it is for, and where to search if that matters."
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-              />
-            </label>
-            <div className="form-actions">
-              {products.length > 0 ? (
-                <button className="secondary" type="button" onClick={() => onCreatingProductChange(false)}>
-                  Cancel
-                </button>
-              ) : null}
-              <button disabled={!canCreateProduct} type="submit">
-                {creating ? "Creating..." : "Create product"}
-              </button>
-            </div>
-          </form>
-
-          {localError ? <p className="form-error">{localError}</p> : null}
-        </Modal>
-      ) : null}
-
-      {!detailProduct ? (
-        <Card
-          title="Products"
-          meta={
-            <div className="card-actions">
-              <span className="muted-count">{products.length} total</span>
-              <button className="icon-action" type="button" aria-label="Add product" onClick={startCreatingProduct}>
-                <Plus size={18} />
-              </button>
-            </div>
-          }
-        >
-          <div className="product-table">
-            <div className="product-table-head">
-              <span>Product</span>
-              <span>Description</span>
-            </div>
-            {products.length ? (
-              products.map((product) => (
-                <button
-                  className={product.id === selectedProductId ? "product-table-row active" : "product-table-row"}
-                  key={product.id}
-                  type="button"
-                  onClick={() => selectProduct(product)}
-                >
-                  <strong>{displayProductName(product)}</strong>
-                  <span>{product.product_description || "No description saved."}</span>
-                </button>
-              ))
-            ) : (
-              <p className="empty-copy">No products yet. Add one product name and description to start.</p>
-            )}
+    <div className="product-page product-settings-page">
+      <section className="product-settings-card">
+        <header className="product-settings-header">
+          <div>
+            <span>Product settings</span>
+            <h1>{selectedProduct.product_name}</h1>
           </div>
-        </Card>
-      ) : (
-        <div className="product-detail-stack">
-          <Card
-            title={displayProductName(detailProduct)}
-            meta={
-              <div className="card-actions">
-                <button className="secondary" type="button" onClick={() => setDetailProductId("")}>
-                  Back
-                </button>
-                <button type="button" onClick={() => onNavigate("overview")}>
-                  List contacts
-                </button>
-                <button className="danger" onClick={deleteSelectedProduct}>
-                  <Trash2 size={14} />
-                  Delete
-                </button>
-              </div>
-            }
-          >
-            <p className="product-brief">{detailProduct.product_description}</p>
-            <div className="product-facts">
-              <ProductFact label="Created" value={formatDate(detailProduct.created_at)} />
-              <ProductFact label="Updated" value={formatDate(detailProduct.updated_at)} />
-              <ProductFact label="Source" value="Product description" />
-            </div>
-          </Card>
+          <button className="secondary" type="button" onClick={() => onNavigate("overview")}>
+            <ArrowLeft size={14} />
+            Finder
+          </button>
+        </header>
 
-          <Card title="Discovery context">
-            <p className="empty-copy">
-              ScoutLead will use this product description as the context for discovery sources. Include target customer,
-              niche, geography, or source hints directly in the description when you want to narrow the search.
-            </p>
-          </Card>
-        </div>
-      )}
+        <form
+          className="product-settings-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveProduct();
+          }}
+        >
+          <label className="field product-name-field">
+            <span>Product name</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} />
+            {duplicateName ? <em>A product with this name already exists.</em> : null}
+          </label>
+
+          <label className="field">
+            <span>Product description</span>
+            <textarea
+              rows={8}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+            <small className="product-settings-hint">
+              Describe what it does, who it helps, and any market or geography hints you want the finder to use.
+            </small>
+          </label>
+
+          <div className="product-settings-meta" aria-label="Product summary">
+            <ProductSettingMeta label="Runs" value={String(productDiscoveryRuns.length)} />
+            <ProductSettingMeta label="Contacts" value={String(productContacts.length)} />
+            <ProductSettingMeta label="Updated" value={formatDate(selectedProduct.updated_at)} />
+          </div>
+
+          <footer className="product-settings-actions">
+            {!hasChanges ? <span>No unsaved changes</span> : <span>Unsaved changes</span>}
+            <button className="runbtn" disabled={!canSave} type="submit">
+              <Save size={14} />
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </footer>
+        </form>
+      </section>
     </div>
   );
 }
 
-function ProductFact({ label, value }: { label: string; value: string }) {
+function ProductSettingMeta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="product-fact">
+    <div>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
-}
-
-function displayProductName(product: Product) {
-  const savedName = product.product_name.trim();
-  return savedName || "Unnamed product";
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }

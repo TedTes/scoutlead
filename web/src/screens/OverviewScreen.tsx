@@ -5,21 +5,18 @@ import { useToast } from "../shared-ui";
 import type { SourceProvider, SourceRequestSource } from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
-const starterPrompts = [
+const promptTemplates = [
   {
-    label: "Residential painters in Toronto",
-    hint: "Local shops with websites and quote forms",
-    query: "independent residential painters in Toronto with a website, quote-request form, strong reviews, and owner contact details",
+    label: "Local service shops",
+    query: "independent [service] businesses in [city] with a website, strong reviews, and owner contact details",
   },
   {
-    label: "Small HVAC in Vancouver",
-    hint: "Service businesses with direct contact paths",
-    query: "small HVAC companies in Vancouver with a website, strong reviews, and reachable owner contact details",
+    label: "Marketplace listings",
+    query: "[service] providers in [city] with direct phone numbers, recent listings, and clear service descriptions",
   },
   {
-    label: "Auto detailers in Calgary",
-    hint: "Owner-led shops with public booking signals",
-    query: "independent mobile auto detailers in Calgary with strong reviews, a website, and owner contact details",
+    label: "Quote-ready businesses",
+    query: "[business type] in [city] with quote forms, public contact details, and proof they serve customers directly",
   },
 ];
 
@@ -96,11 +93,6 @@ export function OverviewScreen({
     }
   };
 
-  const runStarter = (query: string) => {
-    setPrompt(query);
-    void submitSourceRequest(query);
-  };
-
   return (
     <section className="discovery-workspace">
       <header className="discovery-hero">
@@ -117,15 +109,17 @@ export function OverviewScreen({
           void submitSourceRequest(prompt);
         }}
       >
-        <label className="composer-query">
-          <span>Search</span>
-          <textarea
-            aria-label={`Find contacts for ${selectedProduct?.product_name || "selected product"}`}
-            placeholder="Independent residential painters in Toronto with a website, quote form, and owner contact"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-          />
-        </label>
+        <div className="composer-body">
+          <label className="composer-query">
+            <span>Search</span>
+            <textarea
+              aria-label={`Find contacts for ${selectedProduct?.product_name || "selected product"}`}
+              placeholder="Independent residential painters in Toronto with a website, quote form, and owner contact"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+            />
+          </label>
+        </div>
 
         {promptTags.length ? (
           <div className="composer-tags" aria-label="Search signals">
@@ -172,18 +166,14 @@ export function OverviewScreen({
         </div>
       </form>
 
-      <div className="starter-section">
-        <span className="starter-section-label">Or start from an example</span>
-        <div className="starter-grid">
-          {starterPrompts.map((starter) => (
-            <button key={starter.label} type="button" onClick={() => runStarter(starter.query)}>
-              <strong>{starter.label}</strong>
-              <span>{starter.hint}</span>
-              <em>Run this search</em>
-            </button>
-          ))}
-        </div>
-      </div>
+      <section className="prompt-template-grid" aria-label="Search templates">
+        {promptTemplates.map((template) => (
+          <button key={template.label} type="button" onClick={() => setPrompt(template.query)}>
+            <strong>{template.label}</strong>
+            <small>{template.query}</small>
+          </button>
+        ))}
+      </section>
     </section>
   );
 }
