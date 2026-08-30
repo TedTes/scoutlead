@@ -560,11 +560,11 @@ a {
 
 .app-topbar {
   align-items: center;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  background: transparent;
+  border-bottom: 0;
   display: flex;
-  flex: 0 0 62px;
-  padding: 0 24px;
+  flex: 0 0 auto;
+  padding: 12px 26px 0;
 }
 
 .top-product-area {
@@ -572,6 +572,8 @@ a {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+  margin: 0 auto;
+  max-width: 960px;
   position: relative;
   width: 100%;
 }

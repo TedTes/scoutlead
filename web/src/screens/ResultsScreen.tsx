@@ -146,6 +146,10 @@ export function ResultsScreen() {
     return <OverviewScreen />;
   }
 
+  if (!contacts.length) {
+    return <OverviewScreen />;
+  }
+
   return (
     <section className="results-workspace">
       <SearchStrip
