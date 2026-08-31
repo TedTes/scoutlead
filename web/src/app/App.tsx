@@ -480,18 +480,43 @@ function ProductManagementSection({
 }
 
 function RunHistoryDraft({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [editing, setEditing] = useState(true);
+  const displayName = value.trim() || "Page name";
+
+  const commitName = () => {
+    onChange(displayName);
+    setEditing(false);
+  };
+
   return (
     <div className="list-row-shell draft active">
-      <div className="list-row-editor">
-        <span className="list-run-marker" />
-        <input
-          aria-label="New list name"
-          autoFocus
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onFocus={(event) => event.currentTarget.select()}
-        />
-      </div>
+      {editing ? (
+        <div className="list-row-editor">
+          <span className="list-run-marker" />
+          <input
+            aria-label="New list name"
+            autoFocus
+            value={value}
+            onBlur={commitName}
+            onChange={(event) => onChange(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                commitName();
+              }
+            }}
+          />
+        </div>
+      ) : (
+        <button className="list-row-main" type="button" onDoubleClick={() => setEditing(true)}>
+          <span className="list-run-marker" />
+          <span>
+            <strong>{displayName}</strong>
+          </span>
+        </button>
+      )}
       <small>new search</small>
     </div>
   );

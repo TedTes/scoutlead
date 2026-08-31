@@ -257,10 +257,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setSelectedProductIdState(nextProductId);
       if (nextProductId) localStorage.setItem("selectedProductId", nextProductId);
 
-      const storedRunId = localStorage.getItem("selectedDiscoveryRunId") || "";
+      const storedRunIdValue = localStorage.getItem("selectedDiscoveryRunId");
+      const storedRunId = storedRunIdValue || "";
       const productRunList = nextRuns.filter((run) => run.product_id === nextProductId);
       const nextRunId =
-        (storedRunId && productRunList.some((run) => run.id === storedRunId) ? storedRunId : productRunList[0]?.id) || "";
+        storedRunId && productRunList.some((run) => run.id === storedRunId)
+          ? storedRunId
+          : storedRunIdValue === null
+            ? productRunList[0]?.id || ""
+            : "";
       setSelectedDiscoveryRunIdState(nextRunId);
       selectedDiscoveryRunIdRef.current = nextRunId;
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
