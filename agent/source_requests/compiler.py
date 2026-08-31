@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from agents.llm import LLMClient
-from products.discovery_policy import normalize_places_region_code, validate_google_places_query
+from products.discovery_policy import build_local_business_query, normalize_places_region_code
 from products.schemas import ProductRead
 from prompts.source_intent import SOURCE_INTENT_PROMPT, SOURCE_INTENT_SYSTEM
 from shared.errors import ValidationError
@@ -37,8 +37,11 @@ class SourceRequestCompiler:
         product: ProductRead,
     ) -> SourceRequestPlan:
         intent = self._interpret(request=request, product=product, source=GOOGLE_PLACES_PROVIDER_ID)
-        query = normalize_text(intent.search_query)
-        validate_google_places_query(query)
+        query = build_local_business_query(
+            business_category=intent.business_category,
+            location=intent.location,
+            fallback_query=intent.search_query,
+        )
         region_code = normalize_places_region_code(intent.country or product.target_geography)
         return SourceRequestPlan(
             source=GOOGLE_PLACES_PROVIDER_ID,

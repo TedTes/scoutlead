@@ -176,13 +176,14 @@ export class ApiClient {
     const payload = response.status === 204 ? undefined : await response.json().catch(() => undefined);
     if (!response.ok) {
       const details = payload?.error?.details;
+      const userMessage = details && typeof details === "object" ? details.user_message : undefined;
       const detailText =
-        details && typeof details === "object"
+        !userMessage && details && typeof details === "object"
           ? [details.required_shape, details.query ? `Query: ${details.query}` : undefined]
               .filter(Boolean)
               .join(" ")
           : "";
-      const message = [payload?.error?.message ?? `Request failed with ${response.status}`, detailText]
+      const message = [userMessage ?? payload?.error?.message ?? `Request failed with ${response.status}`, detailText]
         .filter(Boolean)
         .join(" ");
       throw new Error(message);

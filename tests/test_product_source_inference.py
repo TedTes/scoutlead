@@ -17,7 +17,9 @@ from products.schemas import (
     QualificationCriterion,
 )
 from products.discovery_policy import (
+    build_local_business_query,
     normalize_places_region_code,
+    validate_local_business_intent,
     validate_google_places_query,
 )
 from products.service import ProductService
@@ -554,9 +556,37 @@ def test_product_discovery_query_policy_rejects_broad_web_search_syntax() -> Non
         validate_google_places_query(
             "solo painter OR independent painter OR field service technician"
         )
+    with pytest.raises(ValidationError):
+        validate_google_places_query("residential painters Toronto ON site:example.com")
 
 
-def test_product_discovery_query_policy_requires_market_context() -> None:
+def test_product_discovery_query_policy_allows_natural_language_and() -> None:
+    validate_google_places_query(
+        "residential painting contractors Toronto ON with direct phone contact and quote-ready service pages"
+    )
+
+
+def test_local_business_intent_uses_parsed_location_dynamically() -> None:
+    assert (
+        build_local_business_query(
+            business_category="residential painting contractors",
+            location="Toronto",
+            fallback_query="residential painting contractors Toronto with direct phone contact",
+        )
+        == "residential painting contractors Toronto"
+    )
+
+
+def test_local_business_intent_requires_parsed_market_context() -> None:
+    with pytest.raises(ValidationError):
+        validate_local_business_intent(
+            business_category="residential painters",
+            location="",
+            query="residential painters",
+        )
+
+
+def test_product_discovery_query_policy_requires_enough_query_context() -> None:
     with pytest.raises(ValidationError):
         validate_google_places_query("residential painters")
 
