@@ -8,6 +8,7 @@ import type {
   DiscoveryResult,
   DiscoverySnapshot,
   DiscoveryTrace,
+  LeadUpdateInput,
   Message,
   Metrics,
   Product,
@@ -54,6 +55,9 @@ type AppDataContextValue = {
   pauseDiscoveryRun: (runId?: string) => Promise<void>;
   resumeDiscoveryRun: (runId?: string) => Promise<void>;
   addSeedResults: (seeds: unknown[]) => Promise<void>;
+  qualifyLead: (leadId: string) => Promise<void>;
+  updateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
+  createOutreachDraft: (leadId: string) => Promise<Message | null>;
   updateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
   approveMessage: (messageId: string) => Promise<void>;
   sendMessage: (messageId: string) => Promise<void>;
@@ -418,6 +422,21 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         mutate(async () => {
           if (selectedDiscoveryRunIdState) await api.addSeedResults(selectedDiscoveryRunIdState, seeds);
         }),
+      qualifyLead: (leadId) =>
+        mutate(async () => {
+          await api.qualifyLead(leadId);
+        }),
+      updateLead: (leadId, update) =>
+        mutate(async () => {
+          await api.updateLead(leadId, update);
+        }),
+      createOutreachDraft: async (leadId) => {
+        let created: Message | null = null;
+        await mutate(async () => {
+          created = await api.createLeadOutreachDraft(leadId);
+        });
+        return created;
+      },
       updateMessage: (messageId, update) =>
         mutate(async () => {
           await api.updateMessage(messageId, update);

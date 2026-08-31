@@ -133,6 +133,15 @@ export type ResultSeedInput = {
   raw?: Record<string, unknown> | null;
 };
 
+export type LeadReviewStatus = "unreviewed" | "good_fit" | "maybe" | "not_fit";
+export type AgentFitStatus = "good_fit" | "maybe" | "not_fit";
+
+export type LeadUpdateInput = {
+  review_status?: LeadReviewStatus;
+  review_note?: string | null;
+  shortlisted?: boolean;
+};
+
 export type DiscoveryResult = {
   id: string;
   campaign_id: string;
@@ -145,6 +154,10 @@ export type DiscoveryResult = {
   source: string;
   raw_sources?: Array<Record<string, unknown>>;
   status: string;
+  review_status?: LeadReviewStatus;
+  review_note?: string | null;
+  reviewed_at?: string | null;
+  shortlisted_at?: string | null;
   created_at: string;
   updated_at: string;
   research?: {
@@ -162,8 +175,12 @@ export type DiscoveryResult = {
   };
   qualification?: {
     qualified: boolean;
+    fit_status?: AgentFitStatus | null;
     score: number;
     rationale: string;
+    positive_signals?: string[];
+    missing_evidence?: string[];
+    risks?: string[];
     recommended_next_step?: string;
     criteria?: Array<{
       criterion_id: string;

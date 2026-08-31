@@ -10,6 +10,7 @@ import type {
   DiscoveryTrace,
   DiscoveryCandidate,
   DiscoveryResult,
+  LeadUpdateInput,
   Message,
   Metrics,
   Product,
@@ -133,12 +134,24 @@ export class ApiClient {
     return this.request<DiscoveryResult[]>(`/discovery-runs/${runId}/results`);
   }
 
+  updateLead(id: string, body: LeadUpdateInput) {
+    return this.request<DiscoveryResult>(`/leads/${id}`, { method: "PATCH", body });
+  }
+
+  qualifyLead(id: string) {
+    return this.request<DiscoveryResult>(`/leads/${id}/qualify`, { method: "POST" });
+  }
+
   getDiscoveryCandidates(runId: string) {
     return this.request<DiscoveryCandidate[]>(`/discovery-runs/${runId}/discovery-candidates`);
   }
 
   getMessages(runId: string) {
     return this.request<Message[]>(`/discovery-runs/${runId}/messages`);
+  }
+
+  createLeadOutreachDraft(leadId: string) {
+    return this.request<Message>(`/leads/${leadId}/outreach-draft`, { method: "POST" });
   }
 
   updateMessage(id: string, body: Partial<Message>) {

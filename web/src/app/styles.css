@@ -1724,6 +1724,238 @@ a {
   white-space: nowrap;
 }
 
+.drawer-agent-panel {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: grid;
+  gap: 11px;
+  margin: 14px 0 4px;
+  padding: 12px;
+}
+
+.agent-rationale {
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.agent-evidence-grid {
+  display: grid;
+  gap: 9px;
+}
+
+.agent-evidence-list {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 10px;
+}
+
+.agent-evidence-list strong {
+  color: var(--faint);
+  display: block;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.agent-evidence-list ul {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-evidence-list li,
+.agent-evidence-list p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.drawer-review-panel {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 4px;
+  padding: 12px;
+}
+
+.drawer-section-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.drawer-section-heading h3,
+.review-note-field span {
+  color: var(--faint);
+  display: block;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 1px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.drawer-section-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.review-action-row,
+.review-secondary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-action-row button,
+.review-secondary-row button {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.review-action-row button:hover,
+.review-secondary-row button:hover {
+  border-color: var(--black);
+}
+
+.review-action-row button.active,
+.review-secondary-row button.active {
+  background: var(--black);
+  border-color: var(--black);
+  color: white;
+}
+
+.review-action-row button:disabled,
+.review-secondary-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.review-note-field {
+  display: grid;
+  gap: 6px;
+}
+
+.review-note-field textarea {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+  min-height: 72px;
+  outline: 0;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.review-note-field textarea:focus {
+  border-color: var(--black);
+  box-shadow: 0 0 0 3px rgba(27, 31, 36, 0.08);
+}
+
+.drawer-outreach-panel {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 4px;
+  padding: 12px;
+}
+
+.draft-field {
+  display: grid;
+  gap: 6px;
+}
+
+.draft-field span {
+  color: var(--faint);
+  display: block;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.draft-field input,
+.draft-field textarea {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+  outline: 0;
+  padding: 9px 10px;
+}
+
+.draft-field textarea {
+  min-height: 132px;
+  resize: vertical;
+}
+
+.draft-field input:focus,
+.draft-field textarea:focus {
+  border-color: var(--black);
+  box-shadow: 0 0 0 3px rgba(27, 31, 36, 0.08);
+}
+
+.draft-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.draft-action-row button,
+.generate-draft-button {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.draft-action-row button:hover,
+.generate-draft-button:hover {
+  border-color: var(--black);
+}
+
+.draft-action-row button:disabled,
+.generate-draft-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.draft-warning {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .drawer-detail-list {
   margin: 8px 0 0;
 }

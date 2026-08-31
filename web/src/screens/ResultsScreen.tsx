@@ -4,10 +4,17 @@ import type { ReactNode } from "react";
 import { OverviewScreen } from "./OverviewScreen";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { DiscoveryResult, SourceRequestSource } from "../types/domain";
+import type {
+  AgentFitStatus,
+  DiscoveryResult,
+  LeadReviewStatus,
+  LeadUpdateInput,
+  Message,
+  SourceRequestSource,
+} from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
-type ResultFilter = "all" | "reachable";
+type ResultFilter = "all" | "shortlisted" | "needs_review" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
 
 export function ResultsScreen() {
@@ -21,6 +28,12 @@ export function ResultsScreen() {
     setSelectedDiscoveryRunId,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
+    qualifyLead,
+    updateLead,
+    createOutreachDraft,
+    updateMessage,
+    approveMessage,
+    sendMessage,
     snapshot,
     sourceProviders,
   } = useAppData();
@@ -40,10 +53,17 @@ export function ResultsScreen() {
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = draftPrompt.trim() || runPrompt;
   const selectedSource = selectedSources[0] || "";
-  const reachableContacts = contacts.filter((contact) => isReachableContact(contact)).length;
+  const shortlistedContacts = contacts.filter((contact) => contact.shortlisted_at).length;
+  const needsReviewContacts = contacts.filter((contact) => reviewStatus(contact) === "unreviewed").length;
+  const notFitContacts = contacts.filter((contact) => reviewStatus(contact) === "not_fit").length;
+  const draftedLeadIds = new Set(snapshot.messages.filter((message) => message.status !== "cancelled").map((message) => message.lead_id));
+  const draftedContacts = contacts.filter((contact) => draftedLeadIds.has(contact.id)).length;
   const visibleContacts = contacts
     .filter((contact) => {
-      if (filter === "reachable") return isReachableContact(contact);
+      if (filter === "shortlisted") return Boolean(contact.shortlisted_at);
+      if (filter === "needs_review") return reviewStatus(contact) === "unreviewed";
+      if (filter === "not_fit") return reviewStatus(contact) === "not_fit";
+      if (filter === "has_draft") return draftedLeadIds.has(contact.id);
       return true;
     })
     .sort((a, b) => {
@@ -53,6 +73,9 @@ export function ResultsScreen() {
     });
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId);
+  const selectedMessage = selectedContact
+    ? snapshot.messages.find((message) => message.lead_id === selectedContact.id && message.status !== "cancelled")
+    : undefined;
 
   useEffect(() => {
     setDraftPrompt(runPrompt);
@@ -175,11 +198,19 @@ export function ResultsScreen() {
               <div className="action-menu">
                 <button
                   type="button"
-                  disabled={!visibleContacts.length}
-                  onClick={() => exportContactsCsv(visibleContacts.length ? visibleContacts : contacts, exportName)}
+                  disabled={!contacts.length}
+                  onClick={() => exportContactsCsv(contacts, exportName)}
                 >
                   <Download size={14} />
-                  Export CSV
+                  Export all contacts
+                </button>
+                <button
+                  type="button"
+                  disabled={!shortlistedContacts}
+                  onClick={() => exportContactsCsv(contacts.filter((contact) => contact.shortlisted_at), `${exportName}-shortlist`)}
+                >
+                  <Download size={14} />
+                  Export shortlist
                 </button>
                 <button type="button" onClick={() => void renameCurrentRun()}>
                   Rename run
@@ -204,9 +235,21 @@ export function ResultsScreen() {
             All
             <span>{contacts.length}</span>
           </button>
-          <button className={filter === "reachable" ? "active" : ""} type="button" onClick={() => setFilter("reachable")}>
-            Reachable
-            <span>{reachableContacts}</span>
+          <button className={filter === "shortlisted" ? "active" : ""} type="button" onClick={() => setFilter("shortlisted")}>
+            Shortlisted
+            <span>{shortlistedContacts}</span>
+          </button>
+          <button className={filter === "needs_review" ? "active" : ""} type="button" onClick={() => setFilter("needs_review")}>
+            Needs review
+            <span>{needsReviewContacts}</span>
+          </button>
+          <button className={filter === "not_fit" ? "active" : ""} type="button" onClick={() => setFilter("not_fit")}>
+            Not fit
+            <span>{notFitContacts}</span>
+          </button>
+          <button className={filter === "has_draft" ? "active" : ""} type="button" onClick={() => setFilter("has_draft")}>
+            Has draft
+            <span>{draftedContacts}</span>
           </button>
         </div>
         <div className="sort-tabs">
@@ -243,7 +286,17 @@ export function ResultsScreen() {
         </section>
       )}
 
-      <ContactDrawer contact={selectedContact} onClose={() => setSelectedContactId("")} />
+      <ContactDrawer
+        contact={selectedContact}
+        message={selectedMessage}
+        onClose={() => setSelectedContactId("")}
+        onApproveMessage={approveMessage}
+        onCreateDraft={createOutreachDraft}
+        onQualifyLead={qualifyLead}
+        onSendMessage={sendMessage}
+        onUpdateLead={updateLead}
+        onUpdateMessage={updateMessage}
+      />
     </section>
   );
 }
@@ -356,13 +409,45 @@ function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: ()
   );
 }
 
-function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefined; onClose: () => void }) {
+function ContactDrawer({
+  contact,
+  message,
+  onClose,
+  onApproveMessage,
+  onCreateDraft,
+  onQualifyLead,
+  onSendMessage,
+  onUpdateLead,
+  onUpdateMessage,
+}: {
+  contact: DiscoveryResult | undefined;
+  message: Message | undefined;
+  onClose: () => void;
+  onApproveMessage: (messageId: string) => Promise<void>;
+  onCreateDraft: (leadId: string) => Promise<Message | null>;
+  onQualifyLead: (leadId: string) => Promise<void>;
+  onSendMessage: (messageId: string) => Promise<void>;
+  onUpdateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
+  onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
+}) {
   const { showToast } = useToast();
   const open = Boolean(contact);
   const score = contact ? contactScore(contact) : 0;
+  const currentReviewStatus = contact ? reviewStatus(contact) : "unreviewed";
+  const agentAssessment = contact ? getAgentAssessment(contact) : undefined;
+  const canShortlist = contact ? canShortlistContact(contact) : false;
+  const shortlisted = Boolean(contact?.shortlisted_at);
+  const canDraft = shortlisted && canShortlist;
+  const [reviewNote, setReviewNote] = useState("");
+  const [qualifying, setQualifying] = useState(false);
+  const [savingReview, setSavingReview] = useState(false);
+  const [draftSubject, setDraftSubject] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [savingDraft, setSavingDraft] = useState(false);
   const signals = contact ? contactSignals(contact) : [];
   const website = contact?.website_url || contact?.research?.website_url || "";
   const email = contact?.contact_email || contact?.research?.contact_email || "";
+  const canSend = Boolean(message && message.status === "approved" && email && canDraft);
   const phone = contact ? getPhone(contact) : "";
   const contactName = contact ? getContactName(contact) : "";
   const address = contact ? getAddress(contact) : "";
@@ -391,6 +476,135 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
       window.removeEventListener("keydown", onKey);
     };
   }, [onClose, open]);
+
+  useEffect(() => {
+    setReviewNote(contact?.review_note || "");
+  }, [contact?.id, contact?.review_note]);
+
+  useEffect(() => {
+    setDraftSubject(message?.subject || "");
+    setDraftBody(message?.body || "");
+  }, [message?.id, message?.subject, message?.body]);
+
+  const saveLeadUpdate = async (update: LeadUpdateInput, successTitle: string) => {
+    if (!contact || savingReview) return;
+    setSavingReview(true);
+    try {
+      await onUpdateLead(contact.id, update);
+      showToast({ title: successTitle, tone: "green" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Update failed", message, tone: "red" });
+    } finally {
+      setSavingReview(false);
+    }
+  };
+
+  const runAgentCheck = async () => {
+    if (!contact || qualifying) return;
+    setQualifying(true);
+    try {
+      await onQualifyLead(contact.id);
+      showToast({ title: "Agent assessment updated", tone: "green" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Agent check failed", message, tone: "red" });
+    } finally {
+      setQualifying(false);
+    }
+  };
+
+  const chooseReviewStatus = (nextStatus: LeadReviewStatus) => {
+    void saveLeadUpdate(
+      {
+        review_status: nextStatus,
+        shortlisted: nextStatus === "not_fit" ? false : undefined,
+      },
+      "Review saved",
+    );
+  };
+
+  const toggleShortlist = () => {
+    if (!contact || !canShortlist) return;
+    void saveLeadUpdate(
+      { shortlisted: !shortlisted },
+      shortlisted ? "Removed from shortlist" : "Shortlisted",
+    );
+  };
+
+  const saveReviewNote = () => {
+    void saveLeadUpdate({ review_note: reviewNote }, "Review note saved");
+  };
+
+  const generateDraft = async () => {
+    if (!contact || savingDraft) return;
+    setSavingDraft(true);
+    try {
+      const created = await onCreateDraft(contact.id);
+      if (created) {
+        setDraftSubject(created.subject || "");
+        setDraftBody(created.body || "");
+      }
+      showToast({ title: "Draft ready", tone: "green" });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Draft failed", message: errorMessage, tone: "red" });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const saveDraft = async () => {
+    if (!message || savingDraft || !draftBody.trim()) return;
+    setSavingDraft(true);
+    try {
+      await onUpdateMessage(message.id, {
+        subject: draftSubject.trim() || undefined,
+        body: draftBody.trim(),
+      });
+      showToast({ title: "Draft saved", tone: "green" });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Draft save failed", message: errorMessage, tone: "red" });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const approveDraft = async () => {
+    if (!message || savingDraft) return;
+    setSavingDraft(true);
+    try {
+      await onApproveMessage(message.id);
+      showToast({ title: "Draft approved", tone: "green" });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Approval failed", message: errorMessage, tone: "red" });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const sendDraft = async () => {
+    if (!message || savingDraft) return;
+    const confirmed = window.confirm("Send this approved email now?");
+    if (!confirmed) return;
+    setSavingDraft(true);
+    try {
+      await onSendMessage(message.id);
+      showToast({ title: "Email sent", tone: "green" });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Send failed", message: errorMessage, tone: "red" });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const copyDraft = () => {
+    const text = [draftSubject ? `Subject: ${draftSubject}` : "", draftBody].filter(Boolean).join("\n\n");
+    void copy(text, "Draft");
+  };
 
   const copy = async (value: string, label: string) => {
     if (!value) return;
@@ -435,6 +649,143 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
                 ))}
               </div>
 
+              <section className="drawer-agent-panel">
+                <div className="drawer-section-heading">
+                  <h3>Agent assessment</h3>
+                  <span>
+                    {agentAssessment
+                      ? `${agentFitStatusLabel(agentAssessment.fitStatus)} · ${agentAssessment.score}`
+                      : "Not assessed"}
+                  </span>
+                </div>
+                {agentAssessment ? (
+                  <>
+                    <p className="agent-rationale">{agentAssessment.rationale}</p>
+                    <div className="agent-evidence-grid">
+                      <EvidenceList title="Positive signals" items={agentAssessment.positiveSignals} empty="No strong positive signals captured." />
+                      <EvidenceList title="Missing evidence" items={agentAssessment.missingEvidence} empty="No missing evidence called out." />
+                      <EvidenceList title="Risks" items={agentAssessment.risks} empty="No specific risks captured." />
+                    </div>
+                  </>
+                ) : (
+                  <p className="agent-rationale">Run an agent check to score this contact against the product criteria.</p>
+                )}
+                <div className="review-secondary-row">
+                  <button type="button" disabled={qualifying} onClick={runAgentCheck}>
+                    {qualifying ? "Checking..." : agentAssessment ? "Recheck fit" : "Run agent check"}
+                  </button>
+                  {agentAssessment && currentReviewStatus === "unreviewed" ? (
+                    <button
+                      type="button"
+                      disabled={qualifying || savingReview}
+                      onClick={() => chooseReviewStatus(agentAssessment.fitStatus)}
+                    >
+                      Use recommendation
+                    </button>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="drawer-review-panel">
+                <div className="drawer-section-heading">
+                  <h3>Review</h3>
+                  <span>{reviewStatusLabel(currentReviewStatus)}</span>
+                </div>
+                <div className="review-action-row">
+                  {(["good_fit", "maybe", "not_fit"] as LeadReviewStatus[]).map((status) => (
+                    <button
+                      className={currentReviewStatus === status ? "active" : ""}
+                      disabled={savingReview}
+                      key={status}
+                      type="button"
+                      onClick={() => chooseReviewStatus(status)}
+                    >
+                      {reviewStatusLabel(status)}
+                    </button>
+                  ))}
+                </div>
+                <label className="review-note-field">
+                  <span>Note</span>
+                  <textarea
+                    placeholder="Why this contact is or is not worth pursuing"
+                    value={reviewNote}
+                    onChange={(event) => setReviewNote(event.target.value)}
+                  />
+                </label>
+                <div className="review-secondary-row">
+                  <button type="button" disabled={savingReview} onClick={saveReviewNote}>
+                    Save note
+                  </button>
+                  {canShortlist ? (
+                    <button
+                      className={shortlisted ? "active" : ""}
+                      type="button"
+                      disabled={savingReview}
+                      onClick={toggleShortlist}
+                    >
+                      {shortlisted ? "Shortlisted" : "Shortlist"}
+                    </button>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="drawer-outreach-panel">
+                <div className="drawer-section-heading">
+                  <h3>Outreach</h3>
+                  <span>{message ? messageStatusLabel(message.status) : canDraft ? "Not generated" : "Shortlist required"}</span>
+                </div>
+                {message ? (
+                  <>
+                    <label className="draft-field">
+                      <span>Subject</span>
+                      <input
+                        value={draftSubject}
+                        onChange={(event) => setDraftSubject(event.target.value)}
+                        disabled={message.status === "sent"}
+                      />
+                    </label>
+                    <label className="draft-field">
+                      <span>Body</span>
+                      <textarea
+                        value={draftBody}
+                        onChange={(event) => setDraftBody(event.target.value)}
+                        disabled={message.status === "sent"}
+                      />
+                    </label>
+                    <div className="draft-action-row">
+                      <button type="button" disabled={savingDraft || !draftBody.trim() || message.status === "sent"} onClick={saveDraft}>
+                        Save
+                      </button>
+                      <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={copyDraft}>
+                        <Copy size={13} />
+                        Copy
+                      </button>
+                      {message.status === "pending_approval" || message.status === "draft" ? (
+                        <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={approveDraft}>
+                          Approve
+                        </button>
+                      ) : null}
+                      {message.status === "approved" ? (
+                        <button type="button" disabled={savingDraft || !canSend} onClick={sendDraft}>
+                          Send email
+                        </button>
+                      ) : null}
+                    </div>
+                    {message.status === "approved" && !canSend ? (
+                      <p className="draft-warning">
+                        {!email ? "Add or find an email before sending." : "Keep this contact shortlisted before sending."}
+                      </p>
+                    ) : null}
+                  </>
+                ) : canDraft ? (
+                  <button className="generate-draft-button" type="button" disabled={savingDraft} onClick={generateDraft}>
+                    Generate draft
+                  </button>
+                ) : (
+                  <p className="draft-warning">Mark this contact as Good fit or Maybe, then shortlist it before drafting.</p>
+                )}
+              </section>
+
               <dl className="drawer-detail-list">
                 <DrawerRow icon={<MapPin size={16} />} label="Address">
                   {address || contact.geography || contact.research?.geography || "No address found"}
@@ -473,11 +824,6 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
                 <Mini label="Posted" value={posted || "—"} />
                 <Mini label="Confidence" value={confidence} />
               </div>
-
-              <section className="drawer-section">
-                <h3>{contact.status === "disqualified" ? "Disqualification reason" : "Qualification"}</h3>
-                <p>{disqualificationReason(contact) || contact.qualification?.rationale || "No qualification summary yet."}</p>
-              </section>
 
               {evidenceNotes.length ? (
                 <section className="drawer-section">
@@ -525,6 +871,24 @@ function Mini({ label, value }: { label: string; value: string }) {
   );
 }
 
+function EvidenceList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  const visibleItems = items.filter(Boolean).slice(0, 3);
+  return (
+    <div className="agent-evidence-list">
+      <strong>{title}</strong>
+      {visibleItems.length ? (
+        <ul>
+          {visibleItems.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>{empty}</p>
+      )}
+    </div>
+  );
+}
+
 function getRunPrompt(run: { source_input?: string | null; source_inputs?: Record<string, unknown> } | undefined) {
   const prompt = run?.source_inputs?.source_request_prompt;
   if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
@@ -549,6 +913,72 @@ function contactStatusLabel(contact: DiscoveryResult) {
   if (contact.qualification?.qualified) return "Qualified";
   if (contact.status === "disqualified") return "Disqualified";
   return "Review";
+}
+
+function reviewStatus(contact: DiscoveryResult): LeadReviewStatus {
+  return contact.review_status || "unreviewed";
+}
+
+function reviewStatusLabel(status: LeadReviewStatus) {
+  const labels: Record<LeadReviewStatus, string> = {
+    unreviewed: "Needs review",
+    good_fit: "Good fit",
+    maybe: "Maybe",
+    not_fit: "Not fit",
+  };
+  return labels[status];
+}
+
+function agentFitStatusLabel(status: AgentFitStatus) {
+  const labels: Record<AgentFitStatus, string> = {
+    good_fit: "Good fit",
+    maybe: "Maybe",
+    not_fit: "Not fit",
+  };
+  return labels[status];
+}
+
+function getAgentAssessment(contact: DiscoveryResult) {
+  const qualification = contact.qualification;
+  if (!qualification) return undefined;
+  const fitStatus = qualification.fit_status || deriveAgentFitStatus(qualification.qualified, qualification.score, qualification.recommended_next_step);
+  const criteriaEvidence = (qualification.criteria || []).flatMap((criterion) => criterion.evidence || []);
+  const criteriaMissing = (qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || []);
+  return {
+    fitStatus,
+    score: Math.max(0, Math.min(100, Math.round(qualification.score))),
+    rationale: qualification.rationale || "No rationale captured.",
+    positiveSignals: [...new Set([...(qualification.positive_signals || []), ...criteriaEvidence])],
+    missingEvidence: [...new Set([...(qualification.missing_evidence || []), ...criteriaMissing])],
+    risks: [...new Set([...(qualification.risks || []), ...(contact.research?.disqualifiers || [])])],
+  };
+}
+
+function deriveAgentFitStatus(qualified: boolean, score: number, nextStep?: string): AgentFitStatus {
+  if (qualified && score >= 65) return "good_fit";
+  if (score >= 50 && !/do not/i.test(nextStep || "")) return "maybe";
+  return "not_fit";
+}
+
+function canShortlistContact(contact: DiscoveryResult) {
+  const status = reviewStatus(contact);
+  if (status === "not_fit") return false;
+  if (status === "good_fit" || status === "maybe") return true;
+  const assessment = getAgentAssessment(contact);
+  return assessment?.fitStatus === "good_fit" || assessment?.fitStatus === "maybe";
+}
+
+function messageStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: "Draft",
+    pending_approval: "Pending approval",
+    approved: "Approved",
+    sent: "Sent",
+    failed: "Failed",
+    replied: "Replied",
+    cancelled: "Cancelled",
+  };
+  return labels[status] || status.replace(/_/g, " ");
 }
 
 function contactScore(contact: DiscoveryResult) {
@@ -772,6 +1202,9 @@ function exportContactsCsv(contacts: DiscoveryResult[], runName: string) {
     geography: contact.geography || contact.research?.geography || "",
     score: String(contactScore(contact)),
     status: contactStatusLabel(contact),
+    review_status: reviewStatusLabel(reviewStatus(contact)),
+    review_note: contact.review_note || "",
+    shortlisted: contact.shortlisted_at ? "yes" : "no",
     signals: contactSignals(contact).join("; "),
     rationale: contact.qualification?.rationale || "",
   }));
