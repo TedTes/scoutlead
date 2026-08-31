@@ -39,6 +39,7 @@ export function ResultsScreen() {
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = draftPrompt.trim() || runPrompt;
+  const selectedSource = selectedSources[0] || "";
   const reachableContacts = contacts.filter((contact) => isReachableContact(contact)).length;
   const visibleContacts = contacts
     .filter((contact) => {
@@ -78,9 +79,9 @@ export function ResultsScreen() {
     setSelectedSources((current) => {
       const fromRun = getRunSource(selectedDiscoveryRun);
       const validCurrent = current.filter((sourceId) => connectedProviders.some((provider) => provider.id === sourceId));
-      const validActive = normalizeActiveSourceIds(activeSourceIds, connectedProviders);
+      const validActive = normalizeActiveSourceIds(activeSourceIds, connectedProviders).slice(0, 1);
       if (validActive.length) return validActive;
-      if (validCurrent.length) return validCurrent;
+      if (validCurrent.length) return validCurrent.slice(0, 1);
       if (fromRun && connectedProviders.some((provider) => provider.id === fromRun)) return [fromRun];
       return connectedProviders[0] ? [connectedProviders[0].id] : [];
     });
@@ -88,26 +89,23 @@ export function ResultsScreen() {
 
   const updateSearch = async () => {
     const request = draftPrompt.trim();
-    if (!selectedProductId || !request || !selectedSources.length || running) return;
+    if (!selectedProductId || !request || !selectedSource || running) return;
     setRunning(true);
     try {
-      const completed = [];
-      for (const source of selectedSources) {
-        const result = await runSourceRequest({
-          product_id: selectedProductId,
-          source,
-          name: selectedDiscoveryRun?.name || undefined,
-          prompt: request,
-          max_results: selectedDiscoveryRun?.max_leads || 25,
-          run_immediately: true,
-        });
-        if (result) completed.push(result);
-      }
-      if (completed.length) {
+      const result = await runSourceRequest({
+        product_id: selectedProductId,
+        source: selectedSource,
+        name: selectedDiscoveryRun?.name || undefined,
+        prompt: request,
+        max_results: selectedDiscoveryRun?.max_leads || 25,
+        run_immediately: true,
+      });
+      if (result) {
+        const foundCount = result.summary?.discovered_lead_count ?? 0;
         showToast({
-          title: "Updated search complete",
-          message: "Created a new run from the edited search.",
-          tone: "green",
+          title: foundCount ? "Updated search complete" : "Search finished",
+          message: foundCount ? `${foundCount} contact${foundCount === 1 ? "" : "s"} found.` : "No contacts were returned. Try another search.",
+          tone: foundCount ? "green" : "amber",
         });
       }
     } catch (err) {
@@ -147,7 +145,7 @@ export function ResultsScreen() {
   }
 
   if (!contacts.length) {
-    return <OverviewScreen />;
+    return <OverviewScreen emptyMessage="No contacts were returned for this run. Try a different business type, location, or wording." />;
   }
 
   return (
@@ -158,7 +156,7 @@ export function ResultsScreen() {
         onSubmit={updateSearch}
         query={runPrompt}
         running={running}
-        ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSources.length)}
+        ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSource)}
       />
 
       <header className="results-hero compact">

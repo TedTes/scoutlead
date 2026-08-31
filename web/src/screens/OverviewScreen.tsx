@@ -22,9 +22,11 @@ const promptTemplates = [
 
 export function OverviewScreen({
   draftRunName,
+  emptyMessage,
   onRunCreated,
 }: {
   draftRunName?: string;
+  emptyMessage?: string;
   onRunCreated?: () => void;
 }) {
   const {
@@ -45,10 +47,11 @@ export function OverviewScreen({
   const promptValue = prompt.trim();
   const currentQuery = promptValue || getRunPrompt(selectedDiscoveryRun) || "";
   const promptTags = parsePromptTags(currentQuery);
-  const ready = Boolean(selectedProductId && promptValue.length >= 4 && selectedSources.length);
+  const selectedSource = selectedSources[0] || "";
+  const ready = Boolean(selectedProductId && promptValue.length >= 4 && selectedSource);
 
   useEffect(() => {
-    setSelectedSources(normalizeActiveSourceIds(activeSourceIds, connectedProviders));
+    setSelectedSources(normalizeActiveSourceIds(activeSourceIds, connectedProviders).slice(0, 1));
   }, [activeSourceIds, connectedProviders]);
 
   useEffect(() => {
@@ -57,27 +60,24 @@ export function OverviewScreen({
 
   const submitSourceRequest = async (nextPrompt = prompt) => {
     const request = nextPrompt.trim();
-    if (!selectedProductId || !request || running || !selectedSources.length) return;
+    if (!selectedProductId || !request || running || !selectedSource) return;
     const requestedName = draftRunName?.trim();
     setRunning(true);
     try {
-      const results = [];
-      for (const source of selectedSources) {
-        const result = await runSourceRequest({
-          product_id: selectedProductId,
-          source,
-          name: requestedName && requestedName.toLowerCase() !== "page name" ? requestedName : undefined,
-          prompt: request,
-          max_results: 25,
-          run_immediately: true,
-        });
-        if (result) results.push(result);
-      }
-      if (results.length) {
+      const result = await runSourceRequest({
+        product_id: selectedProductId,
+        source: selectedSource,
+        name: requestedName && requestedName.toLowerCase() !== "page name" ? requestedName : undefined,
+        prompt: request,
+        max_results: 25,
+        run_immediately: true,
+      });
+      if (result) {
+        const foundCount = result.summary?.discovered_lead_count ?? 0;
         showToast({
-          title: "Search complete",
-          message: "Contact search finished.",
-          tone: "green",
+          title: foundCount ? "Search complete" : "Search finished",
+          message: foundCount ? `${foundCount} contact${foundCount === 1 ? "" : "s"} found.` : "No contacts were returned. Try another search.",
+          tone: foundCount ? "green" : "amber",
         });
         onRunCreated?.();
       }
@@ -139,6 +139,8 @@ export function OverviewScreen({
           </div>
         ) : null}
       </form>
+
+      {emptyMessage ? <p className="empty-run-note">{emptyMessage}</p> : null}
 
       <section className="prompt-template-grid" aria-label="Search templates">
         {promptTemplates.map((template) => (
