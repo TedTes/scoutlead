@@ -9,6 +9,7 @@ from campaign_sources.schemas import CampaignSourceCreate, CampaignSourceMode, C
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, CampaignRead
 from db.session import create_database
+from discovery.classifier import assess_discovery_candidate
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateType
 from leads.repository import LeadRepository
@@ -105,6 +106,42 @@ def test_discovery_stores_salary_result_as_rejected_candidate_not_lead() -> None
         assert salary.lead_id is None
         assert business.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS.value
         assert business.lead_id == leads[0].id
+
+
+def test_google_places_review_metadata_does_not_make_business_a_directory() -> None:
+    product_data = product_input().model_dump(mode="json")
+    product_data.update(
+        {
+            "id": "product_google_places_classifier",
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    product = ProductRead.model_validate(product_data)
+    assessment = assess_discovery_candidate(
+        SearchResult(
+            title="All Painting Toronto",
+            url="https://allpainting.ca/",
+            snippet=(
+                "18 King St E Ste 1400, Toronto, ON M5E 1L4 | phone: (416) 710-4224 | "
+                "rating: 5 | reviews: 250 | painter, general_contractor, service, "
+                "point_of_interest, establishment"
+            ),
+            geography="18 King St E Ste 1400, Toronto, ON M5E 1L4",
+            source="google_places",
+            raw={
+                "nationalPhoneNumber": "(416) 710-4224",
+                "websiteUri": "https://allpainting.ca/",
+                "businessStatus": "OPERATIONAL",
+                "types": ["painter", "general_contractor", "service", "establishment"],
+            },
+        ),
+        product,
+    )
+
+    assert assessment.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS
+    assert assessment.confidence >= 65
+    assert assessment.rejection_reason is None
 
 
 def product_input() -> ProductCreate:

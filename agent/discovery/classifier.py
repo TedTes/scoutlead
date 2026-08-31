@@ -126,9 +126,14 @@ BUSINESS_TERMS = (
     "contact us",
 )
 
+STRUCTURED_LOCAL_BUSINESS_SOURCES = {"google_places"}
+
 
 def assess_discovery_candidate(result: SearchResult, product: ProductRead) -> CandidateAssessment:
-    if not result.url:
+    is_structured_local_business = result.source in STRUCTURED_LOCAL_BUSINESS_SOURCES
+    if not result.url and not (
+        is_structured_local_business and _has_structured_contact_signal(result)
+    ):
         return CandidateAssessment(
             candidate_type=DiscoveryCandidateType.UNKNOWN,
             confidence=20,
@@ -151,7 +156,9 @@ def assess_discovery_candidate(result: SearchResult, product: ProductRead) -> Ca
     if _contains_any(text, JOB_TERMS) or any(part in path for part in ("/jobs", "/careers", "/hiring")):
         return _reject(DiscoveryCandidateType.JOB, 90, "Job or career page, not a customer business.")
 
-    if any(hint in host for hint in DIRECTORY_HOST_HINTS) or _contains_any(text, DIRECTORY_TERMS):
+    if not is_structured_local_business and (
+        any(hint in host for hint in DIRECTORY_HOST_HINTS) or _contains_any(text, DIRECTORY_TERMS)
+    ):
         return _reject(DiscoveryCandidateType.DIRECTORY, 90, "Directory, list, review, or aggregator page.")
 
     if _contains_any(text, CONTENT_TERMS) or any(
@@ -225,12 +232,31 @@ def _business_confidence(text: str, result: SearchResult, product: ProductRead) 
 
     if result.contact_email:
         confidence += 10
+    if _has_structured_contact_signal(result):
+        confidence += 8
     if "contact" in text:
         confidence += 6
     if "quote" in text or "estimate" in text:
         confidence += 6
 
     return max(0, min(confidence, 95))
+
+
+def _has_structured_contact_signal(result: SearchResult) -> bool:
+    raw = result.raw or {}
+    return bool(
+        result.contact_email
+        or _raw_text(raw, "nationalPhoneNumber")
+        or _raw_text(raw, "internationalPhoneNumber")
+        or _raw_text(raw, "phone")
+        or _raw_text(raw, "phoneNumber")
+        or _raw_text(raw, "googleMapsUri")
+    )
+
+
+def _raw_text(raw: dict, key: str) -> str:
+    value = raw.get(key)
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _target_terms(product: ProductRead) -> set[str]:
