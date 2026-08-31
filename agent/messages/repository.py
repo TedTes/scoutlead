@@ -46,8 +46,15 @@ class MessageRepository:
         return list(self.session.scalars(statement))
 
     def list_by_lead(self, lead_id: str) -> list[MessageModel]:
-        statement = select(MessageModel).where(MessageModel.lead_id == lead_id)
+        statement = select(MessageModel).where(MessageModel.lead_id == lead_id).order_by(MessageModel.created_at.desc())
         return list(self.session.scalars(statement))
+
+    def latest_for_lead(self, lead_id: str, channel: str | None = None) -> MessageModel | None:
+        statement = select(MessageModel).where(MessageModel.lead_id == lead_id)
+        if channel is not None:
+            statement = statement.where(MessageModel.channel == channel)
+        statement = statement.order_by(MessageModel.created_at.desc())
+        return self.session.scalars(statement).first()
 
     def has_draft_for_lead(self, lead_id: str, channel: str | None = None) -> bool:
         messages = self.list_by_lead(lead_id)

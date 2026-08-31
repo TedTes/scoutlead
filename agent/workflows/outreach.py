@@ -1,15 +1,16 @@
 from agents.llm import LLMClient
 from campaigns.repository import CampaignRepository
+from campaigns.goal import goal_policy
+from campaigns.schemas import CampaignGoalType
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus
+from leads.policy import can_shortlist_lead, is_outreach_ready
 from leads.repository import LeadRepository
-from leads.schemas import LeadRead, LeadStatus
+from leads.schemas import LeadRead, LeadStatus, LeadUpdate
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead, MessageStatus, OutreachDraft
 from products.schemas import ProductRead
-from campaigns.goal import goal_policy
-from campaigns.schemas import CampaignGoalType
 from prompts.outreach_learn import outreach_learn_prompt
 from prompts.outreach_sell import outreach_sell_prompt
 
@@ -39,6 +40,13 @@ class OutreachWorkflow:
         for lead_model in self.leads.list_by_campaign(campaign.id):
             lead = LeadRead.model_validate(lead_model)
             if lead.status != LeadStatus.QUALIFIED:
+                continue
+            if not lead.shortlisted_at and can_shortlist_lead(
+                review_status=lead.review_status,
+                qualification=lead.qualification,
+            ):
+                lead = LeadRead.model_validate(self.leads.update(lead.id, LeadUpdate(shortlisted=True)))
+            if not is_outreach_ready(lead):
                 continue
             if self.messages.has_draft_for_lead(lead.id, channel.value):
                 continue

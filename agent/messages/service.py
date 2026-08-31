@@ -2,28 +2,86 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from agents.llm import LLMClient
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignStatus
+from campaigns.goal import goal_policy
+from campaigns.schemas import CampaignGoalType, CampaignRead, CampaignStatus, OutreachChannel
 from conversations.repository import ConversationRepository
+from leads.policy import is_outreach_ready
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead, LeadStatus
 from messages.repository import MessageRepository
-from messages.schemas import MessageApproval, MessageRead, MessageStatus, MessageUpdate
+from messages.schemas import MessageApproval, MessageRead, MessageStatus, MessageUpdate, OutreachDraft
 from messages.state import assert_send_allowed
+from prompts.outreach_learn import outreach_learn_prompt
+from prompts.outreach_sell import outreach_sell_prompt
 from products.repository import ProductRepository
 from products.schemas import ProductRead
+from shared.errors import ConflictError
 from tools.email import EmailTool
 
 
 class MessageService:
-    def __init__(self, *, session: Session, email: EmailTool) -> None:
+    def __init__(self, *, session: Session, email: EmailTool, llm: LLMClient | None = None) -> None:
         self.session = session
         self.email = email
+        self.llm = llm
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)
         self.leads = LeadRepository(session)
         self.messages = MessageRepository(session)
         self.conversations = ConversationRepository(session)
+
+    def create_outreach_draft_for_lead(self, lead_id: str) -> MessageRead:
+        if self.llm is None:
+            raise ConflictError(
+                "outreach draft generation is not configured",
+                {"lead_id": lead_id, "user_message": "Draft generation is not configured for this environment."},
+            )
+        lead = LeadRead.model_validate(self.leads.get(lead_id))
+        if not lead.shortlisted_at:
+            raise ConflictError(
+                "lead must be shortlisted before generating outreach",
+                {"lead_id": lead_id, "user_message": "Shortlist this contact before generating outreach."},
+            )
+        if not is_outreach_ready(lead):
+            raise ConflictError(
+                "lead needs a positive fit decision before outreach",
+                {
+                    "lead_id": lead_id,
+                    "review_status": lead.review_status.value,
+                    "user_message": "Mark this contact as Good fit or Maybe before generating outreach.",
+                },
+            )
+
+        campaign = CampaignRead.model_validate(self.campaigns.get(lead.campaign_id))
+        product = ProductRead.model_validate(self.products.get(lead.product_id))
+        channel = _message_channel(campaign)
+        existing = self.messages.latest_for_lead(lead.id, channel.value)
+        if existing and MessageStatus(existing.status) not in {MessageStatus.CANCELLED, MessageStatus.FAILED}:
+            return MessageRead.model_validate(existing)
+
+        policy = goal_policy(campaign.goal_type)
+        if policy.goal_type == CampaignGoalType.SELL:
+            system = "Draft concise sales outreach for human approval."
+            prompt = outreach_sell_prompt(product, lead, channel)
+        else:
+            system = "Draft customer-discovery outreach for human approval."
+            prompt = outreach_learn_prompt(product, lead, channel)
+        draft = self.llm.generate_object(
+            task="outreach_draft",
+            system=system,
+            prompt=prompt,
+            response_model=OutreachDraft,
+            context={
+                "product": product.model_dump(mode="json"),
+                "lead": lead.model_dump(mode="json"),
+                "campaign": campaign.model_dump(mode="json"),
+            },
+        )
+        message = self.messages.create_draft(campaign.id, product.id, lead.id, draft)
+        self.leads.update_status(lead.id, LeadStatus.AWAITING_APPROVAL)
+        return MessageRead.model_validate(message)
 
     def approve(self, message_id: str, approval: MessageApproval) -> MessageRead:
         message = self.messages.approve(message_id, approval)
@@ -44,6 +102,15 @@ class MessageService:
         campaign = self.campaigns.get(message.campaign_id)
 
         assert_send_allowed(message.status)
+        if not is_outreach_ready(lead):
+            raise ConflictError(
+                "lead needs a positive fit decision before sending",
+                {
+                    "lead_id": lead.id,
+                    "review_status": lead.review_status.value,
+                    "user_message": "Shortlist a Good fit or Maybe contact before sending.",
+                },
+            )
         if campaign.status == CampaignStatus.AWAITING_APPROVAL.value:
             self.campaigns.update_status(message.campaign_id, CampaignStatus.SENDING)
 
@@ -74,3 +141,10 @@ class MessageService:
             self.campaigns.update_status(message.campaign_id, CampaignStatus.TRACKING)
 
         return MessageRead.model_validate(updated)
+
+
+def _message_channel(campaign: CampaignRead) -> OutreachChannel:
+    if not campaign.channels:
+        return OutreachChannel.EMAIL
+    value = campaign.channels[0]
+    return value if isinstance(value, OutreachChannel) else OutreachChannel(str(value))

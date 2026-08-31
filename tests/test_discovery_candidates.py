@@ -7,12 +7,13 @@ from sqlalchemy.orm import sessionmaker
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceCreate, CampaignSourceMode, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignCreate, CampaignRead
+from campaigns.schemas import CampaignCreate, CampaignRead, LeadSeedInput
 from db.session import create_database
 from discovery.classifier import assess_discovery_candidate
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateType
 from leads.repository import LeadRepository
+from leads.schemas import LeadReviewStatus, LeadUpdate
 from memory.repository import MemoryRepository
 from products.repository import ProductRepository
 from products.schemas import DiscoverySource, DiscoverySourceType, ProductCreate, ProductRead, QualificationCriterion
@@ -142,6 +143,45 @@ def test_google_places_review_metadata_does_not_make_business_a_directory() -> N
     assert assessment.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS
     assert assessment.confidence >= 65
     assert assessment.rejection_reason is None
+
+
+def test_lead_review_state_and_shortlist_are_persisted() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(product_input())
+        lead = LeadRepository(session).create_from_seed(
+            "campaign_review_state",
+            product.id,
+            LeadSeedInput(
+                company_name="Cedar & Sons Painting",
+                website_url="https://cedarpaint.example",
+                geography="Austin, TX",
+                description="Residential painting company",
+            ),
+        )
+
+        updated = LeadRepository(session).update(
+            lead.id,
+            LeadUpdate(
+                review_status=LeadReviewStatus.GOOD_FIT,
+                review_note="Owner-operated and reachable.",
+                shortlisted=True,
+            ),
+        )
+
+        assert updated.review_status == LeadReviewStatus.GOOD_FIT.value
+        assert updated.review_note == "Owner-operated and reachable."
+        assert updated.reviewed_at is not None
+        assert updated.shortlisted_at is not None
+
+        unshortlisted = LeadRepository(session).update(
+            lead.id,
+            LeadUpdate(shortlisted=False),
+        )
+        assert unshortlisted.shortlisted_at is None
 
 
 def product_input() -> ProductCreate:

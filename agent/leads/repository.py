@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from campaigns.schemas import LeadSeedInput
 from db.models import DiscoveryCandidateModel, LeadModel
-from leads.schemas import LeadResearch, LeadStatus, QualificationResult
-from shared.errors import NotFoundError
-from shared.utils import new_id, normalize_url
+from leads.policy import can_shortlist_lead, normalize_qualification_result
+from leads.schemas import LeadResearch, LeadReviewStatus, LeadStatus, LeadUpdate, QualificationResult
+from shared.errors import ConflictError, NotFoundError
+from shared.utils import new_id, normalize_url, utcnow
 
 
 class LeadRepository:
@@ -32,6 +33,7 @@ class LeadRepository:
             description=seed.description,
             source=seed.source or "campaign_seed",
             status=LeadStatus.DISCOVERED.value,
+            review_status=LeadReviewStatus.UNREVIEWED.value,
             raw_sources=[seed.raw or seed.model_dump(mode="json")],
         )
         self.session.add(model)
@@ -60,6 +62,7 @@ class LeadRepository:
             description=result.get("snippet") or result.get("description"),
             source=result.get("source") or "search",
             status=LeadStatus.DISCOVERED.value,
+            review_status=LeadReviewStatus.UNREVIEWED.value,
             raw_sources=[result],
         )
         self.session.add(model)
@@ -83,6 +86,7 @@ class LeadRepository:
             description=candidate.snippet,
             source=candidate.source,
             status=LeadStatus.DISCOVERED.value,
+            review_status=LeadReviewStatus.UNREVIEWED.value,
             raw_sources=[
                 {
                     "candidate_id": candidate.id,
@@ -123,6 +127,38 @@ class LeadRepository:
         self.session.refresh(model)
         return model
 
+    def update(self, lead_id: str, update: LeadUpdate) -> LeadModel:
+        model = self.get(lead_id)
+        data = update.model_dump(mode="python", exclude_unset=True)
+        next_review_status = LeadReviewStatus(model.review_status)
+        if "review_status" in data:
+            status = data["review_status"]
+            next_review_status = status if isinstance(status, LeadReviewStatus) else LeadReviewStatus(status)
+            model.review_status = next_review_status.value
+            model.reviewed_at = utcnow()
+            if next_review_status == LeadReviewStatus.NOT_FIT:
+                model.shortlisted_at = None
+        if "review_note" in data:
+            note = data["review_note"]
+            model.review_note = note.strip() if isinstance(note, str) and note.strip() else None
+        if "shortlisted" in data:
+            if data["shortlisted"] and not can_shortlist_lead(
+                review_status=next_review_status,
+                qualification=model.qualification,
+            ):
+                raise ConflictError(
+                    "lead needs a positive fit decision before shortlist",
+                    {
+                        "lead_id": lead_id,
+                        "review_status": next_review_status.value,
+                        "user_message": "Mark this contact as Good fit or Maybe before shortlisting.",
+                    },
+                )
+            model.shortlisted_at = utcnow() if data["shortlisted"] else None
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
     def attach_research(self, lead_id: str, research: LeadResearch) -> LeadModel:
         model = self.get(lead_id)
         model.research = research.model_dump(mode="json")
@@ -136,8 +172,9 @@ class LeadRepository:
 
     def attach_qualification(self, lead_id: str, result: QualificationResult) -> LeadModel:
         model = self.get(lead_id)
-        model.qualification = result.model_dump(mode="json")
-        model.status = LeadStatus.QUALIFIED.value if result.qualified else LeadStatus.DISQUALIFIED.value
+        normalized = normalize_qualification_result(result)
+        model.qualification = normalized.model_dump(mode="json")
+        model.status = LeadStatus.QUALIFIED.value if normalized.qualified else LeadStatus.DISQUALIFIED.value
         self.session.commit()
         self.session.refresh(model)
         return model

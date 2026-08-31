@@ -64,6 +64,7 @@ def create_database(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_product_source_columns(engine)
     _ensure_campaign_runtime_columns(engine)
+    _ensure_lead_review_columns(engine)
 
 
 def _ensure_product_source_columns(engine: Engine) -> None:
@@ -110,3 +111,23 @@ def _ensure_campaign_runtime_columns(engine: Engine) -> None:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN icp_preset_id VARCHAR(255)"))
         if "source_preset_id" not in existing_columns:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN source_preset_id VARCHAR(255)"))
+
+
+def _ensure_lead_review_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("leads"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("leads")}
+    dialect = engine.dialect.name
+    timestamp_type = "TIMESTAMP WITH TIME ZONE" if dialect == "postgresql" else "DATETIME"
+    with engine.begin() as connection:
+        if "review_status" not in existing_columns:
+            connection.execute(text("ALTER TABLE leads ADD COLUMN review_status VARCHAR(32)"))
+            connection.execute(text("UPDATE leads SET review_status = 'unreviewed' WHERE review_status IS NULL"))
+        if "review_note" not in existing_columns:
+            connection.execute(text("ALTER TABLE leads ADD COLUMN review_note TEXT"))
+        if "reviewed_at" not in existing_columns:
+            connection.execute(text(f"ALTER TABLE leads ADD COLUMN reviewed_at {timestamp_type}"))
+        if "shortlisted_at" not in existing_columns:
+            connection.execute(text(f"ALTER TABLE leads ADD COLUMN shortlisted_at {timestamp_type}"))

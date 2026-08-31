@@ -1,12 +1,15 @@
-from fastapi import APIRouter
+from typing import Annotated
 
-from app.dependencies import DbSession
+from fastapi import APIRouter, Depends
+
+from app.dependencies import AppServices, DbSession, get_services
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import LeadSeedInput
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateRead
 from leads.repository import LeadRepository
-from leads.schemas import LeadRead
+from leads.schemas import LeadRead, LeadUpdate
+from leads.service import LeadQualificationService
 
 router = APIRouter(tags=["leads"])
 
@@ -32,3 +35,17 @@ def add_campaign_seed_leads(campaign_id: str, seeds: list[LeadSeedInput], sessio
 @router.get("/leads/{lead_id}", response_model=LeadRead)
 def get_lead(lead_id: str, session: DbSession):
     return LeadRepository(session).get(lead_id)
+
+
+@router.patch("/leads/{lead_id}", response_model=LeadRead)
+def update_lead(lead_id: str, update: LeadUpdate, session: DbSession):
+    return LeadRepository(session).update(lead_id, update)
+
+
+@router.post("/leads/{lead_id}/qualify", response_model=LeadRead)
+def qualify_lead(
+    lead_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return LeadQualificationService(session=session, llm=services.llm).qualify(lead_id)

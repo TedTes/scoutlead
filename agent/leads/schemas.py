@@ -18,6 +18,19 @@ class LeadStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class LeadReviewStatus(StrEnum):
+    UNREVIEWED = "unreviewed"
+    GOOD_FIT = "good_fit"
+    MAYBE = "maybe"
+    NOT_FIT = "not_fit"
+
+
+class AgentFitStatus(StrEnum):
+    GOOD_FIT = "good_fit"
+    MAYBE = "maybe"
+    NOT_FIT = "not_fit"
+
+
 class LeadFitType(StrEnum):
     TARGET_CUSTOMER = "target_customer"
     COMPETITOR_OR_ALTERNATIVE = "competitor_or_alternative"
@@ -53,8 +66,12 @@ class CriterionScore(BaseModel):
 
 class QualificationResult(BaseModel):
     qualified: bool
+    fit_status: AgentFitStatus | None = None
     score: int = Field(ge=0, le=100)
     rationale: str
+    positive_signals: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     criteria: list[CriterionScore] = Field(default_factory=list)
     recommended_next_step: str
 
@@ -71,11 +88,21 @@ class LeadCreate(BaseModel):
     raw_sources: list[dict] = Field(default_factory=list)
 
 
+class LeadUpdate(BaseModel):
+    review_status: LeadReviewStatus | None = None
+    review_note: str | None = None
+    shortlisted: bool | None = None
+
+
 class LeadRead(LeadCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     status: LeadStatus
+    review_status: LeadReviewStatus = LeadReviewStatus.UNREVIEWED
+    review_note: str | None = None
+    reviewed_at: datetime | None = None
+    shortlisted_at: datetime | None = None
     research: LeadResearch | None = None
     qualification: QualificationResult | None = None
     created_at: datetime

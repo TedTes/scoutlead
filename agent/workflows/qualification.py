@@ -2,7 +2,8 @@ from agents.llm import LLMClient
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus
 from leads.repository import LeadRepository
-from leads.schemas import LeadRead, LeadStatus, QualificationResult
+from leads.policy import normalize_qualification_result
+from leads.schemas import AgentFitStatus, LeadRead, LeadStatus, QualificationResult
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
@@ -86,6 +87,7 @@ def enforce_qualification_boundary(
         return result.model_copy(
             update={
                 "qualified": False,
+                "fit_status": AgentFitStatus.NOT_FIT,
                 "rationale": (
                     f"{result.rationale} Disqualified because the score is below "
                     f"the {MIN_QUALIFICATION_SCORE} qualification threshold."
@@ -94,4 +96,4 @@ def enforce_qualification_boundary(
             }
         )
 
-    return result
+    return normalize_qualification_result(result)

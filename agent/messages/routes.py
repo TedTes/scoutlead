@@ -22,6 +22,17 @@ def get_message(message_id: str, session: DbSession):
     return MessageRepository(session).get(message_id)
 
 
+@router.post("/leads/{lead_id}/outreach-draft", response_model=MessageRead)
+def create_lead_outreach_draft(
+    lead_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return MessageService(session=session, email=services.email, llm=services.llm).create_outreach_draft_for_lead(
+        lead_id
+    )
+
+
 @router.patch("/messages/{message_id}", response_model=MessageRead)
 def update_message(
     message_id: str,
