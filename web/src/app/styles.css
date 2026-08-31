@@ -1037,6 +1037,7 @@ a {
 
 .composer-body {
   display: block;
+  position: relative;
 }
 
 .composer-query {
@@ -1056,7 +1057,7 @@ a {
   line-height: 1.55;
   min-height: 104px;
   outline: 0;
-  padding: 15px 16px 12px;
+  padding: 15px 70px 54px 16px;
   resize: vertical;
   width: 100%;
 }
@@ -1112,61 +1113,13 @@ a {
   white-space: normal;
 }
 
-.composer-footer {
-  align-items: center;
-  background: var(--panel);
-  border-top: 1px solid var(--line);
-  display: flex;
-  gap: 12px;
-  padding: 10px 16px;
-}
-
-.source-pill-row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  min-width: 0;
-}
-
-.source-label {
-  color: var(--faint);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-
-.source-pill {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 500;
-  gap: 6px;
-  height: 30px;
-  padding: 0 11px;
-  white-space: nowrap;
-}
-
-.source-pill.selected {
-  background: #edf1ff;
-  border-color: #c7d2fe;
-  color: var(--text);
-}
-
-.source-pill.selected svg {
-  color: var(--black);
-}
-
 .composer-submit-group {
   align-items: center;
+  bottom: 10px;
   display: flex;
   gap: 9px;
-  margin-left: auto;
+  position: absolute;
+  right: 14px;
 }
 
 .composer-hint {
@@ -1915,8 +1868,7 @@ a {
   justify-content: center;
 }
 
-.modal-backdrop,
-.source-dialog-backdrop {
+.modal-backdrop {
   align-items: center;
   background: rgba(27, 31, 36, 0.54);
   display: grid;
@@ -1926,8 +1878,7 @@ a {
   z-index: 110;
 }
 
-.modal-card,
-.source-dialog-card {
+.modal-card {
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: 13px;
@@ -1936,37 +1887,32 @@ a {
   width: min(430px, calc(100vw - 32px));
 }
 
-.modal-card > header,
-.source-dialog-card > header {
+.modal-card > header {
   align-items: center;
   display: flex;
   gap: 12px;
   padding: 17px 18px 6px;
 }
 
-.modal-card h2,
-.source-dialog-card h2 {
+.modal-card h2 {
   font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.2px;
   margin: 0;
 }
 
-.modal-card p,
-.source-dialog-card p {
+.modal-card p {
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.5;
   margin: 6px 26px 0 0;
 }
 
-.modal-card .link-button,
-.source-dialog-card .drawer-close {
+.modal-card .link-button {
   margin-left: auto;
 }
 
-.modal-body,
-.source-toggle-list {
+.modal-body {
   padding: 12px 18px 18px;
 }
 
@@ -2021,67 +1967,6 @@ a {
   padding-top: 13px;
 }
 
-.source-toggle-row {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--text);
-  display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
-  padding: 12px;
-  text-align: left;
-  width: 100%;
-}
-
-.source-toggle-row:hover {
-  background: var(--panel-soft);
-}
-
-.source-toggle-row strong {
-  display: block;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.source-toggle-row small {
-  color: var(--muted);
-  display: block;
-  font-size: 11.5px;
-  margin-top: 2px;
-}
-
-.source-toggle-row em {
-  background: var(--panel-muted);
-  border-radius: 999px;
-  display: block;
-  flex: 0 0 42px;
-  height: 24px;
-  margin-left: auto;
-  position: relative;
-}
-
-.source-toggle-row em i {
-  background: var(--panel);
-  border-radius: 50%;
-  box-shadow: var(--shadow-sm);
-  height: 18px;
-  left: 3px;
-  position: absolute;
-  top: 3px;
-  width: 18px;
-}
-
-.source-toggle-row.active em {
-  background: var(--black);
-}
-
-.source-toggle-row.active em i {
-  left: 21px;
-}
-
-.source-dialog-card > footer,
 .modal-card > footer {
   border-top: 1px solid var(--line);
   color: var(--faint);
@@ -2477,20 +2362,16 @@ a {
 
   .composer-query textarea {
     min-height: 76px;
+    padding: 13px 62px 48px 14px;
   }
 
   .prompt-template-grid button {
     min-height: 0;
   }
 
-  .composer-footer {
-    align-items: stretch;
-    display: grid;
-  }
-
   .composer-submit-group {
-    justify-content: flex-end;
-    margin-left: 0;
+    bottom: 8px;
+    right: 10px;
   }
 
   .searchbar {
@@ -2631,8 +2512,7 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .modal-card,
-  .source-dialog-card {
+  .modal-card {
     width: calc(100vw - 20px);
   }
 

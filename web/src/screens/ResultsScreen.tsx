@@ -373,7 +373,6 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
   const price = contact ? getPrice(contact) : "";
   const posted = contact ? getPostedDate(contact) : "";
   const confidence = contact?.research?.confidence ? `${contact.research.confidence}%` : "—";
-  const sourceDataRows = contact ? getSourceDataRows(contact) : [];
   const evidenceNotes = contact
     ? [
         ...(contact.research?.pain_indicators || []),
@@ -493,19 +492,6 @@ function ContactDrawer({ contact, onClose }: { contact: DiscoveryResult | undefi
                 </section>
               ) : null}
 
-              {sourceDataRows.length ? (
-                <section className="drawer-section">
-                  <h3>Source data</h3>
-                  <dl className="drawer-source-data">
-                    {sourceDataRows.map((row) => (
-                      <div key={row.key}>
-                        <dt>{humanizeSourceKey(row.key)}</dt>
-                        <dd>{row.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </section>
-              ) : null}
             </div>
 
             <footer className="drawer-footer">
@@ -747,34 +733,6 @@ function getRawObjects(contact: DiscoveryResult) {
   return values;
 }
 
-function getSourceDataRows(contact: DiscoveryResult) {
-  const rows: Array<{ key: string; value: string }> = [];
-  const seen = new Set<string>();
-  const skipKeys = new Set(["query", "raw", "normalized_contact_name", "normalized_contact_phone"]);
-
-  for (const raw of getRawObjects(contact)) {
-    for (const [key, value] of flattenRawObject(raw)) {
-      if (skipKeys.has(key) || seen.has(key)) continue;
-      const text = rawSourceValueToString(value);
-      if (!text) continue;
-      seen.add(key);
-      rows.push({ key, value: text });
-      if (rows.length >= 14) return rows;
-    }
-  }
-
-  return rows;
-}
-
-function flattenRawObject(value: unknown, prefix = "", depth = 0): Array<[string, unknown]> {
-  if (!isRecord(value) || depth > 2) return [];
-  return Object.entries(value).flatMap(([key, child]) => {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (isRecord(child) && depth < 2) return flattenRawObject(child, path, depth + 1);
-    return [[path, child]];
-  });
-}
-
 function getRawValue(raw: Record<string, unknown>, key: string): unknown {
   if (key in raw) return raw[key];
   return key.split(".").reduce<unknown>((value, part) => {
@@ -802,29 +760,6 @@ function rawValueToString(value: unknown): string {
     }
   }
   return "";
-}
-
-function rawSourceValueToString(value: unknown): string {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (Array.isArray(value)) {
-    const values = value.map(rawSourceValueToString).filter(Boolean);
-    return values.slice(0, 4).join(", ");
-  }
-  if (isRecord(value)) {
-    return rawValueToString(value) || JSON.stringify(value);
-  }
-  return "";
-}
-
-function humanizeSourceKey(key: string) {
-  return key
-    .split(".")
-    .pop()!
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/[_-]/g, " ")
-    .trim();
 }
 
 function exportContactsCsv(contacts: DiscoveryResult[], runName: string) {

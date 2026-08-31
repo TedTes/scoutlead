@@ -1,8 +1,8 @@
-import { Check, Play, Search } from "lucide-react";
+import { Play, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
-import type { SourceProvider, SourceRequestSource } from "../types/domain";
+import type { SourceRequestSource } from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
 const promptTemplates = [
@@ -35,7 +35,6 @@ export function OverviewScreen({
     selectedProductId,
     sourceProviders,
     activeSourceIds,
-    setActiveSourceIds,
   } = useAppData();
   const { showToast } = useToast();
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>(["google_places"]);
@@ -43,9 +42,6 @@ export function OverviewScreen({
   const [running, setRunning] = useState(false);
   const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
-  const selectedProviderLabels = connectedProviders
-    .filter((provider) => selectedSources.includes(provider.id))
-    .map((provider) => provider.label);
   const promptValue = prompt.trim();
   const currentQuery = promptValue || getRunPrompt(selectedDiscoveryRun) || "";
   const promptTags = parsePromptTags(currentQuery);
@@ -80,7 +76,7 @@ export function OverviewScreen({
       if (results.length) {
         showToast({
           title: "Search complete",
-          message: `Searched ${selectedProviderLabels.join(" + ") || "selected sources"}`,
+          message: "Contact search finished.",
           tone: "green",
         });
         onRunCreated?.();
@@ -119,36 +115,6 @@ export function OverviewScreen({
               onChange={(event) => setPrompt(event.target.value)}
             />
           </label>
-        </div>
-
-        {promptTags.length ? (
-          <div className="composer-tags" aria-label="Search signals">
-            {promptTags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-        ) : null}
-
-        <div className="composer-footer">
-          <div className="source-pill-row">
-            <span className="source-label">Sources</span>
-            {connectedProviders.map((provider) => (
-              <SourceOption
-                provider={provider}
-                key={provider.id}
-                checked={selectedSources.includes(provider.id)}
-                onToggle={() => {
-                  setSelectedSources((current) => {
-                    const next = current.includes(provider.id)
-                      ? current.filter((sourceId) => sourceId !== provider.id)
-                      : [...current, provider.id];
-                    setActiveSourceIds(next);
-                    return next;
-                  });
-                }}
-              />
-            ))}
-          </div>
           <div className="composer-submit-group">
             {!running && promptValue.length > 0 && promptValue.length < 4 ? (
               <span className="composer-hint">Type at least 4 characters</span>
@@ -164,6 +130,14 @@ export function OverviewScreen({
             </button>
           </div>
         </div>
+
+        {promptTags.length ? (
+          <div className="composer-tags" aria-label="Search signals">
+            {promptTags.map((tag) => (
+              <span key={tag}>{tag}</span>
+            ))}
+          </div>
+        ) : null}
       </form>
 
       <section className="prompt-template-grid" aria-label="Search templates">
@@ -175,23 +149,6 @@ export function OverviewScreen({
         ))}
       </section>
     </section>
-  );
-}
-
-function SourceOption({
-  provider,
-  checked,
-  onToggle,
-}: {
-  provider: SourceProvider;
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button className={checked ? "source-pill selected" : "source-pill"} type="button" onClick={onToggle}>
-      {checked ? <Check size={13} /> : null}
-      {provider.label}
-    </button>
   );
 }
 

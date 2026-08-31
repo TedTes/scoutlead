@@ -1,12 +1,11 @@
-import { Check, ChevronDown, Download, Menu, Pencil, Plug, Plus, Settings, Trash2, User, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, Download, Menu, Pencil, Plus, Settings, Trash2, User } from "lucide-react";
+import { useEffect, useRef, useState, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
-import type { DiscoveryResult, DiscoveryRun, Product, SourceProvider, SourceRequestSource } from "../types/domain";
+import type { DiscoveryResult, DiscoveryRun, Product } from "../types/domain";
 import type { Screen } from "../types/navigation";
-import { mergeSourceProviders } from "../utils/source-providers";
 
 export function App() {
   return (
@@ -22,9 +21,8 @@ function AppShell() {
   const [activeScreen, setActiveScreen] = useState<Screen>("overview");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
-  const [showSourceSettings, setShowSourceSettings] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [draftRunName, setDraftRunName] = useState<string | null>(null);
+  const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
@@ -39,19 +37,12 @@ function AppShell() {
     selectedDiscoveryRun,
     productDiscoveryRuns,
     productContacts,
-    sourceProviders,
-    activeSourceIds,
-    setActiveSourceIds,
     createProductFromDescription,
     deleteProduct,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
     refreshSnapshot,
   } = useAppData();
-  const allSourceProviders = mergeSourceProviders(sourceProviders);
-  const connectedProviders = allSourceProviders.filter((provider) => provider.configured);
-  const activeSourceProviders = connectedProviders.filter((provider) => activeSourceIds.includes(provider.id));
-  const connectedSourceCount = activeSourceProviders.length;
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
   const selectedRunLabel =
@@ -59,6 +50,16 @@ function AppShell() {
       ? listLabel(selectedDiscoveryRun)
       : draftRunName?.trim() || "";
   const isTraceRoute = routePath === "/trace" || routePath === "/debug/trace";
+  const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
+    setDraftRunNameState((current) => {
+      const next =
+        typeof nextValue === "function"
+          ? (nextValue as (value: string | null) => string | null)(current)
+          : nextValue;
+      writeDraftRunName(selectedProductId, next);
+      return next;
+    });
+  };
 
   const returnToApp = () => {
     window.history.pushState(null, "", "/");
@@ -77,9 +78,9 @@ function AppShell() {
     setOpenContextMenu(null);
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
-    setSelectedDiscoveryRunId("");
     setActiveScreen("overview");
     setDraftRunName((current) => current ?? "Page name");
+    setSelectedDiscoveryRunId("");
   };
 
   const selectScreen = (screen: Screen) => {
@@ -164,6 +165,15 @@ function AppShell() {
     if (!hasSelectedRun) setActiveScreen("overview");
   }, [activeScreen, productDiscoveryRuns, selectedDiscoveryRunId]);
 
+  useEffect(() => {
+    if (!selectedProductId) {
+      setDraftRunNameState(null);
+      return;
+    }
+    if (selectedDiscoveryRunId) return;
+    setDraftRunNameState(readDraftRunName(selectedProductId));
+  }, [selectedProductId, selectedDiscoveryRunId]);
+
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
       <header className="mobile-topbar">
@@ -226,7 +236,6 @@ function AppShell() {
               return (
                 <RunHistoryItem
                   active={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id}
-                  providers={allSourceProviders}
                   run={run}
                   key={run.id}
                   onSelect={() => {
@@ -245,13 +254,11 @@ function AppShell() {
         </nav>
 
         <ProductManagementSection
-          connectedSourceCount={connectedSourceCount}
           hasProduct={Boolean(selectedProduct)}
           hasContacts={productContacts.length > 0}
           onDelete={handleDeleteSelectedProduct}
           onExport={handleExportProductContacts}
           onProductSettings={() => selectScreen("product")}
-          onSources={() => setShowSourceSettings(true)}
         />
       </aside>
 
@@ -315,15 +322,6 @@ function AppShell() {
             }
             return created;
           }}
-        />
-      ) : null}
-
-      {showSourceSettings ? (
-        <SourceSettingsDialog
-          activeSourceIds={activeSourceIds}
-          providers={allSourceProviders}
-          onChange={setActiveSourceIds}
-          onClose={() => setShowSourceSettings(false)}
         />
       ) : null}
     </div>
@@ -395,21 +393,17 @@ function ProductSelector({
 }
 
 function ProductManagementSection({
-  connectedSourceCount,
   hasContacts,
   hasProduct,
   onDelete,
   onExport,
   onProductSettings,
-  onSources,
 }: {
-  connectedSourceCount: number;
   hasContacts: boolean;
   hasProduct: boolean;
   onDelete: () => Promise<void> | void;
   onExport: () => void;
   onProductSettings: () => void;
-  onSources: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -433,13 +427,6 @@ function ProductManagementSection({
           <Settings size={13} />
         </span>
         <span className="mng-label-text">Product settings</span>
-      </button>
-      <button className="mng-item" type="button" onClick={onSources}>
-        <span className="mng-icon">
-          <Plug size={13} />
-        </span>
-        <span className="mng-label-text">Sources</span>
-        <span className="mng-count">· {connectedSourceCount} connected</span>
       </button>
       <button className={hasContacts ? "mng-item" : "mng-item is-disabled"} disabled={!hasContacts} type="button" onClick={onExport}>
         <span className="mng-icon">
@@ -524,7 +511,6 @@ function RunHistoryDraft({ value, onChange }: { value: string; onChange: (value:
 
 function RunHistoryItem({
   active,
-  providers,
   run,
   title,
   onDelete,
@@ -532,7 +518,6 @@ function RunHistoryItem({
   onSelect,
 }: {
   active: boolean;
-  providers: SourceProvider[];
   run: DiscoveryRun;
   title: string;
   onDelete: () => void;
@@ -584,7 +569,7 @@ function RunHistoryItem({
           <span>
             <strong>{title}</strong>
             <small>
-              <span>{listMeta(run, providers)}</span>
+              <span>{listMeta(run)}</span>
               <em>{formatRunDate(run.created_at)}</em>
             </small>
           </span>
@@ -712,96 +697,6 @@ function AddProductDialog({
   );
 }
 
-function SourceSettingsDialog({
-  activeSourceIds,
-  providers,
-  onChange,
-  onClose,
-}: {
-  activeSourceIds: SourceRequestSource[];
-  providers: SourceProvider[];
-  onChange: (sourceIds: SourceRequestSource[]) => void;
-  onClose: () => void;
-}) {
-  const { showToast } = useToast();
-  const configuredProviders = providers.filter((provider) => provider.configured);
-
-  const toggleProvider = (provider: SourceProvider) => {
-    if (!provider.configured) {
-      showToast({
-        title: "Source is not configured",
-        message: "Connect this provider before enabling it for searches.",
-        tone: "amber",
-      });
-      return;
-    }
-
-    const isActive = activeSourceIds.includes(provider.id);
-    if (isActive && activeSourceIds.filter((sourceId) => configuredProviders.some((item) => item.id === sourceId)).length <= 1) {
-      showToast({
-        title: "Keep one source enabled",
-        message: "ScoutLead needs at least one connected source to run a search.",
-        tone: "amber",
-      });
-      return;
-    }
-
-    onChange(isActive ? activeSourceIds.filter((sourceId) => sourceId !== provider.id) : [...activeSourceIds, provider.id]);
-  };
-
-  return (
-    <div className="source-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="source-dialog-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Sources"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <h2>Sources</h2>
-            <p>Choose which connected sources ScoutLead uses when finding contacts.</p>
-          </div>
-          <button className="drawer-close" type="button" aria-label="Close sources" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="source-toggle-list">
-          {configuredProviders.length ? configuredProviders.map((provider) => {
-            const active = activeSourceIds.includes(provider.id) && provider.configured;
-            return (
-              <button
-                className={`source-toggle-row${active ? " active" : ""}`}
-                key={provider.id}
-                type="button"
-                onClick={() => toggleProvider(provider)}
-              >
-                <span>
-                  <strong>{provider.label}</strong>
-                  <small>{provider.detail || (provider.configured ? "Ready for searches" : "Setup required")}</small>
-                </span>
-                <em aria-hidden="true">
-                  <i />
-                </em>
-              </button>
-            );
-          }) : (
-            <p className="context-menu-empty">No source providers are configured.</p>
-          )}
-        </div>
-
-        <footer>
-          <span>
-            {activeSourceIds.filter((sourceId) => configuredProviders.some((provider) => provider.id === sourceId)).length || 0} enabled
-          </span>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
 function displayProductName(product: Product) {
   const savedName = product.product_name.trim();
   if (savedName && !/^(new product|untitled product|product)$/i.test(savedName)) return savedName;
@@ -835,14 +730,9 @@ function isGeneratedRunName(value: string) {
   return /\b(source request|discovery|validation)\b.*\d{4}-\d{2}-\d{2}/i.test(value);
 }
 
-function listMeta(run: DiscoveryRun, providers: SourceProvider[]) {
-  const source = run.source_inputs?.source_request_source;
-  const sourceLabel =
-    typeof source === "string"
-      ? providers.find((provider) => provider.id === source)?.label || titleCase(source.replace(/_/g, " "))
-      : "";
+function listMeta(run: DiscoveryRun) {
   const status = run.status.replace(/_/g, " ");
-  return sourceLabel ? `${status} · ${sourceLabel}` : status;
+  return status;
 }
 
 function truncateLabel(value: string, maxLength: number) {
@@ -853,6 +743,25 @@ function formatRunDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function draftRunStorageKey(productId: string) {
+  return `draftDiscoveryRunName:${productId}`;
+}
+
+function readDraftRunName(productId: string) {
+  if (!productId) return null;
+  return localStorage.getItem(draftRunStorageKey(productId));
+}
+
+function writeDraftRunName(productId: string, value: string | null) {
+  if (!productId) return;
+  const key = draftRunStorageKey(productId);
+  if (value === null) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, value);
 }
 
 function titleFromQuery(query: string) {
@@ -903,7 +812,6 @@ function exportProductContactsCsv(contacts: DiscoveryResult[], productName: stri
     phone: rawContactValue(contact, ["phone", "telephone", "contact_phone", "phoneNumber"]),
     website: contact.website_url || contact.research?.website_url || "",
     geography: contact.geography || contact.research?.geography || "",
-    source: contact.source,
     score: String(Math.round(contact.qualification?.score ?? contact.research?.confidence ?? 0)),
     status: contact.status,
     summary: contact.research?.summary || contact.description || "",
