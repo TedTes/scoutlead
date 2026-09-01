@@ -79,7 +79,7 @@ function AppShell() {
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
     setActiveScreen("overview");
-    setDraftRunName((current) => current ?? "Page name");
+    setDraftRunName((current) => current ?? readDraftRunName(selectedProductId) ?? "Page name");
     setSelectedDiscoveryRunId("");
   };
 
@@ -95,7 +95,7 @@ function AppShell() {
     setSelectedProductId(productId);
     setSelectedDiscoveryRunId("");
     setActiveScreen("overview");
-    setDraftRunName(null);
+    setDraftRunNameState(null);
     setMobileRailOpen(false);
   };
 
@@ -103,9 +103,10 @@ function AppShell() {
     if (!selectedProduct) return;
     setOpenContextMenu(null);
     await deleteProduct(selectedProduct.id);
+    writeDraftRunName(selectedProduct.id, null);
+    setDraftRunNameState(null);
     setSelectedDiscoveryRunId("");
     setActiveScreen("overview");
-    setDraftRunName(null);
     showToast({ title: "Product deleted", message: `${selectedProductName} was removed.`, tone: "green" });
   };
 
@@ -115,8 +116,6 @@ function AppShell() {
   };
 
   const handleDeleteRun = async (run: DiscoveryRun) => {
-    const confirmed = window.confirm(`Delete ${listLabel(run)}? This removes the saved results for this run.`);
-    if (!confirmed) return;
     await deleteDiscoveryRuns([run.id]);
     if (selectedDiscoveryRunId === run.id) {
       setSelectedDiscoveryRunId("");
@@ -170,9 +169,8 @@ function AppShell() {
       setDraftRunNameState(null);
       return;
     }
-    if (selectedDiscoveryRunId) return;
     setDraftRunNameState(readDraftRunName(selectedProductId));
-  }, [selectedProductId, selectedDiscoveryRunId]);
+  }, [selectedProductId]);
 
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
@@ -229,9 +227,20 @@ function AppShell() {
 
           <div className="list-nav-section">
             {draftRunName !== null ? (
-              <RunHistoryDraft value={draftRunName} onChange={setDraftRunName} />
+              <RunHistoryDraft
+                active={!isTraceRoute && activeScreen === "overview" && !selectedDiscoveryRunId}
+                value={draftRunName}
+                onChange={setDraftRunName}
+                onSelect={startNewList}
+              />
             ) : null}
-            {productDiscoveryRuns.slice(0, 12).map((run) => {
+            {draftRunName === null && productDiscoveryRuns.length === 0 ? (
+              <div className="nav-empty">
+                <div className="t">No runs yet</div>
+                <div className="s">Start a search to create the first saved list.</div>
+              </div>
+            ) : null}
+            {productDiscoveryRuns.map((run) => {
               const title = listLabel(run);
               return (
                 <RunHistoryItem
@@ -239,13 +248,13 @@ function AppShell() {
                   run={run}
                   key={run.id}
                   onSelect={() => {
-                    setDraftRunName(null);
                     setSelectedDiscoveryRunId(run.id);
                     void refreshSnapshot(run.id);
                     selectScreen("results");
                   }}
                   onRename={handleRenameRun}
                   onDelete={() => void handleDeleteRun(run)}
+                  contacts={productContacts}
                   title={title}
                 />
               );
@@ -466,9 +475,27 @@ function ProductManagementSection({
   );
 }
 
-function RunHistoryDraft({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const [editing, setEditing] = useState(true);
+function RunHistoryDraft({
+  active,
+  value,
+  onChange,
+  onSelect,
+}: {
+  active: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onSelect: () => void;
+}) {
+  const [editing, setEditing] = useState(active);
   const displayName = value.trim() || "Page name";
+
+  useEffect(() => {
+    if (!active) {
+      setEditing(false);
+      return;
+    }
+    if (displayName === "Page name") setEditing(true);
+  }, [active, displayName]);
 
   const commitName = () => {
     onChange(displayName);
@@ -476,10 +503,10 @@ function RunHistoryDraft({ value, onChange }: { value: string; onChange: (value:
   };
 
   return (
-    <div className="list-row-shell draft active">
+    <div className={active ? "list-row-shell run draft active is-active" : "list-row-shell run draft"}>
       {editing ? (
         <div className="list-row-editor">
-          <span className="list-run-marker" />
+          <span className="run-dot is-new" />
           <input
             aria-label="New list name"
             autoFocus
@@ -497,14 +524,15 @@ function RunHistoryDraft({ value, onChange }: { value: string; onChange: (value:
           />
         </div>
       ) : (
-        <button className="list-row-main" type="button" onDoubleClick={() => setEditing(true)}>
-          <span className="list-run-marker" />
-          <span>
-            <strong>{displayName}</strong>
+        <button className="list-row-main" type="button" onClick={onSelect} onDoubleClick={() => setEditing(true)}>
+          <span className="run-title">{displayName}</span>
+          <span className="run-meta">
+            <span className="run-dot is-new" />
+            <span className="run-yield">new search</span>
+            <span className="run-when">draft</span>
           </span>
         </button>
       )}
-      <small>new search</small>
     </div>
   );
 }
@@ -513,6 +541,7 @@ function RunHistoryItem({
   active,
   run,
   title,
+  contacts,
   onDelete,
   onRename,
   onSelect,
@@ -520,12 +549,15 @@ function RunHistoryItem({
   active: boolean;
   run: DiscoveryRun;
   title: string;
-  onDelete: () => void;
+  contacts: DiscoveryResult[];
+  onDelete: () => void | Promise<void>;
   onRename: (runId: string, name: string) => Promise<void>;
   onSelect: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(title);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!editing) setName(title);
@@ -542,11 +574,21 @@ function RunHistoryItem({
     setEditing(false);
   };
 
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await onDelete();
+    } finally {
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
+  };
+
   return (
-    <div className={active ? "list-row-shell active" : "list-row-shell"} title={getRunPrompt(run) || title}>
+    <div className={active ? "list-row-shell run active is-active" : "list-row-shell run"} title={getRunPrompt(run) || title}>
       {editing ? (
         <div className="list-row-editor">
-          <span className="list-run-marker" />
+          <span className={`run-dot ${runDotClass(run)}`} />
           <input
             aria-label="Rename run"
             autoFocus
@@ -565,23 +607,34 @@ function RunHistoryItem({
         </div>
       ) : (
         <button className="list-row-main" type="button" onClick={onSelect} onDoubleClick={() => setEditing(true)}>
-          <span className="list-run-marker" />
-          <span>
-            <strong>{title}</strong>
-            <small>
-              <span>{listMeta(run)}</span>
-              <em>{formatRunDate(run.created_at)}</em>
-            </small>
+          <span className="run-title">{title}</span>
+          <span className="run-meta">
+            <span className={`run-dot ${runDotClass(run)}`} />
+            <span className="run-yield">{runYield(run, contacts)}</span>
+            <span className="run-status">{listMeta(run)}</span>
+            <span className="run-when">{formatRunDate(run.created_at)}</span>
           </span>
         </button>
       )}
-      <div className="list-row-actions">
+      {confirmingDelete ? (
+        <div className="run-confirm">
+          <span className="q">Delete run?</span>
+          <button className="yes" type="button" disabled={deleting} onClick={() => void confirmDelete()}>
+            Delete
+          </button>
+          <button type="button" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
+      <div className="list-row-actions run-actions">
         <button
           aria-label={`Rename ${title}`}
-          className="list-row-action"
+          className="list-row-action run-act"
           type="button"
           onClick={(event) => {
             event.stopPropagation();
+            setConfirmingDelete(false);
             setEditing(true);
           }}
         >
@@ -589,11 +642,12 @@ function RunHistoryItem({
         </button>
         <button
           aria-label={`Delete ${title}`}
-          className="list-row-action danger"
+          className="list-row-action run-act del danger"
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            onDelete();
+            setEditing(false);
+            setConfirmingDelete(true);
           }}
         >
           <Trash2 size={12} />
@@ -712,17 +766,17 @@ function displayProductName(product: Product) {
 }
 
 function listLabel(run: DiscoveryRun) {
-  if (run.name && !isGeneratedRunName(run.name)) return truncateLabel(run.name, 38);
+  if (run.name && !isGeneratedRunName(run.name)) return run.name;
   const intent = run.source_inputs?.source_request_intent;
   if (isRecord(intent)) {
     const category = typeof intent.business_category === "string" ? intent.business_category.trim() : "";
     const location = typeof intent.location === "string" ? intent.location.trim() : "";
-    if (category && location) return truncateLabel(`${titleCase(category)} · ${titleCase(location)}`, 38);
-    if (category) return truncateLabel(titleCase(category), 38);
+    if (category && location) return `${titleCase(category)} · ${titleCase(location)}`;
+    if (category) return titleCase(category);
   }
   const prompt = getRunPrompt(run);
-  if (prompt) return truncateLabel(titleFromQuery(prompt) || prompt, 38);
-  if (run.name) return truncateLabel(run.name, 38);
+  if (prompt) return titleFromQuery(prompt) || prompt;
+  if (run.name) return run.name;
   return "Untitled list";
 }
 
@@ -735,8 +789,23 @@ function listMeta(run: DiscoveryRun) {
   return status;
 }
 
-function truncateLabel(value: string, maxLength: number) {
-  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+function runDotClass(run: DiscoveryRun) {
+  const status = run.status.toLowerCase();
+  if (["discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(status)) {
+    return "is-running";
+  }
+  if (["draft", "paused"].includes(status)) return "is-new";
+  if (status === "failed") return "is-failed";
+  return "is-done";
+}
+
+function runYield(run: DiscoveryRun, contacts: DiscoveryResult[]) {
+  const runContacts = contacts.filter((contact) => contact.campaign_id === run.id);
+  const verifiedCount = runContacts.filter((contact) => contact.verification_status === "valid").length;
+  if (runContacts.length && verifiedCount) return `${runContacts.length} · ${verifiedCount} verified`;
+  if (runContacts.length) return `${runContacts.length} found`;
+  if (runDotClass(run) === "is-running") return "searching";
+  return "0 found";
 }
 
 function formatRunDate(value: string) {
