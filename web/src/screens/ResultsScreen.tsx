@@ -6,6 +6,7 @@ import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
+  ContactVerificationStatus,
   DiscoveryResult,
   LeadReviewStatus,
   LeadUpdateInput,
@@ -14,7 +15,7 @@ import type {
 } from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
-type ResultFilter = "all" | "shortlisted" | "needs_review" | "not_fit" | "has_draft";
+type ResultFilter = "all" | "verified" | "good_fit" | "shortlisted" | "needs_review" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
 
 export function ResultsScreen() {
@@ -30,6 +31,7 @@ export function ResultsScreen() {
     renameDiscoveryRun,
     qualifyLead,
     updateLead,
+    draftShortlist,
     createOutreachDraft,
     updateMessage,
     approveMessage,
@@ -44,6 +46,7 @@ export function ResultsScreen() {
   const [sort, setSort] = useState<ResultSort>("contact");
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
   const [running, setRunning] = useState(false);
+  const [draftingShortlist, setDraftingShortlist] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -53,13 +56,31 @@ export function ResultsScreen() {
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = draftPrompt.trim() || runPrompt;
   const selectedSource = selectedSources[0] || "";
+  const activeMessages = snapshot.messages.filter((message) => message.status !== "cancelled");
+  const messageByLeadId = new Map(activeMessages.map((message) => [message.lead_id, message]));
+  const approvedLeadIds = new Set(
+    activeMessages
+      .filter((message) => message.status === "approved" || message.status === "sent")
+      .map((message) => message.lead_id),
+  );
+  const reachableContacts = contacts.filter(isReachableContact).length;
+  const verifiedContacts = contacts.filter(isVerifiedContact).length;
+  const goodFitContacts = contacts.filter(canShortlistContact).length;
   const shortlistedContacts = contacts.filter((contact) => contact.shortlisted_at).length;
   const needsReviewContacts = contacts.filter((contact) => reviewStatus(contact) === "unreviewed").length;
   const notFitContacts = contacts.filter((contact) => reviewStatus(contact) === "not_fit").length;
-  const draftedLeadIds = new Set(snapshot.messages.filter((message) => message.status !== "cancelled").map((message) => message.lead_id));
+  const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
   const draftedContacts = contacts.filter((contact) => draftedLeadIds.has(contact.id)).length;
+  const approvedShortlistContacts = contacts.filter(
+    (contact) => contact.shortlisted_at && approvedLeadIds.has(contact.id),
+  );
+  const draftableShortlistContacts = contacts.filter(
+    (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
+  );
   const visibleContacts = contacts
     .filter((contact) => {
+      if (filter === "verified") return isVerifiedContact(contact);
+      if (filter === "good_fit") return canShortlistContact(contact);
       if (filter === "shortlisted") return Boolean(contact.shortlisted_at);
       if (filter === "needs_review") return reviewStatus(contact) === "unreviewed";
       if (filter === "not_fit") return reviewStatus(contact) === "not_fit";
@@ -73,9 +94,7 @@ export function ResultsScreen() {
     });
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId);
-  const selectedMessage = selectedContact
-    ? snapshot.messages.find((message) => message.lead_id === selectedContact.id && message.status !== "cancelled")
-    : undefined;
+  const selectedMessage = selectedContact ? messageByLeadId.get(selectedContact.id) : undefined;
 
   useEffect(() => {
     setDraftPrompt(runPrompt);
@@ -163,6 +182,27 @@ export function ResultsScreen() {
     void updateSearch();
   };
 
+  const draftCurrentShortlist = async () => {
+    if (!selectedDiscoveryRun || draftingShortlist) return;
+    setDraftingShortlist(true);
+    try {
+      const created = await draftShortlist(selectedDiscoveryRun.id);
+      setRunMenuOpen(false);
+      showToast({
+        title: created.length ? "Drafts created" : "No new drafts",
+        message: created.length
+          ? `${created.length} shortlisted contact${created.length === 1 ? "" : "s"} now have drafts.`
+          : "No verified shortlisted contacts needed a new draft.",
+        tone: created.length ? "green" : "amber",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Drafting failed", message, tone: "red" });
+    } finally {
+      setDraftingShortlist(false);
+    }
+  };
+
   if (!selectedDiscoveryRun) {
     return <OverviewScreen />;
   }
@@ -183,6 +223,15 @@ export function ResultsScreen() {
       />
 
       <header className="results-hero compact">
+        <p className="run-quality-line">
+          {contacts.length} found
+          <span>{reachableContacts} reachable</span>
+          <span>{verifiedContacts} verified</span>
+          <span>{goodFitContacts} good fit</span>
+          <span>{shortlistedContacts} shortlisted</span>
+          <span>{draftedContacts} drafted</span>
+          <span>{approvedShortlistContacts.length} approved</span>
+        </p>
         <div className="results-actions">
           <div className="results-menu-control" ref={runMenuRef}>
             <button
@@ -199,7 +248,7 @@ export function ResultsScreen() {
                 <button
                   type="button"
                   disabled={!contacts.length}
-                  onClick={() => exportContactsCsv(contacts, exportName)}
+                  onClick={() => exportContactsCsv(contacts, exportName, activeMessages)}
                 >
                   <Download size={14} />
                   Export all contacts
@@ -207,10 +256,26 @@ export function ResultsScreen() {
                 <button
                   type="button"
                   disabled={!shortlistedContacts}
-                  onClick={() => exportContactsCsv(contacts.filter((contact) => contact.shortlisted_at), `${exportName}-shortlist`)}
+                  onClick={() => exportContactsCsv(contacts.filter((contact) => contact.shortlisted_at), `${exportName}-shortlist`, activeMessages)}
                 >
                   <Download size={14} />
                   Export shortlist
+                </button>
+                <button
+                  type="button"
+                  disabled={!approvedShortlistContacts.length}
+                  onClick={() => exportContactsCsv(approvedShortlistContacts, `${exportName}-approved-shortlist`, activeMessages)}
+                >
+                  <Download size={14} />
+                  Export approved shortlist
+                </button>
+                <button
+                  type="button"
+                  disabled={!draftableShortlistContacts.length || draftingShortlist}
+                  onClick={() => void draftCurrentShortlist()}
+                >
+                  <Mail size={14} />
+                  Generate drafts for shortlist
                 </button>
                 <button type="button" onClick={() => void renameCurrentRun()}>
                   Rename run
@@ -234,6 +299,14 @@ export function ResultsScreen() {
           <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
             All
             <span>{contacts.length}</span>
+          </button>
+          <button className={filter === "verified" ? "active" : ""} type="button" onClick={() => setFilter("verified")}>
+            Verified
+            <span>{verifiedContacts}</span>
+          </button>
+          <button className={filter === "good_fit" ? "active" : ""} type="button" onClick={() => setFilter("good_fit")}>
+            Good fit
+            <span>{goodFitContacts}</span>
           </button>
           <button className={filter === "shortlisted" ? "active" : ""} type="button" onClick={() => setFilter("shortlisted")}>
             Shortlisted
@@ -346,6 +419,10 @@ function SearchStrip({
 
 function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: () => void }) {
   const score = contactScore(contact);
+  const fitStatus = displayFitStatus(contact);
+  const evidence = contactEvidenceLine(contact);
+  const missing = contactMissingEvidenceLine(contact);
+  const verification = verificationStatus(contact);
 
   return (
     <li>
@@ -366,7 +443,10 @@ function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: ()
             <strong>{score}</strong>
           </span>
           <span className="contact-identity">
-            <strong>{contact.company_name}</strong>
+            <span className="contact-title-line">
+              <strong>{contact.company_name}</strong>
+              <em className={`fit-badge ${fitStatus.className}`}>{fitStatus.label}</em>
+            </span>
             <small>
               {contact.research?.business_type || contact.description || "Business"}
               {contact.geography || contact.research?.geography ? (
@@ -376,9 +456,14 @@ function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: ()
                 </>
               ) : null}
             </small>
+            <span className="contact-evidence-line">{evidence}</span>
+            {missing ? <span className="contact-missing-line">{missing}</span> : null}
           </span>
         </div>
         <div className="contact-actions" aria-label="Contact availability">
+          <span className={`verification-label verification-${verification}`}>
+            {verificationStatusLabel(verification)}
+          </span>
           {contact.contact_email || contact.research?.contact_email ? (
             <span className="contact-icon has" title="Email found">
               <Mail size={15} />
@@ -437,7 +522,6 @@ function ContactDrawer({
   const agentAssessment = contact ? getAgentAssessment(contact) : undefined;
   const canShortlist = contact ? canShortlistContact(contact) : false;
   const shortlisted = Boolean(contact?.shortlisted_at);
-  const canDraft = shortlisted && canShortlist;
   const [reviewNote, setReviewNote] = useState("");
   const [qualifying, setQualifying] = useState(false);
   const [savingReview, setSavingReview] = useState(false);
@@ -447,6 +531,8 @@ function ContactDrawer({
   const signals = contact ? contactSignals(contact) : [];
   const website = contact?.website_url || contact?.research?.website_url || "";
   const email = contact?.contact_email || contact?.research?.contact_email || "";
+  const verified = contact ? isVerifiedContact(contact) : false;
+  const canDraft = Boolean(shortlisted && canShortlist && verified && email);
   const canSend = Boolean(message && message.status === "approved" && email && canDraft);
   const phone = contact ? getPhone(contact) : "";
   const contactName = contact ? getContactName(contact) : "";
@@ -649,6 +735,14 @@ function ContactDrawer({
                 ))}
               </div>
 
+              <section className="drawer-verification-panel">
+                <div className="drawer-section-heading">
+                  <h3>Contact verification</h3>
+                  <span>{contactVerificationSummary(contact)}</span>
+                </div>
+                <p>{contact.verification_reason || verificationStatusDescription(contact)}</p>
+              </section>
+
               <section className="drawer-agent-panel">
                 <div className="drawer-section-heading">
                   <h3>Agent assessment</h3>
@@ -782,7 +876,13 @@ function ContactDrawer({
                     Generate draft
                   </button>
                 ) : (
-                  <p className="draft-warning">Mark this contact as Good fit or Maybe, then shortlist it before drafting.</p>
+                  <p className="draft-warning">
+                    {shortlisted && !verified
+                      ? "Verify this contact before generating outreach."
+                      : !email
+                        ? "Find an email before generating outreach."
+                        : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
+                  </p>
                 )}
               </section>
 
@@ -929,6 +1029,41 @@ function reviewStatusLabel(status: LeadReviewStatus) {
   return labels[status];
 }
 
+function verificationStatus(contact: DiscoveryResult): ContactVerificationStatus {
+  return contact.verification_status || "unverified";
+}
+
+function verificationStatusLabel(status: ContactVerificationStatus) {
+  const labels: Record<ContactVerificationStatus, string> = {
+    unverified: "Unverified",
+    valid: "Verified",
+    risky: "Risky",
+    invalid: "Invalid",
+    unknown: "Unknown",
+  };
+  return labels[status];
+}
+
+function verificationStatusDescription(contact: DiscoveryResult) {
+  const status = verificationStatus(contact);
+  if (status === "valid") return "This contact passed the configured verification check.";
+  if (status === "risky") return "The contact may be reachable but has verification risk.";
+  if (status === "invalid") return "The contact failed the configured verification check.";
+  if (status === "unknown") return "The configured verification check could not confirm this contact.";
+  return "This contact has not been verified yet.";
+}
+
+function contactVerificationSummary(contact: DiscoveryResult) {
+  const status = verificationStatus(contact);
+  const score = typeof contact.verification_score === "number" ? ` · ${contact.verification_score}` : "";
+  const provider = contact.verification_provider ? ` via ${contact.verification_provider}` : "";
+  return `${verificationStatusLabel(status)}${score}${provider}`;
+}
+
+function isVerifiedContact(contact: DiscoveryResult) {
+  return verificationStatus(contact) === "valid";
+}
+
 function agentFitStatusLabel(status: AgentFitStatus) {
   const labels: Record<AgentFitStatus, string> = {
     good_fit: "Good fit",
@@ -966,6 +1101,37 @@ function canShortlistContact(contact: DiscoveryResult) {
   if (status === "good_fit" || status === "maybe") return true;
   const assessment = getAgentAssessment(contact);
   return assessment?.fitStatus === "good_fit" || assessment?.fitStatus === "maybe";
+}
+
+function displayFitStatus(contact: DiscoveryResult): { label: string; className: string } {
+  const status = reviewStatus(contact);
+  if (status === "good_fit") return { label: "Good fit", className: "fit-good" };
+  if (status === "maybe") return { label: "Maybe", className: "fit-maybe" };
+  if (status === "not_fit") return { label: "Not fit", className: "fit-bad" };
+  const assessment = getAgentAssessment(contact);
+  if (assessment?.fitStatus === "good_fit") return { label: "Agent good fit", className: "fit-good" };
+  if (assessment?.fitStatus === "maybe") return { label: "Agent maybe", className: "fit-maybe" };
+  if (assessment?.fitStatus === "not_fit") return { label: "Agent not fit", className: "fit-bad" };
+  return { label: "Needs review", className: "fit-neutral" };
+}
+
+function contactEvidenceLine(contact: DiscoveryResult) {
+  const assessment = getAgentAssessment(contact);
+  const evidence =
+    assessment?.positiveSignals[0] ||
+    contact.research?.signals?.[0] ||
+    contact.research?.summary ||
+    contact.description ||
+    "Open details to review public evidence.";
+  return truncateText(evidence, 128);
+}
+
+function contactMissingEvidenceLine(contact: DiscoveryResult) {
+  const missing = getAgentAssessment(contact)?.missingEvidence[0];
+  if (missing) return `Missing: ${truncateText(missing, 110)}`;
+  if (!contact.contact_email && !contact.research?.contact_email) return `Missing: email`;
+  if (!isVerifiedContact(contact)) return `Missing: verified contact`;
+  return "";
 }
 
 function messageStatusLabel(status: string) {
@@ -1048,6 +1214,12 @@ function displayUrl(value: string) {
   } catch {
     return value;
   }
+}
+
+function truncateText(value: string, maxLength: number) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
 }
 
 function getAddress(contact: DiscoveryResult) {
@@ -1190,8 +1362,10 @@ function rawValueToString(value: unknown): string {
   return "";
 }
 
-function exportContactsCsv(contacts: DiscoveryResult[], runName: string) {
+function exportContactsCsv(contacts: DiscoveryResult[], runName: string, messages: Message[] = []) {
+  const messageByLeadId = new Map(messages.map((message) => [message.lead_id, message]));
   const rows = contacts.map((contact) => ({
+    shortlisted: contact.shortlisted_at ? "yes" : "no",
     company: contact.company_name,
     email: contact.contact_email || contact.research?.contact_email || "",
     contact_name: getContactName(contact) || contact.research?.contact_name || "",
@@ -1200,13 +1374,20 @@ function exportContactsCsv(contacts: DiscoveryResult[], runName: string) {
     posted: getPostedDate(contact),
     website: contact.website_url || contact.research?.website_url || "",
     geography: contact.geography || contact.research?.geography || "",
+    verification_status: verificationStatusLabel(verificationStatus(contact)),
+    verification_score: contact.verification_score ?? "",
+    verification_reason: contact.verification_reason || "",
     score: String(contactScore(contact)),
     status: contactStatusLabel(contact),
-    review_status: reviewStatusLabel(reviewStatus(contact)),
+    fit_verdict: displayFitStatus(contact).label,
     review_note: contact.review_note || "",
-    shortlisted: contact.shortlisted_at ? "yes" : "no",
+    evidence: contactEvidenceLine(contact),
+    missing_evidence: contactMissingEvidenceLine(contact).replace(/^Missing:\s*/, ""),
     signals: contactSignals(contact).join("; "),
     rationale: contact.qualification?.rationale || "",
+    draft_status: messageByLeadId.get(contact.id)?.status || "",
+    draft_subject: messageByLeadId.get(contact.id)?.subject || "",
+    draft_body: messageByLeadId.get(contact.id)?.body || "",
   }));
   const headers = Object.keys(rows[0] || { company: "" });
   const csv = [

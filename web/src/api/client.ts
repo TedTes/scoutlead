@@ -150,6 +150,10 @@ export class ApiClient {
     return this.request<Message[]>(`/discovery-runs/${runId}/messages`);
   }
 
+  draftShortlist(runId: string) {
+    return this.request<Message[]>(`/discovery-runs/${runId}/draft-shortlist`, { method: "POST" });
+  }
+
   createLeadOutreachDraft(leadId: string) {
     return this.request<Message>(`/leads/${leadId}/outreach-draft`, { method: "POST" });
   }

@@ -1304,6 +1304,16 @@ a {
   background: var(--panel-muted);
 }
 
+.action-menu button:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.action-menu button:disabled:hover {
+  background: transparent;
+}
+
 .action-menu .danger-item {
   color: var(--red);
 }
@@ -1403,6 +1413,19 @@ a {
   font-family: var(--mono);
   margin-left: 5px;
   opacity: 0.72;
+}
+
+.run-quality-line {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0 auto 0 0;
+}
+
+.run-quality-line span::before {
+  color: var(--faint);
+  content: "·";
+  margin: 0 7px;
 }
 
 .sort-tabs {
@@ -1517,6 +1540,13 @@ a {
   min-width: 0;
 }
 
+.contact-title-line {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
 .contact-identity strong {
   color: var(--text);
   display: block;
@@ -1526,6 +1556,41 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.fit-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.fit-good {
+  background: var(--green-bg);
+  border-color: var(--green-line);
+  color: var(--green);
+}
+
+.fit-maybe {
+  background: var(--amber-bg);
+  border-color: var(--amber-line);
+  color: var(--amber);
+}
+
+.fit-bad {
+  background: #fff0f0;
+  border-color: #f0c8c8;
+  color: #b42318;
+}
+
+.fit-neutral {
+  background: var(--panel-muted);
+  color: var(--muted);
 }
 
 .contact-identity small {
@@ -1541,6 +1606,25 @@ a {
 .contact-identity small svg {
   height: 12px;
   width: 12px;
+}
+
+.contact-evidence-line,
+.contact-missing-line {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-evidence-line {
+  color: var(--muted);
+}
+
+.contact-missing-line {
+  color: var(--amber);
 }
 
 .contact-actions {
@@ -1562,6 +1646,35 @@ a {
 
 .contact-icon.missing {
   opacity: 0.32;
+}
+
+.verification-label {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.verification-valid {
+  background: var(--green-bg);
+  border-color: var(--green-line);
+  color: var(--green);
+}
+
+.verification-risky,
+.verification-unknown {
+  background: var(--amber-bg);
+  border-color: var(--amber-line);
+  color: var(--amber);
+}
+
+.verification-invalid {
+  background: #fff0f0;
+  border-color: #f0c8c8;
+  color: #b42318;
 }
 
 .no-contact-pill {
@@ -1722,6 +1835,22 @@ a {
   padding: 4px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.drawer-verification-panel {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding: 12px;
+}
+
+.drawer-verification-panel p {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .drawer-agent-panel {

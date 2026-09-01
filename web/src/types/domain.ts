@@ -135,6 +135,7 @@ export type ResultSeedInput = {
 
 export type LeadReviewStatus = "unreviewed" | "good_fit" | "maybe" | "not_fit";
 export type AgentFitStatus = "good_fit" | "maybe" | "not_fit";
+export type ContactVerificationStatus = "unverified" | "valid" | "risky" | "invalid" | "unknown";
 
 export type LeadUpdateInput = {
   review_status?: LeadReviewStatus;
@@ -158,6 +159,11 @@ export type DiscoveryResult = {
   review_note?: string | null;
   reviewed_at?: string | null;
   shortlisted_at?: string | null;
+  verification_status?: ContactVerificationStatus;
+  verification_provider?: string | null;
+  verification_checked_at?: string | null;
+  verification_reason?: string | null;
+  verification_score?: number | null;
   created_at: string;
   updated_at: string;
   research?: {
@@ -248,9 +254,15 @@ export type Metrics = {
   north_star_value: number;
   lead_count: number;
   researched_lead_count: number;
+  reachable_lead_count: number;
+  verified_lead_count: number;
   qualified_lead_count: number;
+  good_fit_lead_count: number;
+  shortlisted_lead_count: number;
   average_lead_score: number;
+  drafted_message_count: number;
   pending_approval_count: number;
+  approved_message_count: number;
   sent_count: number;
   response_count: number;
   response_rate: number;

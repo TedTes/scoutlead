@@ -57,6 +57,7 @@ type AppDataContextValue = {
   addSeedResults: (seeds: unknown[]) => Promise<void>;
   qualifyLead: (leadId: string) => Promise<void>;
   updateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
+  draftShortlist: (runId?: string) => Promise<Message[]>;
   createOutreachDraft: (leadId: string) => Promise<Message | null>;
   updateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
   approveMessage: (messageId: string) => Promise<void>;
@@ -430,6 +431,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         mutate(async () => {
           await api.updateLead(leadId, update);
         }),
+      draftShortlist: async (runId = selectedDiscoveryRunIdState) => {
+        let created: Message[] = [];
+        await mutate(async () => {
+          if (!runId) return;
+          created = await api.draftShortlist(runId);
+        });
+        return created;
+      },
       createOutreachDraft: async (leadId) => {
         let created: Message | null = null;
         await mutate(async () => {
