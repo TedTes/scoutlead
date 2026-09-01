@@ -4,6 +4,7 @@ from conversations.schemas import ConversationRead, ResponseIntent
 from evaluation.lead_quality import evaluate_lead_quality
 from evaluation.outreach import evaluate_outreach_approaches
 from evaluation.schemas import CampaignMetrics
+from leads.policy import can_shortlist_lead, is_reachable_lead, is_verified_lead
 from leads.schemas import LeadRead
 from messages.schemas import MessageRead, MessageStatus
 
@@ -36,6 +37,7 @@ def calculate_campaign_metrics(
     )
     response_rate = len(inbound_events) / len(sent) if sent else 0
     interview_rate = interview_count / len(sent) if sent else 0
+    active_messages = [message for message in messages if message.status != MessageStatus.CANCELLED]
     approach_performance = evaluate_outreach_approaches(
         messages,
         conversations,
@@ -55,11 +57,25 @@ def calculate_campaign_metrics(
         north_star_value=north_star_values.get(policy.north_star_metric, 0),
         lead_count=len(leads),
         researched_lead_count=sum(1 for lead in leads if lead.research is not None),
+        reachable_lead_count=sum(1 for lead in leads if is_reachable_lead(lead)),
+        verified_lead_count=sum(1 for lead in leads if is_verified_lead(lead)),
         qualified_lead_count=sum(1 for lead in leads if lead.qualification and lead.qualification.qualified),
+        good_fit_lead_count=sum(
+            1
+            for lead in leads
+            if can_shortlist_lead(review_status=lead.review_status, qualification=lead.qualification)
+        ),
+        shortlisted_lead_count=sum(1 for lead in leads if lead.shortlisted_at),
         average_lead_score=round(sum(scores) / len(scores)) if scores else 0,
+        drafted_message_count=sum(
+            1
+            for message in active_messages
+            if message.status in {MessageStatus.DRAFT, MessageStatus.PENDING_APPROVAL, MessageStatus.APPROVED}
+        ),
         pending_approval_count=sum(
             1 for message in messages if message.status == MessageStatus.PENDING_APPROVAL
         ),
+        approved_message_count=sum(1 for message in active_messages if message.status == MessageStatus.APPROVED),
         sent_count=len(sent),
         response_count=len(inbound_events),
         response_rate=response_rate,

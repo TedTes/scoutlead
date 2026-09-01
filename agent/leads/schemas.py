@@ -25,6 +25,14 @@ class LeadReviewStatus(StrEnum):
     NOT_FIT = "not_fit"
 
 
+class ContactVerificationStatus(StrEnum):
+    UNVERIFIED = "unverified"
+    VALID = "valid"
+    RISKY = "risky"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+
+
 class AgentFitStatus(StrEnum):
     GOOD_FIT = "good_fit"
     MAYBE = "maybe"
@@ -94,6 +102,13 @@ class LeadUpdate(BaseModel):
     shortlisted: bool | None = None
 
 
+class LeadVerification(BaseModel):
+    status: ContactVerificationStatus
+    provider: str
+    reason: str | None = None
+    score: int = Field(ge=0, le=100)
+
+
 class LeadRead(LeadCreate):
     model_config = ConfigDict(from_attributes=True)
 
@@ -103,6 +118,11 @@ class LeadRead(LeadCreate):
     review_note: str | None = None
     reviewed_at: datetime | None = None
     shortlisted_at: datetime | None = None
+    verification_status: ContactVerificationStatus = ContactVerificationStatus.UNVERIFIED
+    verification_provider: str | None = None
+    verification_checked_at: datetime | None = None
+    verification_reason: str | None = None
+    verification_score: int | None = None
     research: LeadResearch | None = None
     qualification: QualificationResult | None = None
     created_at: datetime

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from leads.schemas import AgentFitStatus, LeadRead, LeadReviewStatus, QualificationResult
+from leads.schemas import (
+    AgentFitStatus,
+    ContactVerificationStatus,
+    LeadRead,
+    LeadReviewStatus,
+    QualificationResult,
+)
 
 
 MAYBE_FIT_SCORE = 50
@@ -44,6 +50,26 @@ def is_outreach_ready(lead: LeadRead) -> bool:
             qualification=lead.qualification,
         )
     )
+
+
+def lead_email(lead: LeadRead) -> str | None:
+    if lead.contact_email:
+        return lead.contact_email
+    if lead.research and lead.research.contact_email:
+        return lead.research.contact_email
+    return None
+
+
+def is_reachable_lead(lead: LeadRead) -> bool:
+    return bool(lead_email(lead))
+
+
+def is_verified_lead(lead: LeadRead) -> bool:
+    return lead.verification_status == ContactVerificationStatus.VALID
+
+
+def is_draftable_lead(lead: LeadRead) -> bool:
+    return is_outreach_ready(lead) and is_reachable_lead(lead) and is_verified_lead(lead)
 
 
 def _review_status(value: LeadReviewStatus | str | None) -> LeadReviewStatus:

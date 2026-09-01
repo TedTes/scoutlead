@@ -7,7 +7,13 @@ from campaigns.repository import CampaignRepository
 from campaigns.goal import goal_policy
 from campaigns.schemas import CampaignGoalType, CampaignRead, CampaignStatus, OutreachChannel
 from conversations.repository import ConversationRepository
-from leads.policy import is_outreach_ready
+from leads.policy import (
+    is_draftable_lead,
+    is_outreach_ready,
+    is_reachable_lead,
+    is_verified_lead,
+    lead_email,
+)
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead, LeadStatus
 from messages.repository import MessageRepository
@@ -53,6 +59,20 @@ class MessageService:
                     "user_message": "Mark this contact as Good fit or Maybe before generating outreach.",
                 },
             )
+        if not is_reachable_lead(lead):
+            raise ConflictError(
+                "lead needs a reachable email before outreach",
+                {"lead_id": lead_id, "user_message": "Find an email before generating outreach."},
+            )
+        if not is_verified_lead(lead):
+            raise ConflictError(
+                "lead must be verified before outreach",
+                {
+                    "lead_id": lead_id,
+                    "verification_status": lead.verification_status.value,
+                    "user_message": "Verify this contact before generating outreach.",
+                },
+            )
 
         campaign = CampaignRead.model_validate(self.campaigns.get(lead.campaign_id))
         product = ProductRead.model_validate(self.products.get(lead.product_id))
@@ -83,6 +103,20 @@ class MessageService:
         self.leads.update_status(lead.id, LeadStatus.AWAITING_APPROVAL)
         return MessageRead.model_validate(message)
 
+    def create_outreach_drafts_for_run(self, campaign_id: str) -> list[MessageRead]:
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        created: list[MessageRead] = []
+        channel = _message_channel(campaign)
+        for lead_model in self.leads.list_by_campaign(campaign.id):
+            lead = LeadRead.model_validate(lead_model)
+            if not is_draftable_lead(lead):
+                continue
+            existing = self.messages.latest_for_lead(lead.id, channel.value)
+            if existing and MessageStatus(existing.status) not in {MessageStatus.CANCELLED, MessageStatus.FAILED}:
+                continue
+            created.append(self.create_outreach_draft_for_lead(lead.id))
+        return created
+
     def approve(self, message_id: str, approval: MessageApproval) -> MessageRead:
         message = self.messages.approve(message_id, approval)
         self.leads.update_status(message.lead_id, LeadStatus.APPROVED)
@@ -111,6 +145,23 @@ class MessageService:
                     "user_message": "Shortlist a Good fit or Maybe contact before sending.",
                 },
             )
+        if not is_reachable_lead(lead):
+            raise ConflictError(
+                "lead needs a reachable email before sending",
+                {"lead_id": lead.id, "user_message": "Find an email before sending."},
+            )
+        if not is_verified_lead(lead):
+            raise ConflictError(
+                "lead must be verified before sending",
+                {
+                    "lead_id": lead.id,
+                    "verification_status": lead.verification_status.value,
+                    "user_message": "Verify this contact before sending.",
+                },
+            )
+        email = lead_email(lead)
+        if email and lead.contact_email != email:
+            lead.contact_email = email
         if campaign.status == CampaignStatus.AWAITING_APPROVAL.value:
             self.campaigns.update_status(message.campaign_id, CampaignStatus.SENDING)
 

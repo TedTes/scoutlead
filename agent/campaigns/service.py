@@ -43,6 +43,7 @@ from shared.utils import truncate
 from source_presets.service import SourcePresetService
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
+from tools.verify import EmailVerificationTool
 from tools.search import SearchTool
 from tools.source_registry import SourceAdapterRegistry
 from workflows.discovery import DiscoveryWorkflow
@@ -162,6 +163,11 @@ class CampaignService:
         apify_actor_result_mapping: str | None = None,
         apify_actor_max_charge_usd: float | None = None,
         apify_sources: list[dict[str, Any]] | None = None,
+        contact_verification_provider: str = "syntax",
+        email_verification_endpoint: str | None = None,
+        email_verification_api_key: str | None = None,
+        zerobounce_api_key: str | None = None,
+        zerobounce_api_endpoint: str | None = None,
         timeout_seconds: float = 20.0,
     ) -> None:
         self.session = session
@@ -179,6 +185,11 @@ class CampaignService:
         self.apify_actor_result_mapping = apify_actor_result_mapping
         self.apify_actor_max_charge_usd = apify_actor_max_charge_usd
         self.apify_sources = apify_sources
+        self.contact_verification_provider = contact_verification_provider
+        self.email_verification_endpoint = email_verification_endpoint
+        self.email_verification_api_key = email_verification_api_key
+        self.zerobounce_api_key = zerobounce_api_key
+        self.zerobounce_api_endpoint = zerobounce_api_endpoint
         self.timeout_seconds = timeout_seconds
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)
@@ -366,6 +377,7 @@ class CampaignService:
                     leads=self.leads,
                     memory=self.memory,
                     slot_config=preset.slot_config(ToolSlot.VERIFY),
+                    verification_tool=self._verification_tool(),
                     **self._slot_tool_call_callbacks(
                         agent_run_id=agent_run_id,
                         campaign_id=campaign_id,
@@ -503,6 +515,16 @@ class CampaignService:
             )
         )
 
+    def _verification_tool(self) -> EmailVerificationTool:
+        return EmailVerificationTool(
+            provider=self.contact_verification_provider,
+            endpoint=self.email_verification_endpoint,
+            api_key=self.email_verification_api_key,
+            zerobounce_api_key=self.zerobounce_api_key,
+            zerobounce_api_endpoint=self.zerobounce_api_endpoint,
+            timeout_seconds=self.timeout_seconds,
+        )
+
     def metrics(self, campaign_id: str) -> CampaignMetrics:
         leads = [
             LeadRead.model_validate(model)
@@ -628,6 +650,16 @@ class CampaignService:
             )
         )
 
+        verification_status, verification_detail, verification_required = self._contact_verification_check()
+        checks.append(
+            CampaignPreflightCheck(
+                name="Contact verification",
+                status=verification_status,
+                detail=verification_detail,
+                required=verification_required,
+            )
+        )
+
         checks.append(
             CampaignPreflightCheck(
                 name="Website inspection",
@@ -640,6 +672,24 @@ class CampaignService:
 
     def messages_can_send_real_email(self) -> bool:
         return self.email.is_configured
+
+    def _contact_verification_check(self) -> tuple[str, str, bool]:
+        provider = (self.contact_verification_provider or "syntax").strip().lower()
+        if provider in {"syntax", "local"}:
+            return (
+                "warning",
+                "Local syntax-only verification is enabled; deliverability is not externally checked.",
+                False,
+            )
+        if provider == "http":
+            if self.email_verification_endpoint:
+                return "ok", "Generic HTTP contact verification is configured.", True
+            return "failed", "Configure EMAIL_VERIFICATION_ENDPOINT for generic HTTP verification.", True
+        if provider == "zerobounce":
+            if self.zerobounce_api_key or self.email_verification_api_key:
+                return "ok", "ZeroBounce contact verification is configured.", True
+            return "failed", "Configure ZEROBOUNCE_API_KEY for ZeroBounce contact verification.", True
+        return "failed", f"Unknown contact verification provider: {provider}.", True
 
     @staticmethod
     def _assert_runnable_campaign(campaign: CampaignRead) -> None:

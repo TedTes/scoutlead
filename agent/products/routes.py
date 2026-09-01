@@ -56,6 +56,11 @@ def _campaign_service(
         apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
         apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
         apify_sources=services.settings.apify_source_configs,
+        contact_verification_provider=services.settings.contact_verification_provider,
+        email_verification_endpoint=services.settings.email_verification_endpoint,
+        email_verification_api_key=services.settings.email_verification_api_key,
+        zerobounce_api_key=services.settings.zerobounce_api_key,
+        zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 

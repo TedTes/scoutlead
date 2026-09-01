@@ -23,9 +23,15 @@ class CampaignMetrics(BaseModel):
     north_star_value: float = 0
     lead_count: int
     researched_lead_count: int
+    reachable_lead_count: int = 0
+    verified_lead_count: int = 0
     qualified_lead_count: int
+    good_fit_lead_count: int = 0
+    shortlisted_lead_count: int = 0
     average_lead_score: int
+    drafted_message_count: int = 0
     pending_approval_count: int
+    approved_message_count: int = 0
     sent_count: int
     response_count: int
     response_rate: float

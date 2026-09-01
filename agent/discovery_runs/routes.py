@@ -26,6 +26,7 @@ from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
+from messages.service import MessageService
 from products.repository import ProductRepository
 from shared.errors import ConflictError
 from source_requests.schemas import (
@@ -57,6 +58,11 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
         apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
         apify_sources=services.settings.apify_source_configs,
+        contact_verification_provider=services.settings.contact_verification_provider,
+        email_verification_endpoint=services.settings.email_verification_endpoint,
+        email_verification_api_key=services.settings.email_verification_api_key,
+        zerobounce_api_key=services.settings.zerobounce_api_key,
+        zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 
@@ -247,6 +253,17 @@ def list_discovery_candidates(run_id: str, session: DbSession):
 @router.get("/{run_id}/messages", response_model=list[MessageRead])
 def list_discovery_messages(run_id: str, session: DbSession):
     return MessageRepository(session).list_by_campaign(run_id)
+
+
+@router.post("/{run_id}/draft-shortlist", response_model=list[MessageRead])
+def draft_discovery_shortlist(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return MessageService(session=session, email=services.email, llm=services.llm).create_outreach_drafts_for_run(
+        run_id
+    )
 
 
 @router.get("/{run_id}/agent-runs", response_model=list[AgentRunRead])

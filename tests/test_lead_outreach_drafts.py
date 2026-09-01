@@ -6,7 +6,15 @@ from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, LeadSeedInput
 from db.session import create_database
 from leads.repository import LeadRepository
-from leads.schemas import AgentFitStatus, LeadReviewStatus, LeadStatus, LeadUpdate, QualificationResult
+from leads.schemas import (
+    AgentFitStatus,
+    ContactVerificationStatus,
+    LeadReviewStatus,
+    LeadStatus,
+    LeadUpdate,
+    LeadVerification,
+    QualificationResult,
+)
 from messages.schemas import MessageApproval, MessageStatus, OutreachDraft
 from messages.service import MessageService
 from products.repository import ProductRepository
@@ -61,6 +69,15 @@ def test_shortlisted_lead_can_generate_one_pending_outreach_draft() -> None:
             lead.id,
             LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True),
         )
+        lead_repo.attach_verification(
+            lead.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
+        )
 
         service = MessageService(session=session, email=EmailTool(), llm=DraftLLM())
         message = service.create_outreach_draft_for_lead(lead.id)
@@ -96,6 +113,39 @@ def test_unreviewed_lead_without_agent_fit_cannot_be_shortlisted() -> None:
 
         with pytest.raises(ConflictError):
             LeadRepository(session).update(lead.id, LeadUpdate(shortlisted=True))
+
+
+def test_shortlisted_good_fit_lead_must_be_verified_before_drafting() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(product_input())
+        campaign = CampaignRepository(session).create(
+            CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
+        )
+        lead_repo = LeadRepository(session)
+        lead = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Cedar & Sons Painting",
+                website_url="https://cedarpaint.example",
+                contact_email="owner@cedarpaint.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+        lead_repo.update(
+            lead.id,
+            LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True),
+        )
+
+        with pytest.raises(ConflictError):
+            MessageService(session=session, email=EmailTool(), llm=DraftLLM()).create_outreach_draft_for_lead(
+                lead.id
+            )
 
 
 def test_agent_good_fit_can_be_shortlisted_before_manual_review() -> None:
@@ -139,6 +189,82 @@ def test_agent_good_fit_can_be_shortlisted_before_manual_review() -> None:
         assert shortlisted.shortlisted_at is not None
 
 
+def test_draft_shortlist_skips_unverified_and_not_fit_leads() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(product_input())
+        campaign = CampaignRepository(session).create(
+            CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
+        )
+        lead_repo = LeadRepository(session)
+        verified = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Verified Painter",
+                website_url="https://verified.example",
+                contact_email="owner@verified.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+        unverified = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Unverified Painter",
+                website_url="https://unverified.example",
+                contact_email="owner@unverified.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+        not_fit = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Not Fit Directory",
+                website_url="https://directory.example",
+                contact_email="hello@directory.example",
+                geography="Toronto, ON",
+                description="Directory page",
+            ),
+        )
+        for lead in [verified, unverified, not_fit]:
+            lead_repo.update(
+                lead.id,
+                LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True),
+            )
+        lead_repo.attach_verification(
+            verified.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
+        )
+        lead_repo.attach_verification(
+            not_fit.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
+        )
+        lead_repo.update(not_fit.id, LeadUpdate(review_status=LeadReviewStatus.NOT_FIT))
+
+        messages = MessageService(session=session, email=EmailTool(), llm=DraftLLM()).create_outreach_drafts_for_run(
+            campaign.id
+        )
+
+        assert [message.lead_id for message in messages] == [verified.id]
+
+
 def test_not_fit_review_clears_shortlist_and_blocks_sending() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
@@ -164,6 +290,15 @@ def test_not_fit_review_clears_shortlist_and_blocks_sending() -> None:
         lead_repo.update(
             lead.id,
             LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True),
+        )
+        lead_repo.attach_verification(
+            lead.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
         )
 
         service = MessageService(session=session, email=EmailTool(), llm=DraftLLM())

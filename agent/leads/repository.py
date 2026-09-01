@@ -8,7 +8,15 @@ from sqlalchemy.orm import Session
 from campaigns.schemas import LeadSeedInput
 from db.models import DiscoveryCandidateModel, LeadModel
 from leads.policy import can_shortlist_lead, normalize_qualification_result
-from leads.schemas import LeadResearch, LeadReviewStatus, LeadStatus, LeadUpdate, QualificationResult
+from leads.schemas import (
+    ContactVerificationStatus,
+    LeadResearch,
+    LeadReviewStatus,
+    LeadStatus,
+    LeadUpdate,
+    LeadVerification,
+    QualificationResult,
+)
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, normalize_url, utcnow
 
@@ -34,6 +42,7 @@ class LeadRepository:
             source=seed.source or "campaign_seed",
             status=LeadStatus.DISCOVERED.value,
             review_status=LeadReviewStatus.UNREVIEWED.value,
+            verification_status=ContactVerificationStatus.UNVERIFIED.value,
             raw_sources=[seed.raw or seed.model_dump(mode="json")],
         )
         self.session.add(model)
@@ -63,6 +72,7 @@ class LeadRepository:
             source=result.get("source") or "search",
             status=LeadStatus.DISCOVERED.value,
             review_status=LeadReviewStatus.UNREVIEWED.value,
+            verification_status=ContactVerificationStatus.UNVERIFIED.value,
             raw_sources=[result],
         )
         self.session.add(model)
@@ -87,6 +97,7 @@ class LeadRepository:
             source=candidate.source,
             status=LeadStatus.DISCOVERED.value,
             review_status=LeadReviewStatus.UNREVIEWED.value,
+            verification_status=ContactVerificationStatus.UNVERIFIED.value,
             raw_sources=[
                 {
                     "candidate_id": candidate.id,
@@ -175,6 +186,17 @@ class LeadRepository:
         normalized = normalize_qualification_result(result)
         model.qualification = normalized.model_dump(mode="json")
         model.status = LeadStatus.QUALIFIED.value if normalized.qualified else LeadStatus.DISQUALIFIED.value
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
+    def attach_verification(self, lead_id: str, result: LeadVerification) -> LeadModel:
+        model = self.get(lead_id)
+        model.verification_status = result.status.value
+        model.verification_provider = result.provider
+        model.verification_checked_at = utcnow()
+        model.verification_reason = result.reason
+        model.verification_score = result.score
         self.session.commit()
         self.session.refresh(model)
         return model
