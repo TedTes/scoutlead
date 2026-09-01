@@ -156,6 +156,25 @@ class MessageModel(TimestampMixin, Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class EmailConnectionModel(TimestampMixin, Base):
+    __tablename__ = "email_connections"
+    __table_args__ = (
+        UniqueConstraint("product_id", "provider", name="uq_email_connections_product_provider"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    email_address: Mapped[str] = mapped_column(String(320), nullable=False)
+    encrypted_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    product: Mapped[ProductModel] = relationship()
+
+
 class ConversationModel(TimestampMixin, Base):
     __tablename__ = "conversations"
 

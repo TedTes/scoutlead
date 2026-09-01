@@ -13,6 +13,7 @@ from db.models import (
     ConversationEventModel,
     ConversationModel,
     DiscoveryCandidateModel,
+    EmailConnectionModel,
     LeadModel,
     LearningSummaryModel,
     MessageModel,
@@ -267,6 +268,7 @@ class ProductRepository:
 
         self.session.execute(delete(ConversationModel).where(ConversationModel.product_id == product_id))
         self.session.execute(delete(MessageModel).where(MessageModel.product_id == product_id))
+        self.session.execute(delete(EmailConnectionModel).where(EmailConnectionModel.product_id == product_id))
         self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.product_id == product_id))
         self.session.execute(delete(LeadModel).where(LeadModel.product_id == product_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))

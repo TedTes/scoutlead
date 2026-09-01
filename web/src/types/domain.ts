@@ -101,6 +101,19 @@ export type SourceProvider = {
   detail?: string | null;
 };
 
+export type GmailConnectionStatus = {
+  product_id: string;
+  provider: "gmail";
+  connected: boolean;
+  email_address?: string | null;
+  scopes: string[];
+  last_error?: string | null;
+};
+
+export type GmailAuthorizationUrl = {
+  authorization_url: string;
+};
+
 export type SourceRequestInput = {
   product_id: string;
   source: SourceRequestSource;

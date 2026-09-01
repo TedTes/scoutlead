@@ -30,7 +30,7 @@ from tools.email import EmailTool
 class MessageService:
     def __init__(self, *, session: Session, email: EmailTool, llm: LLMClient | None = None) -> None:
         self.session = session
-        self.email = email
+        self.email = email.bind_session(session)
         self.llm = llm
         self.products = ProductRepository(session)
         self.campaigns = CampaignRepository(session)

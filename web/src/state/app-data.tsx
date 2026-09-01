@@ -8,6 +8,8 @@ import type {
   DiscoveryResult,
   DiscoverySnapshot,
   DiscoveryTrace,
+  GmailAuthorizationUrl,
+  GmailConnectionStatus,
   LeadUpdateInput,
   Message,
   Metrics,
@@ -34,12 +36,16 @@ type AppDataContextValue = {
   productContacts: DiscoveryResult[];
   snapshot: DiscoverySnapshot;
   sourceProviders: SourceProvider[];
+  gmailConnectionStatus: GmailConnectionStatus | null;
   activeSourceIds: SourceRequestSource[];
   setSelectedProductId: (productId: string) => void;
   setSelectedDiscoveryRunId: (runId: string) => void;
   setActiveSourceIds: (sourceIds: SourceRequestSource[]) => void;
   refreshAll: () => Promise<void>;
   refreshSnapshot: (runId?: string) => Promise<void>;
+  refreshGmailConnection: (productId?: string) => Promise<void>;
+  getGmailAuthorizationUrl: (productId?: string) => Promise<GmailAuthorizationUrl | null>;
+  disconnectGmail: (productId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<Product | null>;
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
   deleteProduct: (productId?: string) => Promise<void>;
@@ -129,6 +135,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
+  const [gmailConnectionStatus, setGmailConnectionStatus] = useState<GmailConnectionStatus | null>(null);
   const [activeSourceIds, setActiveSourceIdsState] = useState<SourceRequestSource[]>(readStoredActiveSourceIds);
 
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -235,6 +242,29 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [api],
   );
 
+  const refreshGmailConnection = useCallback(
+    async (productId?: string) => {
+      const targetProductId = productId ?? localStorage.getItem("selectedProductId") ?? "";
+      if (!targetProductId) {
+        setGmailConnectionStatus(null);
+        return;
+      }
+      try {
+        const status = await api.getGmailConnectionStatus(targetProductId);
+        setGmailConnectionStatus(status);
+      } catch {
+        setGmailConnectionStatus({
+          product_id: targetProductId,
+          provider: "gmail",
+          connected: false,
+          scopes: [],
+          last_error: "Unable to load Gmail connection status.",
+        });
+      }
+    },
+    [api],
+  );
+
   const refreshAll = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -278,12 +308,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
       await refreshProductContacts(nextProductId, nextRuns);
       await refreshSnapshot(nextRunId);
+      await refreshGmailConnection(nextProductId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [api, refreshProductContacts, refreshSnapshot]);
+  }, [api, refreshGmailConnection, refreshProductContacts, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -309,6 +340,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     void refreshProductContacts(selectedProductIdState, discoveryRuns);
   }, [discoveryRuns, refreshProductContacts, selectedProductIdState]);
 
+  useEffect(() => {
+    void refreshGmailConnection(selectedProductIdState);
+  }, [refreshGmailConnection, selectedProductIdState]);
+
   const value = useMemo<AppDataContextValue>(
     () => ({
       apiHealthy,
@@ -325,11 +360,23 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       snapshot,
       activeSourceIds,
       sourceProviders,
+      gmailConnectionStatus,
       setSelectedProductId: persistSelectedProductId,
       setSelectedDiscoveryRunId: persistSelectedDiscoveryRunId,
       setActiveSourceIds: persistActiveSourceIds,
       refreshAll,
       refreshSnapshot,
+      refreshGmailConnection,
+      getGmailAuthorizationUrl: async (productId = selectedProductIdState) => {
+        if (!productId) return null;
+        return api.getGmailAuthorizationUrl(productId);
+      },
+      disconnectGmail: (productId = selectedProductIdState) =>
+        mutate(async () => {
+          if (!productId) return;
+          const status = await api.disconnectGmail(productId);
+          setGmailConnectionStatus(status);
+        }),
       createProduct: async (input) => {
         let created: Product | null = null;
         await mutate(async () => {
@@ -504,12 +551,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       productContacts,
       products,
       refreshAll,
+      refreshGmailConnection,
       refreshSnapshot,
       selectedDiscoveryRun,
       selectedDiscoveryRunIdState,
       selectedProduct,
       selectedProductIdState,
       sourceProviders,
+      gmailConnectionStatus,
       activeSourceIds,
       snapshot,
     ],

@@ -18,6 +18,8 @@ import type {
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
+  GmailAuthorizationUrl,
+  GmailConnectionStatus,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -50,6 +52,18 @@ export class ApiClient {
 
   deleteProduct(id: string) {
     return this.request<void>(`/products/${id}`, { method: "DELETE" });
+  }
+
+  getGmailConnectionStatus(productId: string) {
+    return this.request<GmailConnectionStatus>(`/products/${productId}/email/gmail/status`);
+  }
+
+  getGmailAuthorizationUrl(productId: string) {
+    return this.request<GmailAuthorizationUrl>(`/products/${productId}/email/gmail/connect`);
+  }
+
+  disconnectGmail(productId: string) {
+    return this.request<GmailConnectionStatus>(`/products/${productId}/email/gmail`, { method: "DELETE" });
   }
 
   discoverProduct(id: string, maxResults = 10) {

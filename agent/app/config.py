@@ -64,13 +64,27 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
 
-    email_provider: Literal["console", "http", "resend"] = "console"
+    email_provider: Literal["console", "http", "resend", "gmail"] = "console"
     email_provider_endpoint: str | None = None
     email_api_key: str | None = None
     resend_api_key: str | None = None
     email_from_address: str | None = None
     email_from_name: str = "Soutlead"
     email_reply_to: str | None = None
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    google_oauth_redirect_uri: str | None = None
+    google_oauth_state_secret: str | None = None
+    google_oauth_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_oauth_token_url: str = "https://oauth2.googleapis.com/token"
+    google_userinfo_url: str = "https://openidconnect.googleapis.com/v1/userinfo"
+    google_token_encryption_key: str | None = None
+    gmail_api_base_url: str = "https://gmail.googleapis.com/gmail/v1"
+    gmail_oauth_scopes: list[str] = [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
 
     contact_verification_provider: Literal["syntax", "http", "bouncer", "zerobounce"] = "syntax"
     email_verification_endpoint: str | None = None

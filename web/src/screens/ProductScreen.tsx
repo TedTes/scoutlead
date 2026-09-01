@@ -1,4 +1,4 @@
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Mail, PlugZap, Save, Unplug } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -21,12 +21,18 @@ export function ProductScreen({
     selectedProductId,
     productContacts,
     productDiscoveryRuns,
+    gmailConnectionStatus,
+    getGmailAuthorizationUrl,
+    refreshGmailConnection,
+    disconnectGmail,
     updateProduct,
   } = useAppData();
   const { showToast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [connectingGmail, setConnectingGmail] = useState(false);
+  const [disconnectingGmail, setDisconnectingGmail] = useState(false);
 
   useEffect(() => {
     setName(selectedProduct?.product_name || "");
@@ -76,6 +82,59 @@ export function ProductScreen({
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleGmailMessage = (event: MessageEvent) => {
+      if (event.data?.type === "scoutlead:gmail:connected" || event.data?.type === "scoutlead:gmail:failed") {
+        void refreshGmailConnection(selectedProductId);
+      }
+    };
+    window.addEventListener("message", handleGmailMessage);
+    return () => window.removeEventListener("message", handleGmailMessage);
+  }, [refreshGmailConnection, selectedProductId]);
+
+  const connectGmail = async () => {
+    if (!selectedProduct || connectingGmail) return;
+    setConnectingGmail(true);
+    try {
+      const response = await getGmailAuthorizationUrl(selectedProduct.id);
+      if (!response?.authorization_url) return;
+      const popup = window.open(
+        response.authorization_url,
+        "scoutlead-gmail-connect",
+        "popup,width=520,height=720",
+      );
+      if (!popup) {
+        window.location.href = response.authorization_url;
+      }
+      window.setTimeout(() => void refreshGmailConnection(selectedProduct.id), 1200);
+    } catch (error) {
+      showToast({
+        title: "Gmail connection failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
+      });
+    } finally {
+      setConnectingGmail(false);
+    }
+  };
+
+  const disconnectProductGmail = async () => {
+    if (!selectedProduct || disconnectingGmail) return;
+    setDisconnectingGmail(true);
+    try {
+      await disconnectGmail(selectedProduct.id);
+      showToast({ title: "Gmail disconnected", message: "This product will not send through Gmail.", tone: "green" });
+    } catch (error) {
+      showToast({
+        title: "Gmail disconnect failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
+      });
+    } finally {
+      setDisconnectingGmail(false);
     }
   };
 
@@ -137,6 +196,42 @@ export function ProductScreen({
             <ProductSettingMeta label="Contacts" value={String(productContacts.length)} />
             <ProductSettingMeta label="Updated" value={formatDate(selectedProduct.updated_at)} />
           </div>
+
+          <section className="product-settings-gmail" aria-label="Gmail sending connection">
+            <div className="product-settings-gmail-icon">
+              <Mail size={16} />
+            </div>
+            <div className="product-settings-gmail-copy">
+              <span>Gmail sending</span>
+              <strong>
+                {gmailConnectionStatus?.connected
+                  ? gmailConnectionStatus.email_address || "Connected"
+                  : "Not connected"}
+              </strong>
+              {gmailConnectionStatus?.last_error ? <em>{gmailConnectionStatus.last_error}</em> : null}
+            </div>
+            {gmailConnectionStatus?.connected ? (
+              <button
+                className="secondary product-settings-gmail-action"
+                type="button"
+                disabled={disconnectingGmail}
+                onClick={() => void disconnectProductGmail()}
+              >
+                <Unplug size={14} />
+                {disconnectingGmail ? "Disconnecting..." : "Disconnect"}
+              </button>
+            ) : (
+              <button
+                className="runbtn product-settings-gmail-action"
+                type="button"
+                disabled={connectingGmail}
+                onClick={() => void connectGmail()}
+              >
+                <PlugZap size={14} />
+                {connectingGmail ? "Connecting..." : "Connect Gmail"}
+              </button>
+            )}
+          </section>
 
           <footer className="product-settings-actions">
             {!hasChanges ? <span>No unsaved changes</span> : <span>Unsaved changes</span>}

@@ -10,6 +10,7 @@ from agent_runs.routes import router as agent_runs_router
 from campaigns.routes import router as campaigns_router
 from db.session import create_database
 from discovery_runs.routes import router as discovery_runs_router
+from email_connections.routes import router as email_connections_router
 from insights.routes import router as insights_router
 from leads.routes import router as leads_router
 from messages.routes import router as messages_router
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_runs_router)
     app.include_router(campaigns_router)
     app.include_router(discovery_runs_router)
+    app.include_router(email_connections_router)
     app.include_router(insights_router)
     app.include_router(leads_router)
     app.include_router(messages_router)

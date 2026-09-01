@@ -30,6 +30,19 @@ def test_settings_accepts_dev_environment(monkeypatch) -> None:
     assert settings.environment == "dev"
 
 
+def test_settings_accepts_gmail_email_provider(monkeypatch) -> None:
+    monkeypatch.setenv("EMAIL_PROVIDER", "gmail")
+
+    settings = Settings()
+
+    assert settings.email_provider == "gmail"
+    assert settings.gmail_oauth_scopes == [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
+
+
 def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
     monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
     monkeypatch.setenv(
