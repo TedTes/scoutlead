@@ -45,6 +45,7 @@ type AppDataContextValue = {
   deleteProduct: (productId?: string) => Promise<void>;
   discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
+  rerunSourceRequest: (runId?: string) => Promise<SourceRequestRun | null>;
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
@@ -369,6 +370,24 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         setLoading(true);
         try {
           const result = await api.createSourceRequest(input);
+          localStorage.setItem("selectedDiscoveryRunId", result.run.id);
+          created = result;
+          await refreshAll();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        } finally {
+          setLoading(false);
+        }
+        return created;
+      },
+      rerunSourceRequest: async (runId = selectedDiscoveryRunIdState) => {
+        let created: SourceRequestRun | null = null;
+        setError("");
+        setLoading(true);
+        try {
+          if (!runId) return null;
+          const result = await api.rerunSourceRequest(runId);
           localStorage.setItem("selectedDiscoveryRunId", result.run.id);
           created = result;
           await refreshAll();

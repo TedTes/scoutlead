@@ -5,7 +5,8 @@ from typing import Any
 from agent_runs.schemas import AgentRunCreate
 from agent_runs.service import AgentRunService
 from agents.llm import LLMClient
-from campaigns.schemas import CampaignCreate, CampaignGoalType
+from campaign_sources.schemas import CampaignSourceSlot
+from campaigns.schemas import CampaignCreate, CampaignGoalType, CampaignRead
 from campaigns.service import CampaignService
 from products.repository import ProductRepository
 from products.schemas import ProductRead
@@ -100,6 +101,59 @@ class SourceRequestService:
         summary = self.campaigns.run_contact_listing(run.id, agent_run_id=agent_run.id)
         return SourceRequestRun(plan=plan, run=summary.campaign, summary=summary)
 
+    def rerun(self, run_id: str, *, run_immediately: bool = True) -> SourceRequestRun:
+        run = CampaignRead.model_validate(self.campaigns.get(run_id))
+        return self.create(self._rerun_request(run, run_immediately=run_immediately))
+
+    def _rerun_request(self, run: CampaignRead, *, run_immediately: bool) -> SourceRequestCreate:
+        source_inputs = run.source_inputs or {}
+        source = _string_value(
+            source_inputs.get("source_request_source")
+            or source_inputs.get("source_provider_id")
+        )
+        prompt = _string_value(source_inputs.get("source_request_prompt"))
+
+        if not source or not prompt:
+            sources = self.campaigns.campaign_sources.list_by_campaign(
+                run.id,
+                slot=CampaignSourceSlot.DISCOVERY,
+                enabled_only=True,
+            )
+            if sources:
+                first_source = sources[0]
+                source = source or first_source.provider_id
+                prompt = prompt or _string_value(
+                    first_source.input.get("source_request_prompt")
+                    or first_source.input.get("query")
+                )
+
+        prompt = prompt or _string_value(run.source_input)
+        if not source:
+            raise ValidationError(
+                "run cannot be rerun without a saved source",
+                {
+                    "run_id": run.id,
+                    "user_message": "This run does not have a saved source to re-run.",
+                },
+            )
+        if not prompt:
+            raise ValidationError(
+                "run cannot be rerun without a saved search prompt",
+                {
+                    "run_id": run.id,
+                    "user_message": "This run does not have a saved search prompt to re-run.",
+                },
+            )
+
+        return SourceRequestCreate(
+            product_id=run.product_id,
+            source=source,
+            prompt=prompt,
+            name=run.name,
+            max_results=run.max_leads,
+            run_immediately=run_immediately,
+        )
+
     @staticmethod
     def _apify_source_map(
         *,
@@ -143,6 +197,10 @@ def _source_request_run_name(
     if prompt:
         return _truncate_name(prompt)
     return f"Contact list {utcnow().strftime('%Y-%m-%d %H:%M')}"
+
+
+def _string_value(value: Any) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
 def _title_text(value: str) -> str:

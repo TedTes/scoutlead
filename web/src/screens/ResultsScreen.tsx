@@ -22,6 +22,7 @@ export function ResultsScreen() {
   const {
     activeSourceIds,
     runSourceRequest,
+    rerunSourceRequest,
     selectedDiscoveryRun,
     selectedDiscoveryRunId,
     selectedProduct,
@@ -177,9 +178,26 @@ export function ResultsScreen() {
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
 
-  const rerunCurrentSearch = () => {
+  const rerunCurrentSearch = async () => {
+    if (!selectedDiscoveryRun || running) return;
     setRunMenuOpen(false);
-    void updateSearch();
+    setRunning(true);
+    try {
+      const result = await rerunSourceRequest(selectedDiscoveryRun.id);
+      if (result) {
+        const foundCount = result.summary?.discovered_lead_count ?? 0;
+        showToast({
+          title: foundCount ? "Re-run complete" : "Re-run finished",
+          message: foundCount ? `${foundCount} contact${foundCount === 1 ? "" : "s"} found.` : "No contacts were returned. Try another search.",
+          tone: foundCount ? "green" : "amber",
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Re-run failed", message, tone: "red" });
+    } finally {
+      setRunning(false);
+    }
   };
 
   const draftCurrentShortlist = async () => {
@@ -280,7 +298,7 @@ export function ResultsScreen() {
                 <button type="button" onClick={() => void renameCurrentRun()}>
                   Rename run
                 </button>
-                <button type="button" onClick={rerunCurrentSearch}>
+                <button type="button" disabled={running} onClick={() => void rerunCurrentSearch()}>
                   <RotateCw size={14} />
                   Re-run search
                 </button>

@@ -84,6 +84,22 @@ def create_source_request(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
 ):
+    return _source_request_service(session, services).create(request)
+
+
+@router.post("/{run_id}/rerun", response_model=SourceRequestRun)
+def rerun_source_request(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return _source_request_service(session, services).rerun(run_id)
+
+
+def _source_request_service(
+    session: DbSession,
+    services: AppServices,
+) -> SourceRequestService:
     return SourceRequestService(
         products=ProductRepository(session),
         campaigns=_service(session, services),
@@ -92,7 +108,7 @@ def create_source_request(
         apify_source_provider_id=services.settings.apify_source_provider_id,
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,
-    ).create(request)
+    )
 
 
 @router.get("/source-providers", response_model=list[SourceProviderRead])

@@ -71,6 +71,10 @@ export class ApiClient {
     return this.request<SourceRequestRun>("/discovery-runs/source-request", { method: "POST", body: input });
   }
 
+  rerunSourceRequest(runId: string) {
+    return this.request<SourceRequestRun>(`/discovery-runs/${runId}/rerun`, { method: "POST" });
+  }
+
   getSourceProviders() {
     return this.request<SourceProvider[]>("/discovery-runs/source-providers");
   }

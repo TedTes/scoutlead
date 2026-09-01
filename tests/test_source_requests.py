@@ -62,6 +62,46 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert sources[0].input["source_request_action"] == "list_contacts"
 
 
+def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+        service = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+        )
+        first = service.create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source=GOOGLE_PLACES_PROVIDER_ID,
+                prompt="List painting service contacts in Toronto ON",
+                name="Painters Toronto shortlist",
+                max_results=12,
+                run_immediately=False,
+            )
+        )
+
+        rerun = service.rerun(first.run.id, run_immediately=False)
+        rerun_sources = CampaignSourceRepository(session).list_by_campaign(rerun.run.id)
+
+        assert rerun.run.id != first.run.id
+        assert rerun.run.name == "Painters Toronto shortlist"
+        assert rerun_sources[0].provider_id == GOOGLE_PLACES_PROVIDER_ID
+        assert rerun_sources[0].input["source_request_source"] == GOOGLE_PLACES_PROVIDER_ID
+        assert rerun_sources[0].input["source_request_prompt"] == "List painting service contacts in Toronto ON"
+        assert rerun.run.max_leads == 12
+
+
 def test_source_request_creates_configured_apify_run_without_running() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
