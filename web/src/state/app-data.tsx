@@ -365,11 +365,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         }),
       runSourceRequest: async (input) => {
         let created: SourceRequestRun | null = null;
-        await mutate(async () => {
+        setError("");
+        setLoading(true);
+        try {
           const result = await api.createSourceRequest(input);
           localStorage.setItem("selectedDiscoveryRunId", result.run.id);
           created = result;
-        });
+          await refreshAll();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        } finally {
+          setLoading(false);
+        }
         return created;
       },
       updateProduct: (productId, update) =>

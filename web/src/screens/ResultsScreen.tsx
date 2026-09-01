@@ -55,7 +55,7 @@ export function ResultsScreen() {
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = draftPrompt.trim() || runPrompt;
-  const selectedSource = selectedSources[0] || "";
+  const selectedSource = selectedSources[0] || getRunSource(selectedDiscoveryRun) || "";
   const activeMessages = snapshot.messages.filter((message) => message.status !== "cancelled");
   const messageByLeadId = new Map(activeMessages.map((message) => [message.lead_id, message]));
   const approvedLeadIds = new Set(
@@ -130,7 +130,7 @@ export function ResultsScreen() {
   }, [activeSourceIds, connectedProviders, selectedDiscoveryRun]);
 
   const updateSearch = async () => {
-    const request = draftPrompt.trim();
+    const request = draftPrompt.trim() || runPrompt;
     if (!selectedProductId || !request || !selectedSource || running) return;
     setRunning(true);
     try {
