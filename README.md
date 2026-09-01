@@ -163,6 +163,8 @@ OPENAI_API_KEY=...
 EMAIL_PROVIDER=resend
 RESEND_API_KEY=...
 EMAIL_FROM_ADDRESS=founder@example.com
+CONTACT_VERIFICATION_PROVIDER=zerobounce
+ZEROBOUNCE_API_KEY=...
 GOOGLE_PLACES_API_KEY=...
 APIFY_API_TOKEN=...
 APIFY_SOURCE_KIJIJI={"id":"kijiji","label":"Kijiji","enabled":true,"actor_id":"actor-owner/kijiji-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}}
@@ -170,6 +172,8 @@ APIFY_SOURCE_HOMESTARS={"id":"homestars","label":"HomeStars","enabled":true,"act
 ```
 
 Use one `APIFY_SOURCE_<NAME>` env var per Apify-backed source. The suffix must match the object `id`, so `APIFY_SOURCE_KIJIJI` maps to source id `kijiji`. Each source must define an `input_template` or URL template that matches that actor's expected input shape; ScoutLead interprets the user's plain-language request once, then renders that source-specific template. Template values include `{{query}}`, `{{business_category}}`, `{{business_slug}}`, `{{location}}`, `{{location_slug}}`, `{{city}}`, `{{region}}`, `{{country}}`, `{{limit}}`, and `{{source_url}}`. The old `APIFY_SOURCES` array is still read only when no per-source env vars are present.
+
+Set `CONTACT_VERIFICATION_PROVIDER=zerobounce` to verify discovered email addresses through ZeroBounce before drafts can be generated. The verifier is provider-backed, so `syntax` and generic `http` remain available for local/testing or future swaps.
 
 Before running a campaign, check provider readiness:
 
