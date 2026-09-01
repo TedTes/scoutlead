@@ -72,9 +72,11 @@ class Settings(BaseSettings):
     email_from_name: str = "Soutlead"
     email_reply_to: str | None = None
 
-    contact_verification_provider: Literal["syntax", "http", "zerobounce"] = "syntax"
+    contact_verification_provider: Literal["syntax", "http", "bouncer", "zerobounce"] = "syntax"
     email_verification_endpoint: str | None = None
     email_verification_api_key: str | None = None
+    bouncer_api_key: str | None = None
+    bouncer_api_endpoint: str | None = None
     zerobounce_api_key: str | None = None
     zerobounce_api_endpoint: str | None = None
 

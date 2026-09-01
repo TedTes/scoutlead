@@ -47,6 +47,105 @@ def test_risky_provider_result_does_not_count_as_verified(monkeypatch) -> None:
     assert result.confidence == 55
 
 
+def test_bouncer_provider_maps_deliverable_response(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "email": "owner@example.com",
+                "status": "deliverable",
+                "reason": "accepted_email",
+                "score": 98,
+            }
+
+    def fake_get(*args, **kwargs):
+        captured["url"] = args[0]
+        captured["headers"] = kwargs["headers"]
+        captured["params"] = kwargs["params"]
+        return Response()
+
+    monkeypatch.setattr("tools.verify.httpx.get", fake_get)
+
+    result = EmailVerificationTool(
+        provider="bouncer",
+        bouncer_api_key="bouncer_test_key",
+    ).run({"email": "owner@example.com"})
+
+    assert captured["url"] == "https://api.usebouncer.com/v1.1/email/verify"
+    assert captured["headers"] == {"x-api-key": "bouncer_test_key"}
+    assert captured["params"] == {"email": "owner@example.com", "timeout": 20}
+    assert result.provider == "bouncer"
+    assert result.data["status"] == "valid"
+    assert result.confidence == 98
+
+
+@pytest.mark.parametrize(
+    ("provider_status", "expected_status", "expected_max_score"),
+    [
+        ("risky", "risky", 55),
+        ("undeliverable", "invalid", 10),
+        ("unknown", "unknown", 30),
+    ],
+)
+def test_bouncer_provider_maps_non_verified_statuses(
+    monkeypatch,
+    provider_status: str,
+    expected_status: str,
+    expected_max_score: int,
+) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "email": "owner@example.com",
+                "status": provider_status,
+                "reason": "mailbox_full" if provider_status == "risky" else "rejected_email",
+            }
+
+    monkeypatch.setattr("tools.verify.httpx.get", lambda *args, **kwargs: Response())
+
+    result = EmailVerificationTool(
+        provider="bouncer",
+        bouncer_api_key="bouncer_test_key",
+    ).run({"email": "owner@example.com"})
+
+    assert result.provider == "bouncer"
+    assert result.data["status"] == expected_status
+    assert result.confidence <= expected_max_score
+
+
+def test_bouncer_provider_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="BOUNCER_API_KEY"):
+        EmailVerificationTool(provider="bouncer").run({"email": "owner@example.com"})
+
+
+def test_bouncer_preflight_requires_api_key() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        service = CampaignService(
+            session=session,
+            llm=FakeWorkflowLLM(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            contact_verification_provider="bouncer",
+        )
+
+        assert service._contact_verification_check() == (
+            "failed",
+            "Configure BOUNCER_API_KEY for Bouncer contact verification.",
+            True,
+        )
+
+
 def test_zerobounce_provider_maps_valid_response(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

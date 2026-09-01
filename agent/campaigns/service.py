@@ -166,6 +166,8 @@ class CampaignService:
         contact_verification_provider: str = "syntax",
         email_verification_endpoint: str | None = None,
         email_verification_api_key: str | None = None,
+        bouncer_api_key: str | None = None,
+        bouncer_api_endpoint: str | None = None,
         zerobounce_api_key: str | None = None,
         zerobounce_api_endpoint: str | None = None,
         timeout_seconds: float = 20.0,
@@ -188,6 +190,8 @@ class CampaignService:
         self.contact_verification_provider = contact_verification_provider
         self.email_verification_endpoint = email_verification_endpoint
         self.email_verification_api_key = email_verification_api_key
+        self.bouncer_api_key = bouncer_api_key
+        self.bouncer_api_endpoint = bouncer_api_endpoint
         self.zerobounce_api_key = zerobounce_api_key
         self.zerobounce_api_endpoint = zerobounce_api_endpoint
         self.timeout_seconds = timeout_seconds
@@ -520,6 +524,8 @@ class CampaignService:
             provider=self.contact_verification_provider,
             endpoint=self.email_verification_endpoint,
             api_key=self.email_verification_api_key,
+            bouncer_api_key=self.bouncer_api_key,
+            bouncer_api_endpoint=self.bouncer_api_endpoint,
             zerobounce_api_key=self.zerobounce_api_key,
             zerobounce_api_endpoint=self.zerobounce_api_endpoint,
             timeout_seconds=self.timeout_seconds,
@@ -685,6 +691,10 @@ class CampaignService:
             if self.email_verification_endpoint:
                 return "ok", "Generic HTTP contact verification is configured.", True
             return "failed", "Configure EMAIL_VERIFICATION_ENDPOINT for generic HTTP verification.", True
+        if provider == "bouncer":
+            if self.bouncer_api_key or self.email_verification_api_key:
+                return "ok", "Bouncer contact verification is configured.", True
+            return "failed", "Configure BOUNCER_API_KEY for Bouncer contact verification.", True
         if provider == "zerobounce":
             if self.zerobounce_api_key or self.email_verification_api_key:
                 return "ok", "ZeroBounce contact verification is configured.", True

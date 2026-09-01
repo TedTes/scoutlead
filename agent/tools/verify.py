@@ -12,6 +12,7 @@ from tools.base import ToolResult, ToolSlot
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 VERIFICATION_STATUSES = {"valid", "risky", "invalid", "unknown"}
 ZEROBOUNCE_VALIDATE_ENDPOINT = "https://api.zerobounce.net/v2/validate"
+BOUNCER_VERIFY_ENDPOINT = "https://api.usebouncer.com/v1.1/email/verify"
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,70 @@ class ZeroBounceEmailVerifier:
         )
 
 
+class BouncerEmailVerifier:
+    provider_id = "bouncer"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        endpoint: str | None = None,
+        timeout_seconds: float,
+    ) -> None:
+        self.api_key = api_key
+        self.endpoint = endpoint or BOUNCER_VERIFY_ENDPOINT
+        self.timeout_seconds = timeout_seconds
+
+    def verify(self, email: str, context: dict[str, Any]) -> VerificationResult:
+        if not self.api_key:
+            raise ValueError("BOUNCER_API_KEY is required when CONTACT_VERIFICATION_PROVIDER=bouncer")
+        if not email:
+            return VerificationResult(
+                provider=self.provider_id,
+                email=email,
+                status="unknown",
+                reason="No email address found.",
+                score=0,
+            )
+        if not EMAIL_RE.match(email):
+            return VerificationResult(
+                provider=self.provider_id,
+                email=email,
+                status="invalid",
+                reason="Email syntax is invalid. Bouncer was not called.",
+                score=20,
+            )
+
+        params: dict[str, Any] = {
+            "email": email,
+            "timeout": _bouncer_timeout(context.get("timeout"), self.timeout_seconds),
+        }
+        response = httpx.get(
+            self.endpoint,
+            headers={"x-api-key": self.api_key},
+            params=params,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Bouncer returned a non-object response")
+        return self._normalize_response(email, payload)
+
+    def _normalize_response(self, email: str, payload: dict[str, Any]) -> VerificationResult:
+        raw_status = str(payload.get("status") or "unknown").lower().strip()
+        raw_reason = str(payload.get("reason") or "unknown").lower().strip()
+        status, score = _bouncer_status(raw_status, payload)
+        return VerificationResult(
+            provider=self.provider_id,
+            email=str(payload.get("email") or email),
+            status=status,
+            reason=_bouncer_reason(raw_status, raw_reason, payload),
+            score=score,
+            raw=payload,
+        )
+
+
 class EmailVerificationTool:
     name = "email_syntax"
     slot = ToolSlot.VERIFY
@@ -204,6 +269,8 @@ class EmailVerificationTool:
         provider: str = "syntax",
         endpoint: str | None = None,
         api_key: str | None = None,
+        bouncer_api_key: str | None = None,
+        bouncer_api_endpoint: str | None = None,
         zerobounce_api_key: str | None = None,
         zerobounce_api_endpoint: str | None = None,
         timeout_seconds: float = 20.0,
@@ -211,6 +278,8 @@ class EmailVerificationTool:
         self.provider = provider
         self.endpoint = endpoint
         self.api_key = api_key
+        self.bouncer_api_key = bouncer_api_key
+        self.bouncer_api_endpoint = bouncer_api_endpoint
         self.zerobounce_api_key = zerobounce_api_key
         self.zerobounce_api_endpoint = zerobounce_api_endpoint
         self.timeout_seconds = timeout_seconds
@@ -218,6 +287,8 @@ class EmailVerificationTool:
             provider=provider,
             endpoint=endpoint,
             api_key=api_key,
+            bouncer_api_key=bouncer_api_key,
+            bouncer_api_endpoint=bouncer_api_endpoint,
             zerobounce_api_key=zerobounce_api_key,
             zerobounce_api_endpoint=zerobounce_api_endpoint,
             timeout_seconds=timeout_seconds,
@@ -244,6 +315,8 @@ def build_email_verifier(
     provider: str,
     endpoint: str | None,
     api_key: str | None,
+    bouncer_api_key: str | None,
+    bouncer_api_endpoint: str | None,
     zerobounce_api_key: str | None,
     zerobounce_api_endpoint: str | None,
     timeout_seconds: float,
@@ -253,6 +326,12 @@ def build_email_verifier(
         return SyntaxEmailVerifier()
     if normalized == "http":
         return HttpEmailVerifier(endpoint=endpoint, api_key=api_key, timeout_seconds=timeout_seconds)
+    if normalized == "bouncer":
+        return BouncerEmailVerifier(
+            api_key=bouncer_api_key or api_key,
+            endpoint=bouncer_api_endpoint or endpoint,
+            timeout_seconds=timeout_seconds,
+        )
     if normalized == "zerobounce":
         return ZeroBounceEmailVerifier(
             api_key=zerobounce_api_key or api_key,
@@ -260,6 +339,40 @@ def build_email_verifier(
             timeout_seconds=timeout_seconds,
         )
     raise ValueError(f"Unknown contact verification provider: {provider}")
+
+
+def _bouncer_status(raw_status: str, payload: dict[str, Any]) -> tuple[str, int]:
+    score = _quality_score(payload.get("score"))
+    if raw_status == "deliverable":
+        return "valid", score or 95
+    if raw_status == "risky":
+        return "risky", score or 55
+    if raw_status == "undeliverable":
+        return "invalid", score if score is not None and score <= 40 else 10
+    if raw_status == "unknown":
+        return "unknown", score or 30
+    return "unknown", score or 30
+
+
+def _bouncer_reason(raw_status: str, raw_reason: str, payload: dict[str, Any]) -> str:
+    parts = [f"Bouncer returned {raw_status or 'unknown'}."]
+    if raw_reason:
+        parts.append(f"Reason: {raw_reason}.")
+    retry_after = str(payload.get("retryAfter") or "").strip()
+    if retry_after:
+        parts.append(f"Retry after: {retry_after}.")
+    toxic = str(payload.get("toxic") or "").strip()
+    if toxic and toxic != "unknown":
+        parts.append(f"Toxicity: {toxic}.")
+    return " ".join(parts)
+
+
+def _bouncer_timeout(value: Any, fallback_seconds: float) -> int:
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        timeout = int(round(fallback_seconds))
+    return max(1, min(30, timeout or 10))
 
 
 def _zerobounce_status(
