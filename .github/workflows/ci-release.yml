@@ -74,12 +74,13 @@ jobs:
       - web
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
-      RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
-      RAILWAY_API_SERVICE: ${{ vars.RAILWAY_API_SERVICE }}
-      RAILWAY_WORKER_SERVICE: ${{ vars.RAILWAY_WORKER_SERVICE }}
-      RAILWAY_WEB_SERVICE: ${{ vars.RAILWAY_WEB_SERVICE }}
+      RELEASE_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN || vars.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID || secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT || secrets.RAILWAY_ENVIRONMENT }}
+      RAILWAY_API_SERVICE: ${{ vars.RAILWAY_API_SERVICE || secrets.RAILWAY_API_SERVICE }}
+      RAILWAY_WORKER_SERVICE: ${{ vars.RAILWAY_WORKER_SERVICE || secrets.RAILWAY_WORKER_SERVICE }}
+      RAILWAY_WEB_SERVICE: ${{ vars.RAILWAY_WEB_SERVICE || secrets.RAILWAY_WEB_SERVICE }}
       PYTHONPATH: agent
     steps:
       - name: Check out repository
@@ -87,6 +88,7 @@ jobs:
 
       - name: Validate Railway configuration
         run: |
+          echo "GitHub release environment: $RELEASE_ENVIRONMENT"
           missing=0
           for name in RAILWAY_TOKEN RAILWAY_PROJECT_ID RAILWAY_ENVIRONMENT RAILWAY_API_SERVICE RAILWAY_WORKER_SERVICE RAILWAY_WEB_SERVICE; do
             if [ -z "${!name}" ]; then

@@ -173,6 +173,9 @@ under each GitHub Environment you deploy from:
 - Variable: `RAILWAY_WORKER_SERVICE` — worker service name or ID.
 - Variable: `RAILWAY_WEB_SERVICE` — web service name or ID.
 
+The workflow also accepts the non-token values as secrets if you stored everything in
+the Secrets tab. Keep `RAILWAY_TOKEN` as a secret.
+
 Disable Railway GitHub auto-deploys for these services after the workflow is configured.
 Otherwise Railway can deploy immediately on push and bypass the migration gate.
 
