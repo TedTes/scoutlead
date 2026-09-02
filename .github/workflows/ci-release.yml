@@ -59,6 +59,7 @@ jobs:
   release:
     name: Migrate and Deploy to Railway
     runs-on: ubuntu-latest
+    environment: production
     needs:
       - backend
       - web
