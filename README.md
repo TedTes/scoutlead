@@ -167,6 +167,7 @@ under each GitHub Environment you deploy from:
 - `Settings -> Environments -> production`
 
 - Secret: `RAILWAY_TOKEN` — Railway project token scoped to the target environment.
+- Secret: `RAILWAY_MIGRATION_DATABASE_URL` — Railway Postgres public connection URL for that environment.
 - Variable: `RAILWAY_PROJECT_ID` — Railway project ID.
 - Variable: `RAILWAY_ENVIRONMENT` — matching Railway environment name or ID, for example `dev` or `production`.
 - Variable: `RAILWAY_API_SERVICE` — API service name or ID.
@@ -175,6 +176,11 @@ under each GitHub Environment you deploy from:
 
 The workflow also accepts the non-token values as secrets if you stored everything in
 the Secrets tab. Keep `RAILWAY_TOKEN` as a secret.
+
+Use the Postgres service's `DATABASE_PUBLIC_URL` value for `RAILWAY_MIGRATION_DATABASE_URL`.
+Do not use the runtime `DATABASE_URL` if it points at `postgres.railway.internal`; GitHub
+Actions runs outside Railway's private network and cannot resolve that host. The API and
+worker services can still use the private `DATABASE_URL` at runtime.
 
 Disable Railway GitHub auto-deploys for these services after the workflow is configured.
 Otherwise Railway can deploy immediately on push and bypass the migration gate.

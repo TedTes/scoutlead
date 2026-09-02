@@ -81,6 +81,7 @@ jobs:
       RAILWAY_API_SERVICE: ${{ vars.RAILWAY_API_SERVICE || secrets.RAILWAY_API_SERVICE }}
       RAILWAY_WORKER_SERVICE: ${{ vars.RAILWAY_WORKER_SERVICE || secrets.RAILWAY_WORKER_SERVICE }}
       RAILWAY_WEB_SERVICE: ${{ vars.RAILWAY_WEB_SERVICE || secrets.RAILWAY_WEB_SERVICE }}
+      RAILWAY_MIGRATION_DATABASE_URL: ${{ secrets.RAILWAY_MIGRATION_DATABASE_URL || vars.RAILWAY_MIGRATION_DATABASE_URL || secrets.RAILWAY_DATABASE_URL || vars.RAILWAY_DATABASE_URL }}
       PYTHONPATH: agent
     steps:
       - name: Check out repository
@@ -90,12 +91,16 @@ jobs:
         run: |
           echo "GitHub release environment: $RELEASE_ENVIRONMENT"
           missing=0
-          for name in RAILWAY_TOKEN RAILWAY_PROJECT_ID RAILWAY_ENVIRONMENT RAILWAY_API_SERVICE RAILWAY_WORKER_SERVICE RAILWAY_WEB_SERVICE; do
+          for name in RAILWAY_TOKEN RAILWAY_PROJECT_ID RAILWAY_ENVIRONMENT RAILWAY_API_SERVICE RAILWAY_WORKER_SERVICE RAILWAY_WEB_SERVICE RAILWAY_MIGRATION_DATABASE_URL; do
             if [ -z "${!name}" ]; then
               echo "::error::$name is required for Railway release"
               missing=1
             fi
           done
+          if printf '%s' "$RAILWAY_MIGRATION_DATABASE_URL" | grep -q '\.railway\.internal'; then
+            echo "::error::RAILWAY_MIGRATION_DATABASE_URL must use Railway Postgres DATABASE_PUBLIC_URL, not the private postgres.railway.internal URL"
+            missing=1
+          fi
           exit "$missing"
 
       - name: Set up Python for migrations
@@ -116,13 +121,9 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Run database migrations
-        run: |
-          railway run \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_ENVIRONMENT" \
-            --service "$RAILWAY_API_SERVICE" \
-            --no-local \
-            python -m alembic upgrade head
+        env:
+          DATABASE_URL: ${{ env.RAILWAY_MIGRATION_DATABASE_URL }}
+        run: python -m alembic upgrade head
 
       - name: Deploy API service
         run: |
