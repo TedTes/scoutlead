@@ -150,6 +150,26 @@ PYTHONPATH=agent DATABASE_URL="$DATABASE_URL" alembic upgrade head
 
 Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in production after migrations are running. Set `API_AUTH_TOKEN` on the backend and the same value as `VITE_API_TOKEN` on the web service.
 
+### GitHub Actions Release Pipeline
+
+The repo includes `.github/workflows/ci-release.yml`.
+
+On pull requests, it runs backend tests and the web production build. On pushes to `main`
+or manual `workflow_dispatch` from `main`, it runs those checks, runs Alembic against the
+Railway API service environment, then deploys the API, worker, and web services.
+
+Configure these GitHub repository settings before relying on the workflow:
+
+- Secret: `RAILWAY_TOKEN` — Railway project token scoped to the target environment.
+- Variable: `RAILWAY_PROJECT_ID` — Railway project ID.
+- Variable: `RAILWAY_ENVIRONMENT` — Railway environment name or ID, for example `production`.
+- Variable: `RAILWAY_API_SERVICE` — API service name or ID.
+- Variable: `RAILWAY_WORKER_SERVICE` — worker service name or ID.
+- Variable: `RAILWAY_WEB_SERVICE` — web service name or ID.
+
+Disable Railway GitHub auto-deploys for these services after the workflow is configured.
+Otherwise Railway can deploy immediately on push and bypass the migration gate.
+
 For real-world operation, disable mock providers and configure actual integrations:
 
 ```bash
