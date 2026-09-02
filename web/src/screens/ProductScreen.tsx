@@ -30,6 +30,8 @@ export function ProductScreen({
   const { showToast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connectingGmail, setConnectingGmail] = useState(false);
   const [disconnectingGmail, setDisconnectingGmail] = useState(false);
@@ -37,7 +39,15 @@ export function ProductScreen({
   useEffect(() => {
     setName(selectedProduct?.product_name || "");
     setDescription(selectedProduct?.product_description || "");
-  }, [selectedProduct?.id, selectedProduct?.product_description, selectedProduct?.product_name]);
+    setWebhookUrl(selectedProduct?.webhook_url || "");
+    setWebhookEnabled(Boolean(selectedProduct?.webhook_enabled));
+  }, [
+    selectedProduct?.id,
+    selectedProduct?.product_description,
+    selectedProduct?.product_name,
+    selectedProduct?.webhook_enabled,
+    selectedProduct?.webhook_url,
+  ]);
 
   const duplicateName = useMemo(() => {
     const normalized = name.trim().toLowerCase();
@@ -54,12 +64,16 @@ export function ProductScreen({
   const hasChanges = Boolean(
     selectedProduct &&
       (name.trim() !== selectedProduct.product_name.trim() ||
-        description.trim() !== selectedProduct.product_description.trim()),
+        description.trim() !== selectedProduct.product_description.trim() ||
+        webhookUrl.trim() !== (selectedProduct.webhook_url || "").trim() ||
+        webhookEnabled !== Boolean(selectedProduct.webhook_enabled)),
   );
+  const webhookUrlValid = !webhookUrl.trim() || /^https?:\/\//i.test(webhookUrl.trim());
   const canSave = Boolean(
     selectedProduct &&
       name.trim() &&
       description.trim().length >= 20 &&
+      webhookUrlValid &&
       hasChanges &&
       !duplicateName &&
       !saving,
@@ -72,6 +86,8 @@ export function ProductScreen({
       await updateProduct(selectedProduct.id, {
         product_name: name.trim(),
         product_description: description.trim(),
+        webhook_url: webhookUrl.trim() || null,
+        webhook_enabled: Boolean(webhookEnabled && webhookUrl.trim()),
       });
       showToast({ title: "Product saved", message: "Discovery will use the updated context.", tone: "green" });
     } catch (error) {
@@ -231,6 +247,32 @@ export function ProductScreen({
                 {connectingGmail ? "Connecting..." : "Connect Gmail"}
               </button>
             )}
+          </section>
+
+          <section className="product-settings-webhook" aria-label="Approved shortlist webhook">
+            <div className="product-settings-webhook-copy">
+              <span>Approved shortlist webhook</span>
+              <strong>{webhookEnabled && webhookUrl.trim() ? "Enabled" : "Off"}</strong>
+              <em>Posts approved shortlisted contacts as JSON.</em>
+            </div>
+            <label className="field product-settings-webhook-url">
+              <span>Webhook URL</span>
+              <input
+                placeholder="https://hooks.example/approved-shortlist"
+                value={webhookUrl}
+                onChange={(event) => setWebhookUrl(event.target.value)}
+              />
+              {!webhookUrlValid ? <em>Use a full http or https URL.</em> : null}
+            </label>
+            <label className="product-settings-webhook-toggle">
+              <input
+                checked={webhookEnabled}
+                disabled={!webhookUrl.trim()}
+                type="checkbox"
+                onChange={(event) => setWebhookEnabled(event.target.checked)}
+              />
+              Enable webhook delivery
+            </label>
           </section>
 
           <footer className="product-settings-actions">

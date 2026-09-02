@@ -10,6 +10,7 @@ import type {
   DiscoveryTrace,
   DiscoveryCandidate,
   DiscoveryResult,
+  LeadContactPolicyInput,
   LeadUpdateInput,
   Message,
   Metrics,
@@ -20,6 +21,7 @@ import type {
   SourceProvider,
   GmailAuthorizationUrl,
   GmailConnectionStatus,
+  WebhookDelivery,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -156,6 +158,10 @@ export class ApiClient {
     return this.request<DiscoveryResult>(`/leads/${id}`, { method: "PATCH", body });
   }
 
+  updateLeadContactPolicy(id: string, body: LeadContactPolicyInput) {
+    return this.request<DiscoveryResult>(`/leads/${id}/contact-policy`, { method: "PATCH", body });
+  }
+
   qualifyLead(id: string) {
     return this.request<DiscoveryResult>(`/leads/${id}/qualify`, { method: "POST" });
   }
@@ -166,6 +172,17 @@ export class ApiClient {
 
   getMessages(runId: string) {
     return this.request<Message[]>(`/discovery-runs/${runId}/messages`);
+  }
+
+  getWebhookDeliveries(runId: string) {
+    return this.request<WebhookDelivery[]>(`/discovery-runs/${runId}/webhook-deliveries`);
+  }
+
+  sendApprovedShortlistWebhook(runId: string) {
+    return this.request<WebhookDelivery>(`/discovery-runs/${runId}/webhook-deliveries`, {
+      method: "POST",
+      body: { event: "approved_shortlist.ready" },
+    });
   }
 
   draftShortlist(runId: string) {
@@ -189,6 +206,13 @@ export class ApiClient {
 
   sendMessage(id: string) {
     return this.request<Message>(`/messages/${id}/send`, { method: "POST" });
+  }
+
+  markMessageReplied(id: string, body?: string) {
+    return this.request<Message>(`/messages/${id}/mark-replied`, {
+      method: "POST",
+      body: { body: body || undefined },
+    });
   }
 
   cancelMessage(id: string) {

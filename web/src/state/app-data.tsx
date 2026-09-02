@@ -10,6 +10,7 @@ import type {
   DiscoveryTrace,
   GmailAuthorizationUrl,
   GmailConnectionStatus,
+  LeadContactPolicyInput,
   LeadUpdateInput,
   Message,
   Metrics,
@@ -52,6 +53,7 @@ type AppDataContextValue = {
   discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
   rerunSourceRequest: (runId?: string) => Promise<SourceRequestRun | null>;
+  sendApprovedShortlistWebhook: (runId?: string) => Promise<void>;
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
@@ -64,11 +66,13 @@ type AppDataContextValue = {
   addSeedResults: (seeds: unknown[]) => Promise<void>;
   qualifyLead: (leadId: string) => Promise<void>;
   updateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
+  updateLeadContactPolicy: (leadId: string, update: LeadContactPolicyInput) => Promise<void>;
   draftShortlist: (runId?: string) => Promise<Message[]>;
   createOutreachDraft: (leadId: string) => Promise<Message | null>;
   updateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
   approveMessage: (messageId: string) => Promise<void>;
   sendMessage: (messageId: string) => Promise<void>;
+  markMessageReplied: (messageId: string, body?: string) => Promise<void>;
   cancelMessage: (messageId: string) => Promise<void>;
 };
 
@@ -446,6 +450,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         }
         return created;
       },
+      sendApprovedShortlistWebhook: (runId = selectedDiscoveryRunIdState) =>
+        mutate(async () => {
+          if (!runId) return;
+          await api.sendApprovedShortlistWebhook(runId);
+        }),
       updateProduct: (productId, update) =>
         mutate(async () => {
           if (!productId) return;
@@ -505,6 +514,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         mutate(async () => {
           await api.updateLead(leadId, update);
         }),
+      updateLeadContactPolicy: (leadId, update) =>
+        mutate(async () => {
+          await api.updateLeadContactPolicy(leadId, update);
+        }),
       draftShortlist: async (runId = selectedDiscoveryRunIdState) => {
         let created: Message[] = [];
         await mutate(async () => {
@@ -531,6 +544,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       sendMessage: (messageId) =>
         mutate(async () => {
           await api.sendMessage(messageId);
+        }),
+      markMessageReplied: (messageId, body) =>
+        mutate(async () => {
+          await api.markMessageReplied(messageId, body);
         }),
       cancelMessage: (messageId) =>
         mutate(async () => {

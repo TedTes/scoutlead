@@ -15,6 +15,8 @@ export type Product = {
   source_fingerprint?: string | null;
   source_last_checked_at?: string | null;
   source_evidence?: Record<string, unknown> | null;
+  webhook_url?: string | null;
+  webhook_enabled?: boolean;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -149,11 +151,19 @@ export type ResultSeedInput = {
 export type LeadReviewStatus = "unreviewed" | "good_fit" | "maybe" | "not_fit";
 export type AgentFitStatus = "good_fit" | "maybe" | "not_fit";
 export type ContactVerificationStatus = "unverified" | "valid" | "risky" | "invalid" | "unknown";
+export type ContactPolicyStatus = "allowed" | "suppressed" | "unsubscribed" | "bounced";
+export type SuppressionScope = "product" | "global";
 
 export type LeadUpdateInput = {
   review_status?: LeadReviewStatus;
   review_note?: string | null;
   shortlisted?: boolean;
+};
+
+export type LeadContactPolicyInput = {
+  status: ContactPolicyStatus;
+  reason?: string | null;
+  scope?: SuppressionScope;
 };
 
 export type DiscoveryResult = {
@@ -172,11 +182,16 @@ export type DiscoveryResult = {
   review_note?: string | null;
   reviewed_at?: string | null;
   shortlisted_at?: string | null;
+  contact_policy_status?: ContactPolicyStatus;
+  contact_policy_reason?: string | null;
+  contact_policy_checked_at?: string | null;
+  last_contacted_at?: string | null;
   verification_status?: ContactVerificationStatus;
   verification_provider?: string | null;
   verification_checked_at?: string | null;
   verification_reason?: string | null;
   verification_score?: number | null;
+  verification_details?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   research?: {
@@ -257,6 +272,21 @@ export type Message = {
   sent_at?: string | null;
   provider_message_id?: string | null;
   failure_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WebhookDelivery = {
+  id: string;
+  product_id: string;
+  campaign_id: string;
+  event: string;
+  url: string;
+  status: "success" | "failed";
+  request_payload: Record<string, unknown>;
+  response_status?: number | null;
+  response_body?: string | null;
+  error?: string | null;
   created_at: string;
   updated_at: string;
 };

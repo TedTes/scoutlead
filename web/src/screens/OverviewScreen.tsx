@@ -1,24 +1,10 @@
-import { Play, Search } from "lucide-react";
+import { Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
 import type { SourceRequestSource } from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
-
-const promptTemplates = [
-  {
-    label: "Local service shops",
-    query: "independent [service] businesses in [city] with a website, strong reviews, and owner contact details",
-  },
-  {
-    label: "Marketplace listings",
-    query: "[service] providers in [city] with direct phone numbers, recent listings, and clear service descriptions",
-  },
-  {
-    label: "Quote-ready businesses",
-    query: "[business type] in [city] with quote forms, public contact details, and proof they serve customers directly",
-  },
-];
+import { searchDiscoveryTemplates } from "../utils/template-search";
 
 export function OverviewScreen({
   draftRunName,
@@ -47,6 +33,10 @@ export function OverviewScreen({
   const promptValue = prompt.trim();
   const currentQuery = promptValue || getRunPrompt(selectedDiscoveryRun) || "";
   const promptTags = parsePromptTags(currentQuery);
+  const promptTemplates = useMemo(
+    () => searchDiscoveryTemplates({ product: selectedProduct, limit: 3 }),
+    [selectedProduct],
+  );
   const selectedSource = selectedSources[0] || "";
   const ready = Boolean(selectedProductId && promptValue.length >= 4 && selectedSource);
 
@@ -92,10 +82,13 @@ export function OverviewScreen({
   return (
     <section className="discovery-workspace">
       <header className="discovery-hero">
-        <span className="discovery-hero-icon" aria-hidden="true">
-          <Search size={20} />
-        </span>
-        <h1>Who should we find?</h1>
+        <div>
+          <h1>Who should we find?</h1>
+          <p>
+            Describe the businesses you want to reach. ScoutLead finds them, scores fit against{" "}
+            {selectedProduct?.product_name || "your product"}, and pulls reachable contacts.
+          </p>
+        </div>
       </header>
 
       <form
@@ -142,10 +135,14 @@ export function OverviewScreen({
 
       {emptyMessage ? <p className="empty-run-note">{emptyMessage}</p> : null}
 
+      <p className="prompt-template-kicker">Or start from an example</p>
       <section className="prompt-template-grid" aria-label="Search templates">
         {promptTemplates.map((template) => (
-          <button key={template.label} type="button" onClick={() => setPrompt(template.query)}>
-            <strong>{template.label}</strong>
+          <button key={template.id} type="button" onClick={() => setPrompt(template.query)}>
+            <strong>
+              {template.label}
+              <span>{template.tag}</span>
+            </strong>
             <small>{template.query}</small>
           </button>
         ))}

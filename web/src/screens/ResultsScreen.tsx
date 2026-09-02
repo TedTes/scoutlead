@@ -1,4 +1,19 @@
-import { AlertTriangle, Copy, Download, Globe, Mail, MapPin, MoreVertical, Phone, Play, RotateCw, Search, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Copy,
+  Download,
+  Globe,
+  Mail,
+  MapPin,
+  MoreVertical,
+  Phone,
+  Play,
+  PlugZap,
+  RotateCw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { OverviewScreen } from "./OverviewScreen";
@@ -6,8 +21,10 @@ import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
+  ContactPolicyStatus,
   ContactVerificationStatus,
   DiscoveryResult,
+  LeadContactPolicyInput,
   LeadReviewStatus,
   LeadUpdateInput,
   Message,
@@ -32,11 +49,14 @@ export function ResultsScreen() {
     renameDiscoveryRun,
     qualifyLead,
     updateLead,
+    updateLeadContactPolicy,
     draftShortlist,
     createOutreachDraft,
     updateMessage,
     approveMessage,
     sendMessage,
+    markMessageReplied,
+    sendApprovedShortlistWebhook,
     snapshot,
     sourceProviders,
   } = useAppData();
@@ -48,6 +68,7 @@ export function ResultsScreen() {
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
+  const [sendingWebhook, setSendingWebhook] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,6 +95,9 @@ export function ResultsScreen() {
   const draftedContacts = contacts.filter((contact) => draftedLeadIds.has(contact.id)).length;
   const approvedShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && approvedLeadIds.has(contact.id),
+  );
+  const webhookReady = Boolean(
+    selectedProduct?.webhook_enabled && selectedProduct.webhook_url && approvedShortlistContacts.length,
   );
   const draftableShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
@@ -221,6 +245,27 @@ export function ResultsScreen() {
     }
   };
 
+  const sendCurrentApprovedShortlistWebhook = async () => {
+    if (!selectedDiscoveryRun || sendingWebhook) return;
+    setSendingWebhook(true);
+    try {
+      await sendApprovedShortlistWebhook(selectedDiscoveryRun.id);
+      setRunMenuOpen(false);
+      showToast({
+        title: "Webhook sent",
+        message: `${approvedShortlistContacts.length} approved contact${
+          approvedShortlistContacts.length === 1 ? "" : "s"
+        } delivered.`,
+        tone: "green",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Webhook failed", message, tone: "red" });
+    } finally {
+      setSendingWebhook(false);
+    }
+  };
+
   if (!selectedDiscoveryRun) {
     return <OverviewScreen />;
   }
@@ -286,6 +331,14 @@ export function ResultsScreen() {
                 >
                   <Download size={14} />
                   Export approved shortlist
+                </button>
+                <button
+                  type="button"
+                  disabled={!webhookReady || sendingWebhook}
+                  onClick={() => void sendCurrentApprovedShortlistWebhook()}
+                >
+                  <PlugZap size={14} />
+                  {sendingWebhook ? "Sending webhook..." : "Send approved to webhook"}
                 </button>
                 <button
                   type="button"
@@ -384,7 +437,9 @@ export function ResultsScreen() {
         onApproveMessage={approveMessage}
         onCreateDraft={createOutreachDraft}
         onQualifyLead={qualifyLead}
+        onMarkMessageReplied={markMessageReplied}
         onSendMessage={sendMessage}
+        onUpdateContactPolicy={updateLeadContactPolicy}
         onUpdateLead={updateLead}
         onUpdateMessage={updateMessage}
       />
@@ -441,6 +496,8 @@ function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: ()
   const evidence = contactEvidenceLine(contact);
   const missing = contactMissingEvidenceLine(contact);
   const verification = verificationStatus(contact);
+  const policy = contactPolicyStatus(contact);
+  const blocked = isContactBlocked(contact);
 
   return (
     <li>
@@ -479,6 +536,11 @@ function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: ()
           </span>
         </div>
         <div className="contact-actions" aria-label="Contact availability">
+          {blocked ? (
+            <span className={`contact-policy-pill policy-${policy}`}>
+              {contactPolicyStatusLabel(policy)}
+            </span>
+          ) : null}
           <span className={`verification-label verification-${verification}`}>
             {verificationStatusLabel(verification)}
           </span>
@@ -519,7 +581,9 @@ function ContactDrawer({
   onApproveMessage,
   onCreateDraft,
   onQualifyLead,
+  onMarkMessageReplied,
   onSendMessage,
+  onUpdateContactPolicy,
   onUpdateLead,
   onUpdateMessage,
 }: {
@@ -529,7 +593,9 @@ function ContactDrawer({
   onApproveMessage: (messageId: string) => Promise<void>;
   onCreateDraft: (leadId: string) => Promise<Message | null>;
   onQualifyLead: (leadId: string) => Promise<void>;
+  onMarkMessageReplied: (messageId: string, body?: string) => Promise<void>;
   onSendMessage: (messageId: string) => Promise<void>;
+  onUpdateContactPolicy: (leadId: string, update: LeadContactPolicyInput) => Promise<void>;
   onUpdateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
   onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
 }) {
@@ -538,7 +604,9 @@ function ContactDrawer({
   const score = contact ? contactScore(contact) : 0;
   const currentReviewStatus = contact ? reviewStatus(contact) : "unreviewed";
   const agentAssessment = contact ? getAgentAssessment(contact) : undefined;
-  const canShortlist = contact ? canShortlistContact(contact) : false;
+  const policyStatus = contact ? contactPolicyStatus(contact) : "allowed";
+  const blocked = contact ? isContactBlocked(contact) : false;
+  const canShortlist = contact ? canShortlistContact(contact) && !blocked : false;
   const shortlisted = Boolean(contact?.shortlisted_at);
   const [reviewNote, setReviewNote] = useState("");
   const [qualifying, setQualifying] = useState(false);
@@ -550,7 +618,7 @@ function ContactDrawer({
   const website = contact?.website_url || contact?.research?.website_url || "";
   const email = contact?.contact_email || contact?.research?.contact_email || "";
   const verified = contact ? isVerifiedContact(contact) : false;
-  const canDraft = Boolean(shortlisted && canShortlist && verified && email);
+  const canDraft = Boolean(!blocked && shortlisted && canShortlist && verified && email);
   const canSend = Boolean(message && message.status === "approved" && email && canDraft);
   const phone = contact ? getPhone(contact) : "";
   const contactName = contact ? getContactName(contact) : "";
@@ -619,6 +687,10 @@ function ContactDrawer({
   };
 
   const chooseReviewStatus = (nextStatus: LeadReviewStatus) => {
+    if (blocked) {
+      showToast({ title: "Contact blocked", message: contactPolicyDescription(contact), tone: "amber" });
+      return;
+    }
     void saveLeadUpdate(
       {
         review_status: nextStatus,
@@ -634,6 +706,25 @@ function ContactDrawer({
       { shortlisted: !shortlisted },
       shortlisted ? "Removed from shortlist" : "Shortlisted",
     );
+  };
+
+  const updateContactPolicy = async (update: LeadContactPolicyInput, successTitle: string) => {
+    if (!contact || savingReview) return;
+    const isBlocking = update.status !== "allowed";
+    if (isBlocking) {
+      const confirmed = window.confirm(`${successTitle}? This contact will be removed from shortlist and blocked from outreach.`);
+      if (!confirmed) return;
+    }
+    setSavingReview(true);
+    try {
+      await onUpdateContactPolicy(contact.id, update);
+      showToast({ title: successTitle, tone: "green" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Contact policy failed", message, tone: "red" });
+    } finally {
+      setSavingReview(false);
+    }
   };
 
   const saveReviewNote = () => {
@@ -705,6 +796,22 @@ function ContactDrawer({
     }
   };
 
+  const markReplied = async () => {
+    if (!message || savingDraft) return;
+    const body = window.prompt("Optional reply note", "Marked as replied manually.");
+    if (body === null) return;
+    setSavingDraft(true);
+    try {
+      await onMarkMessageReplied(message.id, body.trim() || undefined);
+      showToast({ title: "Marked replied", tone: "green" });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Reply update failed", message: errorMessage, tone: "red" });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
   const copyDraft = () => {
     const text = [draftSubject ? `Subject: ${draftSubject}` : "", draftBody].filter(Boolean).join("\n\n");
     void copy(text, "Draft");
@@ -759,6 +866,68 @@ function ContactDrawer({
                   <span>{contactVerificationSummary(contact)}</span>
                 </div>
                 <p>{contact.verification_reason || verificationStatusDescription(contact)}</p>
+                {verificationDetailChips(contact.verification_details).length ? (
+                  <div className="verification-detail-row">
+                    {verificationDetailChips(contact.verification_details).map((detail) => (
+                      <span key={detail}>{detail}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className={blocked ? "drawer-contact-policy-panel is-blocked" : "drawer-contact-policy-panel"}>
+                <div className="drawer-section-heading">
+                  <h3>Contact policy</h3>
+                  <span>{contactPolicyStatusLabel(policyStatus)}</span>
+                </div>
+                <p>{contactPolicyDescription(contact)}</p>
+                <div className="review-secondary-row contact-policy-actions">
+                  <button
+                    type="button"
+                    disabled={savingReview || policyStatus === "suppressed"}
+                    onClick={() =>
+                      void updateContactPolicy(
+                        { status: "suppressed", reason: "Manually marked do-not-contact.", scope: "product" },
+                        "Do not contact",
+                      )
+                    }
+                  >
+                    Do not contact
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingReview || policyStatus === "bounced"}
+                    onClick={() =>
+                      void updateContactPolicy(
+                        { status: "bounced", reason: "Email bounced or failed delivery.", scope: "product" },
+                        "Marked bounced",
+                      )
+                    }
+                  >
+                    Mark bounced
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingReview || policyStatus === "unsubscribed"}
+                    onClick={() =>
+                      void updateContactPolicy(
+                        { status: "unsubscribed", reason: "Contact requested no further outreach.", scope: "product" },
+                        "Marked unsubscribed",
+                      )
+                    }
+                  >
+                    Unsubscribed
+                  </button>
+                  {blocked ? (
+                    <button
+                      type="button"
+                      disabled={savingReview}
+                      onClick={() => void updateContactPolicy({ status: "allowed" }, "Contact allowed")}
+                    >
+                      Clear block
+                    </button>
+                  ) : null}
+                </div>
               </section>
 
               <section className="drawer-agent-panel">
@@ -882,10 +1051,19 @@ function ContactDrawer({
                           Send email
                         </button>
                       ) : null}
+                      {message.status === "sent" ? (
+                        <button type="button" disabled={savingDraft} onClick={markReplied}>
+                          Mark replied
+                        </button>
+                      ) : null}
                     </div>
                     {message.status === "approved" && !canSend ? (
                       <p className="draft-warning">
-                        {!email ? "Add or find an email before sending." : "Keep this contact shortlisted before sending."}
+                        {blocked
+                          ? "This contact is blocked from outreach."
+                          : !email
+                            ? "Add or find an email before sending."
+                            : "Keep this contact shortlisted before sending."}
                       </p>
                     ) : null}
                   </>
@@ -895,11 +1073,13 @@ function ContactDrawer({
                   </button>
                 ) : (
                   <p className="draft-warning">
-                    {shortlisted && !verified
-                      ? "Verify this contact before generating outreach."
-                      : !email
-                        ? "Find an email before generating outreach."
-                        : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
+                    {blocked
+                      ? "This contact is blocked from outreach."
+                      : shortlisted && !verified
+                        ? "Verify this contact before generating outreach."
+                        : !email
+                          ? "Find an email before generating outreach."
+                          : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
                   </p>
                 )}
               </section>
@@ -1024,7 +1204,11 @@ function getRunSource(run: { source_inputs?: Record<string, unknown> } | undefin
 }
 
 function isReachableContact(contact: DiscoveryResult) {
-  return Boolean(contact.contact_email || contact.research?.contact_email || getPhone(contact));
+  return Boolean(
+    !isContactBlocked(contact)
+      && verificationStatus(contact) !== "invalid"
+      && (contact.contact_email || contact.research?.contact_email || getPhone(contact)),
+  );
 }
 
 function contactStatusLabel(contact: DiscoveryResult) {
@@ -1071,11 +1255,63 @@ function verificationStatusDescription(contact: DiscoveryResult) {
   return "This contact has not been verified yet.";
 }
 
+function contactPolicyStatus(contact: DiscoveryResult): ContactPolicyStatus {
+  return contact.contact_policy_status || "allowed";
+}
+
+function isContactBlocked(contact: DiscoveryResult) {
+  return contactPolicyStatus(contact) !== "allowed";
+}
+
+function contactPolicyStatusLabel(status: ContactPolicyStatus) {
+  const labels: Record<ContactPolicyStatus, string> = {
+    allowed: "Allowed",
+    suppressed: "Do not contact",
+    unsubscribed: "Unsubscribed",
+    bounced: "Bounced",
+  };
+  return labels[status];
+}
+
+function contactPolicyDescription(contact: DiscoveryResult | undefined) {
+  if (!contact) return "No contact policy has been set.";
+  if (contact.contact_policy_reason) return contact.contact_policy_reason;
+  const status = contactPolicyStatus(contact);
+  if (status === "suppressed") return "This contact is manually blocked from outreach.";
+  if (status === "unsubscribed") return "This contact requested no further outreach.";
+  if (status === "bounced") return "This contact is blocked because email delivery bounced.";
+  return "This contact can be shortlisted, drafted, and sent after the normal checks pass.";
+}
+
 function contactVerificationSummary(contact: DiscoveryResult) {
   const status = verificationStatus(contact);
   const score = typeof contact.verification_score === "number" ? ` · ${contact.verification_score}` : "";
   const provider = contact.verification_provider ? ` via ${contact.verification_provider}` : "";
   return `${verificationStatusLabel(status)}${score}${provider}`;
+}
+
+function verificationDetailChips(details: Record<string, unknown> | null | undefined) {
+  if (!details) return [];
+  const chips: string[] = [];
+  const providerStatus = rawValueToString(details.provider_status);
+  const providerReason = rawValueToString(details.provider_reason);
+  if (providerStatus) chips.push(providerStatus.replace(/_/g, " "));
+  if (providerReason && providerReason !== providerStatus) chips.push(providerReason.replace(/_/g, " "));
+  if (truthyDetail(details.accept_all)) chips.push("accept-all");
+  if (truthyDetail(details.disposable)) chips.push("disposable");
+  if (truthyDetail(details.role)) chips.push("role account");
+  if (truthyDetail(details.free)) chips.push("free email");
+  if (truthyDetail(details.toxic)) chips.push(`toxicity: ${rawValueToString(details.toxic)}`);
+  const suggestion = rawValueToString(details.did_you_mean);
+  if (suggestion) chips.push(`suggested: ${suggestion}`);
+  return chips.slice(0, 6);
+}
+
+function truthyDetail(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return !["", "false", "no", "0", "unknown"].includes(value.trim().toLowerCase());
+  if (typeof value === "number") return value > 0;
+  return false;
 }
 
 function isVerifiedContact(contact: DiscoveryResult) {
@@ -1392,9 +1628,13 @@ function exportContactsCsv(contacts: DiscoveryResult[], runName: string, message
     posted: getPostedDate(contact),
     website: contact.website_url || contact.research?.website_url || "",
     geography: contact.geography || contact.research?.geography || "",
+    contact_policy_status: contactPolicyStatusLabel(contactPolicyStatus(contact)),
+    contact_policy_reason: contact.contact_policy_reason || "",
+    last_contacted_at: contact.last_contacted_at || "",
     verification_status: verificationStatusLabel(verificationStatus(contact)),
     verification_score: contact.verification_score ?? "",
     verification_reason: contact.verification_reason || "",
+    verification_details: formatVerificationDetails(contact.verification_details),
     score: String(contactScore(contact)),
     status: contactStatusLabel(contact),
     fit_verdict: displayFitStatus(contact).label,
@@ -1426,6 +1666,10 @@ function exportContactsCsv(contacts: DiscoveryResult[], runName: string, message
 function csvCell(value: string | number | undefined) {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
+}
+
+function formatVerificationDetails(details: Record<string, unknown> | null | undefined) {
+  return verificationDetailChips(details).join("; ");
 }
 
 function slugify(value: string) {
