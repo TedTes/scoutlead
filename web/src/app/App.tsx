@@ -124,6 +124,12 @@ function AppShell() {
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
 
+  const handleDeleteDraftRun = () => {
+    setDraftRunName(null);
+    setSelectedDiscoveryRunId("");
+    setActiveScreen("overview");
+  };
+
   const handleExportProductContacts = () => {
     if (!productContacts.length) {
       showToast({
@@ -232,6 +238,7 @@ function AppShell() {
                 value={draftRunName}
                 onChange={setDraftRunName}
                 onSelect={startNewList}
+                onDelete={handleDeleteDraftRun}
               />
             ) : null}
             {draftRunName === null && productDiscoveryRuns.length === 0 ? (
@@ -480,13 +487,16 @@ function RunHistoryDraft({
   value,
   onChange,
   onSelect,
+  onDelete,
 }: {
   active: boolean;
   value: string;
   onChange: (value: string) => void;
   onSelect: () => void;
+  onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(active);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const displayName = value.trim() || "Page name";
 
   useEffect(() => {
@@ -500,6 +510,12 @@ function RunHistoryDraft({
   const commitName = () => {
     onChange(displayName);
     setEditing(false);
+  };
+
+  const confirmDelete = () => {
+    setConfirmingDelete(false);
+    setEditing(false);
+    onDelete();
   };
 
   return (
@@ -533,6 +549,43 @@ function RunHistoryDraft({
           </span>
         </button>
       )}
+      {confirmingDelete ? (
+        <div className="run-confirm">
+          <span className="q">Delete draft?</span>
+          <button className="yes" type="button" onClick={confirmDelete}>
+            Delete
+          </button>
+          <button type="button" onClick={() => setConfirmingDelete(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
+      <div className="list-row-actions run-actions">
+        <button
+          aria-label={`Rename ${displayName}`}
+          className="list-row-action run-act"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setConfirmingDelete(false);
+            setEditing(true);
+          }}
+        >
+          <Pencil size={12} />
+        </button>
+        <button
+          aria-label={`Delete ${displayName}`}
+          className="list-row-action run-act del danger"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setEditing(false);
+            setConfirmingDelete(true);
+          }}
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
     </div>
   );
 }
