@@ -160,6 +160,11 @@ lets you choose either `dev` or `production`; the release job binds to that GitH
 Environment, runs Alembic against the matching Railway environment, then deploys the API,
 worker, and web services.
 
+The workflow deploys each Railway service from the repo root. Keep the web service's Railway
+Root Directory set to `/web`; do not combine that service setting with a `railway up ./web
+--path-as-root` workflow deploy, because Railway can apply the service root directory again
+during the remote build.
+
 Configure these GitHub repository settings before relying on the workflow. Add the same keys
 under each GitHub Environment you deploy from:
 

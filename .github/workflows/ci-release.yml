@@ -145,8 +145,7 @@ jobs:
 
       - name: Deploy web service
         run: |
-          railway up ./web \
-            --path-as-root \
+          railway up \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT" \
             --service "$RAILWAY_WEB_SERVICE" \
