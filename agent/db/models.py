@@ -30,6 +30,8 @@ class ProductModel(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     source_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    webhook_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    webhook_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -106,14 +108,63 @@ class LeadModel(TimestampMixin, Base):
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     shortlisted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    contact_policy_status: Mapped[str] = mapped_column(String(32), nullable=False, default="allowed")
+    contact_policy_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contact_policy_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     verification_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unverified")
     verification_provider: Mapped[str | None] = mapped_column(String(255), nullable=True)
     verification_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     verification_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     verification_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verification_details: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     raw_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     research: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     qualification: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class ContactSuppressionModel(TimestampMixin, Base):
+    __tablename__ = "contact_suppressions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope",
+            "product_id",
+            "kind",
+            "value",
+            name="uq_contact_suppressions_scope_product_kind_value",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True, index=True)
+    lead_id: Mapped[str | None] = mapped_column(ForeignKey("leads.id"), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    value: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="manual")
+
+    product: Mapped[ProductModel | None] = relationship()
+    lead: Mapped[LeadModel | None] = relationship()
+
+
+class WebhookDeliveryModel(TimestampMixin, Base):
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    event: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    product: Mapped[ProductModel] = relationship()
+    campaign: Mapped[CampaignModel] = relationship()
 
 
 class DiscoveryCandidateModel(TimestampMixin, Base):

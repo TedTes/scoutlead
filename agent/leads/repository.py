@@ -9,7 +9,9 @@ from campaigns.schemas import LeadSeedInput
 from db.models import DiscoveryCandidateModel, LeadModel
 from leads.policy import can_shortlist_lead, normalize_qualification_result
 from leads.schemas import (
+    ContactPolicyStatus,
     ContactVerificationStatus,
+    LeadContactPolicyUpdate,
     LeadResearch,
     LeadReviewStatus,
     LeadStatus,
@@ -19,6 +21,7 @@ from leads.schemas import (
 )
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, normalize_url, utcnow
+from suppressions.repository import ContactSuppressionRepository, is_blocked_contact_policy
 
 
 class LeadRepository:
@@ -28,7 +31,7 @@ class LeadRepository:
     def create_from_seed(self, campaign_id: str, product_id: str, seed: LeadSeedInput) -> LeadModel:
         existing = self.find_existing(campaign_id, seed.company_name, seed.website_url)
         if existing:
-            return existing
+            return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
         model = LeadModel(
             id=new_id("lead"),
@@ -46,6 +49,7 @@ class LeadRepository:
             raw_sources=[seed.raw or seed.model_dump(mode="json")],
         )
         self.session.add(model)
+        ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
         self.session.commit()
         self.session.refresh(model)
         return model
@@ -58,7 +62,7 @@ class LeadRepository:
             raise ValueError("search result is missing title/company_name")
         existing = self.find_existing(campaign_id, company_name, result.get("url"))
         if existing:
-            return existing
+            return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
         model = LeadModel(
             id=new_id("lead"),
@@ -76,6 +80,7 @@ class LeadRepository:
             raw_sources=[result],
         )
         self.session.add(model)
+        ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
         self.session.commit()
         self.session.refresh(model)
         return model
@@ -83,7 +88,7 @@ class LeadRepository:
     def create_from_candidate(self, candidate: DiscoveryCandidateModel) -> LeadModel:
         existing = self.find_existing(candidate.campaign_id, candidate.title, candidate.url)
         if existing:
-            return existing
+            return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
         model = LeadModel(
             id=new_id("lead"),
@@ -115,6 +120,7 @@ class LeadRepository:
             ],
         )
         self.session.add(model)
+        ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
         self.session.commit()
         self.session.refresh(model)
         return model
@@ -153,6 +159,15 @@ class LeadRepository:
             note = data["review_note"]
             model.review_note = note.strip() if isinstance(note, str) and note.strip() else None
         if "shortlisted" in data:
+            if data["shortlisted"] and is_blocked_contact_policy(model.contact_policy_status):
+                raise ConflictError(
+                    "lead is blocked from outreach",
+                    {
+                        "lead_id": lead_id,
+                        "contact_policy_status": model.contact_policy_status,
+                        "user_message": "This contact is marked do-not-contact and cannot be shortlisted.",
+                    },
+                )
             if data["shortlisted"] and not can_shortlist_lead(
                 review_status=next_review_status,
                 qualification=model.qualification,
@@ -166,6 +181,24 @@ class LeadRepository:
                     },
                 )
             model.shortlisted_at = utcnow() if data["shortlisted"] else None
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
+    def update_contact_policy(self, lead_id: str, update: LeadContactPolicyUpdate) -> LeadModel:
+        model = self.get(lead_id)
+        if update.status == ContactPolicyStatus.ALLOWED:
+            return ContactSuppressionRepository(self.session).clear_lead_policy(model)
+        return ContactSuppressionRepository(self.session).set_lead_policy(
+            model,
+            status=update.status,
+            reason=update.reason,
+            scope=update.scope,
+        )
+
+    def mark_contacted(self, lead_id: str, contacted_at=None) -> LeadModel:
+        model = self.get(lead_id)
+        model.last_contacted_at = contacted_at or utcnow()
         self.session.commit()
         self.session.refresh(model)
         return model
@@ -197,6 +230,7 @@ class LeadRepository:
         model.verification_checked_at = utcnow()
         model.verification_reason = result.reason
         model.verification_score = result.score
+        model.verification_details = result.details or None
         self.session.commit()
         self.session.refresh(model)
         return model

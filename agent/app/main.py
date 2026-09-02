@@ -17,6 +17,7 @@ from messages.routes import router as messages_router
 from products.routes import router as products_router
 from shared.errors import SoutleadError
 from shared.logger import configure_logging
+from webhooks.routes import router as webhooks_router
 
 
 class ApiAuthMiddleware(BaseHTTPMiddleware):
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(insights_router)
     app.include_router(leads_router)
     app.include_router(messages_router)
+    app.include_router(webhooks_router)
     return app
 
 

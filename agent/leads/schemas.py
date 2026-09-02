@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +32,18 @@ class ContactVerificationStatus(StrEnum):
     RISKY = "risky"
     INVALID = "invalid"
     UNKNOWN = "unknown"
+
+
+class ContactPolicyStatus(StrEnum):
+    ALLOWED = "allowed"
+    SUPPRESSED = "suppressed"
+    UNSUBSCRIBED = "unsubscribed"
+    BOUNCED = "bounced"
+
+
+class SuppressionScope(StrEnum):
+    PRODUCT = "product"
+    GLOBAL = "global"
 
 
 class AgentFitStatus(StrEnum):
@@ -102,11 +115,18 @@ class LeadUpdate(BaseModel):
     shortlisted: bool | None = None
 
 
+class LeadContactPolicyUpdate(BaseModel):
+    status: ContactPolicyStatus
+    reason: str | None = None
+    scope: SuppressionScope = SuppressionScope.PRODUCT
+
+
 class LeadVerification(BaseModel):
     status: ContactVerificationStatus
     provider: str
     reason: str | None = None
     score: int = Field(ge=0, le=100)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class LeadRead(LeadCreate):
@@ -118,11 +138,16 @@ class LeadRead(LeadCreate):
     review_note: str | None = None
     reviewed_at: datetime | None = None
     shortlisted_at: datetime | None = None
+    contact_policy_status: ContactPolicyStatus = ContactPolicyStatus.ALLOWED
+    contact_policy_reason: str | None = None
+    contact_policy_checked_at: datetime | None = None
+    last_contacted_at: datetime | None = None
     verification_status: ContactVerificationStatus = ContactVerificationStatus.UNVERIFIED
     verification_provider: str | None = None
     verification_checked_at: datetime | None = None
     verification_reason: str | None = None
     verification_score: int | None = None
+    verification_details: dict[str, Any] | None = None
     research: LeadResearch | None = None
     qualification: QualificationResult | None = None
     created_at: datetime

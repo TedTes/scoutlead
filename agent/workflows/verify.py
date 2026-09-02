@@ -142,6 +142,7 @@ def _verification_from_tool_result(result) -> LeadVerification:
         provider=result.provider,
         reason=str(data.get("reason") or f"Verifier returned {status.value}."),
         score=max(0, min(100, score)),
+        details=data.get("details") if isinstance(data.get("details"), dict) else {},
     )
 
 

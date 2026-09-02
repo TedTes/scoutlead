@@ -8,14 +8,17 @@ from db.session import create_database
 from leads.repository import LeadRepository
 from leads.schemas import (
     AgentFitStatus,
+    ContactPolicyStatus,
     ContactVerificationStatus,
+    LeadContactPolicyUpdate,
     LeadReviewStatus,
     LeadStatus,
     LeadUpdate,
     LeadVerification,
     QualificationResult,
+    SuppressionScope,
 )
-from messages.schemas import MessageApproval, MessageStatus, OutreachDraft
+from messages.schemas import MessageApproval, MessageReplyMark, MessageStatus, OutreachDraft
 from messages.service import MessageService
 from products.repository import ProductRepository
 from shared.errors import ConflictError
@@ -87,6 +90,61 @@ def test_shortlisted_lead_can_generate_one_pending_outreach_draft() -> None:
         assert message.status == MessageStatus.PENDING_APPROVAL
         assert message.subject == "QuoteVan question"
         assert lead_repo.get(lead.id).status == LeadStatus.AWAITING_APPROVAL.value
+
+
+def test_suppressed_lead_blocks_shortlist_and_future_matching() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(product_input())
+        campaign = CampaignRepository(session).create(
+            CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
+        )
+        lead_repo = LeadRepository(session)
+        lead = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Cedar & Sons Painting",
+                website_url="https://cedarpaint.example",
+                contact_email="owner@cedarpaint.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+        blocked = lead_repo.update_contact_policy(
+            lead.id,
+            LeadContactPolicyUpdate(
+                status=ContactPolicyStatus.SUPPRESSED,
+                reason="Asked not to be contacted.",
+                scope=SuppressionScope.PRODUCT,
+            ),
+        )
+
+        assert blocked.contact_policy_status == ContactPolicyStatus.SUPPRESSED.value
+        assert blocked.shortlisted_at is None
+        with pytest.raises(ConflictError):
+            lead_repo.update(lead.id, LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True))
+
+        next_campaign = CampaignRepository(session).create(
+            CampaignCreate(product_id=product.id, name="Painters Toronto rerun", max_leads=5)
+        )
+        rediscovered = lead_repo.create_from_seed(
+            next_campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Cedar Painting Again",
+                website_url="https://cedarpaint.example/services",
+                contact_email="owner@cedarpaint.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+
+        assert rediscovered.contact_policy_status == ContactPolicyStatus.SUPPRESSED.value
+        assert rediscovered.contact_policy_reason == "Asked not to be contacted."
 
 
 def test_unreviewed_lead_without_agent_fit_cannot_be_shortlisted() -> None:
@@ -309,3 +367,49 @@ def test_not_fit_review_clears_shortlist_and_blocks_sending() -> None:
         assert not_fit.shortlisted_at is None
         with pytest.raises(ConflictError):
             service.send(message.id)
+
+
+def test_sent_message_can_be_marked_replied() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(product_input())
+        campaign = CampaignRepository(session).create(
+            CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
+        )
+        lead_repo = LeadRepository(session)
+        lead = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Cedar & Sons Painting",
+                website_url="https://cedarpaint.example",
+                contact_email="owner@cedarpaint.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+        lead_repo.update(
+            lead.id,
+            LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True),
+        )
+        lead_repo.attach_verification(
+            lead.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
+        )
+
+        service = MessageService(session=session, email=EmailTool(), llm=DraftLLM())
+        message = service.create_outreach_draft_for_lead(lead.id)
+        service.approve(message.id, MessageApproval(approved_by="operator"))
+        sent = service.send(message.id)
+        replied = service.mark_replied(sent.id, MessageReplyMark(body="They replied with interest."))
+
+        assert replied.status == MessageStatus.REPLIED
+        assert lead_repo.get(lead.id).status == LeadStatus.RESPONDED.value

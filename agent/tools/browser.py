@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import re
 from typing import Protocol
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
 from shared.utils import normalize_text, truncate
+
+EVIDENCE_LINK_RE = re.compile(r"(contact|quote|estimate|about|service|pricing|request)", re.I)
+MAX_EVIDENCE_PAGES = 4
 
 
 class WebsiteInspection(BaseModel):
@@ -31,6 +34,31 @@ class DirectHttpBrowserTool:
         self.timeout_seconds = timeout_seconds
 
     def inspect(self, url: str) -> WebsiteInspection:
+        primary = self._inspect_url(url)
+        if primary.error:
+            return primary
+
+        pages = [primary]
+        for link in _candidate_evidence_links(primary.links, primary.url):
+            if len(pages) >= MAX_EVIDENCE_PAGES:
+                break
+            page = self._inspect_url(link)
+            if not page.error:
+                pages.append(page)
+
+        if len(pages) == 1:
+            return primary
+
+        return WebsiteInspection(
+            url=primary.url,
+            title=primary.title,
+            description=primary.description,
+            text=truncate(normalize_text(" ".join(_page_text(page) for page in pages)), 9000),
+            emails=sorted({email for page in pages for email in page.emails})[:10],
+            links=sorted({link for page in pages for link in page.links})[:80],
+        )
+
+    def _inspect_url(self, url: str) -> WebsiteInspection:
         try:
             response = httpx.get(
                 url,
@@ -63,6 +91,45 @@ class DirectHttpBrowserTool:
             emails=emails[:10],
             links=sorted(set(links))[:50],
         )
+
+
+def _candidate_evidence_links(links: list[str], base_url: str) -> list[str]:
+    base_domain = _domain(base_url)
+    ranked: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for link in links:
+        if not link.startswith(("http://", "https://")):
+            continue
+        if _domain(link) != base_domain:
+            continue
+        if link in seen or not EVIDENCE_LINK_RE.search(link):
+            continue
+        seen.add(link)
+        ranked.append((_link_priority(link), link))
+    return [link for _, link in sorted(ranked, key=lambda item: (item[0], item[1]))]
+
+
+def _link_priority(link: str) -> int:
+    path = urlparse(link).path.lower()
+    if "contact" in path:
+        return 0
+    if "quote" in path or "estimate" in path or "request" in path:
+        return 1
+    if "about" in path:
+        return 2
+    if "service" in path:
+        return 3
+    return 4
+
+
+def _domain(url: str) -> str:
+    parsed = urlparse(url)
+    return (parsed.netloc or parsed.path).split(":", 1)[0].removeprefix("www.").lower()
+
+
+def _page_text(page: WebsiteInspection) -> str:
+    label = page.title or page.url
+    return f"{label}. {page.description or ''} {page.text}"
 
 
 class BrowserAutomationFallbackTool:

@@ -10,6 +10,7 @@ from db.models import (
     CampaignMemoryModel,
     CampaignModel,
     CampaignSourceModel,
+    ContactSuppressionModel,
     ConversationEventModel,
     ConversationModel,
     DiscoveryCandidateModel,
@@ -21,6 +22,7 @@ from db.models import (
     ProductSourceDraftModel,
     QueueJobModel,
     ToolCallModel,
+    WebhookDeliveryModel,
 )
 from products.schemas import ProductCreate, ProductUpdate
 from shared.errors import ConflictError, NotFoundError
@@ -269,6 +271,8 @@ class ProductRepository:
         self.session.execute(delete(ConversationModel).where(ConversationModel.product_id == product_id))
         self.session.execute(delete(MessageModel).where(MessageModel.product_id == product_id))
         self.session.execute(delete(EmailConnectionModel).where(EmailConnectionModel.product_id == product_id))
+        self.session.execute(delete(ContactSuppressionModel).where(ContactSuppressionModel.product_id == product_id))
+        self.session.execute(delete(WebhookDeliveryModel).where(WebhookDeliveryModel.product_id == product_id))
         self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.product_id == product_id))
         self.session.execute(delete(LeadModel).where(LeadModel.product_id == product_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))

@@ -45,11 +45,18 @@ class ProductBase(BaseModel):
     source_fingerprint: str | None = None
     source_last_checked_at: datetime | None = None
     source_evidence: dict[str, Any] | None = None
+    webhook_url: str | None = None
+    webhook_enabled: bool = False
 
     @field_validator("constraints")
     @classmethod
     def non_empty_constraints(cls, values: list[str]) -> list[str]:
         return [value.strip() for value in values if value.strip()]
+
+    @field_validator("webhook_url")
+    @classmethod
+    def valid_webhook_url(cls, value: str | None) -> str | None:
+        return normalize_webhook_url(value)
 
 
 class ProductCreate(ProductBase):
@@ -136,3 +143,19 @@ class ProductUpdate(BaseModel):
     source_fingerprint: str | None = None
     source_last_checked_at: datetime | None = None
     source_evidence: dict[str, Any] | None = None
+    webhook_url: str | None = None
+    webhook_enabled: bool | None = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def valid_webhook_url(cls, value: str | None) -> str | None:
+        return normalize_webhook_url(value)
+
+
+def normalize_webhook_url(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    if not normalized:
+        return None
+    if not normalized.lower().startswith(("http://", "https://")):
+        raise ValueError("webhook_url must start with http:// or https://")
+    return normalized

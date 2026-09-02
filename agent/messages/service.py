@@ -7,8 +7,11 @@ from campaigns.repository import CampaignRepository
 from campaigns.goal import goal_policy
 from campaigns.schemas import CampaignGoalType, CampaignRead, CampaignStatus, OutreachChannel
 from conversations.repository import ConversationRepository
+from conversations.schemas import FollowUpAction, ResponseClassification, ResponseIntent
 from leads.policy import (
+    contact_block_reason,
     is_draftable_lead,
+    is_contact_blocked_lead,
     is_outreach_ready,
     is_reachable_lead,
     is_verified_lead,
@@ -17,7 +20,7 @@ from leads.policy import (
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead, LeadStatus
 from messages.repository import MessageRepository
-from messages.schemas import MessageApproval, MessageRead, MessageStatus, MessageUpdate, OutreachDraft
+from messages.schemas import MessageApproval, MessageRead, MessageReplyMark, MessageStatus, MessageUpdate, OutreachDraft
 from messages.state import assert_send_allowed
 from prompts.outreach_learn import outreach_learn_prompt
 from prompts.outreach_sell import outreach_sell_prompt
@@ -49,6 +52,15 @@ class MessageService:
             raise ConflictError(
                 "lead must be shortlisted before generating outreach",
                 {"lead_id": lead_id, "user_message": "Shortlist this contact before generating outreach."},
+            )
+        if is_contact_blocked_lead(lead):
+            raise ConflictError(
+                "lead is blocked from outreach",
+                {
+                    "lead_id": lead_id,
+                    "contact_policy_status": lead.contact_policy_status.value,
+                    "user_message": contact_block_reason(lead),
+                },
             )
         if not is_outreach_ready(lead):
             raise ConflictError(
@@ -129,6 +141,25 @@ class MessageService:
         message = self.messages.set_status(message_id, MessageStatus.CANCELLED)
         return MessageRead.model_validate(message)
 
+    def mark_replied(self, message_id: str, reply: MessageReplyMark) -> MessageRead:
+        message = MessageRead.model_validate(self.messages.get(message_id))
+        updated = self.messages.set_status(message_id, MessageStatus.REPLIED)
+        self.leads.update_status(message.lead_id, LeadStatus.RESPONDED)
+        conversation = self.conversations.get_or_create(
+            message.campaign_id, message.product_id, message.lead_id
+        )
+        self.conversations.add_inbound_event(
+            conversation.id,
+            reply.body or "Marked as replied manually.",
+            ResponseClassification(
+                intent=ResponseIntent.UNKNOWN,
+                confidence=100,
+                rationale="Marked as replied manually by the operator.",
+                follow_up_action=FollowUpAction.MANUAL_REVIEW,
+            ),
+        )
+        return MessageRead.model_validate(updated)
+
     def send(self, message_id: str) -> MessageRead:
         message = MessageRead.model_validate(self.messages.get(message_id))
         product = ProductRead.model_validate(self.products.get(message.product_id))
@@ -136,6 +167,15 @@ class MessageService:
         campaign = self.campaigns.get(message.campaign_id)
 
         assert_send_allowed(message.status)
+        if is_contact_blocked_lead(lead):
+            raise ConflictError(
+                "lead is blocked from outreach",
+                {
+                    "lead_id": lead.id,
+                    "contact_policy_status": lead.contact_policy_status.value,
+                    "user_message": contact_block_reason(lead),
+                },
+            )
         if not is_outreach_ready(lead):
             raise ConflictError(
                 "lead needs a positive fit decision before sending",
@@ -182,6 +222,7 @@ class MessageService:
             sent_at=sent_at,
         )
         self.leads.update_status(message.lead_id, LeadStatus.SENT)
+        self.leads.mark_contacted(message.lead_id, sent_at)
         conversation = self.conversations.get_or_create(
             message.campaign_id, message.product_id, message.lead_id
         )

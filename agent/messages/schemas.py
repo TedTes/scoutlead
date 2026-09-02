@@ -36,6 +36,10 @@ class MessageUpdate(BaseModel):
     approach_tag: str | None = None
 
 
+class MessageReplyMark(BaseModel):
+    body: str | None = None
+
+
 class MessageRead(OutreachDraft):
     model_config = ConfigDict(from_attributes=True)
 

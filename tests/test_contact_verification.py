@@ -60,6 +60,10 @@ def test_bouncer_provider_maps_deliverable_response(monkeypatch) -> None:
                 "status": "deliverable",
                 "reason": "accepted_email",
                 "score": 98,
+                "acceptAll": False,
+                "disposable": False,
+                "role": False,
+                "domain": "example.com",
             }
 
     def fake_get(*args, **kwargs):
@@ -80,6 +84,16 @@ def test_bouncer_provider_maps_deliverable_response(monkeypatch) -> None:
     assert captured["params"] == {"email": "owner@example.com", "timeout": 20}
     assert result.provider == "bouncer"
     assert result.data["status"] == "valid"
+    assert result.data["details"] == {
+        "provider": "bouncer",
+        "provider_status": "deliverable",
+        "provider_reason": "accepted_email",
+        "score": 98,
+        "domain": "example.com",
+        "disposable": False,
+        "role": False,
+        "accept_all": False,
+    }
     assert result.confidence == 98
 
 

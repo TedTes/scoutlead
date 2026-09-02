@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.dependencies import AppServices, DbSession, get_services
 from messages.repository import MessageRepository
-from messages.schemas import MessageApproval, MessageRead, MessageUpdate
+from messages.schemas import MessageApproval, MessageRead, MessageReplyMark, MessageUpdate
 from messages.service import MessageService
 from queue.schemas import QueueJobRead
 from queue.service import QueueService
@@ -69,6 +69,16 @@ def cancel_message(
     services: Annotated[AppServices, Depends(get_services)],
 ):
     return MessageService(session=session, email=services.email).cancel(message_id)
+
+
+@router.post("/messages/{message_id}/mark-replied", response_model=MessageRead)
+def mark_message_replied(
+    message_id: str,
+    reply: MessageReplyMark,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+):
+    return MessageService(session=session, email=services.email).mark_replied(message_id, reply)
 
 
 @router.post("/messages/{message_id}/enqueue-send", response_model=QueueJobRead)

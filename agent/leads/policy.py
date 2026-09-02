@@ -4,11 +4,13 @@ from typing import Any
 
 from leads.schemas import (
     AgentFitStatus,
+    ContactPolicyStatus,
     ContactVerificationStatus,
     LeadRead,
     LeadReviewStatus,
     QualificationResult,
 )
+from suppressions.repository import is_blocked_contact_policy
 
 
 MAYBE_FIT_SCORE = 50
@@ -45,6 +47,7 @@ def can_shortlist_lead(
 def is_outreach_ready(lead: LeadRead) -> bool:
     return bool(
         lead.shortlisted_at
+        and not is_contact_blocked_lead(lead)
         and can_shortlist_lead(
             review_status=lead.review_status,
             qualification=lead.qualification,
@@ -61,7 +64,11 @@ def lead_email(lead: LeadRead) -> str | None:
 
 
 def is_reachable_lead(lead: LeadRead) -> bool:
-    return bool(lead_email(lead))
+    return bool(
+        lead_email(lead)
+        and not is_contact_blocked_lead(lead)
+        and lead.verification_status != ContactVerificationStatus.INVALID
+    )
 
 
 def is_verified_lead(lead: LeadRead) -> bool:
@@ -70,6 +77,19 @@ def is_verified_lead(lead: LeadRead) -> bool:
 
 def is_draftable_lead(lead: LeadRead) -> bool:
     return is_outreach_ready(lead) and is_reachable_lead(lead) and is_verified_lead(lead)
+
+
+def is_contact_blocked_lead(lead: LeadRead) -> bool:
+    return is_blocked_contact_policy(lead.contact_policy_status)
+
+
+def contact_block_reason(lead: LeadRead) -> str:
+    status = lead.contact_policy_status
+    if isinstance(status, ContactPolicyStatus):
+        label = status.value.replace("_", " ")
+    else:
+        label = str(status or "blocked").replace("_", " ")
+    return lead.contact_policy_reason or f"Contact policy is {label}."
 
 
 def _review_status(value: LeadReviewStatus | str | None) -> LeadReviewStatus:

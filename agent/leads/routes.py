@@ -8,7 +8,7 @@ from campaigns.schemas import LeadSeedInput
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateRead
 from leads.repository import LeadRepository
-from leads.schemas import LeadRead, LeadUpdate
+from leads.schemas import LeadContactPolicyUpdate, LeadRead, LeadUpdate
 from leads.service import LeadQualificationService
 
 router = APIRouter(tags=["leads"])
@@ -40,6 +40,15 @@ def get_lead(lead_id: str, session: DbSession):
 @router.patch("/leads/{lead_id}", response_model=LeadRead)
 def update_lead(lead_id: str, update: LeadUpdate, session: DbSession):
     return LeadRepository(session).update(lead_id, update)
+
+
+@router.patch("/leads/{lead_id}/contact-policy", response_model=LeadRead)
+def update_lead_contact_policy(
+    lead_id: str,
+    update: LeadContactPolicyUpdate,
+    session: DbSession,
+):
+    return LeadRepository(session).update_contact_policy(lead_id, update)
 
 
 @router.post("/leads/{lead_id}/qualify", response_model=LeadRead)

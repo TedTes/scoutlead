@@ -32,6 +32,7 @@ class VerificationResult:
             "verdict": status,
             "reason": self.reason,
             "score": max(0, min(100, int(self.score))),
+            "details": _verification_details(self.provider, self.raw),
             "raw": self.raw,
         }
 
@@ -352,6 +353,31 @@ def _bouncer_status(raw_status: str, payload: dict[str, Any]) -> tuple[str, int]
     if raw_status == "unknown":
         return "unknown", score or 30
     return "unknown", score or 30
+
+
+def _verification_details(provider: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not payload:
+        return {}
+    details: dict[str, Any] = {"provider": provider}
+    _copy_detail(details, "provider_status", payload, "status")
+    _copy_detail(details, "provider_reason", payload, "reason", "sub_status", "subStatus")
+    _copy_detail(details, "score", payload, "score", "quality_score", "qualityScore")
+    _copy_detail(details, "domain", payload, "domain")
+    _copy_detail(details, "disposable", payload, "disposable", "is_disposable", "isDisposable")
+    _copy_detail(details, "role", payload, "role", "role_account", "isRoleAccount")
+    _copy_detail(details, "accept_all", payload, "acceptAll", "accept_all", "catch_all", "catchAll")
+    _copy_detail(details, "free", payload, "free", "free_email", "freeEmail")
+    _copy_detail(details, "toxic", payload, "toxic", "toxicity")
+    _copy_detail(details, "did_you_mean", payload, "did_you_mean", "didYouMean")
+    _copy_detail(details, "retry_after", payload, "retryAfter", "retry_after")
+    return {key: value for key, value in details.items() if value not in (None, "")}
+
+
+def _copy_detail(target: dict[str, Any], name: str, source: dict[str, Any], *keys: str) -> None:
+    for key in keys:
+        if key in source and source[key] not in (None, ""):
+            target[name] = source[key]
+            return
 
 
 def _bouncer_reason(raw_status: str, raw_reason: str, payload: dict[str, Any]) -> str:
