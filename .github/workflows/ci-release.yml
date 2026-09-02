@@ -6,12 +6,21 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      target_environment:
+        description: GitHub/Railway environment to deploy
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - production
 
 permissions:
   contents: read
 
 concurrency:
-  group: scoutlead-release-${{ github.ref }}
+  group: scoutlead-release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }}
   cancel-in-progress: true
 
 jobs:
@@ -57,9 +66,9 @@ jobs:
         run: npm run build
 
   release:
-    name: Migrate and Deploy to Railway
+    name: Migrate and Deploy to Railway (${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }})
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }}
     needs:
       - backend
       - web
