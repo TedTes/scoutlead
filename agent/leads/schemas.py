@@ -133,6 +133,8 @@ class LeadRead(LeadCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    business_id: str | None = None
+    contact_id: str | None = None
     status: LeadStatus
     review_status: LeadReviewStatus = LeadReviewStatus.UNREVIEWED
     review_note: str | None = None

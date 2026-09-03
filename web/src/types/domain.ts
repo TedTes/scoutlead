@@ -170,6 +170,8 @@ export type DiscoveryResult = {
   id: string;
   campaign_id: string;
   product_id: string;
+  business_id?: string | null;
+  contact_id?: string | null;
   company_name: string;
   website_url?: string;
   contact_email?: string;

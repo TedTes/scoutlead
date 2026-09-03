@@ -66,6 +66,7 @@ def create_database(engine: Engine) -> None:
     _ensure_campaign_runtime_columns(engine)
     _ensure_lead_review_columns(engine)
     _ensure_lead_verification_columns(engine)
+    _ensure_canonical_contact_columns(engine)
 
 
 def _ensure_product_source_columns(engine: Engine) -> None:
@@ -156,3 +157,25 @@ def _ensure_lead_verification_columns(engine: Engine) -> None:
             connection.execute(text("ALTER TABLE leads ADD COLUMN verification_reason TEXT"))
         if "verification_score" not in existing_columns:
             connection.execute(text("ALTER TABLE leads ADD COLUMN verification_score INTEGER"))
+
+
+def _ensure_canonical_contact_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("leads"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("leads")}
+    existing_indexes = {index["name"] for index in inspector.get_indexes("leads")}
+    with engine.begin() as connection:
+        if "business_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE leads ADD COLUMN business_id VARCHAR(64)"))
+        if "contact_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE leads ADD COLUMN contact_id VARCHAR(64)"))
+        if "ix_leads_business_id" not in existing_indexes:
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_leads_business_id ON leads (business_id)")
+            )
+        if "ix_leads_contact_id" not in existing_indexes:
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_leads_contact_id ON leads (contact_id)")
+            )

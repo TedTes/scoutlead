@@ -91,12 +91,77 @@ class CampaignSourceModel(TimestampMixin, Base):
     budget_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class BusinessModel(TimestampMixin, Base):
+    __tablename__ = "businesses"
+    __table_args__ = (
+        UniqueConstraint("normalized_name", "domain", name="uq_businesses_normalized_name_domain"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    website_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    geography: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    contacts: Mapped[list["ContactModel"]] = relationship(back_populates="business")
+
+
+class ContactModel(TimestampMixin, Base):
+    __tablename__ = "contacts"
+    __table_args__ = (
+        UniqueConstraint("business_id", "email", name="uq_contacts_business_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), nullable=False, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    verification_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unverified")
+    verification_provider: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verification_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verification_details: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    business: Mapped[BusinessModel] = relationship(back_populates="contacts")
+
+
+class SourceObservationModel(TimestampMixin, Base):
+    __tablename__ = "source_observations"
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_source_observations_source_external_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    query_signature: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    raw_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    business: Mapped[BusinessModel] = relationship()
+
+
 class LeadModel(TimestampMixin, Base):
     __tablename__ = "leads"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    business_id: Mapped[str | None] = mapped_column(ForeignKey("businesses.id"), nullable=True, index=True)
+    contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"), nullable=True, index=True)
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     website_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
