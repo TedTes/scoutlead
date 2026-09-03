@@ -1,5 +1,7 @@
 import {
   AlertTriangle,
+  ArrowRight,
+  Check,
   Copy,
   Download,
   Globe,
@@ -12,6 +14,7 @@ import {
   RotateCw,
   Search,
   Trash2,
+  User,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +37,7 @@ import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-
 
 type ResultFilter = "all" | "verified" | "good_fit" | "shortlisted" | "needs_review" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
+type DrawerTab = "overview" | "evidence" | "outreach";
 
 export function ResultsScreen() {
   const {
@@ -614,6 +618,7 @@ function ContactDrawer({
   const [draftSubject, setDraftSubject] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [savingDraft, setSavingDraft] = useState(false);
+  const [activeTab, setActiveTab] = useState<DrawerTab>("overview");
   const signals = contact ? contactSignals(contact) : [];
   const website = contact?.website_url || contact?.research?.website_url || "";
   const email = contact?.contact_email || contact?.research?.contact_email || "";
@@ -635,6 +640,17 @@ function ContactDrawer({
         ...(contact.qualification?.criteria || []).flatMap((criterion) => criterion.evidence || []),
       ].filter(Boolean)
     : [];
+  const fitStatus = contact ? displayFitStatus(contact) : { label: "Needs review", className: "fit-neutral" };
+  const fitScore = agentAssessment?.score ?? score;
+  const verification = contact ? verificationStatus(contact) : "unverified";
+  const verificationDetails = verificationDetailChips(contact?.verification_details);
+  const evidenceCount = new Set([
+    ...signals,
+    ...evidenceNotes,
+    ...verificationDetails,
+    contact?.verification_reason || "",
+    agentAssessment?.rationale || "",
+  ].filter(Boolean)).size;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -657,6 +673,10 @@ function ContactDrawer({
     setDraftSubject(message?.subject || "");
     setDraftBody(message?.body || "");
   }, [message?.id, message?.subject, message?.body]);
+
+  useEffect(() => {
+    setActiveTab("overview");
+  }, [contact?.id]);
 
   const saveLeadUpdate = async (update: LeadUpdateInput, successTitle: string) => {
     if (!contact || savingReview) return;
@@ -838,7 +858,7 @@ function ContactDrawer({
                 <span className={`score-ring large ${scoreClass(score)}`}>
                   <strong>{score}</strong>
                 </span>
-                <div>
+                <div className="drawer-title-copy">
                   <h2>{contact.company_name}</h2>
                   <p>
                     {contact.research?.business_type || contact.description || "Business"}
@@ -851,294 +871,365 @@ function ContactDrawer({
               </button>
             </header>
 
-            <div className="drawer-body">
-              <p className="drawer-summary">{contact.research?.summary || contact.description || "No research captured yet."}</p>
-
-              <div className="drawer-chip-row">
-                {signals.slice(0, 6).map((signal) => (
-                  <span key={signal}>{signal}</span>
-                ))}
+            <section className="drawer-signal-summary" aria-label="Contact summary">
+              <div className={`drawer-fit-verdict ${fitStatus.className}`}>
+                <Check size={22} />
+                <span>{fitStatus.label}</span>
+                <strong>{fitScore}</strong>
               </div>
-
-              <section className="drawer-verification-panel">
-                <div className="drawer-section-heading">
-                  <h3>Contact verification</h3>
-                  <span>{contactVerificationSummary(contact)}</span>
-                </div>
-                <p>{contact.verification_reason || verificationStatusDescription(contact)}</p>
-                {verificationDetailChips(contact.verification_details).length ? (
-                  <div className="verification-detail-row">
-                    {verificationDetailChips(contact.verification_details).map((detail) => (
-                      <span key={detail}>{detail}</span>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-
-              <section className={blocked ? "drawer-contact-policy-panel is-blocked" : "drawer-contact-policy-panel"}>
-                <div className="drawer-section-heading">
-                  <h3>Contact policy</h3>
-                  <span>{contactPolicyStatusLabel(policyStatus)}</span>
-                </div>
-                <p>{contactPolicyDescription(contact)}</p>
-                <div className="review-secondary-row contact-policy-actions">
-                  <button
-                    type="button"
-                    disabled={savingReview || policyStatus === "suppressed"}
-                    onClick={() =>
-                      void updateContactPolicy(
-                        { status: "suppressed", reason: "Manually marked do-not-contact.", scope: "product" },
-                        "Do not contact",
-                      )
-                    }
-                  >
-                    Do not contact
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingReview || policyStatus === "bounced"}
-                    onClick={() =>
-                      void updateContactPolicy(
-                        { status: "bounced", reason: "Email bounced or failed delivery.", scope: "product" },
-                        "Marked bounced",
-                      )
-                    }
-                  >
-                    Mark bounced
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingReview || policyStatus === "unsubscribed"}
-                    onClick={() =>
-                      void updateContactPolicy(
-                        { status: "unsubscribed", reason: "Contact requested no further outreach.", scope: "product" },
-                        "Marked unsubscribed",
-                      )
-                    }
-                  >
-                    Unsubscribed
-                  </button>
-                  {blocked ? (
-                    <button
-                      type="button"
-                      disabled={savingReview}
-                      onClick={() => void updateContactPolicy({ status: "allowed" }, "Contact allowed")}
-                    >
-                      Clear block
-                    </button>
-                  ) : null}
-                </div>
-              </section>
-
-              <section className="drawer-agent-panel">
-                <div className="drawer-section-heading">
-                  <h3>Agent assessment</h3>
-                  <span>
-                    {agentAssessment
-                      ? `${agentFitStatusLabel(agentAssessment.fitStatus)} · ${agentAssessment.score}`
-                      : "Not assessed"}
+              <div className="drawer-availability-row">
+                <span className={`availability-pill verification-${verification}`}>
+                  <Mail size={13} />
+                  Email · {email ? emailAvailabilityLabel(contact) : "missing"}
+                </span>
+                <span className={phone ? "availability-pill has-contact" : "availability-pill is-muted"}>
+                  <Phone size={13} />
+                  {phone ? "Phone" : "No phone"}
+                </span>
+                {blocked ? (
+                  <span className={`availability-pill policy-${policyStatus}`}>
+                    <AlertTriangle size={13} />
+                    {contactPolicyStatusLabel(policyStatus)}
                   </span>
-                </div>
-                {agentAssessment ? (
-                  <>
-                    <p className="agent-rationale">{agentAssessment.rationale}</p>
-                    <div className="agent-evidence-grid">
-                      <EvidenceList title="Positive signals" items={agentAssessment.positiveSignals} empty="No strong positive signals captured." />
-                      <EvidenceList title="Missing evidence" items={agentAssessment.missingEvidence} empty="No missing evidence called out." />
-                      <EvidenceList title="Risks" items={agentAssessment.risks} empty="No specific risks captured." />
-                    </div>
-                  </>
-                ) : (
-                  <p className="agent-rationale">Run an agent check to score this contact against the product criteria.</p>
-                )}
-                <div className="review-secondary-row">
-                  <button type="button" disabled={qualifying} onClick={runAgentCheck}>
-                    {qualifying ? "Checking..." : agentAssessment ? "Recheck fit" : "Run agent check"}
-                  </button>
-                  {agentAssessment && currentReviewStatus === "unreviewed" ? (
-                    <button
-                      type="button"
-                      disabled={qualifying || savingReview}
-                      onClick={() => chooseReviewStatus(agentAssessment.fitStatus)}
-                    >
-                      Use recommendation
-                    </button>
-                  ) : null}
-                </div>
-              </section>
-
-              <section className="drawer-review-panel">
-                <div className="drawer-section-heading">
-                  <h3>Review</h3>
-                  <span>{reviewStatusLabel(currentReviewStatus)}</span>
-                </div>
-                <div className="review-action-row">
-                  {(["good_fit", "maybe", "not_fit"] as LeadReviewStatus[]).map((status) => (
-                    <button
-                      className={currentReviewStatus === status ? "active" : ""}
-                      disabled={savingReview}
-                      key={status}
-                      type="button"
-                      onClick={() => chooseReviewStatus(status)}
-                    >
-                      {reviewStatusLabel(status)}
-                    </button>
-                  ))}
-                </div>
-                <label className="review-note-field">
-                  <span>Note</span>
-                  <textarea
-                    placeholder="Why this contact is or is not worth pursuing"
-                    value={reviewNote}
-                    onChange={(event) => setReviewNote(event.target.value)}
-                  />
-                </label>
-                <div className="review-secondary-row">
-                  <button type="button" disabled={savingReview} onClick={saveReviewNote}>
-                    Save note
-                  </button>
-                  {canShortlist ? (
-                    <button
-                      className={shortlisted ? "active" : ""}
-                      type="button"
-                      disabled={savingReview}
-                      onClick={toggleShortlist}
-                    >
-                      {shortlisted ? "Shortlisted" : "Shortlist"}
-                    </button>
-                  ) : null}
-                </div>
-              </section>
-
-              <section className="drawer-outreach-panel">
-                <div className="drawer-section-heading">
-                  <h3>Outreach</h3>
-                  <span>{message ? messageStatusLabel(message.status) : canDraft ? "Not generated" : "Shortlist required"}</span>
-                </div>
-                {message ? (
-                  <>
-                    <label className="draft-field">
-                      <span>Subject</span>
-                      <input
-                        value={draftSubject}
-                        onChange={(event) => setDraftSubject(event.target.value)}
-                        disabled={message.status === "sent"}
-                      />
-                    </label>
-                    <label className="draft-field">
-                      <span>Body</span>
-                      <textarea
-                        value={draftBody}
-                        onChange={(event) => setDraftBody(event.target.value)}
-                        disabled={message.status === "sent"}
-                      />
-                    </label>
-                    <div className="draft-action-row">
-                      <button type="button" disabled={savingDraft || !draftBody.trim() || message.status === "sent"} onClick={saveDraft}>
-                        Save
-                      </button>
-                      <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={copyDraft}>
-                        <Copy size={13} />
-                        Copy
-                      </button>
-                      {message.status === "pending_approval" || message.status === "draft" ? (
-                        <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={approveDraft}>
-                          Approve
-                        </button>
-                      ) : null}
-                      {message.status === "approved" ? (
-                        <button type="button" disabled={savingDraft || !canSend} onClick={sendDraft}>
-                          Send email
-                        </button>
-                      ) : null}
-                      {message.status === "sent" ? (
-                        <button type="button" disabled={savingDraft} onClick={markReplied}>
-                          Mark replied
-                        </button>
-                      ) : null}
-                    </div>
-                    {message.status === "approved" && !canSend ? (
-                      <p className="draft-warning">
-                        {blocked
-                          ? "This contact is blocked from outreach."
-                          : !email
-                            ? "Add or find an email before sending."
-                            : "Keep this contact shortlisted before sending."}
-                      </p>
-                    ) : null}
-                  </>
-                ) : canDraft ? (
-                  <button className="generate-draft-button" type="button" disabled={savingDraft} onClick={generateDraft}>
-                    Generate draft
-                  </button>
-                ) : (
-                  <p className="draft-warning">
-                    {blocked
-                      ? "This contact is blocked from outreach."
-                      : shortlisted && !verified
-                        ? "Verify this contact before generating outreach."
-                        : !email
-                          ? "Find an email before generating outreach."
-                          : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
-                  </p>
-                )}
-              </section>
-
-              <dl className="drawer-detail-list">
-                <DrawerRow icon={<MapPin size={16} />} label="Address">
-                  {address || contact.geography || contact.research?.geography || "No address found"}
-                </DrawerRow>
-                <DrawerRow icon={<Globe size={16} />} label="Website">
-                  {website ? (
-                    <a href={website} target="_blank" rel="noreferrer">
-                      {displayUrl(website)}
-                    </a>
-                  ) : (
-                    <span>No website found</span>
-                  )}
-                </DrawerRow>
-                <DrawerRow icon={<Mail size={16} />} label="Contact">
-                  {contactName || contact?.research?.contact_name || "No contact name found"}
-                </DrawerRow>
-                <DrawerRow icon={<Mail size={16} />} label="Email">
-                  {email ? (
-                    <button type="button" onClick={() => copy(email, "Email")}>
-                      {email}
-                      <Copy size={13} />
-                    </button>
-                  ) : (
-                    <span>No email found</span>
-                  )}
-                </DrawerRow>
-                <DrawerRow icon={<Phone size={16} />} label="Phone">
-                  {phone || "No phone found"}
-                </DrawerRow>
-              </dl>
-
-              <div className="drawer-mini-grid">
-                <Mini label="Rating" value={rating || "—"} />
-                <Mini label="Reviews" value={reviewCount || "—"} />
-                <Mini label="Price" value={price || "—"} />
-                <Mini label="Posted" value={posted || "—"} />
-                <Mini label="Confidence" value={confidence} />
+                ) : null}
               </div>
+            </section>
 
-              {evidenceNotes.length ? (
-                <section className="drawer-section">
-                  <h3>Evidence notes</h3>
-                  <ul className="drawer-notes">
-                    {evidenceNotes.slice(0, 5).map((note) => (
-                      <li key={note}>{note}</li>
-                    ))}
-                  </ul>
-                </section>
+            <nav className="drawer-tabs" aria-label="Contact detail sections">
+              <button
+                className={activeTab === "overview" ? "active" : ""}
+                type="button"
+                onClick={() => setActiveTab("overview")}
+              >
+                Overview
+              </button>
+              <button
+                className={activeTab === "evidence" ? "active" : ""}
+                type="button"
+                onClick={() => setActiveTab("evidence")}
+              >
+                Evidence
+                <span>{evidenceCount}</span>
+              </button>
+              <button
+                className={activeTab === "outreach" ? "active" : ""}
+                type="button"
+                onClick={() => setActiveTab("outreach")}
+              >
+                Outreach
+              </button>
+            </nav>
+
+            <div className="drawer-body">
+              {activeTab === "overview" ? (
+                <>
+                  <p className="drawer-summary">{contact.research?.summary || contact.description || "No research captured yet."}</p>
+
+                  <dl className="drawer-detail-list drawer-info-card">
+                    <DrawerRow icon={<MapPin size={16} />} label="Address">
+                      {address || contact.geography || contact.research?.geography || "No address found"}
+                    </DrawerRow>
+                    <DrawerRow icon={<Globe size={16} />} label="Website">
+                      {website ? (
+                        <a href={website} target="_blank" rel="noreferrer">
+                          {displayUrl(website)}
+                        </a>
+                      ) : (
+                        <span>No website found</span>
+                      )}
+                    </DrawerRow>
+                    <DrawerRow icon={<User size={16} />} label="Contact">
+                      {contactName || contact?.research?.contact_name || "No contact name found"}
+                    </DrawerRow>
+                    <DrawerRow icon={<Mail size={16} />} label="Email">
+                      {email ? (
+                        <button type="button" onClick={() => copy(email, "Email")}>
+                          {email}
+                          <span className={`inline-status verification-${verification}`}>
+                            <Check size={11} />
+                            {emailAvailabilityLabel(contact)}
+                          </span>
+                          <Copy size={13} />
+                        </button>
+                      ) : (
+                        <span>No email found</span>
+                      )}
+                    </DrawerRow>
+                    <DrawerRow icon={<Phone size={16} />} label="Phone">
+                      {phone || "No phone found"}
+                    </DrawerRow>
+                  </dl>
+
+                  <div className="drawer-mini-grid">
+                    <Mini label="Rating" value={rating || "—"} />
+                    <Mini label="Reviews" value={reviewCount || "—"} />
+                    <Mini label="Price" value={price || "—"} />
+                    <Mini label="Posted" value={posted || "—"} />
+                    <Mini label="Confidence" value={confidence} />
+                  </div>
+                </>
               ) : null}
 
+              {activeTab === "evidence" ? (
+                <>
+                  <section className="drawer-verification-panel">
+                    <div className="drawer-section-heading">
+                      <h3>Contact verification</h3>
+                      <span>{contactVerificationSummary(contact)}</span>
+                    </div>
+                    <p>{contact.verification_reason || verificationStatusDescription(contact)}</p>
+                    {verificationDetails.length ? (
+                      <div className="verification-detail-row">
+                        {verificationDetails.map((detail) => (
+                          <span key={detail}>{detail}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className={blocked ? "drawer-contact-policy-panel is-blocked" : "drawer-contact-policy-panel"}>
+                    <div className="drawer-section-heading">
+                      <h3>Contact policy</h3>
+                      <span>{contactPolicyStatusLabel(policyStatus)}</span>
+                    </div>
+                    <p>{contactPolicyDescription(contact)}</p>
+                    <div className="review-secondary-row contact-policy-actions">
+                      <button
+                        type="button"
+                        disabled={savingReview || policyStatus === "suppressed"}
+                        onClick={() =>
+                          void updateContactPolicy(
+                            { status: "suppressed", reason: "Manually marked do-not-contact.", scope: "product" },
+                            "Do not contact",
+                          )
+                        }
+                      >
+                        Do not contact
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingReview || policyStatus === "bounced"}
+                        onClick={() =>
+                          void updateContactPolicy(
+                            { status: "bounced", reason: "Email bounced or failed delivery.", scope: "product" },
+                            "Marked bounced",
+                          )
+                        }
+                      >
+                        Mark bounced
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingReview || policyStatus === "unsubscribed"}
+                        onClick={() =>
+                          void updateContactPolicy(
+                            { status: "unsubscribed", reason: "Contact requested no further outreach.", scope: "product" },
+                            "Marked unsubscribed",
+                          )
+                        }
+                      >
+                        Unsubscribed
+                      </button>
+                      {blocked ? (
+                        <button
+                          type="button"
+                          disabled={savingReview}
+                          onClick={() => void updateContactPolicy({ status: "allowed" }, "Contact allowed")}
+                        >
+                          Clear block
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section className="drawer-agent-panel">
+                    <div className="drawer-section-heading">
+                      <h3>Agent assessment</h3>
+                      <span>
+                        {agentAssessment
+                          ? `${agentFitStatusLabel(agentAssessment.fitStatus)} · ${agentAssessment.score}`
+                          : "Not assessed"}
+                      </span>
+                    </div>
+                    {agentAssessment ? (
+                      <>
+                        <p className="agent-rationale">{agentAssessment.rationale}</p>
+                        <div className="agent-evidence-grid">
+                          <EvidenceList title="Positive signals" items={agentAssessment.positiveSignals} empty="No strong positive signals captured." />
+                          <EvidenceList title="Missing evidence" items={agentAssessment.missingEvidence} empty="No missing evidence called out." />
+                          <EvidenceList title="Risks" items={agentAssessment.risks} empty="No specific risks captured." />
+                        </div>
+                      </>
+                    ) : (
+                      <p className="agent-rationale">Run an agent check to score this contact against the product criteria.</p>
+                    )}
+                    <div className="review-secondary-row">
+                      <button type="button" disabled={qualifying} onClick={runAgentCheck}>
+                        {qualifying ? "Checking..." : agentAssessment ? "Recheck fit" : "Run agent check"}
+                      </button>
+                      {agentAssessment && currentReviewStatus === "unreviewed" ? (
+                        <button
+                          type="button"
+                          disabled={qualifying || savingReview}
+                          onClick={() => chooseReviewStatus(agentAssessment.fitStatus)}
+                        >
+                          Use recommendation
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section className="drawer-review-panel">
+                    <div className="drawer-section-heading">
+                      <h3>Review</h3>
+                      <span>{reviewStatusLabel(currentReviewStatus)}</span>
+                    </div>
+                    <div className="review-action-row">
+                      {(["good_fit", "maybe", "not_fit"] as LeadReviewStatus[]).map((status) => (
+                        <button
+                          className={currentReviewStatus === status ? "active" : ""}
+                          disabled={savingReview}
+                          key={status}
+                          type="button"
+                          onClick={() => chooseReviewStatus(status)}
+                        >
+                          {reviewStatusLabel(status)}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="review-note-field">
+                      <span>Note</span>
+                      <textarea
+                        placeholder="Why this contact is or is not worth pursuing"
+                        value={reviewNote}
+                        onChange={(event) => setReviewNote(event.target.value)}
+                      />
+                    </label>
+                    <div className="review-secondary-row">
+                      <button type="button" disabled={savingReview} onClick={saveReviewNote}>
+                        Save note
+                      </button>
+                    </div>
+                  </section>
+
+                  <div className="drawer-chip-row">
+                    {signals.slice(0, 6).map((signal) => (
+                      <span key={signal}>{signal}</span>
+                    ))}
+                  </div>
+
+                  {evidenceNotes.length ? (
+                    <section className="drawer-section">
+                      <h3>Evidence notes</h3>
+                      <ul className="drawer-notes">
+                        {evidenceNotes.slice(0, 5).map((note) => (
+                          <li key={note}>{note}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+                </>
+              ) : null}
+
+              {activeTab === "outreach" ? (
+                <section className="drawer-outreach-panel">
+                  <div className="drawer-section-heading">
+                    <h3>Outreach</h3>
+                    <span>{message ? messageStatusLabel(message.status) : canDraft ? "Not generated" : "Shortlist required"}</span>
+                  </div>
+                  {message ? (
+                    <>
+                      <label className="draft-field">
+                        <span>Subject</span>
+                        <input
+                          value={draftSubject}
+                          onChange={(event) => setDraftSubject(event.target.value)}
+                          disabled={message.status === "sent"}
+                        />
+                      </label>
+                      <label className="draft-field">
+                        <span>Body</span>
+                        <textarea
+                          value={draftBody}
+                          onChange={(event) => setDraftBody(event.target.value)}
+                          disabled={message.status === "sent"}
+                        />
+                      </label>
+                      <div className="draft-action-row">
+                        <button type="button" disabled={savingDraft || !draftBody.trim() || message.status === "sent"} onClick={saveDraft}>
+                          Save
+                        </button>
+                        <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={copyDraft}>
+                          <Copy size={13} />
+                          Copy
+                        </button>
+                        {message.status === "pending_approval" || message.status === "draft" ? (
+                          <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={approveDraft}>
+                            Approve
+                          </button>
+                        ) : null}
+                        {message.status === "approved" ? (
+                          <button type="button" disabled={savingDraft || !canSend} onClick={sendDraft}>
+                            Send email
+                          </button>
+                        ) : null}
+                        {message.status === "sent" ? (
+                          <button type="button" disabled={savingDraft} onClick={markReplied}>
+                            Mark replied
+                          </button>
+                        ) : null}
+                      </div>
+                      {message.status === "approved" && !canSend ? (
+                        <p className="draft-warning">
+                          {blocked
+                            ? "This contact is blocked from outreach."
+                            : !email
+                              ? "Add or find an email before sending."
+                              : "Keep this contact shortlisted before sending."}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : canDraft ? (
+                    <button className="generate-draft-button" type="button" disabled={savingDraft} onClick={generateDraft}>
+                      Generate draft
+                    </button>
+                  ) : (
+                    <p className="draft-warning">
+                      {blocked
+                        ? "This contact is blocked from outreach."
+                        : shortlisted && !verified
+                          ? "Verify this contact before generating outreach."
+                          : !email
+                            ? "Find an email before generating outreach."
+                            : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
+                    </p>
+                  )}
+                </section>
+              ) : null}
             </div>
 
-            <footer className="drawer-footer">
-              <button className="secondary" type="button" onClick={onClose}>
-                Close
+            <footer className="drawer-footer drawer-action-footer">
+              <div className="drawer-footer-secondary">
+                <button
+                  className={shortlisted ? "active" : ""}
+                  type="button"
+                  disabled={savingReview || !canShortlist}
+                  onClick={toggleShortlist}
+                >
+                  {shortlisted ? "Shortlisted" : "Shortlist"}
+                </button>
+                <button
+                  className={currentReviewStatus === "not_fit" ? "active" : ""}
+                  type="button"
+                  disabled={savingReview || blocked}
+                  onClick={() => chooseReviewStatus("not_fit")}
+                >
+                  Pass
+                </button>
+              </div>
+              <button className="drawer-primary-action" type="button" onClick={() => setActiveTab("outreach")}>
+                Review outreach
+                <ArrowRight size={14} />
               </button>
             </footer>
           </>
@@ -1152,8 +1243,8 @@ function DrawerRow({ icon, label, children }: { icon: ReactNode; label: string; 
   return (
     <div className="drawer-row">
       <dt>
-        <span>{icon}</span>
-        {label}
+        <span className="drawer-row-icon">{icon}</span>
+        <span className="drawer-row-label">{label}</span>
       </dt>
       <dd>{children}</dd>
     </div>
@@ -1244,6 +1335,15 @@ function verificationStatusLabel(status: ContactVerificationStatus) {
     unknown: "Unknown",
   };
   return labels[status];
+}
+
+function emailAvailabilityLabel(contact: DiscoveryResult) {
+  const status = verificationStatus(contact);
+  if (status === "valid") return "deliverable";
+  if (status === "risky") return "risky";
+  if (status === "invalid") return "invalid";
+  if (status === "unknown") return "unknown";
+  return "found";
 }
 
 function verificationStatusDescription(contact: DiscoveryResult) {
