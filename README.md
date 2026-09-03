@@ -123,7 +123,7 @@ PYTHONPATH=agent uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Worker start command:
 
 ```bash
-PYTHONPATH=agent python -m queue.worker
+PYTHONPATH=agent python -m job_queue.worker
 ```
 
 Web build/start commands:

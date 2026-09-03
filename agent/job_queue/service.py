@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
-from queue.repository import QueueRepository
-from queue.schemas import JobType
+from job_queue.repository import QueueRepository
+from job_queue.schemas import JobType
 
 
 class QueueService:

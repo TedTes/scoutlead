@@ -24,7 +24,7 @@ dev = [
 
 [project.scripts]
 soutlead-api = "app.main:run"
-soutlead-worker = "queue.worker:run"
+soutlead-worker = "job_queue.worker:run"
 
 [build-system]
 requires = ["setuptools>=68.0.0"]

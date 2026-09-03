@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.models import QueueJobModel
-from queue.schemas import JobStatus, JobType
+from job_queue.schemas import JobStatus, JobType
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 

@@ -3,11 +3,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.dependencies import AppServices, DbSession, get_services
+from job_queue.schemas import QueueJobRead
+from job_queue.service import QueueService
 from messages.repository import MessageRepository
 from messages.schemas import MessageApproval, MessageRead, MessageReplyMark, MessageUpdate
 from messages.service import MessageService
-from queue.schemas import QueueJobRead
-from queue.service import QueueService
 
 router = APIRouter(tags=["messages"])
 

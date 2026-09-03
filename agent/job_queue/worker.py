@@ -5,9 +5,9 @@ from app.config import get_settings
 from app.dependencies import create_app_services
 from campaigns.service import CampaignService
 from db.session import create_database
+from job_queue.repository import QueueRepository
+from job_queue.schemas import JobType
 from messages.service import MessageService
-from queue.repository import QueueRepository
-from queue.schemas import JobType
 from shared.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
