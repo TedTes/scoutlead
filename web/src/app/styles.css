@@ -375,6 +375,7 @@ a {
 
 .run-yield {
   color: var(--_ink2);
+  flex-shrink: 2;
   font-family: var(--mono);
   font-size: 10.5px;
   min-width: 0;
@@ -385,6 +386,7 @@ a {
 
 .run-status {
   color: var(--_ink3);
+  flex-shrink: 3;
   font-size: 10.5px;
   min-width: 0;
   overflow: hidden;
@@ -393,10 +395,12 @@ a {
 }
 
 .run-when {
-  color: var(--_ink3);
+  color: var(--_ink2);
+  flex-shrink: 0;
   font-family: var(--mono);
   font-size: 10px;
   font-style: normal;
+  font-weight: 600;
   margin-left: auto;
   white-space: nowrap;
 }
