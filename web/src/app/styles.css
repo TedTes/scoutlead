@@ -1631,6 +1631,7 @@ a {
 
 .results-menu-control {
   position: relative;
+  z-index: 90;
 }
 
 .action-menu {
@@ -1643,7 +1644,7 @@ a {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  z-index: 80;
+  z-index: 140;
 }
 
 .action-menu button {
@@ -1736,81 +1737,189 @@ a {
   margin-left: 4px;
 }
 
-.results-filterbar {
-  align-items: center;
+.results-controlbar {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
   display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 14px;
+  overflow: visible;
+  padding: 0 0 2px;
+  position: relative;
+  z-index: 45;
 }
 
-.results-filterbar > div {
+.workflow-tabs {
   display: inline-flex;
+  flex: 0 1 auto;
   gap: 2px;
+  min-width: 0;
 }
 
-.results-filterbar button {
+.workflow-tabs button {
+  align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px 8px 0 0;
   color: var(--muted);
-  font-size: 12.5px;
+  display: inline-flex;
+  font-size: 13px;
   font-weight: 500;
-  padding: 7px 12px;
+  gap: 6px;
+  height: 39px;
+  padding: 0 13px;
+  position: relative;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
-.results-filterbar button:hover {
+.workflow-tabs button:hover {
   background: var(--panel-muted);
   color: var(--text);
 }
 
-.results-filterbar button.active {
+.workflow-tabs button.active {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.workflow-tabs button.active::after {
   background: var(--black);
-  color: #ffffff;
+  border-radius: 2px;
+  bottom: -3px;
+  content: "";
+  height: 2px;
+  left: 9px;
+  position: absolute;
+  right: 9px;
 }
 
-.results-filterbar button span {
-  font-family: var(--mono);
-  margin-left: 5px;
-  opacity: 0.72;
-}
-
-.run-quality-line {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-  margin: 0 auto 0 0;
-}
-
-.run-quality-line span::before {
+.workflow-tabs button span {
   color: var(--faint);
-  content: "·";
-  margin: 0 7px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.sort-tabs {
+.results-control-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  margin-left: auto;
+  padding-bottom: 7px;
+}
+
+.filter-menu-control,
+.sort-menu-control {
+  position: relative;
+  z-index: 95;
+}
+
+.filter-button,
+.sort-button {
+  align-items: center;
+  background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
+  color: var(--muted);
   display: inline-flex;
-  margin-left: auto;
-  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  height: 32px;
+  justify-content: flex-start;
+  min-width: 112px;
+  padding: 0 10px 0 11px;
+  white-space: nowrap;
 }
 
-.sort-tabs button {
-  background: var(--panel);
-  border-radius: 0;
-  border-right: 1px solid var(--line);
+.filter-button .control-label,
+.sort-button .control-label {
   color: var(--muted);
   font-size: 12px;
-  padding: 6px 12px;
+  font-weight: 600;
 }
 
-.sort-tabs button:last-child {
-  border-right: 0;
-}
-
-.sort-tabs button.active {
-  background: var(--panel-muted);
+.filter-button strong,
+.sort-button strong {
   color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  margin-right: 2px;
+}
+
+.filter-button svg,
+.sort-button svg {
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.filter-button:hover,
+.sort-button:hover {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.filter-button.active {
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+
+.filter-menu {
+  min-width: 194px;
+}
+
+.filter-menu button {
+  justify-content: space-between;
+}
+
+.filter-menu button.active {
+  background: var(--panel-muted);
+  font-weight: 650;
+}
+
+.filter-menu button span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-left: 18px;
+}
+
+.sort-menu {
+  min-width: 146px;
+}
+
+.sort-menu button {
+  justify-content: space-between;
+}
+
+.sort-menu button.active {
+  background: var(--panel-muted);
+  font-weight: 650;
+}
+
+.sort-indicator {
+  align-items: center;
+  color: var(--text);
+  display: inline-flex;
+  flex: 0 0 14px;
+  height: 14px;
+  justify-content: center;
+  margin-left: 18px;
+  width: 14px;
+}
+
+.sort-indicator svg {
+  display: block;
+}
+
+.results-controlbar .menu-button {
+  border-radius: 9px;
+  height: 32px;
+  width: 32px;
 }
 
 .contact-card-list {
@@ -3495,25 +3604,26 @@ a {
     border-top: 1px solid var(--line);
   }
 
-  .results-filterbar {
-    align-items: stretch;
-    display: grid;
-    gap: 9px;
-  }
-
-  .results-filterbar > div {
+  .workflow-tabs {
     overflow-x: auto;
-    padding-bottom: 1px;
     scrollbar-width: none;
+    width: 100%;
   }
 
-  .results-filterbar > div::-webkit-scrollbar {
+  .workflow-tabs::-webkit-scrollbar {
     display: none;
   }
 
-  .sort-tabs {
+  .results-control-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
     margin-left: 0;
-    width: max-content;
+    width: 100%;
+  }
+
+  .filter-menu {
+    left: 0;
+    right: auto;
   }
 
   .contact-card {

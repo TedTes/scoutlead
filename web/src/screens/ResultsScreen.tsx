@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Globe,
@@ -35,7 +36,8 @@ import type {
 } from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
-type ResultFilter = "all" | "verified" | "good_fit" | "shortlisted" | "needs_review" | "not_fit" | "has_draft";
+type ResultStage = "all" | "shortlisted" | "needs_review";
+type ResultAttributeFilter = "good_fit" | "verified" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
 type DrawerTab = "overview" | "evidence" | "outreach";
 
@@ -67,13 +69,18 @@ export function ResultsScreen() {
   const { showToast } = useToast();
   const [selectedContactId, setSelectedContactId] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
-  const [filter, setFilter] = useState<ResultFilter>("all");
+  const [stage, setStage] = useState<ResultStage>("all");
+  const [attributeFilter, setAttributeFilter] = useState<ResultAttributeFilter | null>(null);
   const [sort, setSort] = useState<ResultSort>("contact");
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
   const [sendingWebhook, setSendingWebhook] = useState(false);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
 
   const contacts = selectedDiscoveryRunId ? snapshot.results : [];
@@ -89,7 +96,6 @@ export function ResultsScreen() {
       .filter((message) => message.status === "approved" || message.status === "sent")
       .map((message) => message.lead_id),
   );
-  const reachableContacts = contacts.filter(isReachableContact).length;
   const verifiedContacts = contacts.filter(isVerifiedContact).length;
   const goodFitContacts = contacts.filter(canShortlistContact).length;
   const shortlistedContacts = contacts.filter((contact) => contact.shortlisted_at).length;
@@ -106,14 +112,30 @@ export function ResultsScreen() {
   const draftableShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
   );
+  const attributeFilterOptions: Array<{ id: ResultAttributeFilter; label: string; count: number }> = [
+    { id: "good_fit", label: "Good fit", count: goodFitContacts },
+    { id: "verified", label: "Verified", count: verifiedContacts },
+    { id: "has_draft", label: "Has draft", count: draftedContacts },
+    { id: "not_fit", label: "Not fit", count: notFitContacts },
+  ];
+  const sortOptions: Array<{ id: ResultSort; label: string }> = [
+    { id: "contact", label: "Contact" },
+    { id: "score", label: "Score" },
+    { id: "name", label: "Name" },
+  ];
+  const activeAttributeFilter = attributeFilterOptions.find((option) => option.id === attributeFilter);
+  const activeSort = sortOptions.find((option) => option.id === sort) || sortOptions[0];
   const visibleContacts = contacts
     .filter((contact) => {
-      if (filter === "verified") return isVerifiedContact(contact);
-      if (filter === "good_fit") return canShortlistContact(contact);
-      if (filter === "shortlisted") return Boolean(contact.shortlisted_at);
-      if (filter === "needs_review") return reviewStatus(contact) === "unreviewed";
-      if (filter === "not_fit") return reviewStatus(contact) === "not_fit";
-      if (filter === "has_draft") return draftedLeadIds.has(contact.id);
+      if (stage === "shortlisted") return Boolean(contact.shortlisted_at);
+      if (stage === "needs_review") return reviewStatus(contact) === "unreviewed";
+      return true;
+    })
+    .filter((contact) => {
+      if (attributeFilter === "verified") return isVerifiedContact(contact);
+      if (attributeFilter === "good_fit") return canShortlistContact(contact);
+      if (attributeFilter === "not_fit") return reviewStatus(contact) === "not_fit";
+      if (attributeFilter === "has_draft") return draftedLeadIds.has(contact.id);
       return true;
     })
     .sort((a, b) => {
@@ -128,23 +150,32 @@ export function ResultsScreen() {
   useEffect(() => {
     setDraftPrompt(runPrompt);
     setSelectedContactId("");
-    setFilter("all");
+    setStage("all");
+    setAttributeFilter(null);
   }, [selectedDiscoveryRunId, runPrompt]);
 
   useEffect(() => {
     setRunMenuOpen(false);
+    setFilterMenuOpen(false);
+    setSortMenuOpen(false);
   }, [selectedDiscoveryRunId]);
 
   useEffect(() => {
-    if (!runMenuOpen) return undefined;
-    const closeMenu = (event: MouseEvent) => {
+    if (!runMenuOpen && !filterMenuOpen && !sortMenuOpen) return undefined;
+    const closeMenus = (event: MouseEvent) => {
       if (!runMenuRef.current?.contains(event.target as Node)) {
         setRunMenuOpen(false);
       }
+      if (!filterMenuRef.current?.contains(event.target as Node)) {
+        setFilterMenuOpen(false);
+      }
+      if (!sortMenuRef.current?.contains(event.target as Node)) {
+        setSortMenuOpen(false);
+      }
     };
-    document.addEventListener("mousedown", closeMenu);
-    return () => document.removeEventListener("mousedown", closeMenu);
-  }, [runMenuOpen]);
+    document.addEventListener("mousedown", closeMenus);
+    return () => document.removeEventListener("mousedown", closeMenus);
+  }, [filterMenuOpen, runMenuOpen, sortMenuOpen]);
 
   useEffect(() => {
     setSelectedSources((current) => {
@@ -289,17 +320,97 @@ export function ResultsScreen() {
         ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSource)}
       />
 
-      <header className="results-hero compact">
-        <p className="run-quality-line">
-          {contacts.length} found
-          <span>{reachableContacts} reachable</span>
-          <span>{verifiedContacts} verified</span>
-          <span>{goodFitContacts} good fit</span>
-          <span>{shortlistedContacts} shortlisted</span>
-          <span>{draftedContacts} drafted</span>
-          <span>{approvedShortlistContacts.length} approved</span>
-        </p>
-        <div className="results-actions">
+      <div className="results-controlbar">
+        <div className="workflow-tabs" aria-label="Workflow stage">
+          <button className={stage === "all" ? "active" : ""} type="button" onClick={() => setStage("all")}>
+            All
+            <span>{contacts.length}</span>
+          </button>
+          <button className={stage === "shortlisted" ? "active" : ""} type="button" onClick={() => setStage("shortlisted")}>
+            Shortlisted
+            <span>{shortlistedContacts}</span>
+          </button>
+          <button className={stage === "needs_review" ? "active" : ""} type="button" onClick={() => setStage("needs_review")}>
+            Needs review
+            <span>{needsReviewContacts}</span>
+          </button>
+        </div>
+
+        <div className="results-control-actions">
+          <div className="filter-menu-control" ref={filterMenuRef}>
+            <button
+              aria-expanded={filterMenuOpen}
+              className={attributeFilter ? "filter-button active" : "filter-button"}
+              type="button"
+              onClick={() => setFilterMenuOpen((open) => !open)}
+            >
+              <span className="control-label">Filter</span>
+              <strong>{activeAttributeFilter?.label || "All"}</strong>
+              <ChevronDown size={14} />
+            </button>
+            {filterMenuOpen ? (
+              <div className="action-menu filter-menu">
+                {attributeFilter ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttributeFilter(null);
+                      setFilterMenuOpen(false);
+                    }}
+                  >
+                    Clear filter
+                    <span>{contacts.length}</span>
+                  </button>
+                ) : null}
+                {attributeFilterOptions.map((option) => (
+                  <button
+                    className={attributeFilter === option.id ? "active" : ""}
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      setAttributeFilter((current) => (current === option.id ? null : option.id));
+                      setFilterMenuOpen(false);
+                    }}
+                  >
+                    {option.label}
+                    <span>{option.count}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="sort-menu-control" ref={sortMenuRef}>
+            <button
+              aria-expanded={sortMenuOpen}
+              className="sort-button"
+              type="button"
+              onClick={() => setSortMenuOpen((open) => !open)}
+            >
+              <span className="control-label">Sort</span>
+              <strong>{activeSort.label}</strong>
+              <ChevronDown size={14} />
+            </button>
+            {sortMenuOpen ? (
+              <div className="action-menu sort-menu">
+                {sortOptions.map((option) => (
+                  <button
+                    className={sort === option.id ? "active" : ""}
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      setSort(option.id);
+                      setSortMenuOpen(false);
+                    }}
+                  >
+                    {option.label}
+                    <span className="sort-indicator">{sort === option.id ? <Check size={12} /> : null}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <div className="results-menu-control" ref={runMenuRef}>
             <button
               aria-expanded={runMenuOpen}
@@ -366,50 +477,6 @@ export function ResultsScreen() {
               </div>
             ) : null}
           </div>
-        </div>
-      </header>
-
-      <div className="results-filterbar">
-        <div>
-          <button className={filter === "all" ? "active" : ""} type="button" onClick={() => setFilter("all")}>
-            All
-            <span>{contacts.length}</span>
-          </button>
-          <button className={filter === "verified" ? "active" : ""} type="button" onClick={() => setFilter("verified")}>
-            Verified
-            <span>{verifiedContacts}</span>
-          </button>
-          <button className={filter === "good_fit" ? "active" : ""} type="button" onClick={() => setFilter("good_fit")}>
-            Good fit
-            <span>{goodFitContacts}</span>
-          </button>
-          <button className={filter === "shortlisted" ? "active" : ""} type="button" onClick={() => setFilter("shortlisted")}>
-            Shortlisted
-            <span>{shortlistedContacts}</span>
-          </button>
-          <button className={filter === "needs_review" ? "active" : ""} type="button" onClick={() => setFilter("needs_review")}>
-            Needs review
-            <span>{needsReviewContacts}</span>
-          </button>
-          <button className={filter === "not_fit" ? "active" : ""} type="button" onClick={() => setFilter("not_fit")}>
-            Not fit
-            <span>{notFitContacts}</span>
-          </button>
-          <button className={filter === "has_draft" ? "active" : ""} type="button" onClick={() => setFilter("has_draft")}>
-            Has draft
-            <span>{draftedContacts}</span>
-          </button>
-        </div>
-        <div className="sort-tabs">
-          <button className={sort === "contact" ? "active" : ""} type="button" onClick={() => setSort("contact")}>
-            Contact
-          </button>
-          <button className={sort === "score" ? "active" : ""} type="button" onClick={() => setSort("score")}>
-            Score
-          </button>
-          <button className={sort === "name" ? "active" : ""} type="button" onClick={() => setSort("name")}>
-            Name
-          </button>
         </div>
       </div>
 
