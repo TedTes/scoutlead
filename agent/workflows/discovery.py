@@ -5,6 +5,7 @@ from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus, LeadSeedInput
+from canonical.repository import CanonicalRepository
 from discovery.classifier import assess_discovery_candidate
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateCreate
@@ -83,6 +84,27 @@ class DiscoveryWorkflow:
                 enabled_only=True,
             )
         ]
+        cached_results: list[dict[str, Any]] = []
+        sources_to_run: list[CampaignSourceRead] = []
+        canonical = CanonicalRepository(self.leads.session)
+        for source in sources:
+            limit = int(source.config.get("limit") or campaign.max_leads)
+            cached_rows = canonical.list_cached_discovery_results(
+                source=source.provider_id,
+                source_input=source.input,
+                limit=limit,
+            )
+            if cached_rows:
+                cached_results.extend(
+                    _rows_with_source_context(
+                        rows=cached_rows,
+                        source=source,
+                        from_cache=True,
+                    )
+                )
+                continue
+            sources_to_run.append(source)
+        sources = sources_to_run
         source_tool = CampaignSourceTool(
             SourceAdapterRegistry(
                 search_tool=self.search_tool,
@@ -123,11 +145,13 @@ class DiscoveryWorkflow:
             tool_data = observation.get("data", []) if isinstance(observation, dict) else []
             source = sources[state["source_index"]]
             for row in tool_data:
-                enriched = dict(row)
-                enriched["discovery_query"] = source.input.get("query") or ""
-                enriched["campaign_source_id"] = source.id
-                enriched["provider_id"] = source.provider_id
-                enriched_rows.append(enriched)
+                enriched_rows.extend(
+                    _rows_with_source_context(
+                        rows=[dict(row)],
+                        source=source,
+                        from_cache=False,
+                    )
+                )
             return {
                 "source_index": state["source_index"] + 1,
                 "results": [*state["results"], *enriched_rows],
@@ -135,7 +159,7 @@ class DiscoveryWorkflow:
 
         result = runner.run(
             goal=f"Discover leads for {product.product_name}",
-            initial_state={"source_index": 0, "results": []},
+            initial_state={"source_index": 0, "results": cached_results},
             max_iterations=max(1, len(sources)),
             allowed_tools={source_tool.name},
             tools=[source_tool],
@@ -182,3 +206,22 @@ class DiscoveryWorkflow:
             )
         )
         return [LeadRead.model_validate(row) for row in discovered]
+
+
+def _rows_with_source_context(
+    *,
+    rows: list[dict[str, Any]],
+    source: CampaignSourceRead,
+    from_cache: bool,
+) -> list[dict[str, Any]]:
+    enriched_rows = []
+    for row in rows:
+        enriched = dict(row)
+        enriched["discovery_query"] = source.input.get("query") or ""
+        enriched["discovery_geography"] = source.input.get("geography") or ""
+        enriched["source_input"] = source.input
+        enriched["campaign_source_id"] = source.id
+        enriched["provider_id"] = source.provider_id
+        enriched["from_cache"] = from_cache
+        enriched_rows.append(enriched)
+    return enriched_rows

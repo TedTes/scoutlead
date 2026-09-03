@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from campaigns.schemas import LeadSeedInput
+from canonical.repository import CanonicalRepository
 from db.models import DiscoveryCandidateModel, LeadModel
 from leads.policy import can_shortlist_lead, normalize_qualification_result
 from leads.schemas import (
@@ -33,10 +34,21 @@ class LeadRepository:
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
+        canonical = CanonicalRepository(self.session).upsert_from_discovery_result(
+            company_name=seed.company_name,
+            website_url=seed.website_url,
+            contact_email=seed.contact_email,
+            geography=seed.geography,
+            description=seed.description,
+            source=seed.source or "campaign_seed",
+            raw=seed.raw or seed.model_dump(mode="json"),
+        )
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=campaign_id,
             product_id=product_id,
+            business_id=canonical.business_id,
+            contact_id=canonical.contact_id,
             company_name=seed.company_name,
             website_url=normalize_url(seed.website_url),
             contact_email=seed.contact_email,
@@ -64,10 +76,21 @@ class LeadRepository:
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
+        canonical = CanonicalRepository(self.session).upsert_from_discovery_result(
+            company_name=company_name,
+            website_url=result.get("url") or result.get("website_url"),
+            contact_email=result.get("contact_email"),
+            geography=result.get("geography"),
+            description=result.get("snippet") or result.get("description"),
+            source=result.get("provider_id") or result.get("source") or "search",
+            raw=result,
+        )
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=campaign_id,
             product_id=product_id,
+            business_id=canonical.business_id,
+            contact_id=canonical.contact_id,
             company_name=company_name,
             website_url=normalize_url(result.get("url") or result.get("website_url")),
             contact_email=result.get("contact_email"),
@@ -90,10 +113,34 @@ class LeadRepository:
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
+        raw_source = {
+            "candidate_id": candidate.id,
+            "query": candidate.query,
+            "title": candidate.title,
+            "url": candidate.url,
+            "snippet": candidate.snippet,
+            "geography": candidate.geography,
+            "contact_email": candidate.contact_email,
+            "source": candidate.source,
+            "candidate_type": candidate.candidate_type,
+            "confidence": candidate.confidence,
+            "raw": candidate.raw,
+        }
+        canonical = CanonicalRepository(self.session).upsert_from_discovery_result(
+            company_name=candidate.title,
+            website_url=candidate.url,
+            contact_email=candidate.contact_email,
+            geography=candidate.geography,
+            description=candidate.snippet,
+            source=candidate.raw.get("provider_id") or candidate.source,
+            raw=raw_source,
+        )
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=candidate.campaign_id,
             product_id=candidate.product_id,
+            business_id=canonical.business_id,
+            contact_id=canonical.contact_id,
             company_name=candidate.title,
             website_url=normalize_url(candidate.url),
             contact_email=candidate.contact_email,
@@ -103,21 +150,7 @@ class LeadRepository:
             status=LeadStatus.DISCOVERED.value,
             review_status=LeadReviewStatus.UNREVIEWED.value,
             verification_status=ContactVerificationStatus.UNVERIFIED.value,
-            raw_sources=[
-                {
-                    "candidate_id": candidate.id,
-                    "query": candidate.query,
-                    "title": candidate.title,
-                    "url": candidate.url,
-                    "snippet": candidate.snippet,
-                    "geography": candidate.geography,
-                    "contact_email": candidate.contact_email,
-                    "source": candidate.source,
-                    "candidate_type": candidate.candidate_type,
-                    "confidence": candidate.confidence,
-                    "raw": candidate.raw,
-                }
-            ],
+            raw_sources=[raw_source],
         )
         self.session.add(model)
         ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
@@ -225,12 +258,22 @@ class LeadRepository:
 
     def attach_verification(self, lead_id: str, result: LeadVerification) -> LeadModel:
         model = self.get(lead_id)
+        checked_at = utcnow()
         model.verification_status = result.status.value
         model.verification_provider = result.provider
-        model.verification_checked_at = utcnow()
+        model.verification_checked_at = checked_at
         model.verification_reason = result.reason
         model.verification_score = result.score
         model.verification_details = result.details or None
+        CanonicalRepository(self.session).apply_contact_verification(
+            contact_id=model.contact_id,
+            status=model.verification_status,
+            provider=model.verification_provider,
+            checked_at=checked_at,
+            reason=model.verification_reason,
+            score=model.verification_score,
+            details=model.verification_details,
+        )
         self.session.commit()
         self.session.refresh(model)
         return model
