@@ -1,18 +1,21 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "RAILPACK",
+    "builder": "DOCKERFILE",
     "watchPatterns": [
+      "/Dockerfile",
+      "/.dockerignore",
       "/agent/**",
       "/pyproject.toml",
       "/alembic.ini",
       "/deploy/railway/api.railway.json",
+      "/scripts/start_railway_service.py",
       "/scripts/apply_railway_service_config.py",
       "/scripts/railway_up_ci.py"
     ]
   },
   "deploy": {
-    "startCommand": "PYTHONPATH=agent python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}",
+    "startCommand": "python scripts/start_railway_service.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300
   }

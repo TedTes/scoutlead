@@ -2,13 +2,13 @@
 
 Railway has three deployable ScoutLead services:
 
-- API: Python app from the repo root.
-- Worker: Python background worker from the repo root.
-- Web: Vite app with Railway root directory `/web`.
+- API: Python app from the repo root using the root `Dockerfile`.
+- Worker: Python background worker from the repo root using the root `Dockerfile`.
+- Web: Vite app with Railway root directory `/web`; the workflow uploads `./web`.
 
-The release workflow applies the critical service settings from this directory before running
-`railway up`. This prevents dashboard drift, especially the worker failure where Railpack cannot
-infer a start command.
+The release workflow applies service settings from this directory before running `railway up`.
+The backend services also ship with a root Dockerfile so Railway does not need to infer their
+Python start command during Railpack prepare.
 
 Changes in this directory intentionally trigger the full Railway release path.
 
@@ -17,13 +17,13 @@ Changes in this directory intentionally trigger the full Railway release path.
 API:
 
 ```sh
-PYTHONPATH=agent python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+python scripts/start_railway_service.py
 ```
 
 Worker:
 
 ```sh
-PYTHONPATH=agent python -m job_queue.worker
+python scripts/start_railway_service.py
 ```
 
 Web:
@@ -31,6 +31,10 @@ Web:
 ```sh
 npm run preview -- --host 0.0.0.0 --port ${PORT:-4173}
 ```
+
+The backend startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it
+falls back to Railway's `RAILWAY_SERVICE_NAME`; service names containing `worker` run the worker,
+and all other backend service names run the API.
 
 ## GitHub release environment
 

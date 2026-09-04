@@ -115,7 +115,7 @@ jobs:
           migrations=false
           web=false
 
-          if printf '%s\n' "$changed" | grep -Eq '^(agent/|pyproject\.toml|alembic\.ini|deploy/railway/|scripts/(apply_railway_service_config|railway_up_ci)\.py)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(agent/|Dockerfile|\.dockerignore|pyproject\.toml|alembic\.ini|deploy/railway/|scripts/(apply_railway_service_config|railway_up_ci|start_railway_service)\.py)'; then
             backend=true
           fi
           if printf '%s\n' "$changed" | grep -Eq '^(agent/db/migrations/|agent/db/models\.py|alembic\.ini)'; then
@@ -238,7 +238,7 @@ jobs:
         if: steps.changes.outputs.web == 'true'
         timeout-minutes: 10
         run: |
-          python scripts/railway_up_ci.py railway up \
+          python scripts/railway_up_ci.py railway up ./web \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT" \
             --service "$RAILWAY_WEB_SERVICE" \

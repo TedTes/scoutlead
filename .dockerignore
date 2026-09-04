@@ -1,0 +1,11 @@
+.git
+.github
+.pytest_cache
+.DS_Store
+**/__pycache__
+**/*.pyc
+data
+examples
+tests
+web/node_modules
+web/dist
