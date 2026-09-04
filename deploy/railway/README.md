@@ -10,6 +10,8 @@ The release workflow applies the critical service settings from this directory b
 `railway up`. This prevents dashboard drift, especially the worker failure where Railpack cannot
 infer a start command.
 
+Changes in this directory intentionally trigger the full Railway release path.
+
 ## Runtime commands
 
 API:
