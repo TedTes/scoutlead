@@ -115,13 +115,13 @@ jobs:
           migrations=false
           web=false
 
-          if printf '%s\n' "$changed" | grep -Eq '^(agent/|pyproject\.toml|alembic\.ini|deploy/railway/)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(agent/|pyproject\.toml|alembic\.ini|deploy/railway/|scripts/(apply_railway_service_config|railway_up_ci)\.py)'; then
             backend=true
           fi
           if printf '%s\n' "$changed" | grep -Eq '^(agent/db/migrations/|agent/db/models\.py|alembic\.ini)'; then
             migrations=true
           fi
-          if printf '%s\n' "$changed" | grep -Eq '^web/'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(web/|deploy/railway/|scripts/(apply_railway_service_config|railway_up_ci)\.py)'; then
             web=true
           fi
 
@@ -186,6 +186,22 @@ jobs:
       - name: Install Railway CLI
         if: steps.changes.outputs.release_needed == 'true'
         run: npm install -g @railway/cli
+
+      - name: Link Railway project
+        if: steps.changes.outputs.release_needed == 'true'
+        run: railway link --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT"
+
+      - name: Apply Railway service config
+        if: steps.changes.outputs.release_needed == 'true'
+        run: |
+          services=()
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
+            services+=(--service api --service worker)
+          fi
+          if [ "${{ steps.changes.outputs.web }}" = "true" ]; then
+            services+=(--service web)
+          fi
+          python scripts/apply_railway_service_config.py "${services[@]}"
 
       - name: Run database migrations
         if: steps.changes.outputs.migrations == 'true'

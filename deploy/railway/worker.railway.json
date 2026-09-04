@@ -1,0 +1,17 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "watchPatterns": [
+      "/agent/**",
+      "/pyproject.toml",
+      "/alembic.ini",
+      "/deploy/railway/worker.railway.json",
+      "/scripts/apply_railway_service_config.py",
+      "/scripts/railway_up_ci.py"
+    ]
+  },
+  "deploy": {
+    "startCommand": "PYTHONPATH=agent python -m job_queue.worker"
+  }
+}

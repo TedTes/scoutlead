@@ -114,3 +114,7 @@ def run() -> None:
         did_work = run_once()
         if not did_work:
             sleep(2)
+
+
+if __name__ == "__main__":
+    run()
