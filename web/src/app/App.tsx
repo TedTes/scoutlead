@@ -13,10 +13,11 @@ import {
 import { useEffect, useRef, useState, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
-import { Modal, ToastProvider, useToast } from "../shared-ui";
+import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
 import type { DiscoveryResult, DiscoveryRun, Product } from "../types/domain";
 import type { Screen } from "../types/navigation";
+import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
 
 export function App() {
   return (
@@ -34,6 +35,8 @@ function AppShell() {
   const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
+  const [exportFileName, setExportFileName] = useState("");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const desktopContextMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -152,8 +155,32 @@ function AppShell() {
       });
       return;
     }
-    exportProductContactsCsv(productContacts, selectedProductName);
-    showToast({ title: "Contacts exported", message: `${productContacts.length} contacts downloaded.`, tone: "green" });
+    setExportFileName(defaultExportFileName(selectedProductName));
+    setExportDialogOpen(true);
+  };
+
+  const confirmExportProductContacts = () => {
+    if (!productContacts.length) {
+      setExportDialogOpen(false);
+      showToast({
+        title: "No contacts to export",
+        message: "Run a search before exporting contacts for this product.",
+        tone: "amber",
+      });
+      return;
+    }
+    if (!baseExportFileName(exportFileName)) {
+      showToast({ title: "Name the export file", message: "Enter a filename before exporting.", tone: "amber" });
+      return;
+    }
+    const downloadName = normalizeExportFileName(exportFileName);
+    exportProductContactsCsv(productContacts, downloadName);
+    setExportDialogOpen(false);
+    showToast({
+      title: "Contacts exported",
+      message: `${productContacts.length} contacts downloaded as ${downloadName}.`,
+      tone: "green",
+    });
   };
 
   useEffect(() => {
@@ -301,7 +328,6 @@ function AppShell() {
           integrationCount={getEnabledIntegrationCount(selectedProduct, Boolean(gmailConnectionStatus?.connected))}
           hasProduct={Boolean(selectedProduct)}
           hasContacts={productContacts.length > 0}
-          onDelete={handleDeleteSelectedProduct}
           onExport={handleExportProductContacts}
           onIntegrations={() => selectScreen("integrations")}
           onProductSettings={() => selectScreen("product")}
@@ -344,7 +370,11 @@ function AppShell() {
             renderScreen(
               activeScreen,
               selectScreen,
-              { isCreatingProduct: false, onCreatingProductChange: setIsCreatingProduct },
+              {
+                isCreatingProduct: false,
+                onCreatingProductChange: setIsCreatingProduct,
+                onDeleteProduct: handleDeleteSelectedProduct,
+              },
               {
                 draftRunName: draftRunName ?? undefined,
                 onRunCreated: () => {
@@ -372,6 +402,19 @@ function AppShell() {
           }}
         />
       ) : null}
+      {exportDialogOpen ? (
+        <ExportContactsDialog
+          contactCount={productContacts.length}
+          fileName={exportFileName}
+          placeholder={defaultExportFileName(selectedProductName)}
+          previewFileName={
+            baseExportFileName(exportFileName) ? normalizeExportFileName(exportFileName) : "filename.csv"
+          }
+          onChange={setExportFileName}
+          onClose={() => setExportDialogOpen(false)}
+          onExport={confirmExportProductContacts}
+        />
+      ) : null}
     </div>
   );
 }
@@ -395,48 +438,57 @@ function ProductSelector({
   onOpenChange: (isOpen: boolean) => void;
   onSelectProduct: (productId: string) => void;
 }) {
+  const selectedLabel = selectedRunLabel ? `${selectedProductName} - ${selectedRunLabel}` : selectedProductName;
+
   return (
-    <>
-      <div className="top-product-cluster">
-        <div className={isOpen ? "top-product-control product-selector is-open" : "top-product-control product-selector"}>
-          <button
-            className="top-product-trigger"
-            type="button"
-            aria-expanded={isOpen}
-            onClick={() => onOpenChange(!isOpen)}
-          >
-            <span className="top-product-primary">
-              <span className="selector-label">Product</span>
-              <strong>{selectedProductName}</strong>
-              {selectedRunLabel ? <span className="top-product-run">- {selectedRunLabel}</span> : null}
-              <ChevronDown className="product-selector-caret" size={15} />
-            </span>
-          </button>
+    <div className="top-product-cluster">
+      <div className={isOpen ? "top-product-control product-selector is-open" : "top-product-control product-selector"}>
+        <button
+          className="top-product-trigger"
+          type="button"
+          aria-expanded={isOpen}
+          title={selectedLabel}
+          onClick={() => onOpenChange(!isOpen)}
+        >
+          <span className={selectedRunLabel ? "top-product-primary has-run" : "top-product-primary"}>
+            <span className="selector-label">Product</span>
+            <strong title={selectedProductName}>{selectedProductName}</strong>
+            {selectedRunLabel ? (
+              <span className="top-product-run" title={selectedRunLabel}>
+                - {selectedRunLabel}
+              </span>
+            ) : null}
+            <ChevronDown className="product-selector-caret" size={15} />
+          </span>
+        </button>
         {isOpen ? (
           <div className="context-menu-panel product-menu-panel top-product-menu">
             {products.length ? (
-              products.map((product) => (
-                <button
-                  className={product.id === selectedProductId ? "context-menu-option active" : "context-menu-option"}
-                  key={product.id}
-                  type="button"
-                  onClick={() => onSelectProduct(product.id)}
-                >
-                  <strong>{displayProductName(product)}</strong>
-                  <Check className="product-selector-check" size={14} />
-                </button>
-              ))
+              products.map((product) => {
+                const productName = displayProductName(product);
+                return (
+                  <button
+                    className={product.id === selectedProductId ? "context-menu-option active" : "context-menu-option"}
+                    key={product.id}
+                    title={productName}
+                    type="button"
+                    onClick={() => onSelectProduct(product.id)}
+                  >
+                    <strong>{productName}</strong>
+                    <Check className="product-selector-check" size={14} />
+                  </button>
+                );
+              })
             ) : (
               <p className="context-menu-empty">No products yet</p>
             )}
           </div>
         ) : null}
-        </div>
-        <button className="top-product-add" type="button" aria-label="Add product" onClick={onAddProduct}>
-          <Plus size={15} />
-        </button>
       </div>
-    </>
+      <button className="top-product-add" type="button" aria-label="Add product" onClick={onAddProduct}>
+        <Plus size={15} />
+      </button>
+    </div>
   );
 }
 
@@ -445,7 +497,6 @@ function ProductManagementSection({
   hasContacts,
   hasProduct,
   integrationCount,
-  onDelete,
   onExport,
   onIntegrations,
   onProductSettings,
@@ -454,25 +505,10 @@ function ProductManagementSection({
   hasContacts: boolean;
   hasProduct: boolean;
   integrationCount: number;
-  onDelete: () => Promise<void> | void;
   onExport: () => void;
   onIntegrations: () => void;
   onProductSettings: () => void;
 }) {
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  const confirmDelete = async () => {
-    if (deleting) return;
-    setDeleting(true);
-    try {
-      await onDelete();
-      setConfirmingDelete(false);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   return (
     <section className="mng" aria-label="Product management">
       <p className="mng-label">Manage</p>
@@ -499,40 +535,17 @@ function ProductManagementSection({
         <span className="mng-label-text">Integrations</span>
         {integrationCount > 0 ? <span className="mng-badge">{integrationCount} on</span> : null}
       </button>
-      <button className={hasContacts ? "mng-item" : "mng-item is-disabled"} disabled={!hasContacts} type="button" onClick={onExport}>
+      <button
+        className={hasContacts ? "mng-item" : "mng-item is-disabled"}
+        disabled={!hasContacts}
+        type="button"
+        onClick={onExport}
+      >
         <span className="mng-icon">
           <Download size={13} />
         </span>
         <span className="mng-label-text">Export all contacts</span>
       </button>
-      <div className="mng-divider" />
-      {confirmingDelete ? (
-        <div className="mng-confirm">
-          <div className="q">
-            Delete this product and its <b>runs, contacts, and history</b>?
-          </div>
-          <div className="btns">
-            <button className="cancel" type="button" onClick={() => setConfirmingDelete(false)}>
-              Cancel
-            </button>
-            <button className="delete" disabled={deleting} type="button" onClick={() => void confirmDelete()}>
-              {deleting ? "Deleting..." : "Delete"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          className={hasProduct ? "mng-danger" : "mng-danger is-disabled"}
-          disabled={!hasProduct}
-          type="button"
-          onClick={() => setConfirmingDelete(true)}
-        >
-          <span className="mng-icon">
-            <Trash2 size={13} />
-          </span>
-          <span className="mng-label-text">Delete product</span>
-        </button>
-      )}
     </section>
   );
 }
@@ -985,7 +998,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function exportProductContactsCsv(contacts: DiscoveryResult[], productName: string) {
+function exportProductContactsCsv(contacts: DiscoveryResult[], fileName: string) {
   const rows = contacts.map((contact) => ({
     company: contact.company_name,
     email: contact.contact_email || contact.research?.contact_email || "",
@@ -1006,7 +1019,7 @@ function exportProductContactsCsv(contacts: DiscoveryResult[], productName: stri
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${slugify(productName)}-contacts.csv`;
+  anchor.download = normalizeExportFileName(fileName);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -1032,8 +1045,4 @@ function getEnabledIntegrationCount(product: Product | undefined, gmailConnected
 function csvCell(value: string | number | undefined) {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
-}
-
-function slugify(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "contacts";
 }

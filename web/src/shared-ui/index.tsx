@@ -99,6 +99,62 @@ export function Modal({
   );
 }
 
+export function ExportContactsDialog({
+  contactCount,
+  fileName,
+  placeholder = "contacts",
+  previewFileName,
+  onChange,
+  onClose,
+  onExport,
+}: {
+  contactCount: number;
+  fileName: string;
+  placeholder?: string;
+  previewFileName: string;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onExport: () => void;
+}) {
+  const hasFileName = Boolean(fileName.trim().replace(/\.csv$/i, "").trim());
+
+  return (
+    <Modal title="Export contacts" onClose={onClose}>
+      <form
+        className="export-contacts-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onExport();
+        }}
+      >
+        <p>Choose a filename for this CSV export.</p>
+        <label className="field">
+          <span>File name</span>
+          <input
+            autoFocus
+            placeholder={placeholder}
+            value={fileName}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          {!hasFileName ? <em>Enter a filename.</em> : null}
+        </label>
+        <p className="export-file-preview">
+          {contactCount} {contactCount === 1 ? "contact" : "contacts"} ·{" "}
+          {hasFileName ? previewFileName : "filename.csv"}
+        </p>
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="runbtn" disabled={!hasFileName} type="submit">
+            Export CSV
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Card({ title, meta, children }: { title: string; meta?: ReactNode; children: ReactNode }) {
   return (
     <section className="card">

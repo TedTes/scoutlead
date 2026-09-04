@@ -21,7 +21,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { OverviewScreen } from "./OverviewScreen";
-import { useToast } from "../shared-ui";
+import { ExportContactsDialog, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
@@ -34,12 +34,25 @@ import type {
   Message,
   SourceRequestSource,
 } from "../types/domain";
+import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
+import { formatDate } from "../utils/format";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 
 type ResultStage = "all" | "shortlisted" | "needs_review";
 type ResultAttributeFilter = "good_fit" | "verified" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
 type DrawerTab = "overview" | "evidence" | "outreach";
+type ContactActivityTone = "done" | "pending" | "warning" | "blocked";
+type ContactActivityItem = {
+  label: string;
+  detail: string;
+  complete: boolean;
+  tone: ContactActivityTone;
+};
+type PendingContactsExport = {
+  contacts: DiscoveryResult[];
+  suggestedName: string;
+};
 
 export function ResultsScreen() {
   const {
@@ -79,6 +92,8 @@ export function ResultsScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
+  const [exportFileName, setExportFileName] = useState("");
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
@@ -301,6 +316,33 @@ export function ResultsScreen() {
     }
   };
 
+  const beginContactsExport = (contactsToExport: DiscoveryResult[], name: string, suffix = "contacts") => {
+    if (!contactsToExport.length) {
+      showToast({ title: "No contacts to export", message: "Change the view or run a search first.", tone: "amber" });
+      return;
+    }
+    const suggestedName = defaultExportFileName(name, suffix);
+    setRunMenuOpen(false);
+    setExportFileName(suggestedName);
+    setPendingExport({ contacts: contactsToExport, suggestedName });
+  };
+
+  const confirmContactsExport = () => {
+    if (!pendingExport) return;
+    if (!baseExportFileName(exportFileName)) {
+      showToast({ title: "Name the export file", message: "Enter a filename before exporting.", tone: "amber" });
+      return;
+    }
+    const downloadName = normalizeExportFileName(exportFileName);
+    exportContactsCsv(pendingExport.contacts, downloadName, activeMessages);
+    setPendingExport(null);
+    showToast({
+      title: "Contacts exported",
+      message: `${pendingExport.contacts.length} contacts downloaded as ${downloadName}.`,
+      tone: "green",
+    });
+  };
+
   if (!selectedDiscoveryRun) {
     return <OverviewScreen />;
   }
@@ -426,7 +468,7 @@ export function ResultsScreen() {
                 <button
                   type="button"
                   disabled={!contacts.length}
-                  onClick={() => exportContactsCsv(contacts, exportName, activeMessages)}
+                  onClick={() => beginContactsExport(contacts, exportName)}
                 >
                   <Download size={14} />
                   Export all contacts
@@ -434,7 +476,13 @@ export function ResultsScreen() {
                 <button
                   type="button"
                   disabled={!shortlistedContacts}
-                  onClick={() => exportContactsCsv(contacts.filter((contact) => contact.shortlisted_at), `${exportName}-shortlist`, activeMessages)}
+                  onClick={() =>
+                    beginContactsExport(
+                      contacts.filter((contact) => contact.shortlisted_at),
+                      exportName,
+                      "shortlist",
+                    )
+                  }
                 >
                   <Download size={14} />
                   Export shortlist
@@ -442,7 +490,7 @@ export function ResultsScreen() {
                 <button
                   type="button"
                   disabled={!approvedShortlistContacts.length}
-                  onClick={() => exportContactsCsv(approvedShortlistContacts, `${exportName}-approved-shortlist`, activeMessages)}
+                  onClick={() => beginContactsExport(approvedShortlistContacts, exportName, "approved-shortlist")}
                 >
                   <Download size={14} />
                   Export approved shortlist
@@ -514,6 +562,20 @@ export function ResultsScreen() {
         onUpdateLead={updateLead}
         onUpdateMessage={updateMessage}
       />
+
+      {pendingExport ? (
+        <ExportContactsDialog
+          contactCount={pendingExport.contacts.length}
+          fileName={exportFileName}
+          placeholder={pendingExport.suggestedName}
+          previewFileName={
+            baseExportFileName(exportFileName) ? normalizeExportFileName(exportFileName) : "filename.csv"
+          }
+          onChange={setExportFileName}
+          onClose={() => setPendingExport(null)}
+          onExport={confirmContactsExport}
+        />
+      ) : null}
     </section>
   );
 }
@@ -711,6 +773,7 @@ function ContactDrawer({
   const fitScore = agentAssessment?.score ?? score;
   const verification = contact ? verificationStatus(contact) : "unverified";
   const verificationDetails = verificationDetailChips(contact?.verification_details);
+  const activityItems = contact ? contactActivityItems(contact, message) : [];
   const evidenceCount = new Set([
     ...signals,
     ...evidenceNotes,
@@ -1034,6 +1097,8 @@ function ContactDrawer({
                     <Mini label="Posted" value={posted || "—"} />
                     <Mini label="Confidence" value={confidence} />
                   </div>
+
+                  <ContactActivityTrail items={activityItems} />
                 </>
               ) : null}
 
@@ -1327,6 +1392,34 @@ function Mini({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ContactActivityTrail({ items }: { items: ContactActivityItem[] }) {
+  const completedCount = items.filter((item) => item.complete).length;
+
+  return (
+    <section className="drawer-activity-panel">
+      <div className="drawer-section-heading">
+        <h3>Activity</h3>
+        <span>
+          {completedCount}/{items.length}
+        </span>
+      </div>
+      <ol className="drawer-activity-list">
+        {items.map((item) => (
+          <li className={`activity-${item.tone}`} key={item.label}>
+            <span className="activity-marker" aria-hidden="true">
+              {item.complete ? <Check size={11} /> : null}
+            </span>
+            <span className="activity-copy">
+              <strong>{item.label}</strong>
+              <span>{item.detail}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function EvidenceList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
   const visibleItems = items.filter(Boolean).slice(0, 3);
   return (
@@ -1568,6 +1661,119 @@ function messageStatusLabel(status: string) {
   return labels[status] || status.replace(/_/g, " ");
 }
 
+function contactActivityItems(contact: DiscoveryResult, message: Message | undefined): ContactActivityItem[] {
+  const review = reviewStatus(contact);
+  const verification = verificationStatus(contact);
+  const policy = contactPolicyStatus(contact);
+  const reviewed = review !== "unreviewed";
+  const approvedAt = messageApprovalDate(message);
+  const sentAt = message?.sent_at || contact.last_contacted_at || "";
+  const messageFailed = message?.status === "failed" || message?.status === "cancelled";
+  const messageSent = Boolean(sentAt || message?.status === "sent" || message?.status === "replied");
+  const messageApproved = Boolean(approvedAt || messageSent || message?.status === "approved");
+  const items: ContactActivityItem[] = [
+    {
+      label: "Found",
+      detail: formatActivityDate(contact.created_at) || "Captured",
+      complete: true,
+      tone: "done",
+    },
+    {
+      label: "Verified",
+      detail: [
+        verificationStatusLabel(verification),
+        contact.verification_checked_at ? formatActivityDate(contact.verification_checked_at) : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      complete: verification !== "unverified",
+      tone: activityToneForVerification(verification),
+    },
+    {
+      label: "Reviewed",
+      detail: [reviewStatusLabel(review), contact.reviewed_at ? formatActivityDate(contact.reviewed_at) : ""]
+        .filter(Boolean)
+        .join(" · "),
+      complete: reviewed,
+      tone: reviewed ? activityToneForReview(review) : "pending",
+    },
+    {
+      label: "Shortlisted",
+      detail: contact.shortlisted_at ? formatActivityDate(contact.shortlisted_at) || "Shortlisted" : "Not shortlisted",
+      complete: Boolean(contact.shortlisted_at),
+      tone: contact.shortlisted_at ? "done" : "pending",
+    },
+    {
+      label: "Draft",
+      detail: message
+        ? [messageStatusLabel(message.status), formatActivityDate(message.created_at)].filter(Boolean).join(" · ")
+        : "No draft yet",
+      complete: Boolean(message),
+      tone: messageFailed ? "blocked" : message ? "done" : "pending",
+    },
+    {
+      label: "Approved",
+      detail: messageApproved ? formatActivityDate(approvedAt || message?.updated_at || sentAt) || "Approved" : "Not approved",
+      complete: messageApproved,
+      tone: messageApproved ? "done" : messageFailed ? "blocked" : "pending",
+    },
+    {
+      label: "Outreach",
+      detail: message?.status === "replied"
+        ? `Replied · ${formatActivityDate(message.updated_at) || "Marked replied"}`
+        : messageSent
+          ? `Sent · ${formatActivityDate(sentAt || message?.updated_at) || "Sent"}`
+          : message?.status === "approved"
+            ? "Approved, not sent"
+            : "Not sent",
+      complete: messageSent,
+      tone: messageFailed ? "blocked" : message?.status === "approved" ? "warning" : messageSent ? "done" : "pending",
+    },
+  ];
+
+  if (policy !== "allowed") {
+    items.push({
+      label: "Blocked",
+      detail: [
+        contactPolicyStatusLabel(policy),
+        contact.contact_policy_checked_at ? formatActivityDate(contact.contact_policy_checked_at) : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      complete: true,
+      tone: "blocked",
+    });
+  }
+
+  return items;
+}
+
+function activityToneForVerification(status: ContactVerificationStatus): ContactActivityTone {
+  if (status === "valid") return "done";
+  if (status === "risky" || status === "unknown") return "warning";
+  if (status === "invalid") return "blocked";
+  return "pending";
+}
+
+function activityToneForReview(status: LeadReviewStatus): ContactActivityTone {
+  if (status === "not_fit") return "blocked";
+  if (status === "maybe") return "warning";
+  if (status === "good_fit") return "done";
+  return "pending";
+}
+
+function messageApprovalDate(message: Message | undefined) {
+  if (!isRecord(message?.approval)) return "";
+  return rawValueToString(message.approval.approved_at);
+}
+
+function formatActivityDate(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return formatDate(date.toISOString());
+}
+
 function contactScore(contact: DiscoveryResult) {
   return Math.max(0, Math.min(100, Math.round(contact.qualification?.score ?? contact.research?.confidence ?? 0)));
 }
@@ -1783,7 +1989,7 @@ function rawValueToString(value: unknown): string {
   return "";
 }
 
-function exportContactsCsv(contacts: DiscoveryResult[], runName: string, messages: Message[] = []) {
+function exportContactsCsv(contacts: DiscoveryResult[], fileName: string, messages: Message[] = []) {
   const messageByLeadId = new Map(messages.map((message) => [message.lead_id, message]));
   const rows = contacts.map((contact) => ({
     shortlisted: contact.shortlisted_at ? "yes" : "no",
@@ -1823,7 +2029,7 @@ function exportContactsCsv(contacts: DiscoveryResult[], runName: string, message
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${slugify(runName)}-contacts.csv`;
+  anchor.download = normalizeExportFileName(fileName);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -1837,10 +2043,6 @@ function csvCell(value: string | number | undefined) {
 
 function formatVerificationDetails(details: Record<string, unknown> | null | undefined) {
   return verificationDetailChips(details).join("; ");
-}
-
-function slugify(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "contacts";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

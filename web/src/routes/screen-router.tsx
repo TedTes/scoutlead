@@ -10,6 +10,7 @@ export function renderScreen(
   productEditor: {
     isCreatingProduct: boolean;
     onCreatingProductChange: (isCreating: boolean) => void;
+    onDeleteProduct?: () => Promise<void> | void;
   } = {
     isCreatingProduct: false,
     onCreatingProductChange: () => undefined,

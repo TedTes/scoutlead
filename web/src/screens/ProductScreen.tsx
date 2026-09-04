@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Plus, Target, X } from "lucide-react";
+import { ArrowLeft, MapPin, Plus, Target, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -9,6 +9,7 @@ import { formatDate } from "../utils/format";
 type ProductScreenProps = {
   isCreatingProduct: boolean;
   onCreatingProductChange: (isCreating: boolean) => void;
+  onDeleteProduct?: () => Promise<void> | void;
   onNavigate: (screen: Screen) => void;
 };
 
@@ -21,6 +22,7 @@ const HUMAN_APPROVAL_CONSTRAINT = "human approval required before outbound messa
 
 export function ProductScreen({
   onCreatingProductChange,
+  onDeleteProduct,
   onNavigate,
 }: ProductScreenProps) {
   const {
@@ -39,6 +41,8 @@ export function ProductScreen({
   const [addingHint, setAddingHint] = useState(false);
   const [hintDraft, setHintDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const originalEditableConstraints = useMemo(
     () => editableConstraints(selectedProduct),
@@ -107,6 +111,17 @@ export function ProductScreen({
       return;
     }
     setConstraints((current) => current.filter((_, index) => index !== chip.index));
+  };
+
+  const confirmDeleteProduct = async () => {
+    if (!selectedProduct || !onDeleteProduct || deleting) return;
+    setDeleting(true);
+    try {
+      await onDeleteProduct();
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const saveProduct = useCallback(async () => {
@@ -272,6 +287,39 @@ export function ProductScreen({
             <small className="product-settings-copy-hint">
               Optional structured hints the finder weights alongside the description.
             </small>
+          </section>
+
+          <section className="product-settings-danger" aria-label="Danger zone">
+            <div>
+              <span className="product-settings-danger-label">Danger zone</span>
+              <p>Delete this product and remove its runs, contacts, and history.</p>
+            </div>
+            {confirmingDelete ? (
+              <div className="product-settings-delete-confirm">
+                <span>Delete this product?</span>
+                <button className="secondary" type="button" onClick={() => setConfirmingDelete(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="product-settings-delete-button"
+                  disabled={deleting}
+                  type="button"
+                  onClick={() => void confirmDeleteProduct()}
+                >
+                  {deleting ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            ) : (
+              <button
+                className="product-settings-delete-button"
+                disabled={!onDeleteProduct}
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 size={14} />
+                Delete product
+              </button>
+            )}
           </section>
         </form>
       </section>
