@@ -29,7 +29,7 @@ class ApifySourceSettings(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "soutlead"
+    app_name: str = "ScoutLead"
     environment: Literal["local", "dev", "test", "staging", "production"] = "local"
     log_level: str = "INFO"
     database_url: str = ""
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     email_api_key: str | None = None
     resend_api_key: str | None = None
     email_from_address: str | None = None
-    email_from_name: str = "Soutlead"
+    email_from_name: str = "ScoutLead"
     email_reply_to: str | None = None
     google_oauth_client_id: str | None = None
     google_oauth_client_secret: str | None = None

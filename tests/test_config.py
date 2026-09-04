@@ -1,5 +1,6 @@
 from app.config import Settings
 from campaigns.schemas import CampaignCreate
+from campaigns.service import email_provider_setup_hint
 import pytest
 from pydantic import ValidationError
 
@@ -41,6 +42,11 @@ def test_settings_accepts_gmail_email_provider(monkeypatch) -> None:
         "email",
         "https://www.googleapis.com/auth/gmail.send",
     ]
+
+
+def test_email_provider_setup_hint_matches_selected_provider() -> None:
+    assert "EMAIL_PROVIDER=gmail" in email_provider_setup_hint("gmail")
+    assert "EMAIL_PROVIDER=resend" in email_provider_setup_hint("resend")
 
 
 def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:

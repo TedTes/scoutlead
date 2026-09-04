@@ -39,7 +39,7 @@ class EmailTool:
         api_key: str | None = None,
         resend_api_key: str | None = None,
         from_address: str | None = None,
-        from_name: str = "Soutlead",
+        from_name: str = "ScoutLead",
         reply_to: str | None = None,
         google_oauth_client_id: str | None = None,
         google_oauth_client_secret: str | None = None,

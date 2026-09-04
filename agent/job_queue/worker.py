@@ -1,8 +1,10 @@
 from time import sleep
 
+from sqlalchemy.orm import Session
+
 from agent_runs.repository import AgentRunRepository
 from app.config import get_settings
-from app.dependencies import create_app_services
+from app.dependencies import AppServices, create_app_services
 from campaigns.service import CampaignService
 from db.session import create_database
 from job_queue.repository import QueueRepository
@@ -27,34 +29,10 @@ def run_once() -> bool:
         agent_run = agent_runs.claim_next()
         if agent_run is not None:
             try:
-                CampaignService(
-                    session=session,
-                    llm=services.llm,
-                    search_tool=services.search,
-                    browser=services.browser,
-                    email=services.email,
-                    google_places_api_key=services.settings.google_places_api_key,
-                    google_places_api_endpoint=services.settings.google_places_api_endpoint,
-                    apify_api_token=services.settings.apify_api_token,
-                    apify_api_base_url=services.settings.apify_api_base_url,
-                    apify_source_provider_id=services.settings.apify_source_provider_id,
-                    apify_actor_id=services.settings.apify_actor_id,
-                    apify_actor_input_template=services.settings.apify_actor_input_template,
-                    apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
-                    apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
-                    apify_sources=services.settings.apify_source_configs,
-                    contact_verification_provider=services.settings.contact_verification_provider,
-                    email_verification_endpoint=services.settings.email_verification_endpoint,
-                    email_verification_api_key=services.settings.email_verification_api_key,
-                    bouncer_api_key=services.settings.bouncer_api_key,
-                    bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
-                    zerobounce_api_key=services.settings.zerobounce_api_key,
-                    zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
-                    embedding=services.embedding,
-                    semantic_cache_min_score=services.settings.semantic_cache_min_score,
-                    semantic_cache_min_results=services.settings.semantic_cache_min_results,
-                    timeout_seconds=services.settings.request_timeout_seconds,
-                ).run_campaign(agent_run.campaign_id, agent_run_id=agent_run.id)
+                _campaign_service(session=session, services=services).run_campaign(
+                    agent_run.campaign_id,
+                    agent_run_id=agent_run.id,
+                )
             except Exception:
                 logger.exception("agent_run_failed run_id=%s", agent_run.id)
             return True
@@ -65,34 +43,9 @@ def run_once() -> bool:
             return False
         try:
             if job.type == JobType.CAMPAIGN_RUN.value:
-                CampaignService(
-                    session=session,
-                    llm=services.llm,
-                    search_tool=services.search,
-                    browser=services.browser,
-                    email=services.email,
-                    google_places_api_key=services.settings.google_places_api_key,
-                    google_places_api_endpoint=services.settings.google_places_api_endpoint,
-                    apify_api_token=services.settings.apify_api_token,
-                    apify_api_base_url=services.settings.apify_api_base_url,
-                    apify_source_provider_id=services.settings.apify_source_provider_id,
-                    apify_actor_id=services.settings.apify_actor_id,
-                    apify_actor_input_template=services.settings.apify_actor_input_template,
-                    apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
-                    apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
-                    apify_sources=services.settings.apify_source_configs,
-                    contact_verification_provider=services.settings.contact_verification_provider,
-                    email_verification_endpoint=services.settings.email_verification_endpoint,
-                    email_verification_api_key=services.settings.email_verification_api_key,
-                    bouncer_api_key=services.settings.bouncer_api_key,
-                    bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
-                    zerobounce_api_key=services.settings.zerobounce_api_key,
-                    zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
-                    embedding=services.embedding,
-                    semantic_cache_min_score=services.settings.semantic_cache_min_score,
-                    semantic_cache_min_results=services.settings.semantic_cache_min_results,
-                    timeout_seconds=services.settings.request_timeout_seconds,
-                ).run_campaign(str(job.payload["campaign_id"]))
+                _campaign_service(session=session, services=services).run_campaign(
+                    str(job.payload["campaign_id"])
+                )
             elif job.type == JobType.MESSAGE_SEND.value:
                 MessageService(session=session, email=services.email).send(
                     str(job.payload["message_id"])
@@ -114,6 +67,38 @@ def run() -> None:
         did_work = run_once()
         if not did_work:
             sleep(2)
+
+
+def _campaign_service(*, session: Session, services: AppServices) -> CampaignService:
+    settings = services.settings
+    return CampaignService(
+        session=session,
+        llm=services.llm,
+        search_tool=services.search,
+        browser=services.browser,
+        email=services.email,
+        google_places_api_key=settings.google_places_api_key,
+        google_places_api_endpoint=settings.google_places_api_endpoint,
+        apify_api_token=settings.apify_api_token,
+        apify_api_base_url=settings.apify_api_base_url,
+        apify_source_provider_id=settings.apify_source_provider_id,
+        apify_actor_id=settings.apify_actor_id,
+        apify_actor_input_template=settings.apify_actor_input_template,
+        apify_actor_result_mapping=settings.apify_actor_result_mapping,
+        apify_actor_max_charge_usd=settings.apify_actor_max_charge_usd,
+        apify_sources=settings.apify_source_configs,
+        contact_verification_provider=settings.contact_verification_provider,
+        email_verification_endpoint=settings.email_verification_endpoint,
+        email_verification_api_key=settings.email_verification_api_key,
+        bouncer_api_key=settings.bouncer_api_key,
+        bouncer_api_endpoint=settings.bouncer_api_endpoint,
+        zerobounce_api_key=settings.zerobounce_api_key,
+        zerobounce_api_endpoint=settings.zerobounce_api_endpoint,
+        embedding=services.embedding,
+        semantic_cache_min_score=settings.semantic_cache_min_score,
+        semantic_cache_min_results=settings.semantic_cache_min_results,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
 
 
 if __name__ == "__main__":

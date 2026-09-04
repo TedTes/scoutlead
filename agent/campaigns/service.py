@@ -660,7 +660,7 @@ class CampaignService:
                 detail=(
                     f"{self.email.provider} email provider ready"
                     if self.messages_can_send_real_email()
-                    else "Configure EMAIL_PROVIDER=resend with RESEND_API_KEY and EMAIL_FROM_ADDRESS."
+                    else email_provider_setup_hint(self.email.provider)
                 ),
                 required=False,
             )
@@ -902,3 +902,16 @@ class CampaignService:
         if value is None or isinstance(value, str | int | float | bool):
             return value
         return str(value)
+
+
+def email_provider_setup_hint(provider: str) -> str:
+    if provider == "gmail":
+        return (
+            "Configure EMAIL_PROVIDER=gmail with Google OAuth credentials, "
+            "GOOGLE_TOKEN_ENCRYPTION_KEY, and a connected Gmail account."
+        )
+    if provider == "resend":
+        return "Configure EMAIL_PROVIDER=resend with RESEND_API_KEY and EMAIL_FROM_ADDRESS."
+    if provider == "http":
+        return "Configure EMAIL_PROVIDER=http with EMAIL_PROVIDER_ENDPOINT."
+    return "Configure EMAIL_PROVIDER with a real sender before outreach."
