@@ -43,7 +43,7 @@ SERVICES = {
     ),
     "web": RailwayServiceConfig(
         env_var="RAILWAY_WEB_SERVICE",
-        root_directory="/web",
+        root_directory="/",
         manifest=ROOT / "deploy/railway/web.railway.json",
     ),
 }

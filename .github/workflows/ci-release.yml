@@ -239,6 +239,7 @@ jobs:
         timeout-minutes: 10
         run: |
           python scripts/railway_up_ci.py railway up ./web \
+            --path-as-root \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT" \
             --service "$RAILWAY_WEB_SERVICE" \

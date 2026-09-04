@@ -4,7 +4,7 @@ Railway has three deployable ScoutLead services:
 
 - API: Python app from the repo root using the root `Dockerfile`.
 - Worker: Python background worker from the repo root using the root `Dockerfile`.
-- Web: Vite app with Railway root directory `/web`; the workflow uploads `./web`.
+- Web: Vite app deployed from `./web --path-as-root`.
 
 The release workflow applies service settings from this directory before running `railway up`.
 The backend services also ship with a root Dockerfile so Railway does not need to infer their
@@ -35,6 +35,9 @@ npm run preview -- --host 0.0.0.0 --port ${PORT:-4173}
 The backend startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it
 falls back to Railway's `RAILWAY_SERVICE_NAME`; service names containing `worker` run the worker,
 and all other backend service names run the API.
+
+The web workflow uses `--path-as-root`, so the uploaded archive root is the `web` directory itself.
+For that reason the web service root directory is `/`, not `/web`.
 
 ## GitHub release environment
 

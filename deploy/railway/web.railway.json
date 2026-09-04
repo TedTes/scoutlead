@@ -3,10 +3,7 @@
   "build": {
     "builder": "RAILPACK",
     "watchPatterns": [
-      "/web/**",
-      "/deploy/railway/web.railway.json",
-      "/scripts/apply_railway_service_config.py",
-      "/scripts/railway_up_ci.py"
+      "**"
     ]
   },
   "deploy": {
