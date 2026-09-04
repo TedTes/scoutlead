@@ -187,13 +187,16 @@ jobs:
         if: steps.changes.outputs.release_needed == 'true'
         run: npm install -g @railway/cli
 
-      - name: Link Railway project
-        if: steps.changes.outputs.release_needed == 'true'
-        run: railway link --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT"
-
       - name: Apply Railway service config
         if: steps.changes.outputs.release_needed == 'true'
+        env:
+          RAILWAY_CONFIG_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || vars.RAILWAY_API_TOKEN }}
         run: |
+          if [ -n "$RAILWAY_CONFIG_API_TOKEN" ]; then
+            unset RAILWAY_TOKEN
+            export RAILWAY_API_TOKEN="$RAILWAY_CONFIG_API_TOKEN"
+          fi
+
           services=()
           if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
             services+=(--service api --service worker)

@@ -44,6 +44,11 @@ Each GitHub environment that deploys to Railway needs these values:
 - `RAILWAY_WEB_SERVICE`
 - `RAILWAY_MIGRATION_DATABASE_URL`
 
+Optional:
+
+- `RAILWAY_API_TOKEN` for the service-config sync step if the project-scoped `RAILWAY_TOKEN`
+  cannot edit Railway service settings.
+
 `RAILWAY_MIGRATION_DATABASE_URL` must use the public Postgres URL because GitHub Actions is
 outside Railway's private network. Runtime `DATABASE_URL` inside Railway services should use the
 private Railway Postgres reference variable.
@@ -51,7 +56,10 @@ private Railway Postgres reference variable.
 ## Notes
 
 Railway's current CLI supports setting service root directories and start commands with
-`railway environment edit --service-config`. Config-as-code files are still documented by Railway,
-but Railway marks `railway.json` / `railway.toml` config-as-code as deprecated for new services, so
-the workflow applies these manifest values through the CLI instead of relying on automatic file
-discovery.
+`railway environment edit --service-config`. The workflow uses `RAILWAY_PROJECT_ID` directly and
+does not call `railway link`, so project-scoped CI tokens do not need interactive linking
+permissions. If service-config edits need broader access, add `RAILWAY_API_TOKEN`; the workflow
+will use it only for config sync and will keep `RAILWAY_TOKEN` for deploys. Config-as-code files
+are still documented by Railway, but Railway marks
+`railway.json` / `railway.toml` config-as-code as deprecated for new services, so the workflow
+applies these manifest values through the CLI instead of relying on automatic file discovery.

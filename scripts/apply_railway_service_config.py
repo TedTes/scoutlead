@@ -14,6 +14,13 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 OPTIONAL_DOT_PATHS = {"build.watchPatterns"}
+PROJECT_FLAG_UNSUPPORTED_MARKERS = (
+    "unexpected argument '--project'",
+    "unexpected argument",
+    "unknown option",
+    "unrecognized option",
+    "found argument '--project'",
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +70,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    project = os.environ.get("RAILWAY_PROJECT_ID")
     environment = os.environ.get("RAILWAY_ENVIRONMENT")
     if not args.dry_run and not environment:
         print("RAILWAY_ENVIRONMENT is required to apply Railway service config", file=sys.stderr)
@@ -83,6 +91,7 @@ def main() -> int:
         for dot_path, value in settings:
             required = dot_path not in OPTIONAL_DOT_PATHS
             status = _apply_setting(
+                project=project or "$RAILWAY_PROJECT_ID",
                 environment=environment or "$RAILWAY_ENVIRONMENT",
                 service=service,
                 dot_path=dot_path,
@@ -135,6 +144,7 @@ def _manifest_settings(manifest: dict[str, Any]) -> list[tuple[str, Any]]:
 
 def _apply_setting(
     *,
+    project: str,
     environment: str,
     service: str,
     dot_path: str,
@@ -146,6 +156,8 @@ def _apply_setting(
         "railway",
         "environment",
         "edit",
+        "--project",
+        project,
         "--environment",
         environment,
         "--service-config",
@@ -159,8 +171,69 @@ def _apply_setting(
         print("+ " + " ".join(shlex.quote(part) for part in command))
         return 0
 
-    completed = subprocess.run(command, check=False)
-    return completed.returncode
+    completed = _run_command(command)
+    if completed.returncode == 0 or not _project_flag_was_rejected(completed.stdout):
+        if completed.returncode != 0 and _looks_unauthorized(completed.stdout):
+            _print_auth_error()
+        return completed.returncode
+
+    fallback_command = _without_project_flag(command)
+    print(
+        "::warning::Railway CLI rejected --project for environment edit; "
+        "retrying with token-scoped project context.",
+        file=sys.stderr,
+    )
+    return _run_command(fallback_command).returncode
+
+
+def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if completed.stdout:
+        print(completed.stdout, end="")
+    return completed
+
+
+def _project_flag_was_rejected(output: str) -> bool:
+    normalized = output.lower()
+    return "--project" in normalized and any(
+        marker in normalized for marker in PROJECT_FLAG_UNSUPPORTED_MARKERS
+    )
+
+
+def _without_project_flag(command: list[str]) -> list[str]:
+    without_project: list[str] = []
+    skip_next = False
+    for part in command:
+        if skip_next:
+            skip_next = False
+            continue
+        if part == "--project":
+            skip_next = True
+            continue
+        without_project.append(part)
+    return without_project
+
+
+def _looks_unauthorized(output: str) -> bool:
+    return "unauthorized" in output.lower()
+
+
+def _print_auth_error() -> None:
+    if os.environ.get("RAILWAY_API_TOKEN"):
+        token_hint = "Check that RAILWAY_API_TOKEN belongs to the Railway workspace/project."
+    else:
+        token_hint = (
+            "Project deploy tokens may not be allowed to edit service config. "
+            "Add a Railway account/workspace token as GitHub secret RAILWAY_API_TOKEN, "
+            "or set the service root directories and start commands manually in Railway."
+        )
+    print(f"::error::{token_hint}", file=sys.stderr)
 
 
 def _format_value(value: Any) -> str:
