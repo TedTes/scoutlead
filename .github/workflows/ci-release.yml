@@ -166,8 +166,8 @@ jobs:
           fi
           exit "$missing"
 
-      - name: Set up Python for migrations
-        if: steps.changes.outputs.migrations == 'true'
+      - name: Set up Python for release scripts
+        if: steps.changes.outputs.release_needed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -197,7 +197,7 @@ jobs:
         if: steps.changes.outputs.backend == 'true'
         timeout-minutes: 10
         run: |
-          railway up \
+          python scripts/railway_up_ci.py railway up \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT" \
             --service "$RAILWAY_API_SERVICE" \
@@ -208,7 +208,7 @@ jobs:
         if: steps.changes.outputs.backend == 'true'
         timeout-minutes: 10
         run: |
-          railway up \
+          python scripts/railway_up_ci.py railway up \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT" \
             --service "$RAILWAY_WORKER_SERVICE" \
@@ -219,7 +219,7 @@ jobs:
         if: steps.changes.outputs.web == 'true'
         timeout-minutes: 10
         run: |
-          railway up \
+          python scripts/railway_up_ci.py railway up \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT" \
             --service "$RAILWAY_WEB_SERVICE" \
