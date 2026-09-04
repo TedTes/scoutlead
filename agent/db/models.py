@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base, TimestampMixin
+from db.types import EmbeddingVector
 
 
 class ProductModel(TimestampMixin, Base):
@@ -105,6 +106,15 @@ class BusinessModel(TimestampMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     geography: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    category_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    semantic_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector(1536), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedding_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_dimension: int = Field(default=1536, gt=0, le=4096)
+    semantic_cache_min_score: float = Field(default=0.78, ge=0, le=1)
+    semantic_cache_min_results: int = Field(default=5, ge=0, le=100)
 
     email_provider: Literal["console", "http", "resend", "gmail"] = "console"
     email_provider_endpoint: str | None = None

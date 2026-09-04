@@ -5,6 +5,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from agents.embeddings import EmbeddingClient, MissingEmbeddingClient, OpenAIEmbeddingClient
 from agents.llm import (
     LLMClient,
     MissingLLMClient,
@@ -22,6 +23,7 @@ class AppServices:
     settings: Settings
     db: Database
     llm: LLMClient
+    embedding: EmbeddingClient
     search: SearchTool
     browser: DirectHttpBrowserTool
     email: EmailTool
@@ -45,10 +47,25 @@ def create_app_services(settings: Settings) -> AppServices:
     else:
         llm = MissingLLMClient()
 
+    embedding: EmbeddingClient
+    if settings.openai_api_key:
+        embedding = OpenAIEmbeddingClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_embedding_model,
+            dimension=settings.embedding_dimension,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+    else:
+        embedding = MissingEmbeddingClient(
+            model=settings.openai_embedding_model,
+            dimension=settings.embedding_dimension,
+        )
+
     return AppServices(
         settings=settings,
         db=Database(settings.database_url),
         llm=llm,
+        embedding=embedding,
         search=SearchTool(
             endpoint=settings.search_api_endpoint,
             api_key=settings.search_api_key,
