@@ -54,6 +54,7 @@ type AppDataContextValue = {
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
   rerunSourceRequest: (runId?: string) => Promise<SourceRequestRun | null>;
   sendApprovedShortlistWebhook: (runId?: string) => Promise<void>;
+  autoSaveProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateProduct: (productId: string, update: Partial<Product>) => Promise<void>;
   updateSelectedProduct: (update: Partial<Product>) => Promise<void>;
   createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
@@ -455,6 +456,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           if (!runId) return;
           await api.sendApprovedShortlistWebhook(runId);
         }),
+      autoSaveProduct: async (productId, update) => {
+        if (!productId) return;
+        setError("");
+        try {
+          const product = await api.updateProduct(productId, update);
+          setProducts((current) =>
+            current.map((existing) => (existing.id === product.id ? product : existing)),
+          );
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
+      },
       updateProduct: (productId, update) =>
         mutate(async () => {
           if (!productId) return;

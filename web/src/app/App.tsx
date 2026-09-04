@@ -1,4 +1,15 @@
-import { Check, ChevronDown, Download, Menu, Pencil, Plus, Settings, Trash2, User } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Download,
+  Menu,
+  Pencil,
+  Plug,
+  Plus,
+  Settings,
+  Trash2,
+  User,
+} from "lucide-react";
 import { useEffect, useRef, useState, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
@@ -24,7 +35,8 @@ function AppShell() {
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
-  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const desktopContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const mobileContextMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
   const {
     loading,
@@ -37,6 +49,7 @@ function AppShell() {
     selectedDiscoveryRun,
     productDiscoveryRuns,
     productContacts,
+    gmailConnectionStatus,
     createProductFromDescription,
     deleteProduct,
     deleteDiscoveryRuns,
@@ -150,7 +163,11 @@ function AppShell() {
 
   useEffect(() => {
     const closeMenu = (event: MouseEvent) => {
-      if (!contextMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !desktopContextMenuRef.current?.contains(target) &&
+        !mobileContextMenuRef.current?.contains(target)
+      ) {
         setOpenContextMenu(null);
       }
     };
@@ -189,8 +206,18 @@ function AppShell() {
         >
           <Menu size={18} />
         </button>
-        <span className="brand-mark">S</span>
-        <strong>{selectedProduct ? selectedProductName : "ScoutLead"}</strong>
+        <div className="mobile-product-area" ref={mobileContextMenuRef}>
+          <ProductSelector
+            isOpen={openContextMenu === "product"}
+            products={products}
+            selectedProductId={selectedProductId}
+            selectedProductName={selectedProductName}
+            selectedRunLabel={selectedRunLabel}
+            onAddProduct={startNewProduct}
+            onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
+            onSelectProduct={selectProduct}
+          />
+        </div>
         <button
           aria-label="Account"
           className="mobile-icon-button mobile-avatar-button"
@@ -270,17 +297,22 @@ function AppShell() {
         </nav>
 
         <ProductManagementSection
+          activeScreen={activeScreen}
+          integrationCount={getEnabledIntegrationCount(selectedProduct, Boolean(gmailConnectionStatus?.connected))}
           hasProduct={Boolean(selectedProduct)}
           hasContacts={productContacts.length > 0}
           onDelete={handleDeleteSelectedProduct}
           onExport={handleExportProductContacts}
+          onIntegrations={() => selectScreen("integrations")}
           onProductSettings={() => selectScreen("product")}
         />
       </aside>
 
-      <section className="main">
+      <section
+        className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
+      >
         <header className="app-topbar">
-          <div className="top-product-area" ref={contextMenuRef}>
+          <div className="top-product-area" ref={desktopContextMenuRef}>
             <ProductSelector
               isOpen={openContextMenu === "product"}
               products={products}
@@ -409,16 +441,22 @@ function ProductSelector({
 }
 
 function ProductManagementSection({
+  activeScreen,
   hasContacts,
   hasProduct,
+  integrationCount,
   onDelete,
   onExport,
+  onIntegrations,
   onProductSettings,
 }: {
+  activeScreen: Screen;
   hasContacts: boolean;
   hasProduct: boolean;
+  integrationCount: number;
   onDelete: () => Promise<void> | void;
   onExport: () => void;
+  onIntegrations: () => void;
   onProductSettings: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -438,11 +476,28 @@ function ProductManagementSection({
   return (
     <section className="mng" aria-label="Product management">
       <p className="mng-label">Manage</p>
-      <button className={hasProduct ? "mng-item" : "mng-item is-disabled"} disabled={!hasProduct} type="button" onClick={onProductSettings}>
+      <button
+        className={manageItemClass(hasProduct, activeScreen === "product")}
+        disabled={!hasProduct}
+        type="button"
+        onClick={onProductSettings}
+      >
         <span className="mng-icon">
           <Settings size={13} />
         </span>
         <span className="mng-label-text">Product settings</span>
+      </button>
+      <button
+        className={manageItemClass(hasProduct, activeScreen === "integrations")}
+        disabled={!hasProduct}
+        type="button"
+        onClick={onIntegrations}
+      >
+        <span className="mng-icon">
+          <Plug size={13} />
+        </span>
+        <span className="mng-label-text">Integrations</span>
+        {integrationCount > 0 ? <span className="mng-badge">{integrationCount} on</span> : null}
       </button>
       <button className={hasContacts ? "mng-item" : "mng-item is-disabled"} disabled={!hasContacts} type="button" onClick={onExport}>
         <span className="mng-icon">
@@ -480,6 +535,10 @@ function ProductManagementSection({
       )}
     </section>
   );
+}
+
+function manageItemClass(enabled: boolean, active: boolean) {
+  return [enabled ? "mng-item" : "mng-item is-disabled", active ? "is-active" : ""].filter(Boolean).join(" ");
 }
 
 function RunHistoryDraft({
@@ -964,6 +1023,10 @@ function rawContactValue(contact: DiscoveryResult, keys: string[]) {
     }
   }
   return "";
+}
+
+function getEnabledIntegrationCount(product: Product | undefined, gmailConnected: boolean) {
+  return Number(gmailConnected) + Number(Boolean(product?.webhook_enabled && product.webhook_url));
 }
 
 function csvCell(value: string | number | undefined) {

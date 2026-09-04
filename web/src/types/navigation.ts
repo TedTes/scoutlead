@@ -1,5 +1,6 @@
 export type Screen =
   | "overview"
+  | "integrations"
   | "product"
   | "results";
 
