@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from agents.embeddings import EmbeddingClient, MissingEmbeddingClient
 from canonical.normalization import (
     contact_name_from_raw,
     email_from_raw,
@@ -22,6 +23,13 @@ from canonical.normalization import (
     source_url_from_raw,
     stable_content_hash,
 )
+from canonical.semantics import (
+    business_semantic_profile,
+    cosine_similarity,
+    market_is_compatible,
+    request_semantic_profile,
+    semantic_key,
+)
 from db.models import BusinessModel, ContactModel, SourceObservationModel
 from shared.utils import new_id, normalize_text, normalize_url, utcnow
 
@@ -33,8 +41,9 @@ class CanonicalLeadLink:
 
 
 class CanonicalRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, embedding: EmbeddingClient | None = None) -> None:
         self.session = session
+        self.embedding = embedding or MissingEmbeddingClient()
 
     def upsert_from_discovery_result(
         self,
@@ -53,6 +62,7 @@ class CanonicalRepository:
             company_name=company_name,
             website_url=website_url,
             geography=geography,
+            description=description,
             source=source_name,
             raw=raw_payload,
         )
@@ -110,6 +120,67 @@ class CanonicalRepository:
             rows.append(_observation_to_search_result(observation, business))
         return rows
 
+    def list_semantic_discovery_results(
+        self,
+        *,
+        source_inputs: dict[str, Any],
+        source_input: str | None,
+        limit: int,
+        min_score: float,
+        min_results: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or min_results <= 0:
+            return []
+
+        profile = request_semantic_profile(
+            source_inputs=source_inputs,
+            source_input=source_input,
+        )
+        if not profile.text:
+            return []
+
+        self._backfill_semantic_fields(
+            request_market_key=profile.market_key,
+            limit=max(limit * 20, 200),
+        )
+        query_embedding = self.embedding.embed_text(profile.text)
+        if query_embedding:
+            matches = self._embedding_matches(
+                query_embedding=query_embedding,
+                market_key=profile.market_key,
+                limit=limit,
+                min_score=min_score,
+            )
+        else:
+            matches = self._structured_matches(
+                category_key=profile.category_key,
+                market_key=profile.market_key,
+                limit=limit,
+            )
+
+        if len(matches) < min_results:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for score, business in matches[:limit]:
+            observation = self._latest_observation_for_business(business.id)
+            row = (
+                _observation_to_search_result(observation, business)
+                if observation is not None
+                else _business_to_search_result(business)
+            )
+            raw = dict(row.get("raw") or {})
+            raw["semantic_cache_hit"] = True
+            raw["semantic_similarity"] = round(score, 4)
+            raw["semantic_request"] = {
+                "category_key": profile.category_key,
+                "market_key": profile.market_key,
+                "text": profile.text,
+            }
+            row["raw"] = raw
+            rows.append(row)
+        return rows
+
     def apply_contact_verification(
         self,
         *,
@@ -141,6 +212,7 @@ class CanonicalRepository:
         company_name: str,
         website_url: str | None,
         geography: str | None,
+        description: str | None,
         source: str,
         raw: dict[str, Any],
     ) -> BusinessModel:
@@ -151,6 +223,14 @@ class CanonicalRepository:
         domain = normalize_domain(normalized_url)
         normalized_geography = normalize_text(geography) or None
         phone = phone_from_raw(raw)
+        profile = business_semantic_profile(
+            company_name=display_name,
+            website_url=normalized_url,
+            geography=normalized_geography,
+            description=description,
+            source=source,
+            raw=raw,
+        )
 
         business = self._find_business(
             source=source,
@@ -169,9 +249,13 @@ class CanonicalRepository:
                 phone=phone,
                 address=_address_from_raw(raw) or normalized_geography,
                 geography=normalized_geography,
+                category_key=profile.category_key,
+                market_key=profile.market_key,
+                semantic_text=profile.text,
                 first_seen_at=now,
                 last_seen_at=now,
             )
+            self._refresh_embedding_if_needed(business, profile.text, now=now)
             self.session.add(business)
             self.session.flush()
             return business
@@ -183,6 +267,17 @@ class CanonicalRepository:
         business.phone = business.phone or phone
         business.address = business.address or _address_from_raw(raw) or normalized_geography
         business.geography = business.geography or normalized_geography
+        business.category_key = business.category_key or profile.category_key
+        business.market_key = business.market_key or profile.market_key
+        if profile.text:
+            previous_semantic_text = business.semantic_text
+            business.semantic_text = profile.text
+            if (
+                not business.embedding
+                or previous_semantic_text != profile.text
+                or business.embedding_model != self.embedding.model
+            ):
+                self._refresh_embedding_if_needed(business, profile.text, now=now)
         business.last_seen_at = now
         self.session.flush()
         return business
@@ -361,6 +456,114 @@ class CanonicalRepository:
         self.session.flush()
         return observation
 
+    def _embedding_matches(
+        self,
+        *,
+        query_embedding: list[float],
+        market_key: str | None,
+        limit: int,
+        min_score: float,
+    ) -> list[tuple[float, BusinessModel]]:
+        statement = (
+            select(BusinessModel)
+            .where(BusinessModel.embedding.is_not(None))
+            .order_by(BusinessModel.last_seen_at.desc())
+            .limit(max(limit * 20, 200))
+        )
+        matches: list[tuple[float, BusinessModel]] = []
+        for business in self.session.scalars(statement):
+            if not market_is_compatible(market_key, business.market_key):
+                continue
+            score = cosine_similarity(query_embedding, business.embedding)
+            if score >= min_score:
+                matches.append((score, business))
+        matches.sort(key=lambda item: (item[0], item[1].last_seen_at), reverse=True)
+        return matches[:limit]
+
+    def _structured_matches(
+        self,
+        *,
+        category_key: str | None,
+        market_key: str | None,
+        limit: int,
+    ) -> list[tuple[float, BusinessModel]]:
+        if not category_key and not market_key:
+            return []
+        statement = select(BusinessModel)
+        if category_key:
+            statement = statement.where(BusinessModel.category_key == category_key)
+        if market_key:
+            statement = statement.where(BusinessModel.market_key == market_key)
+        statement = statement.order_by(BusinessModel.last_seen_at.desc()).limit(limit)
+        return [(1.0, business) for business in self.session.scalars(statement)]
+
+    def _latest_observation_for_business(self, business_id: str) -> SourceObservationModel | None:
+        return self.session.scalar(
+            select(SourceObservationModel)
+            .where(SourceObservationModel.business_id == business_id)
+            .order_by(SourceObservationModel.observed_at.desc())
+            .limit(1)
+        )
+
+    def _backfill_semantic_fields(
+        self,
+        *,
+        request_market_key: str | None,
+        limit: int,
+    ) -> None:
+        statement = (
+            select(BusinessModel)
+            .where(or_(BusinessModel.semantic_text.is_(None), BusinessModel.embedding.is_(None)))
+            .order_by(BusinessModel.last_seen_at.desc())
+            .limit(limit)
+        )
+        now = utcnow()
+        changed = False
+        for business in self.session.scalars(statement):
+            business_market_key = business.market_key or semantic_key(business.geography)
+            if not market_is_compatible(request_market_key, business_market_key):
+                continue
+            observation = self._latest_observation_for_business(business.id)
+            raw = observation.raw_payload if observation is not None else {}
+            profile = business_semantic_profile(
+                company_name=business.display_name,
+                website_url=business.website_url,
+                geography=business.geography,
+                description=_description_from_raw(raw) or business.semantic_text,
+                source=observation.source if observation is not None else "canonical_cache",
+                raw=raw,
+            )
+            previous_semantic_text = business.semantic_text
+            business.category_key = business.category_key or profile.category_key
+            business.market_key = business.market_key or profile.market_key
+            if profile.text:
+                business.semantic_text = profile.text
+                changed = True
+                if (
+                    not business.embedding
+                    or previous_semantic_text != profile.text
+                    or business.embedding_model != self.embedding.model
+                ):
+                    self._refresh_embedding_if_needed(business, profile.text, now=now)
+        if changed:
+            self.session.flush()
+
+    def _refresh_embedding_if_needed(
+        self,
+        business: BusinessModel,
+        semantic_text: str,
+        *,
+        now,
+    ) -> None:
+        if not semantic_text:
+            return
+        embedding = self.embedding.embed_text(semantic_text)
+        if not embedding:
+            return
+        business.embedding = embedding
+        business.embedding_model = self.embedding.model
+        business.embedding_updated_at = now
+
 
 def _query_from_raw(raw: dict[str, Any]) -> str | None:
     for layer in iter_raw_layers(raw):
@@ -390,6 +593,19 @@ def _address_from_raw(raw: dict[str, Any]) -> str | None:
             value = layer.get(key)
             if isinstance(value, str) and value.strip():
                 return normalize_text(value)
+    return None
+
+
+def _description_from_raw(raw: dict[str, Any]) -> str | None:
+    for layer in iter_raw_layers(raw):
+        for key in ("snippet", "description", "summary", "editorialSummary"):
+            value = layer.get(key)
+            if isinstance(value, str) and value.strip():
+                return normalize_text(value)
+            if isinstance(value, dict):
+                text = value.get("text")
+                if isinstance(text, str) and text.strip():
+                    return normalize_text(text)
     return None
 
 
@@ -432,6 +648,7 @@ def _observation_to_search_result(
         or business.geography
     )
     contact_email = _first_cached_text(raw, nested, ("contact_email", "contactEmail", "email"))
+    contact_email = contact_email or _first_contact_email(business)
     result_source = _first_cached_text(raw, nested, ("source",)) or observation.source
     return {
         "title": title,
@@ -447,6 +664,28 @@ def _observation_to_search_result(
             "source_observation_id": observation.id,
         },
     }
+
+
+def _business_to_search_result(business: BusinessModel) -> dict[str, Any]:
+    return {
+        "title": business.display_name,
+        "url": business.website_url,
+        "snippet": business.semantic_text,
+        "geography": business.geography,
+        "contact_email": _first_contact_email(business),
+        "source": "canonical_cache",
+        "raw": {
+            "cache_hit": True,
+            "canonical_business_id": business.id,
+        },
+    }
+
+
+def _first_contact_email(business: BusinessModel) -> str | None:
+    for contact in business.contacts:
+        if contact.email:
+            return contact.email
+    return None
 
 
 def _first_cached_text(

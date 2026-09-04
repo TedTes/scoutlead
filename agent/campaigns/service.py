@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agent_runs.repository import AgentRunRepository
+from agents.embeddings import EmbeddingClient, MissingEmbeddingClient
 from agents.llm import LLMClient, MissingLLMClient
 from agents.runner import ToolAction
 from campaign_sources.repository import CampaignSourceRepository
@@ -170,6 +171,9 @@ class CampaignService:
         bouncer_api_endpoint: str | None = None,
         zerobounce_api_key: str | None = None,
         zerobounce_api_endpoint: str | None = None,
+        embedding: EmbeddingClient | None = None,
+        semantic_cache_min_score: float = 0.78,
+        semantic_cache_min_results: int = 5,
         timeout_seconds: float = 20.0,
     ) -> None:
         self.session = session
@@ -177,6 +181,9 @@ class CampaignService:
         self.search_tool = search_tool
         self.browser = browser
         self.email = email or EmailTool()
+        self.embedding = embedding or MissingEmbeddingClient()
+        self.semantic_cache_min_score = semantic_cache_min_score
+        self.semantic_cache_min_results = semantic_cache_min_results
         self.google_places_api_key = google_places_api_key
         self.google_places_api_endpoint = google_places_api_endpoint
         self.apify_api_token = apify_api_token
@@ -202,7 +209,7 @@ class CampaignService:
         self.icp_presets = ICPPresetService()
         self.source_presets = SourcePresetService()
         self.discovery_candidates = DiscoveryCandidateRepository(session)
-        self.leads = LeadRepository(session)
+        self.leads = LeadRepository(session, embedding=self.embedding)
         self.messages = MessageRepository(session)
         self.conversations = ConversationRepository(session)
         self.memory = MemoryRepository(session)
@@ -321,6 +328,9 @@ class CampaignService:
                     apify_actor_result_mapping=self.apify_actor_result_mapping,
                     apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
                     apify_sources=self.apify_sources,
+                    embedding=self.embedding,
+                    semantic_cache_min_score=self.semantic_cache_min_score,
+                    semantic_cache_min_results=self.semantic_cache_min_results,
                     timeout_seconds=self.timeout_seconds,
                     **self._tool_call_callbacks(
                         agent_run_id=agent_run_id,

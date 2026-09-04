@@ -1,5 +1,6 @@
 from typing import Any, Callable
 
+from agents.embeddings import EmbeddingClient, MissingEmbeddingClient
 from agents.runner import BoundedAgentRunner, StopAction, ToolAction
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
@@ -38,6 +39,9 @@ class DiscoveryWorkflow:
         apify_actor_result_mapping: str | None = None,
         apify_actor_max_charge_usd: float | None = None,
         apify_sources: list[dict[str, Any]] | None = None,
+        embedding: EmbeddingClient | None = None,
+        semantic_cache_min_score: float = 0.78,
+        semantic_cache_min_results: int = 5,
         timeout_seconds: float = 20.0,
         on_tool_start: Callable[[ToolAction, int], str | None] | None = None,
         on_tool_success: Callable[[str, Any], None] | None = None,
@@ -59,6 +63,9 @@ class DiscoveryWorkflow:
         self.apify_actor_result_mapping = apify_actor_result_mapping
         self.apify_actor_max_charge_usd = apify_actor_max_charge_usd
         self.apify_sources = apify_sources
+        self.embedding = embedding or MissingEmbeddingClient()
+        self.semantic_cache_min_score = semantic_cache_min_score
+        self.semantic_cache_min_results = semantic_cache_min_results
         self.timeout_seconds = timeout_seconds
         self.on_tool_start = on_tool_start
         self.on_tool_success = on_tool_success
@@ -86,25 +93,41 @@ class DiscoveryWorkflow:
         ]
         cached_results: list[dict[str, Any]] = []
         sources_to_run: list[CampaignSourceRead] = []
-        canonical = CanonicalRepository(self.leads.session)
+        canonical = CanonicalRepository(self.leads.session, embedding=self.embedding)
+        semantic_rows: list[dict[str, Any]] = []
         for source in sources:
-            limit = int(source.config.get("limit") or campaign.max_leads)
-            cached_rows = canonical.list_cached_discovery_results(
-                source=source.provider_id,
-                source_input=source.input,
-                limit=limit,
+            source_query = str(source.input.get("query") or campaign.source_input or "").strip()
+            semantic_rows = canonical.list_semantic_discovery_results(
+                source_inputs=source.input,
+                source_input=source_query,
+                limit=campaign.max_leads,
+                min_score=self.semantic_cache_min_score,
+                min_results=min(self.semantic_cache_min_results, campaign.max_leads),
             )
-            if cached_rows:
-                cached_results.extend(
-                    _rows_with_source_context(
-                        rows=cached_rows,
-                        source=source,
-                        from_cache=True,
-                    )
+            if semantic_rows:
+                break
+        if semantic_rows:
+            cached_results.extend(_rows_with_semantic_context(semantic_rows))
+            sources = []
+        else:
+            for source in sources:
+                limit = int(source.config.get("limit") or campaign.max_leads)
+                cached_rows = canonical.list_cached_discovery_results(
+                    source=source.provider_id,
+                    source_input=source.input,
+                    limit=limit,
                 )
-                continue
-            sources_to_run.append(source)
-        sources = sources_to_run
+                if cached_rows:
+                    cached_results.extend(
+                        _rows_with_source_context(
+                            rows=cached_rows,
+                            source=source,
+                            from_cache=True,
+                        )
+                    )
+                    continue
+                sources_to_run.append(source)
+            sources = sources_to_run
         source_tool = CampaignSourceTool(
             SourceAdapterRegistry(
                 search_tool=self.search_tool,
@@ -223,5 +246,26 @@ def _rows_with_source_context(
         enriched["campaign_source_id"] = source.id
         enriched["provider_id"] = source.provider_id
         enriched["from_cache"] = from_cache
+        enriched_rows.append(enriched)
+    return enriched_rows
+
+
+def _rows_with_semantic_context(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched_rows = []
+    for row in rows:
+        enriched = dict(row)
+        raw = dict(enriched.get("raw") or {})
+        source_input = raw.get("source_input") if isinstance(raw.get("source_input"), dict) else {}
+        enriched["discovery_query"] = raw.get("discovery_query") or raw.get("query") or ""
+        enriched["discovery_geography"] = (
+            raw.get("discovery_geography") or raw.get("geography") or ""
+        )
+        enriched["source_input"] = source_input
+        enriched["campaign_source_id"] = raw.get("campaign_source_id") or ""
+        enriched["provider_id"] = (
+            raw.get("provider_id") or enriched.get("source") or "canonical_cache"
+        )
+        enriched["from_cache"] = True
+        enriched["from_semantic_cache"] = True
         enriched_rows.append(enriched)
     return enriched_rows

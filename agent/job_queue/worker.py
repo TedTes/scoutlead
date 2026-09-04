@@ -50,6 +50,9 @@ def run_once() -> bool:
                     bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
                     zerobounce_api_key=services.settings.zerobounce_api_key,
                     zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
+                    embedding=services.embedding,
+                    semantic_cache_min_score=services.settings.semantic_cache_min_score,
+                    semantic_cache_min_results=services.settings.semantic_cache_min_results,
                     timeout_seconds=services.settings.request_timeout_seconds,
                 ).run_campaign(agent_run.campaign_id, agent_run_id=agent_run.id)
             except Exception:
@@ -85,6 +88,9 @@ def run_once() -> bool:
                     bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
                     zerobounce_api_key=services.settings.zerobounce_api_key,
                     zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
+                    embedding=services.embedding,
+                    semantic_cache_min_score=services.settings.semantic_cache_min_score,
+                    semantic_cache_min_results=services.settings.semantic_cache_min_results,
                     timeout_seconds=services.settings.request_timeout_seconds,
                 ).run_campaign(str(job.payload["campaign_id"]))
             elif job.type == JobType.MESSAGE_SEND.value:

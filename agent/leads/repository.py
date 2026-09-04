@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from agents.embeddings import EmbeddingClient
 from campaigns.schemas import LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import DiscoveryCandidateModel, LeadModel
@@ -26,15 +27,19 @@ from suppressions.repository import ContactSuppressionRepository, is_blocked_con
 
 
 class LeadRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, embedding: EmbeddingClient | None = None) -> None:
         self.session = session
+        self.embedding = embedding
 
     def create_from_seed(self, campaign_id: str, product_id: str, seed: LeadSeedInput) -> LeadModel:
         existing = self.find_existing(campaign_id, seed.company_name, seed.website_url)
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
-        canonical = CanonicalRepository(self.session).upsert_from_discovery_result(
+        canonical = CanonicalRepository(
+            self.session,
+            embedding=self.embedding,
+        ).upsert_from_discovery_result(
             company_name=seed.company_name,
             website_url=seed.website_url,
             contact_email=seed.contact_email,
@@ -76,7 +81,10 @@ class LeadRepository:
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
 
-        canonical = CanonicalRepository(self.session).upsert_from_discovery_result(
+        canonical = CanonicalRepository(
+            self.session,
+            embedding=self.embedding,
+        ).upsert_from_discovery_result(
             company_name=company_name,
             website_url=result.get("url") or result.get("website_url"),
             contact_email=result.get("contact_email"),
@@ -126,7 +134,10 @@ class LeadRepository:
             "confidence": candidate.confidence,
             "raw": candidate.raw,
         }
-        canonical = CanonicalRepository(self.session).upsert_from_discovery_result(
+        canonical = CanonicalRepository(
+            self.session,
+            embedding=self.embedding,
+        ).upsert_from_discovery_result(
             company_name=candidate.title,
             website_url=candidate.url,
             contact_email=candidate.contact_email,

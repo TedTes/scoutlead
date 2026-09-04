@@ -63,6 +63,9 @@ def _campaign_service(
         bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
         zerobounce_api_key=services.settings.zerobounce_api_key,
         zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
+        embedding=services.embedding,
+        semantic_cache_min_score=services.settings.semantic_cache_min_score,
+        semantic_cache_min_results=services.settings.semantic_cache_min_results,
         timeout_seconds=services.settings.request_timeout_seconds,
     )
 
