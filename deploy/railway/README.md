@@ -29,11 +29,12 @@ python scripts/start_railway_service.py
 Web:
 
 ```sh
-npm run start
+node server.mjs
 ```
 
-`npm run start` runs `node server.mjs`, a dependency-free static file server that serves
-`dist/` with SPA fallback. It replaced `vite preview` because `vite preview` is a dev-oriented
+`server.mjs` is a dependency-free static file server that serves `dist/` with SPA fallback.
+It's invoked directly (not via `npm run start`) because Railway's runtime container does not
+include `npm`, only `node`. It replaced `vite preview` because `vite preview` is a dev-oriented
 server not intended for production hosting.
 
 The backend startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it
