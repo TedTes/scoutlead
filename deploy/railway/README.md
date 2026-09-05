@@ -29,8 +29,12 @@ python scripts/start_railway_service.py
 Web:
 
 ```sh
-npm run preview -- --host 0.0.0.0 --port ${PORT:-4173}
+npm run start
 ```
+
+`npm run start` runs `node server.mjs`, a dependency-free static file server that serves
+`dist/` with SPA fallback. It replaced `vite preview` because `vite preview` is a dev-oriented
+server not intended for production hosting.
 
 The backend startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it
 falls back to Railway's `RAILWAY_SERVICE_NAME`; service names containing `worker` run the worker,
