@@ -34,11 +34,17 @@ class GmailConnectionStatus(BaseModel):
 
 
 class GmailOAuthService:
-    def __init__(self, *, session: Session, settings: Settings) -> None:
+    def __init__(
+        self,
+        *,
+        session: Session,
+        settings: Settings,
+        workspace_id: str | None = None,
+    ) -> None:
         self.session = session
         self.settings = settings
         self.connections = EmailConnectionRepository(session)
-        self.products = ProductRepository(session)
+        self.products = ProductRepository(session, workspace_id=workspace_id)
 
     def status(self, product_id: str) -> GmailConnectionStatus:
         self.products.get(product_id)

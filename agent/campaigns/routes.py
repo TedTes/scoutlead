@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 
 from agent_runs.schemas import AgentRunCreate, AgentRunRead
 from agent_runs.service import AgentRunService
-from app.dependencies import AppServices, DbSession, get_services
+from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary, CampaignUpdate
@@ -15,7 +15,11 @@ from shared.errors import ConflictError
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
-def _service(session: DbSession, services: Annotated[AppServices, Depends(get_services)]) -> CampaignService:
+def _service(
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+) -> CampaignService:
     return CampaignService(
         session=session,
         llm=services.llm,
@@ -43,6 +47,7 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         semantic_cache_min_score=services.settings.semantic_cache_min_score,
         semantic_cache_min_results=services.settings.semantic_cache_min_results,
         timeout_seconds=services.settings.request_timeout_seconds,
+        workspace_id=auth.workspace_id,
     )
 
 
@@ -51,16 +56,18 @@ def create_campaign(
     campaign: CampaignCreate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).create(campaign)
+    return _service(session, services, auth).create(campaign)
 
 
 @router.get("", response_model=list[CampaignRead])
 def list_campaigns(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).list()
+    return _service(session, services, auth).list()
 
 
 @router.get("/{campaign_id}", response_model=CampaignRead)
@@ -68,8 +75,9 @@ def get_campaign(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).get(campaign_id)
+    return _service(session, services, auth).get(campaign_id)
 
 
 @router.patch("/{campaign_id}", response_model=CampaignRead)
@@ -78,12 +86,19 @@ def update_campaign(
     update: CampaignUpdate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).update(campaign_id, update)
+    return _service(session, services, auth).update(campaign_id, update)
 
 
 @router.get("/{campaign_id}/sources", response_model=list[CampaignSourceRead])
-def list_campaign_sources(campaign_id: str, session: DbSession):
+def list_campaign_sources(
+    campaign_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(campaign_id)
     return CampaignSourceRepository(session).list_by_campaign(campaign_id)
 
 
@@ -92,8 +107,9 @@ def delete_campaign(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    _service(session, services).delete(campaign_id)
+    _service(session, services, auth).delete(campaign_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -102,8 +118,9 @@ def pause_campaign(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).pause(campaign_id)
+    return _service(session, services, auth).pause(campaign_id)
 
 
 @router.post("/{campaign_id}/resume", response_model=CampaignRead)
@@ -111,8 +128,9 @@ def resume_campaign(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).resume(campaign_id)
+    return _service(session, services, auth).resume(campaign_id)
 
 
 @router.post("/{campaign_id}/run", response_model=CampaignRunSummary)
@@ -120,8 +138,9 @@ def run_campaign(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    service = _service(session, services)
+    service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(campaign_id))
     agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign_id))
     return service.run_campaign(campaign_id, agent_run_id=agent_run.id)
@@ -132,8 +151,9 @@ def enqueue_campaign_run(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    service = _service(session, services)
+    service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(campaign_id))
     return AgentRunService(session).create(AgentRunCreate(campaign_id=campaign_id))
 
@@ -143,8 +163,9 @@ def campaign_preflight(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).preflight(campaign_id)
+    return _service(session, services, auth).preflight(campaign_id)
 
 
 @router.get("/{campaign_id}/metrics", response_model=CampaignMetrics)
@@ -152,8 +173,9 @@ def campaign_metrics(
     campaign_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).metrics(campaign_id)
+    return _service(session, services, auth).metrics(campaign_id)
 
 
 def _assert_preflight_ready(preflight: CampaignPreflightRead) -> None:

@@ -31,15 +31,22 @@ from tools.email import EmailTool
 
 
 class MessageService:
-    def __init__(self, *, session: Session, email: EmailTool, llm: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        session: Session,
+        email: EmailTool,
+        llm: LLMClient | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
         self.session = session
         self.email = email.bind_session(session)
         self.llm = llm
-        self.products = ProductRepository(session)
-        self.campaigns = CampaignRepository(session)
-        self.leads = LeadRepository(session)
-        self.messages = MessageRepository(session)
-        self.conversations = ConversationRepository(session)
+        self.products = ProductRepository(session, workspace_id=workspace_id)
+        self.campaigns = CampaignRepository(session, workspace_id=workspace_id)
+        self.leads = LeadRepository(session, workspace_id=workspace_id)
+        self.messages = MessageRepository(session, workspace_id=workspace_id)
+        self.conversations = ConversationRepository(session, workspace_id=workspace_id)
 
     def create_outreach_draft_for_lead(self, lead_id: str) -> MessageRead:
         if self.llm is None:

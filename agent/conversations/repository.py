@@ -10,17 +10,20 @@ from conversations.schemas import (
     ResponseClassification,
     ResponseIntent,
 )
-from db.models import ConversationEventModel, ConversationModel
+from db.models import ConversationEventModel, ConversationModel, ProductModel
 from shared.errors import NotFoundError
 from shared.utils import new_id, utcnow
 
 
 class ConversationRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, workspace_id: str | None = None) -> None:
         self.session = session
+        self.workspace_id = workspace_id
 
     def get(self, conversation_id: str) -> ConversationModel:
-        model = self.session.get(ConversationModel, conversation_id)
+        model = self.session.scalar(
+            self._scope(select(ConversationModel).where(ConversationModel.id == conversation_id))
+        )
         if model is None:
             raise NotFoundError("conversation not found", {"conversation_id": conversation_id})
         return model
@@ -31,15 +34,18 @@ class ConversationRepository:
             .where(ConversationModel.campaign_id == campaign_id)
             .order_by(ConversationModel.created_at)
         )
+        statement = self._scope(statement)
         return list(self.session.scalars(statement))
 
     def get_or_create(
         self, campaign_id: str, product_id: str, lead_id: str
     ) -> ConversationModel:
+        self._assert_product_in_scope(product_id)
         statement = select(ConversationModel).where(
             ConversationModel.campaign_id == campaign_id,
             ConversationModel.lead_id == lead_id,
         )
+        statement = self._scope(statement)
         existing = self.session.scalar(statement)
         if existing:
             return existing
@@ -116,6 +122,24 @@ class ConversationRepository:
         self.session.commit()
         self.session.refresh(conversation)
         return conversation
+
+    def _scope(self, statement):
+        if not self.workspace_id:
+            return statement
+        return statement.join(ProductModel, ConversationModel.product_id == ProductModel.id).where(
+            ProductModel.workspace_id == self.workspace_id
+        )
+
+    def _assert_product_in_scope(self, product_id: str) -> None:
+        if not self.workspace_id:
+            return
+        exists = self.session.scalar(
+            select(ProductModel.id)
+            .where(ProductModel.id == product_id)
+            .where(ProductModel.workspace_id == self.workspace_id)
+        )
+        if not exists:
+            raise NotFoundError("product not found", {"product_id": product_id})
 
     @staticmethod
     def _status_for_classification(classification: ResponseClassification) -> ConversationStatus:

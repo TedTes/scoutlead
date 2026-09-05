@@ -3,6 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from types import SimpleNamespace
 import pytest
 
+from auth.context import AuthContext
 from db.session import create_database
 from products.routes import start_product_discovery
 from products.schemas import (
@@ -617,6 +618,7 @@ def test_product_discovery_rejects_broad_plan_before_persisting_profile() -> Non
                 ProductDiscoveryStart(max_results=10),
                 session,
                 SimpleNamespace(llm=BroadDiscoveryPlanLLM(), browser=None, search=None),
+                AuthContext(),
             )
 
         unchanged = service.get(product.id)

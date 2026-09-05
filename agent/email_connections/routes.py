@@ -3,8 +3,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
-from app.dependencies import AppServices, DbSession, get_services
+from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from email_connections.service import GmailAuthorizationUrl, GmailConnectionStatus, GmailOAuthService
+from products.repository import ProductRepository
 from shared.errors import SoutleadError
 
 router = APIRouter(tags=["email-connections"])
@@ -17,15 +18,26 @@ def _service(
     return GmailOAuthService(session=session, settings=services.settings)
 
 
+def _scoped_service(session: DbSession, services: AppServices, auth: CurrentAuth) -> GmailOAuthService:
+    return GmailOAuthService(
+        session=session,
+        settings=services.settings,
+        workspace_id=auth.workspace_id,
+    )
+
+
 @router.get(
     "/products/{product_id}/email/gmail/status",
     response_model=GmailConnectionStatus,
 )
 def gmail_status(
     product_id: str,
-    service: Annotated[GmailOAuthService, Depends(_service)],
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return service.status(product_id)
+    ProductRepository(session, workspace_id=auth.workspace_id).get(product_id)
+    return _scoped_service(session, services, auth).status(product_id)
 
 
 @router.get(
@@ -34,9 +46,12 @@ def gmail_status(
 )
 def gmail_connect(
     product_id: str,
-    service: Annotated[GmailOAuthService, Depends(_service)],
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return service.authorization_url(product_id)
+    ProductRepository(session, workspace_id=auth.workspace_id).get(product_id)
+    return _scoped_service(session, services, auth).authorization_url(product_id)
 
 
 @router.delete(
@@ -45,9 +60,12 @@ def gmail_connect(
 )
 def gmail_disconnect(
     product_id: str,
-    service: Annotated[GmailOAuthService, Depends(_service)],
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return service.disconnect(product_id)
+    ProductRepository(session, workspace_id=auth.workspace_id).get(product_id)
+    return _scoped_service(session, services, auth).disconnect(product_id)
 
 
 @router.get("/email/gmail/callback", response_class=HTMLResponse)

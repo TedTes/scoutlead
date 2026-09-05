@@ -12,11 +12,17 @@ from workflows.qualification import enforce_qualification_boundary
 
 
 class LeadQualificationService:
-    def __init__(self, *, session: Session, llm: LLMClient) -> None:
+    def __init__(
+        self,
+        *,
+        session: Session,
+        llm: LLMClient,
+        workspace_id: str | None = None,
+    ) -> None:
         self.session = session
         self.llm = llm
-        self.leads = LeadRepository(session)
-        self.products = ProductRepository(session)
+        self.leads = LeadRepository(session, workspace_id=workspace_id)
+        self.products = ProductRepository(session, workspace_id=workspace_id)
 
     def qualify(self, lead_id: str) -> LeadRead:
         lead = LeadRead.model_validate(self.leads.get(lead_id))

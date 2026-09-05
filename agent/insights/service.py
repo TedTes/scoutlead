@@ -21,12 +21,18 @@ from shared.errors import NotFoundError
 
 
 class CampaignInsightService:
-    def __init__(self, *, session: Session, llm: LLMClient) -> None:
-        self.products = ProductRepository(session)
-        self.campaigns = CampaignRepository(session)
-        self.leads = LeadRepository(session)
-        self.messages = MessageRepository(session)
-        self.conversations = ConversationRepository(session)
+    def __init__(
+        self,
+        *,
+        session: Session,
+        llm: LLMClient,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.products = ProductRepository(session, workspace_id=workspace_id)
+        self.campaigns = CampaignRepository(session, workspace_id=workspace_id)
+        self.leads = LeadRepository(session, workspace_id=workspace_id)
+        self.messages = MessageRepository(session, workspace_id=workspace_id)
+        self.conversations = ConversationRepository(session, workspace_id=workspace_id)
         self.insights = CampaignInsightRepository(session)
         self.synthesizer = InsightSynthesizer(llm)
 

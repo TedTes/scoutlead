@@ -42,8 +42,9 @@ class ProductService:
         llm: LLMClient | None = None,
         browser: DirectHttpBrowserTool | None = None,
         search: SearchTool | None = None,
+        workspace_id: str | None = None,
     ) -> None:
-        self.products = ProductRepository(session)
+        self.products = ProductRepository(session, workspace_id=workspace_id)
         self.llm = llm
         self.browser = browser
         self.search = search

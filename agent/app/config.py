@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     auto_create_tables: bool = True
     api_auth_token: str | None = None
     cors_origins: str | list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    require_user_auth: bool = False
+    clerk_secret_key: str | None = None
+    clerk_jwt_issuer: str | None = None
+    clerk_jwks_url: str | None = None
 
     search_api_endpoint: str | None = None
     search_api_key: str | None = None

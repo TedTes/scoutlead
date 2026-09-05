@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from agents.embeddings import EmbeddingClient
 from campaigns.schemas import LeadSeedInput
 from canonical.repository import CanonicalRepository
-from db.models import DiscoveryCandidateModel, LeadModel
+from db.models import DiscoveryCandidateModel, LeadModel, ProductModel
 from leads.policy import can_shortlist_lead, normalize_qualification_result
 from leads.schemas import (
     ContactPolicyStatus,
@@ -27,11 +27,19 @@ from suppressions.repository import ContactSuppressionRepository, is_blocked_con
 
 
 class LeadRepository:
-    def __init__(self, session: Session, *, embedding: EmbeddingClient | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        embedding: EmbeddingClient | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
         self.session = session
         self.embedding = embedding
+        self.workspace_id = workspace_id
 
     def create_from_seed(self, campaign_id: str, product_id: str, seed: LeadSeedInput) -> LeadModel:
+        self._assert_product_in_scope(product_id)
         existing = self.find_existing(campaign_id, seed.company_name, seed.website_url)
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
@@ -74,6 +82,7 @@ class LeadRepository:
     def create_from_search_result(
         self, campaign_id: str, product_id: str, result: dict[str, Any]
     ) -> LeadModel:
+        self._assert_product_in_scope(product_id)
         company_name = result.get("title") or result.get("company_name")
         if not company_name:
             raise ValueError("search result is missing title/company_name")
@@ -117,6 +126,7 @@ class LeadRepository:
         return model
 
     def create_from_candidate(self, candidate: DiscoveryCandidateModel) -> LeadModel:
+        self._assert_product_in_scope(candidate.product_id)
         existing = self.find_existing(candidate.campaign_id, candidate.title, candidate.url)
         if existing:
             return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
@@ -173,10 +183,11 @@ class LeadRepository:
         statement = (
             select(LeadModel).where(LeadModel.campaign_id == campaign_id).order_by(LeadModel.created_at)
         )
+        statement = self._scope(statement)
         return list(self.session.scalars(statement))
 
     def get(self, lead_id: str) -> LeadModel:
-        model = self.session.get(LeadModel, lead_id)
+        model = self.session.scalar(self._scope(select(LeadModel).where(LeadModel.id == lead_id)))
         if model is None:
             raise NotFoundError("lead not found", {"lead_id": lead_id})
         return model
@@ -301,3 +312,21 @@ class LeadRepository:
             if normalized_url and lead.website_url == normalized_url:
                 return lead
         return None
+
+    def _scope(self, statement):
+        if not self.workspace_id:
+            return statement
+        return statement.join(ProductModel, LeadModel.product_id == ProductModel.id).where(
+            ProductModel.workspace_id == self.workspace_id
+        )
+
+    def _assert_product_in_scope(self, product_id: str) -> None:
+        if not self.workspace_id:
+            return
+        exists = self.session.scalar(
+            select(ProductModel.id)
+            .where(ProductModel.id == product_id)
+            .where(ProductModel.workspace_id == self.workspace_id)
+        )
+        if not exists:
+            raise NotFoundError("product not found", {"product_id": product_id})

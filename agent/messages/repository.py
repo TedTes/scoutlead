@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import MessageModel
+from db.models import MessageModel, ProductModel
 from messages.schemas import MessageApproval, MessageStatus, MessageUpdate, OutreachDraft
 from messages.state import assert_message_transition
 from shared.errors import ConflictError, NotFoundError
@@ -11,12 +11,14 @@ from shared.utils import new_id, utcnow
 
 
 class MessageRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, workspace_id: str | None = None) -> None:
         self.session = session
+        self.workspace_id = workspace_id
 
     def create_draft(
         self, campaign_id: str, product_id: str, lead_id: str, draft: OutreachDraft
     ) -> MessageModel:
+        self._assert_product_in_scope(product_id)
         data = draft.model_dump(mode="json")
         model = MessageModel(
             id=new_id("message"),
@@ -32,7 +34,7 @@ class MessageRepository:
         return model
 
     def get(self, message_id: str) -> MessageModel:
-        model = self.session.get(MessageModel, message_id)
+        model = self.session.scalar(self._scope(select(MessageModel).where(MessageModel.id == message_id)))
         if model is None:
             raise NotFoundError("message not found", {"message_id": message_id})
         return model
@@ -43,14 +45,17 @@ class MessageRepository:
             .where(MessageModel.campaign_id == campaign_id)
             .order_by(MessageModel.created_at)
         )
+        statement = self._scope(statement)
         return list(self.session.scalars(statement))
 
     def list_by_lead(self, lead_id: str) -> list[MessageModel]:
         statement = select(MessageModel).where(MessageModel.lead_id == lead_id).order_by(MessageModel.created_at.desc())
+        statement = self._scope(statement)
         return list(self.session.scalars(statement))
 
     def latest_for_lead(self, lead_id: str, channel: str | None = None) -> MessageModel | None:
         statement = select(MessageModel).where(MessageModel.lead_id == lead_id)
+        statement = self._scope(statement)
         if channel is not None:
             statement = statement.where(MessageModel.channel == channel)
         statement = statement.order_by(MessageModel.created_at.desc())
@@ -71,6 +76,24 @@ class MessageRepository:
         self.session.commit()
         self.session.refresh(model)
         return model
+
+    def _scope(self, statement):
+        if not self.workspace_id:
+            return statement
+        return statement.join(ProductModel, MessageModel.product_id == ProductModel.id).where(
+            ProductModel.workspace_id == self.workspace_id
+        )
+
+    def _assert_product_in_scope(self, product_id: str) -> None:
+        if not self.workspace_id:
+            return
+        exists = self.session.scalar(
+            select(ProductModel.id)
+            .where(ProductModel.id == product_id)
+            .where(ProductModel.workspace_id == self.workspace_id)
+        )
+        if not exists:
+            raise NotFoundError("product not found", {"product_id": product_id})
 
     def update_draft(self, message_id: str, update: MessageUpdate) -> MessageModel:
         model = self.get(message_id)

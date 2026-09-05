@@ -175,6 +175,7 @@ class CampaignService:
         semantic_cache_min_score: float = 0.78,
         semantic_cache_min_results: int = 5,
         timeout_seconds: float = 20.0,
+        workspace_id: str | None = None,
     ) -> None:
         self.session = session
         self.llm = llm
@@ -202,16 +203,16 @@ class CampaignService:
         self.zerobounce_api_key = zerobounce_api_key
         self.zerobounce_api_endpoint = zerobounce_api_endpoint
         self.timeout_seconds = timeout_seconds
-        self.products = ProductRepository(session)
-        self.campaigns = CampaignRepository(session)
+        self.products = ProductRepository(session, workspace_id=workspace_id)
+        self.campaigns = CampaignRepository(session, workspace_id=workspace_id)
         self.campaign_sources = CampaignSourceRepository(session)
         self.agent_runs = AgentRunRepository(session)
         self.icp_presets = ICPPresetService()
         self.source_presets = SourcePresetService()
         self.discovery_candidates = DiscoveryCandidateRepository(session)
-        self.leads = LeadRepository(session, embedding=self.embedding)
-        self.messages = MessageRepository(session)
-        self.conversations = ConversationRepository(session)
+        self.leads = LeadRepository(session, embedding=self.embedding, workspace_id=workspace_id)
+        self.messages = MessageRepository(session, workspace_id=workspace_id)
+        self.conversations = ConversationRepository(session, workspace_id=workspace_id)
         self.memory = MemoryRepository(session)
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:

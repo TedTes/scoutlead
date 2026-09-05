@@ -18,6 +18,7 @@ from db.models import (
     LeadModel,
     LearningSummaryModel,
     MessageModel,
+    ProductModel,
     QueueJobModel,
     ToolCallModel,
 )
@@ -26,13 +27,15 @@ from shared.utils import new_id, utcnow
 
 
 class CampaignRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, workspace_id: str | None = None) -> None:
         self.session = session
+        self.workspace_id = workspace_id
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:
         data = campaign.model_dump(mode="json")
         data.pop("source_input", None)
         data.pop("source_inputs", None)
+        self._assert_product_in_scope(data["product_id"])
         model = CampaignModel(
             id=new_id("campaign"),
             name=data.pop("name") or f"Campaign {utcnow().date().isoformat()}",
@@ -46,7 +49,8 @@ class CampaignRepository:
         return model
 
     def list(self) -> list[CampaignModel]:
-        return list(self.session.scalars(select(CampaignModel).order_by(CampaignModel.created_at.desc())))
+        statement = self._scope(select(CampaignModel).order_by(CampaignModel.created_at.desc()))
+        return list(self.session.scalars(statement))
 
     def list_by_product(self, product_id: str) -> list[CampaignModel]:
         statement = (
@@ -54,10 +58,11 @@ class CampaignRepository:
             .where(CampaignModel.product_id == product_id)
             .order_by(CampaignModel.created_at.desc())
         )
+        statement = self._scope(statement)
         return list(self.session.scalars(statement))
 
     def get(self, campaign_id: str) -> CampaignModel:
-        model = self.session.get(CampaignModel, campaign_id)
+        model = self.session.scalar(self._scope(select(CampaignModel).where(CampaignModel.id == campaign_id)))
         if model is None:
             raise NotFoundError("campaign not found", {"campaign_id": campaign_id})
         return model
@@ -99,6 +104,24 @@ class CampaignRepository:
         self.session.commit()
         self.session.refresh(model)
         return model
+
+    def _scope(self, statement):
+        if not self.workspace_id:
+            return statement
+        return statement.join(ProductModel, CampaignModel.product_id == ProductModel.id).where(
+            ProductModel.workspace_id == self.workspace_id
+        )
+
+    def _assert_product_in_scope(self, product_id: str) -> None:
+        if not self.workspace_id:
+            return
+        exists = self.session.scalar(
+            select(ProductModel.id)
+            .where(ProductModel.id == product_id)
+            .where(ProductModel.workspace_id == self.workspace_id)
+        )
+        if not exists:
+            raise NotFoundError("product not found", {"product_id": product_id})
 
     def update_status(
         self,

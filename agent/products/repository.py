@@ -30,8 +30,9 @@ from shared.utils import new_id, utcnow
 
 
 class ProductRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, workspace_id: str | None = None) -> None:
         self.session = session
+        self.workspace_id = workspace_id
 
     def create(self, product: ProductCreate) -> ProductModel:
         data = product.model_dump(mode="python")
@@ -57,27 +58,29 @@ class ProductRepository:
                         "source_url": existing.source_url,
                     },
                 )
-        model = ProductModel(id=new_id("product"), **data)
+        model = ProductModel(id=new_id("product"), workspace_id=self.workspace_id, **data)
         self.session.add(model)
         self.session.commit()
         self.session.refresh(model)
         return model
 
     def list(self) -> list[ProductModel]:
-        return list(self.session.scalars(select(ProductModel).order_by(ProductModel.created_at.desc())))
+        statement = self._scope(select(ProductModel).order_by(ProductModel.created_at.desc()))
+        return list(self.session.scalars(statement))
 
     def get(self, product_id: str) -> ProductModel:
         model = self.session.get(ProductModel, product_id)
-        if model is None:
+        if model is None or (self.workspace_id and model.workspace_id != self.workspace_id):
             raise NotFoundError("product not found", {"product_id": product_id})
         return model
 
     def find_by_source_fingerprint(self, source_fingerprint: str | None) -> ProductModel | None:
         if not source_fingerprint:
             return None
-        return self.session.scalar(
+        statement = self._scope(
             select(ProductModel).where(ProductModel.source_fingerprint == source_fingerprint)
         )
+        return self.session.scalar(statement)
 
     def find_active_by_product_name(self, product_name: str | None) -> ProductModel | None:
         if not product_name:
@@ -85,11 +88,13 @@ class ProductRepository:
         normalized_name = product_name.strip().lower()
         results = list(
             self.session.scalars(
-                select(ProductModel)
-                .where(func.lower(func.trim(ProductModel.product_name)) == normalized_name)
-                .where(ProductModel.archived_at.is_(None))
-                .order_by(ProductModel.created_at.desc())
-                .limit(2)
+                self._scope(
+                    select(ProductModel)
+                    .where(func.lower(func.trim(ProductModel.product_name)) == normalized_name)
+                    .where(ProductModel.archived_at.is_(None))
+                    .order_by(ProductModel.created_at.desc())
+                    .limit(2)
+                )
             )
         )
         return results[0] if len(results) == 1 else None
@@ -110,6 +115,7 @@ class ProductRepository:
             .order_by(ProductModel.created_at.desc())
             .limit(1)
         )
+        statement = self._scope(statement)
         if exclude_product_id:
             statement = statement.where(ProductModel.id != exclude_product_id)
         return self.session.scalar(statement)
@@ -284,6 +290,11 @@ class ProductRepository:
         )
         self.session.delete(model)
         self.session.commit()
+
+    def _scope(self, statement):
+        if not self.workspace_id:
+            return statement
+        return statement.where(ProductModel.workspace_id == self.workspace_id)
 
     @staticmethod
     def _ensure_criterion_ids(data: dict) -> None:

@@ -21,13 +21,19 @@ from webhooks.schemas import WebhookDeliveryCreate, WebhookDeliveryRead, Webhook
 
 
 class WebhookDeliveryService:
-    def __init__(self, session: Session, *, timeout_seconds: float = 20.0) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        timeout_seconds: float = 20.0,
+        workspace_id: str | None = None,
+    ) -> None:
         self.session = session
         self.timeout_seconds = timeout_seconds
-        self.campaigns = CampaignRepository(session)
-        self.products = ProductRepository(session)
-        self.leads = LeadRepository(session)
-        self.messages = MessageRepository(session)
+        self.campaigns = CampaignRepository(session, workspace_id=workspace_id)
+        self.products = ProductRepository(session, workspace_id=workspace_id)
+        self.leads = LeadRepository(session, workspace_id=workspace_id)
+        self.messages = MessageRepository(session, workspace_id=workspace_id)
 
     def list_by_campaign(self, campaign_id: str) -> list[WebhookDeliveryRead]:
         self.campaigns.get(campaign_id)

@@ -12,6 +12,8 @@ from agents.llm import (
     OpenAIStructuredLLMClient,
     RemoteJsonLLMClient,
 )
+from auth.context import AuthContext
+from auth.repository import AuthRepository
 from db.session import Database
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
@@ -107,3 +109,11 @@ def get_session(services: Annotated[AppServices, Depends(get_services)]) -> Sess
 
 
 DbSession = Annotated[Session, Depends(get_session)]
+
+
+def get_auth_context(request: Request, session: DbSession) -> AuthContext:
+    context = getattr(request.state, "auth_context", AuthContext())
+    return AuthRepository(session).sync_user_workspace(context)
+
+
+CurrentAuth = Annotated[AuthContext, Depends(get_auth_context)]

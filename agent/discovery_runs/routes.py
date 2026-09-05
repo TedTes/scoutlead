@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 
 from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead, CampaignTrace
 from agent_runs.service import AgentRunService
-from app.dependencies import AppServices, DbSession, get_services
+from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.repository import CampaignRepository
@@ -41,7 +41,11 @@ from source_requests.service import SourceRequestService
 router = APIRouter(prefix="/discovery-runs", tags=["discovery-runs"])
 
 
-def _service(session: DbSession, services: Annotated[AppServices, Depends(get_services)]) -> CampaignService:
+def _service(
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+) -> CampaignService:
     return CampaignService(
         session=session,
         llm=services.llm,
@@ -69,6 +73,7 @@ def _service(session: DbSession, services: Annotated[AppServices, Depends(get_se
         semantic_cache_min_score=services.settings.semantic_cache_min_score,
         semantic_cache_min_results=services.settings.semantic_cache_min_results,
         timeout_seconds=services.settings.request_timeout_seconds,
+        workspace_id=auth.workspace_id,
     )
 
 
@@ -77,8 +82,9 @@ def create_discovery_run(
     run: CampaignCreate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).create(run)
+    return _service(session, services, auth).create(run)
 
 
 @router.post("/source-request", response_model=SourceRequestRun)
@@ -86,8 +92,9 @@ def create_source_request(
     request: SourceRequestCreate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _source_request_service(session, services).create(request)
+    return _source_request_service(session, services, auth).create(request)
 
 
 @router.post("/{run_id}/rerun", response_model=SourceRequestRun)
@@ -95,17 +102,19 @@ def rerun_source_request(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _source_request_service(session, services).rerun(run_id)
+    return _source_request_service(session, services, auth).rerun(run_id)
 
 
 def _source_request_service(
     session: DbSession,
     services: AppServices,
+    auth: CurrentAuth,
 ) -> SourceRequestService:
     return SourceRequestService(
-        products=ProductRepository(session),
-        campaigns=_service(session, services),
+        products=ProductRepository(session, workspace_id=auth.workspace_id),
+        campaigns=_service(session, services, auth),
         agent_runs=AgentRunService(session),
         llm=services.llm,
         apify_source_provider_id=services.settings.apify_source_provider_id,
@@ -157,8 +166,9 @@ def _apify_source_is_configured(source: dict) -> bool:
 def list_discovery_runs(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).list()
+    return _service(session, services, auth).list()
 
 
 @router.get("/{run_id}", response_model=CampaignRead)
@@ -166,8 +176,9 @@ def get_discovery_run(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).get(run_id)
+    return _service(session, services, auth).get(run_id)
 
 
 @router.patch("/{run_id}", response_model=CampaignRead)
@@ -176,12 +187,19 @@ def update_discovery_run(
     update: CampaignUpdate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).update(run_id, update)
+    return _service(session, services, auth).update(run_id, update)
 
 
 @router.get("/{run_id}/sources", response_model=list[CampaignSourceRead])
-def list_discovery_run_sources(run_id: str, session: DbSession):
+def list_discovery_run_sources(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
     return CampaignSourceRepository(session).list_by_campaign(run_id)
 
 
@@ -190,8 +208,9 @@ def delete_discovery_run(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    _service(session, services).delete(run_id)
+    _service(session, services, auth).delete(run_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -200,8 +219,9 @@ def pause_discovery_run(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).pause(run_id)
+    return _service(session, services, auth).pause(run_id)
 
 
 @router.post("/{run_id}/resume", response_model=CampaignRead)
@@ -209,8 +229,9 @@ def resume_discovery_run(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).resume(run_id)
+    return _service(session, services, auth).resume(run_id)
 
 
 @router.post("/{run_id}/run", response_model=CampaignRunSummary)
@@ -218,8 +239,9 @@ def run_discovery(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    service = _service(session, services)
+    service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(run_id))
     agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=run_id))
     return service.run_campaign(run_id, agent_run_id=agent_run.id)
@@ -230,8 +252,9 @@ def enqueue_discovery_run(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    service = _service(session, services)
+    service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(run_id))
     return AgentRunService(session).create(AgentRunCreate(campaign_id=run_id))
 
@@ -241,8 +264,9 @@ def discovery_run_preflight(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).preflight(run_id)
+    return _service(session, services, auth).preflight(run_id)
 
 
 @router.get("/{run_id}/metrics", response_model=CampaignMetrics)
@@ -250,30 +274,55 @@ def discovery_run_metrics(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).metrics(run_id)
+    return _service(session, services, auth).metrics(run_id)
 
 
 @router.get("/{run_id}/results", response_model=list[LeadRead])
-def list_discovery_results(run_id: str, session: DbSession):
-    return LeadRepository(session).list_by_campaign(run_id)
+def list_discovery_results(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
+    return LeadRepository(session, workspace_id=auth.workspace_id).list_by_campaign(run_id)
 
 
 @router.post("/{run_id}/results/seeds", response_model=list[LeadRead])
-def add_discovery_seed_results(run_id: str, seeds: list[LeadSeedInput], session: DbSession):
-    run = CampaignRepository(session).get(run_id)
-    leads = LeadRepository(session)
+def add_discovery_seed_results(
+    run_id: str,
+    seeds: list[LeadSeedInput],
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    run = _service(session, services, auth).get(run_id)
+    leads = LeadRepository(session, workspace_id=auth.workspace_id)
     return [leads.create_from_seed(run_id, run.product_id, seed) for seed in seeds]
 
 
 @router.get("/{run_id}/discovery-candidates", response_model=list[DiscoveryCandidateRead])
-def list_discovery_candidates(run_id: str, session: DbSession):
+def list_discovery_candidates(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
     return DiscoveryCandidateRepository(session).list_by_campaign(run_id)
 
 
 @router.get("/{run_id}/messages", response_model=list[MessageRead])
-def list_discovery_messages(run_id: str, session: DbSession):
-    return MessageRepository(session).list_by_campaign(run_id)
+def list_discovery_messages(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
+    return MessageRepository(session, workspace_id=auth.workspace_id).list_by_campaign(run_id)
 
 
 @router.post("/{run_id}/draft-shortlist", response_model=list[MessageRead])
@@ -281,19 +330,36 @@ def draft_discovery_shortlist(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return MessageService(session=session, email=services.email, llm=services.llm).create_outreach_drafts_for_run(
-        run_id
-    )
+    _service(session, services, auth).get(run_id)
+    return MessageService(
+        session=session,
+        email=services.email,
+        llm=services.llm,
+        workspace_id=auth.workspace_id,
+    ).create_outreach_drafts_for_run(run_id)
 
 
 @router.get("/{run_id}/agent-runs", response_model=list[AgentRunRead])
-def list_discovery_agent_runs(run_id: str, session: DbSession):
+def list_discovery_agent_runs(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
     return AgentRunService(session).list_by_campaign(run_id)
 
 
 @router.get("/{run_id}/trace", response_model=CampaignTrace)
-def get_discovery_trace(run_id: str, session: DbSession):
+def get_discovery_trace(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
     return AgentRunService(session).trace_by_campaign(run_id)
 
 
@@ -302,8 +368,14 @@ def get_discovery_insights(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return CampaignInsightService(session=session, llm=services.llm).latest(run_id)
+    _service(session, services, auth).get(run_id)
+    return CampaignInsightService(
+        session=session,
+        llm=services.llm,
+        workspace_id=auth.workspace_id,
+    ).latest(run_id)
 
 
 @router.post("/{run_id}/insights", response_model=CampaignInsightRead)
@@ -311,8 +383,14 @@ def generate_discovery_insights(
     run_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return CampaignInsightService(session=session, llm=services.llm).generate(run_id)
+    _service(session, services, auth).get(run_id)
+    return CampaignInsightService(
+        session=session,
+        llm=services.llm,
+        workspace_id=auth.workspace_id,
+    ).generate(run_id)
 
 
 def _assert_preflight_ready(preflight: CampaignPreflightRead) -> None:

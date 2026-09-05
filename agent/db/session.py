@@ -69,6 +69,7 @@ def create_database(engine: Engine) -> None:
     _ensure_lead_verification_columns(engine)
     _ensure_canonical_contact_columns(engine)
     _ensure_business_semantic_columns(engine)
+    _ensure_product_workspace_columns(engine)
 
 
 def _ensure_pgvector_extension(engine: Engine) -> None:
@@ -94,7 +95,7 @@ def _ensure_product_source_columns(engine: Engine) -> None:
         "source_evidence": source_evidence_type,
     }
 
-    existing_indexes = {index["name"] for index in inspector.get_indexes("products")}
+    existing_indexes = {index["name"]: index for index in inspector.get_indexes("products")}
     with engine.begin() as connection:
         for column_name, column_type in columns.items():
             if column_name not in existing_columns:
@@ -231,5 +232,52 @@ def _ensure_business_semantic_columns(engine: Engine) -> None:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_businesses_market_key "
                     "ON businesses (market_key)"
+                )
+            )
+
+
+def _ensure_product_workspace_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("products") or not inspector.has_table("workspaces"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("products")}
+    existing_indexes = {index["name"]: index for index in inspector.get_indexes("products")}
+    existing_uniques = {constraint["name"] for constraint in inspector.get_unique_constraints("products")}
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO workspaces (id, name, clerk_organization_id, created_at, updated_at)
+                SELECT 'workspace_default', 'Default workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_default')
+                """
+            )
+        )
+        if "workspace_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE products ADD COLUMN workspace_id VARCHAR(255)"))
+        connection.execute(
+            text("UPDATE products SET workspace_id = 'workspace_default' WHERE workspace_id IS NULL")
+        )
+        source_index = existing_indexes.get("ix_products_source_fingerprint")
+        if source_index and source_index.get("unique"):
+            connection.execute(text("DROP INDEX IF EXISTS ix_products_source_fingerprint"))
+            existing_indexes.pop("ix_products_source_fingerprint", None)
+        if "ix_products_source_fingerprint" not in existing_indexes:
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_products_source_fingerprint ON products (source_fingerprint)")
+            )
+        if "ix_products_workspace_id" not in existing_indexes:
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_products_workspace_id ON products (workspace_id)")
+            )
+        if (
+            "uq_products_workspace_source_fingerprint" not in existing_uniques
+            and "ix_products_workspace_source_fingerprint_unique" not in existing_indexes
+        ):
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_products_workspace_source_fingerprint_unique "
+                    "ON products (workspace_id, source_fingerprint)"
                 )
             )

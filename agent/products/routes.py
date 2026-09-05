@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 
 from agent_runs.schemas import AgentRunCreate
 from agent_runs.service import AgentRunService
-from app.dependencies import AppServices, DbSession, get_services
+from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaigns.schemas import CampaignCreate, CampaignRunSummary
 from campaigns.service import CampaignService
 from products.schemas import (
@@ -27,18 +27,21 @@ router = APIRouter(prefix="/products", tags=["products"])
 def _service(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ) -> ProductService:
     return ProductService(
         session,
         llm=services.llm,
         browser=services.browser,
         search=services.search,
+        workspace_id=auth.workspace_id,
     )
 
 
 def _campaign_service(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ) -> CampaignService:
     return CampaignService(
         session=session,
@@ -67,6 +70,7 @@ def _campaign_service(
         semantic_cache_min_score=services.settings.semantic_cache_min_score,
         semantic_cache_min_results=services.settings.semantic_cache_min_results,
         timeout_seconds=services.settings.request_timeout_seconds,
+        workspace_id=auth.workspace_id,
     )
 
 
@@ -75,8 +79,9 @@ def create_product(
     product: ProductCreate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).create(product)
+    return _service(session, services, auth).create(product)
 
 
 @router.post("/from-description", response_model=ProductRead)
@@ -84,8 +89,9 @@ def create_product_from_description(
     request: ProductDescriptionCreate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).create_from_description(request)
+    return _service(session, services, auth).create_from_description(request)
 
 
 @router.post("/{product_id}/discover", response_model=CampaignRunSummary)
@@ -94,12 +100,13 @@ def start_product_discovery(
     request: ProductDiscoveryStart,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    product_service = _service(session, services)
+    product_service = _service(session, services, auth)
     plan = product_service.plan_discovery(product_id)
     validate_google_places_query(plan.discovery_query)
     product = ProductRead.model_validate(product_service.apply_discovery_plan(product_id, plan))
-    campaign_service = _campaign_service(session, services)
+    campaign_service = _campaign_service(session, services, auth)
     region_code = normalize_places_region_code(plan.region_code) or normalize_places_region_code(
         plan.target_geography
     )
@@ -134,8 +141,9 @@ def start_product_discovery(
 def list_products(
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).list()
+    return _service(session, services, auth).list()
 
 
 @router.get("/{product_id}", response_model=ProductRead)
@@ -143,8 +151,9 @@ def get_product(
     product_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).get(product_id)
+    return _service(session, services, auth).get(product_id)
 
 
 @router.patch("/{product_id}", response_model=ProductRead)
@@ -153,8 +162,9 @@ def update_product(
     update: ProductUpdate,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    return _service(session, services).update(product_id, update)
+    return _service(session, services, auth).update(product_id, update)
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -162,6 +172,7 @@ def delete_product(
     product_id: str,
     session: DbSession,
     services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
 ):
-    _service(session, services).delete(product_id)
+    _service(session, services, auth).delete(product_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
