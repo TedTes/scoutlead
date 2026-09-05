@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClient } from "../api/client";
-import { getApiBaseUrl } from "../config/env";
+import { getApiBaseUrl, getStaticApiToken } from "../config/env";
 import type {
   AgentRunDetail,
   DiscoveryRun,
@@ -89,6 +89,11 @@ const emptySnapshot: DiscoverySnapshot = {
 
 const activeSourcesStorageKey = "scoutlead.activeSourceIds";
 
+type AppDataProviderProps = {
+  children: React.ReactNode;
+  getAuthToken?: () => Promise<string | null>;
+};
+
 function readStoredActiveSourceIds() {
   try {
     const parsed = JSON.parse(localStorage.getItem(activeSourcesStorageKey) || "[]");
@@ -124,7 +129,7 @@ async function getTraceWithFallback(api: ApiClient, runId: string): Promise<Disc
   }
 }
 
-export function AppDataProvider({ children }: { children: React.ReactNode }) {
+export function AppDataProvider({ children, getAuthToken }: AppDataProviderProps) {
   const [apiHealthy, setApiHealthy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -144,7 +149,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [activeSourceIds, setActiveSourceIdsState] = useState<SourceRequestSource[]>(readStoredActiveSourceIds);
 
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
-  const api = useMemo(() => new ApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
+  const api = useMemo(
+    () => new ApiClient({ baseUrl: apiBaseUrl, token: getStaticApiToken(), getToken: getAuthToken }),
+    [apiBaseUrl, getAuthToken],
+  );
 
   const selectedProduct = products.find((product) => product.id === selectedProductIdState);
   const productDiscoveryRuns = discoveryRuns.filter((run) => run.product_id === selectedProductIdState);

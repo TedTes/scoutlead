@@ -10,7 +10,7 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { useEffect, useRef, useState, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
@@ -19,17 +19,22 @@ import type { DiscoveryResult, DiscoveryRun, Product } from "../types/domain";
 import type { Screen } from "../types/navigation";
 import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
 
-export function App() {
+type AppProps = {
+  getAuthToken?: () => Promise<string | null>;
+  accountSlot?: ReactNode;
+};
+
+export function App({ getAuthToken, accountSlot }: AppProps = {}) {
   return (
     <ToastProvider>
-      <AppDataProvider>
-        <AppShell />
+      <AppDataProvider getAuthToken={getAuthToken}>
+        <AppShell accountSlot={accountSlot} />
       </AppDataProvider>
     </ToastProvider>
   );
 }
 
-function AppShell() {
+function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [activeScreen, setActiveScreen] = useState<Screen>("overview");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
@@ -245,13 +250,7 @@ function AppShell() {
             onSelectProduct={selectProduct}
           />
         </div>
-        <button
-          aria-label="Account"
-          className="mobile-icon-button mobile-avatar-button"
-          type="button"
-        >
-          <User size={17} />
-        </button>
+        <AccountControl accountSlot={accountSlot} placement="mobile" />
       </header>
 
       {mobileRailOpen ? (
@@ -349,9 +348,7 @@ function AppShell() {
               onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
               onSelectProduct={selectProduct}
             />
-            <button className="top-avatar" type="button" aria-label="Account">
-              <User size={16} />
-            </button>
+            <AccountControl accountSlot={accountSlot} placement="desktop" />
           </div>
         </header>
         {error && <div className="app-banner">{error}</div>}
@@ -416,6 +413,26 @@ function AppShell() {
         />
       ) : null}
     </div>
+  );
+}
+
+function AccountControl({ accountSlot, placement }: { accountSlot?: ReactNode; placement: "desktop" | "mobile" }) {
+  if (accountSlot) {
+    return <div className={placement === "mobile" ? "mobile-avatar-auth" : "top-avatar-auth"}>{accountSlot}</div>;
+  }
+
+  if (placement === "mobile") {
+    return (
+      <button aria-label="Account" className="mobile-icon-button mobile-avatar-button" type="button">
+        <User size={17} />
+      </button>
+    );
+  }
+
+  return (
+    <button className="top-avatar" type="button" aria-label="Account">
+      <User size={16} />
+    </button>
   );
 }
 

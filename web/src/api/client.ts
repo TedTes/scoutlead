@@ -27,6 +27,7 @@ import type {
 type ApiOptions = {
   baseUrl: string;
   token?: string;
+  getToken?: () => Promise<string | null>;
 };
 
 export class ApiClient {
@@ -224,11 +225,12 @@ export class ApiClient {
   }
 
   private async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const authToken = (await this.options.getToken?.()) || this.options.token;
     const response = await fetch(`${this.options.baseUrl.replace(/\/$/, "")}${path}`, {
       method: init.method ?? "GET",
       headers: {
         "content-type": "application/json",
-        ...(this.options.token ? { authorization: `Bearer ${this.options.token}` } : {}),
+        ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
