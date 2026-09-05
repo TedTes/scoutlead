@@ -95,6 +95,10 @@ def upgrade() -> None:
             SELECT :id, :name, NULL, :now, :now
             WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE id = :id)
             """
+        ).bindparams(
+            sa.bindparam("id", type_=sa.String(length=255)),
+            sa.bindparam("name", type_=sa.String(length=255)),
+            sa.bindparam("now", type_=sa.DateTime(timezone=True)),
         ),
         {"id": DEFAULT_WORKSPACE_ID, "name": "Default workspace", "now": now},
     )
