@@ -1,5 +1,15 @@
 import { ClerkProvider, SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/react";
-import { ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
+import {
+  ArrowRight,
+  Ban,
+  CheckCircle2,
+  ListChecks,
+  Mail,
+  Search,
+  ShieldCheck,
+  Target,
+  UserCheck,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { App } from "../app/App";
 import { getClerkPublishableKey } from "../config/env";
@@ -130,8 +140,193 @@ function LandingPage() {
             </div>
           </div>
         </section>
+
+        <section className="landing-section" aria-label="How it works">
+          <p className="landing-eyebrow">How it works</p>
+          <h2>From a plain-language prompt to an approved send</h2>
+          <div className="landing-steps-grid">
+            <StepCard
+              index={1}
+              icon={<Search size={18} />}
+              title="Describe who you're looking for"
+              body="Tell ScoutLead the niche, the location, and the signals that matter — a website, a quote form, an owner you can actually reach."
+            />
+            <StepCard
+              index={2}
+              icon={<ListChecks size={18} />}
+              title="It finds and dedupes matches"
+              body="Businesses are pulled from real sources and checked against what you've already found, so repeat searches don't waste a run."
+            />
+            <StepCard
+              index={3}
+              icon={<Target size={18} />}
+              title="Every lead gets a fit score, with evidence"
+              body="Each business is scored against your product with the positive signals, missing evidence, and risks behind that score — not just a number."
+            />
+            <StepCard
+              index={4}
+              icon={<Mail size={18} />}
+              title="You approve every message before it sends"
+              body="Contacts are verified before a draft is written, and outreach waits for your approval before anything goes out."
+            />
+          </div>
+        </section>
+
+        <section className="landing-section" aria-label="Compliance and safeguards">
+          <p className="landing-eyebrow">Built to keep outreach clean</p>
+          <h2>Compliance is enforced in code, not left to good intentions</h2>
+          <div className="landing-trust-grid">
+            <TrustItem
+              icon={<ShieldCheck size={17} />}
+              title="Verification before outreach"
+              body="A lead can't move to outreach until its email or phone has been verified as valid."
+            />
+            <TrustItem
+              icon={<Ban size={17} />}
+              title="Suppression is automatic"
+              body="Bounced, unsubscribed, or suppressed contacts are blocked from further outreach — the workflow won't send to them again."
+            />
+            <TrustItem
+              icon={<UserCheck size={17} />}
+              title="Nothing sends without a human"
+              body="Approval is a required step, not a setting. Every draft waits for you before it's sent."
+            />
+            <TrustItem
+              icon={<ListChecks size={17} />}
+              title="Preflight checks catch gaps early"
+              body="A campaign won't start if a required provider — search, verification, or email — isn't configured."
+            />
+          </div>
+        </section>
+
+        <section className="landing-section" aria-label="Use cases">
+          <p className="landing-eyebrow">Use it either way</p>
+          <h2>Validate an idea, or build a pipeline — same workflow</h2>
+          <div className="landing-goals-grid">
+            <GoalCard
+              tag="Learn"
+              title="Validate before you build"
+              body="Run real discovery interviews with verified, reachable operators in your target niche before you commit engineering time."
+            />
+            <GoalCard
+              tag="Sell"
+              title="Build a qualified pipeline"
+              body="Turn the same scored, verified shortlist into an outbound pipeline once you know who to target."
+            />
+          </div>
+        </section>
+
+        <section className="landing-section" aria-label="Example verticals">
+          <p className="landing-eyebrow">Built for local service software</p>
+          <h2>Painting, HVAC, auto services, home services — wherever your customers are small and local</h2>
+          <p className="landing-lede">
+            ScoutLead ships with search templates tuned for owner-operated, local service businesses — the kind of
+            company that's hard to find in a generic B2B list.
+          </p>
+          <div className="landing-example-grid">
+            <ExampleCard
+              niche="Painting"
+              query="independent painting businesses in Toronto with a website, strong reviews, and owner contact details"
+            />
+            <ExampleCard
+              niche="HVAC"
+              query="HVAC operators in Denver with emergency service pages, direct phone numbers, and clear service areas"
+            />
+            <ExampleCard
+              niche="Auto Services"
+              query="commercial auto service providers in Austin with business service pages, reachable contacts, and clear customer proof"
+            />
+            <ExampleCard
+              niche="Home Services"
+              query="small owner-operated home service providers in Seattle with reachable contact details and active service pages"
+            />
+          </div>
+        </section>
+
+        <section className="landing-cta" aria-label="Get started">
+          <h2>Build your first shortlist</h2>
+          <p className="landing-lede">
+            Describe your target customer and see what ScoutLead finds — verified, scored, and ready for you to
+            review.
+          </p>
+          <div className="landing-actions">
+            <SignInButton mode="modal">
+              <button className="landing-primary" type="button">
+                Sign in <ArrowRight size={16} />
+              </button>
+            </SignInButton>
+            <SignUpButton mode="modal">
+              <button className="landing-secondary" type="button">
+                Create account
+              </button>
+            </SignUpButton>
+          </div>
+        </section>
+
+        <footer className="landing-footer">
+          <div className="landing-brand">
+            <span className="landing-mark">S</span>
+            <div>
+              <strong>ScoutLead</strong>
+              <span>Discovery Console</span>
+            </div>
+          </div>
+          <p>Discovery and outreach, built to be reviewed, not automated blindly.</p>
+        </footer>
       </div>
     </main>
+  );
+}
+
+function StepCard({
+  body,
+  icon,
+  index,
+  title,
+}: {
+  body: string;
+  icon: ReactNode;
+  index: number;
+  title: string;
+}) {
+  return (
+    <div className="landing-step">
+      <span className="landing-step-index">{index}</span>
+      <span className="landing-step-icon">{icon}</span>
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function TrustItem({ body, icon, title }: { body: string; icon: ReactNode; title: string }) {
+  return (
+    <div className="landing-trust-item">
+      <span className="landing-trust-icon">{icon}</span>
+      <div>
+        <h3>{title}</h3>
+        <p>{body}</p>
+      </div>
+    </div>
+  );
+}
+
+function GoalCard({ body, tag, title }: { body: string; tag: string; title: string }) {
+  return (
+    <div className="landing-goal-card">
+      <span className="landing-goal-tag">{tag}</span>
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function ExampleCard({ niche, query }: { niche: string; query: string }) {
+  return (
+    <div className="landing-example-card">
+      <span className="landing-example-label">{niche}</span>
+      <p className="landing-example-query">{query}</p>
+    </div>
   );
 }
 
