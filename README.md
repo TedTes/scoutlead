@@ -135,7 +135,7 @@ Expected runtime commands after config sync:
 
 Do not use the API or worker start command on the web service. If a Railway service already has stale Build, Watch, Root Directory, or Start Command settings from earlier manual setup, clear them or let the workflow sync the values from `deploy/railway/`.
 
-Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in shared environments once Alembic migrations are running. Set `API_AUTH_TOKEN` on the API and the same value as `VITE_API_TOKEN` on the web service.
+Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in shared environments once Alembic migrations are running. Set `API_AUTH_TOKEN` on the API and the same value as `VITE_API_TOKEN` on the web service. For user auth, set `VITE_CLERK_PUBLISHABLE_KEY` on the web service and set `REQUIRE_USER_AUTH=true` plus `CLERK_JWT_ISSUER` or `CLERK_JWKS_URL` on the API service.
 
 ### GitHub Actions Release Pipeline
 
@@ -183,6 +183,9 @@ ALLOW_MOCK_PROVIDERS=false
 REQUIRE_REAL_SEARCH=true
 REQUIRE_REAL_EMAIL=true
 REQUIRE_REAL_LLM=true
+REQUIRE_USER_AUTH=true
+CLERK_JWT_ISSUER=https://your-clerk-issuer
+CLERK_SECRET_KEY=...
 SEARCH_PROVIDER=tavily # or brave
 SEARCH_API_KEY=...
 OPENAI_API_KEY=...

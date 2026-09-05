@@ -79,13 +79,22 @@ git diff --check
 
 ## Gmail Setup Check
 
-1. In Google Cloud OAuth, add the API callback URI:
+1. If Clerk auth is enabled, configure the web and API environments:
+
+   ```bash
+   VITE_CLERK_PUBLISHABLE_KEY=...
+   REQUIRE_USER_AUTH=true
+   CLERK_JWT_ISSUER=https://your-clerk-issuer
+   CLERK_SECRET_KEY=...
+   ```
+
+2. In Google Cloud OAuth, add the API callback URI:
 
    ```text
    https://<api-host>/email/gmail/callback
    ```
 
-2. Configure API and worker environment variables:
+3. Configure API and worker environment variables:
 
    ```bash
    EMAIL_PROVIDER=gmail
@@ -98,9 +107,9 @@ git diff --check
    EMAIL_FROM_NAME=ScoutLead
    ```
 
-3. If the Google OAuth consent screen is still in Testing, add the Gmail account as a test user.
-4. Open Integrations, connect Gmail, and verify the connected email appears.
-5. Send only approved outreach. Suppressed, unverified, unreachable, or not-fit leads should stay blocked.
+4. If the Google OAuth consent screen is still in Testing, add the Gmail account as a test user.
+5. Open Integrations, connect Gmail, and verify the connected email appears.
+6. Send only approved outreach. Suppressed, unverified, unreachable, or not-fit leads should stay blocked.
 
 ## External Providers
 
