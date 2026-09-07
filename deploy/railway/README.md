@@ -7,8 +7,10 @@ Railway has three deployable ScoutLead services:
 - Web: Vite app deployed from `./web --path-as-root`.
 
 The release workflow applies service settings from this directory before running `railway up`.
-The backend services also ship with a root Dockerfile so Railway does not need to infer their
-Python start command during Railpack prepare.
+The root Dockerfile is service-aware. It starts the API, worker, or web static server based on
+`SCOUTLEAD_SERVICE` / `SERVICE_TYPE`, or Railway's `RAILWAY_SERVICE_NAME` fallback. This is
+intentional: if Railway's repo auto-deploy path ever points the web service at the repo root, the
+container serves the frontend instead of silently starting the API in the web service.
 
 Changes in this directory intentionally trigger the full Railway release path.
 
@@ -37,9 +39,9 @@ It's invoked directly (not via `npm run start`) because Railway's runtime contai
 include `npm`, only `node`. It replaced `vite preview` because `vite preview` is a dev-oriented
 server not intended for production hosting.
 
-The backend startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it
-falls back to Railway's `RAILWAY_SERVICE_NAME`; service names containing `worker` run the worker,
-and all other backend service names run the API.
+The startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it falls back
+to Railway's `RAILWAY_SERVICE_NAME`; service names containing `worker` run the worker, service
+names containing `web` or `front` serve the built frontend, and all other names run the API.
 
 The web workflow uses `--path-as-root`, so the uploaded archive root is the `web` directory itself.
 For that reason the web service root directory is `/`, not `/web`.

@@ -9,6 +9,8 @@ def main() -> None:
     service = _service_kind()
     if service == "worker":
         command = [sys.executable, "-m", "job_queue.worker"]
+    elif service == "web":
+        command = [sys.executable, "scripts/serve_web_static.py"]
     else:
         command = [
             sys.executable,
@@ -33,6 +35,8 @@ def _service_kind() -> str:
     railway_service = os.environ.get("RAILWAY_SERVICE_NAME", "").strip().lower()
     if "worker" in railway_service:
         return "worker"
+    if "web" in railway_service or "front" in railway_service:
+        return "web"
     return "api"
 
 
