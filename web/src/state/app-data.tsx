@@ -90,6 +90,7 @@ const emptySnapshot: DiscoverySnapshot = {
 const activeSourcesStorageKey = "scoutlead.activeSourceIds";
 
 type AppDataProviderProps = {
+  approverLabel?: string;
   children: React.ReactNode;
   getAuthToken?: () => Promise<string | null>;
 };
@@ -129,7 +130,7 @@ async function getTraceWithFallback(api: ApiClient, runId: string): Promise<Disc
   }
 }
 
-export function AppDataProvider({ children, getAuthToken }: AppDataProviderProps) {
+export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDataProviderProps) {
   const [apiHealthy, setApiHealthy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -561,7 +562,7 @@ export function AppDataProvider({ children, getAuthToken }: AppDataProviderProps
         }),
       approveMessage: (messageId) =>
         mutate(async () => {
-          await api.approveMessage(messageId, "operator");
+          await api.approveMessage(messageId, approverLabel || "operator");
         }),
       sendMessage: (messageId) =>
         mutate(async () => {

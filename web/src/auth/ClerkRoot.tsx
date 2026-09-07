@@ -1,4 +1,3 @@
-import { ClerkProvider, SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/react";
 import {
   ArrowRight,
   Ban,
@@ -10,41 +9,30 @@ import {
   Target,
   UserCheck,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { App } from "../app/App";
-import { getClerkPublishableKey } from "../config/env";
+import { lazy, Suspense, useEffect, useState } from "react";
+
+const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
 
 export function RootApp() {
-  const publishableKey = getClerkPublishableKey();
+  const [path, setPath] = useState(() => window.location.pathname);
 
-  if (!publishableKey) {
-    return <App />;
-  }
+  useEffect(() => {
+    const handlePopState = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  if (!isAppRoute(path)) return <LandingPage />;
 
   return (
-    <ClerkProvider publishableKey={publishableKey}>
-      <ClerkEnabledApp />
-    </ClerkProvider>
+    <Suspense fallback={<AppRouteLoading />}>
+      <AuthenticatedApp />
+    </Suspense>
   );
 }
 
-function ClerkEnabledApp() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
-
-  if (!isLoaded) {
-    return <AuthScreen eyebrow="ScoutLead" title="Loading account" />;
-  }
-
-  if (!isSignedIn) {
-    return <LandingPage />;
-  }
-
-  return (
-    <App
-      getAuthToken={() => getToken()}
-      accountSlot={<UserButton appearance={{ elements: { avatarBox: "clerk-avatar-box" } }} />}
-    />
-  );
+function isAppRoute(path: string) {
+  return path === "/app" || path.startsWith("/app/") || path === "/trace" || path === "/debug/trace";
 }
 
 function LandingPage() {
@@ -60,11 +48,9 @@ function LandingPage() {
             </div>
           </div>
           <div className="landing-nav-actions">
-            <SignInButton mode="modal">
-              <button className="landing-nav-button" type="button">
-                Sign in
-              </button>
-            </SignInButton>
+            <a className="landing-nav-button" href="/app">
+              Sign in
+            </a>
           </div>
         </nav>
 
@@ -77,16 +63,12 @@ function LandingPage() {
               product, and keep outreach human-approved.
             </p>
             <div className="landing-actions">
-              <SignInButton mode="modal">
-                <button className="landing-primary" type="button">
-                  Sign in <ArrowRight size={16} />
-                </button>
-              </SignInButton>
-              <SignUpButton mode="modal">
-                <button className="landing-secondary" type="button">
-                  Create account
-                </button>
-              </SignUpButton>
+              <a className="landing-primary" href="/app">
+                Sign in <ArrowRight size={16} />
+              </a>
+              <a className="landing-secondary" href="/app?signup=1">
+                Create account
+              </a>
             </div>
             <div className="landing-proof-row" aria-label="Product safeguards">
               <span>
@@ -98,104 +80,48 @@ function LandingPage() {
             </div>
           </div>
 
-          <div className="landing-preview" aria-label="ScoutLead shortlist preview">
-            <div className="preview-topbar">
-              <div>
-                <span>Product</span>
-                <strong>quotevan</strong>
-              </div>
-              <button type="button" aria-label="Preview account" />
-            </div>
-            <div className="preview-query">
-              Independent residential painters in Toronto with a website, quote form, and owner contact
-            </div>
-            <div className="preview-stats">16 found · 9 verified · 10 good fit · 1 shortlisted</div>
-            <div className="preview-grid">
-              <div className="preview-list">
-                <PreviewLead score="95" name="Top Shelf Painting & Staining Inc." status="Good fit" verified />
-                <PreviewLead score="90" name="Home Painters Toronto" status="Good fit" verified />
-                <PreviewLead score="88" name="CAM Painters" status="Good fit" verified />
-              </div>
-              <div className="preview-drawer">
-                <div className="preview-drawer-header">
-                  <span className="preview-score large">95</span>
-                  <div>
-                    <strong>Top Shelf Painting</strong>
-                    <span>Owner/operator · Toronto, ON</span>
-                  </div>
-                </div>
-                <p>
-                  Independent painting contractor with on-site estimating, a verified email, and direct phone contact.
-                </p>
-                <div className="preview-evidence">
-                  <span>Website found</span>
-                  <span>Email deliverable</span>
-                  <span>Owner identified</span>
-                </div>
-                <div className="preview-actions">
-                  <button type="button">Shortlist</button>
-                  <button type="button">Review outreach</button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AnimatedPreview />
         </section>
 
-        <section className="landing-section" aria-label="How it works">
+        <section className="landing-section landing-recap-section" aria-label="How it works">
           <p className="landing-eyebrow">How it works</p>
-          <h2>From a plain-language prompt to an approved send</h2>
-          <div className="landing-steps-grid">
-            <StepCard
-              index={1}
-              icon={<Search size={18} />}
-              title="Describe who you're looking for"
-              body="Tell ScoutLead the niche, the location, and the signals that matter — a website, a quote form, an owner you can actually reach."
-            />
-            <StepCard
-              index={2}
-              icon={<ListChecks size={18} />}
-              title="It finds and dedupes matches"
-              body="Businesses are pulled from real sources and checked against what you've already found, so repeat searches don't waste a run."
-            />
-            <StepCard
-              index={3}
-              icon={<Target size={18} />}
-              title="Every lead gets a fit score, with evidence"
-              body="Each business is scored against your product with the positive signals, missing evidence, and risks behind that score — not just a number."
-            />
-            <StepCard
-              index={4}
-              icon={<Mail size={18} />}
-              title="You approve every message before it sends"
-              body="Contacts are verified before a draft is written, and outreach waits for your approval before anything goes out."
-            />
+          <div className="landing-recap">
+            <span className="landing-recap-item">
+              <Search size={15} /> Describe who you're looking for
+            </span>
+            <ArrowRight className="landing-recap-arrow" size={14} />
+            <span className="landing-recap-item">
+              <Target size={15} /> Get a fit score, with evidence
+            </span>
+            <ArrowRight className="landing-recap-arrow" size={14} />
+            <span className="landing-recap-item">
+              <Mail size={15} /> Verify, then approve every send
+            </span>
           </div>
         </section>
 
-        <section className="landing-section" aria-label="Compliance and safeguards">
+        <section className="landing-section landing-trust-section" aria-label="Compliance and safeguards">
           <p className="landing-eyebrow">Built to keep outreach clean</p>
           <h2>Compliance is enforced in code, not left to good intentions</h2>
-          <div className="landing-trust-grid">
-            <TrustItem
-              icon={<ShieldCheck size={17} />}
-              title="Verification before outreach"
-              body="A lead can't move to outreach until its email or phone has been verified as valid."
-            />
-            <TrustItem
-              icon={<Ban size={17} />}
-              title="Suppression is automatic"
-              body="Bounced, unsubscribed, or suppressed contacts are blocked from further outreach — the workflow won't send to them again."
-            />
-            <TrustItem
-              icon={<UserCheck size={17} />}
-              title="Nothing sends without a human"
-              body="Approval is a required step, not a setting. Every draft waits for you before it's sent."
-            />
-            <TrustItem
-              icon={<ListChecks size={17} />}
-              title="Preflight checks catch gaps early"
-              body="A campaign won't start if a required provider — search, verification, or email — isn't configured."
-            />
+          <div className="landing-trust-row">
+            <span className="landing-trust-pill" title="A lead can't move to outreach until its email or phone has been verified as valid.">
+              <ShieldCheck size={14} /> Verification before outreach
+            </span>
+            <span
+              className="landing-trust-pill"
+              title="Bounced, unsubscribed, or suppressed contacts are blocked from further outreach automatically."
+            >
+              <Ban size={14} /> Automatic suppression
+            </span>
+            <span className="landing-trust-pill" title="Approval is a required step, not a setting. Every draft waits for you before it's sent.">
+              <UserCheck size={14} /> Human approval required
+            </span>
+            <span
+              className="landing-trust-pill"
+              title="A campaign won't start if a required provider — search, verification, or email — isn't configured."
+            >
+              <ListChecks size={14} /> Preflight checks
+            </span>
           </div>
         </section>
 
@@ -223,23 +149,31 @@ function LandingPage() {
             ScoutLead ships with search templates tuned for owner-operated, local service businesses — the kind of
             company that's hard to find in a generic B2B list.
           </p>
-          <div className="landing-example-grid">
-            <ExampleCard
-              niche="Painting"
-              query="independent painting businesses in Toronto with a website, strong reviews, and owner contact details"
-            />
-            <ExampleCard
-              niche="HVAC"
-              query="HVAC operators in Denver with emergency service pages, direct phone numbers, and clear service areas"
-            />
-            <ExampleCard
-              niche="Auto Services"
-              query="commercial auto service providers in Austin with business service pages, reachable contacts, and clear customer proof"
-            />
-            <ExampleCard
-              niche="Home Services"
-              query="small owner-operated home service providers in Seattle with reachable contact details and active service pages"
-            />
+          <div className="landing-niche-row">
+            <span
+              className="landing-niche-pill"
+              title="independent painting businesses in Toronto with a website, strong reviews, and owner contact details"
+            >
+              Painting
+            </span>
+            <span
+              className="landing-niche-pill"
+              title="HVAC operators in Denver with emergency service pages, direct phone numbers, and clear service areas"
+            >
+              HVAC
+            </span>
+            <span
+              className="landing-niche-pill"
+              title="commercial auto service providers in Austin with business service pages, reachable contacts, and clear customer proof"
+            >
+              Auto Services
+            </span>
+            <span
+              className="landing-niche-pill"
+              title="small owner-operated home service providers in Seattle with reachable contact details and active service pages"
+            >
+              Home Services
+            </span>
           </div>
         </section>
 
@@ -250,16 +184,12 @@ function LandingPage() {
             review.
           </p>
           <div className="landing-actions">
-            <SignInButton mode="modal">
-              <button className="landing-primary" type="button">
-                Sign in <ArrowRight size={16} />
-              </button>
-            </SignInButton>
-            <SignUpButton mode="modal">
-              <button className="landing-secondary" type="button">
-                Create account
-              </button>
-            </SignUpButton>
+            <a className="landing-primary" href="/app">
+              Sign in <ArrowRight size={16} />
+            </a>
+            <a className="landing-secondary" href="/app?signup=1">
+              Create account
+            </a>
           </div>
         </section>
 
@@ -278,34 +208,208 @@ function LandingPage() {
   );
 }
 
-function StepCard({
-  body,
-  icon,
-  index,
-  title,
-}: {
-  body: string;
-  icon: ReactNode;
-  index: number;
-  title: string;
-}) {
+function AppRouteLoading() {
   return (
-    <div className="landing-step">
-      <span className="landing-step-index">{index}</span>
-      <span className="landing-step-icon">{icon}</span>
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </div>
+    <main className="landing-page">
+      <div className="landing-shell">
+        <section className="landing-hero">
+          <div className="landing-copy">
+            <p className="landing-eyebrow">Account access</p>
+            <h1>Loading ScoutLead</h1>
+            <p className="landing-lede">Preparing the workspace.</p>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
 
-function TrustItem({ body, icon, title }: { body: string; icon: ReactNode; title: string }) {
+const PREVIEW_QUERY =
+  "independent residential painters in Toronto with a website, quote form, and owner contact";
+
+const PREVIEW_LEADS = [
+  { name: "Top Shelf Painting & Staining Inc.", location: "Toronto, ON", score: 95 },
+  { name: "Home Painters Toronto", location: "Toronto, ON", score: 90 },
+  { name: "CAM Painters", location: "Toronto, ON", score: 88 },
+];
+
+type DrawerStage = "hidden" | "detail" | "draft" | "sent";
+
+type PreviewPhase = {
+  drawerStage: DrawerStage;
+  scores: number[];
+  typed: number;
+  verified: boolean[];
+  visibleRows: number;
+};
+
+const PREVIEW_PHASE_INITIAL: PreviewPhase = {
+  drawerStage: "hidden",
+  scores: [0, 0, 0],
+  typed: 0,
+  verified: [false, false, false],
+  visibleRows: 0,
+};
+
+const PREVIEW_PHASE_RESOLVED: PreviewPhase = {
+  drawerStage: "sent",
+  scores: PREVIEW_LEADS.map((lead) => lead.score),
+  typed: PREVIEW_QUERY.length,
+  verified: PREVIEW_LEADS.map(() => true),
+  visibleRows: PREVIEW_LEADS.length,
+};
+
+function AnimatedPreview() {
+  const [phase, setPhase] = useState<PreviewPhase>(PREVIEW_PHASE_INITIAL);
+  const [cycle, setCycle] = useState(0);
+
+  useEffect(() => {
+    const reduceMotion =
+      typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (reduceMotion) {
+      setPhase(PREVIEW_PHASE_RESOLVED);
+      return;
+    }
+
+    const timers: number[] = [];
+    const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
+
+    setPhase(PREVIEW_PHASE_INITIAL);
+
+    const CHAR_MS = 22;
+    for (let i = 1; i <= PREVIEW_QUERY.length; i++) {
+      at(i * CHAR_MS, () => setPhase((p) => ({ ...p, typed: i })));
+    }
+    const typingDone = PREVIEW_QUERY.length * CHAR_MS;
+
+    const REVEAL_GAP = 220;
+    PREVIEW_LEADS.forEach((_, idx) => {
+      at(typingDone + 350 + idx * REVEAL_GAP, () => setPhase((p) => ({ ...p, visibleRows: idx + 1 })));
+    });
+    const revealDone = typingDone + 350 + PREVIEW_LEADS.length * REVEAL_GAP;
+
+    const COUNT_MS = 450;
+    const STEPS = 10;
+    PREVIEW_LEADS.forEach((lead, idx) => {
+      const start = revealDone + 200 + idx * 200;
+      for (let step = 1; step <= STEPS; step++) {
+        at(start + (COUNT_MS / STEPS) * step, () =>
+          setPhase((p) => {
+            const scores = [...p.scores];
+            scores[idx] = Math.round((lead.score * step) / STEPS);
+            return { ...p, scores };
+          }),
+        );
+      }
+      at(start + COUNT_MS + 100, () =>
+        setPhase((p) => {
+          const verified = [...p.verified];
+          verified[idx] = true;
+          return { ...p, verified };
+        }),
+      );
+    });
+    const scoringDone = revealDone + 200 + (PREVIEW_LEADS.length - 1) * 200 + COUNT_MS + 100;
+
+    at(scoringDone + 250, () => setPhase((p) => ({ ...p, drawerStage: "detail" })));
+    at(scoringDone + 250 + 1500, () => setPhase((p) => ({ ...p, drawerStage: "draft" })));
+    at(scoringDone + 250 + 1500 + 1700, () => setPhase((p) => ({ ...p, drawerStage: "sent" })));
+    at(scoringDone + 250 + 1500 + 1700 + 1500, () => setCycle((c) => c + 1));
+
+    return () => timers.forEach(clearTimeout);
+  }, [cycle]);
+
+  const topLead = PREVIEW_LEADS[0];
+  const drawerVisible = phase.drawerStage !== "hidden";
+
   return (
-    <div className="landing-trust-item">
-      <span className="landing-trust-icon">{icon}</span>
-      <div>
-        <h3>{title}</h3>
-        <p>{body}</p>
+    <div className="landing-preview" aria-label="ScoutLead shortlist preview">
+      <div className="preview-topbar">
+        <div>
+          <span>Product</span>
+          <strong>quotevan</strong>
+        </div>
+        <button type="button" aria-label="Preview account" />
+      </div>
+      <div className="terminal-query">
+        {PREVIEW_QUERY.slice(0, phase.typed)}
+        <span className="terminal-cursor" aria-hidden="true" />
+      </div>
+      <div className={`preview-stats${phase.visibleRows > 0 ? "" : " is-hidden"}`}>
+        16 found · 9 verified · 10 good fit · 1 shortlisted
+      </div>
+      <div className="preview-grid">
+        <div className="preview-list">
+          {PREVIEW_LEADS.map((lead, idx) => {
+            const visible = idx < phase.visibleRows;
+            return (
+              <div
+                aria-hidden={!visible}
+                className={`preview-lead${visible ? "" : " is-hidden"}`}
+                key={lead.name}
+              >
+                <span className="preview-score">{phase.scores[idx]}</span>
+                <div>
+                  <strong>{lead.name}</strong>
+                  <span>Residential painting contractor · {lead.location}</span>
+                </div>
+                {phase.verified[idx] ? <em className="terminal-verified-enter">Verified</em> : <em>&nbsp;</em>}
+              </div>
+            );
+          })}
+        </div>
+        <div aria-hidden={!drawerVisible} className={`preview-drawer${drawerVisible ? "" : " is-hidden"}`}>
+          {phase.drawerStage === "draft" || phase.drawerStage === "sent" ? (
+            <>
+              <div className="preview-drawer-header">
+                <span className="preview-score large">
+                  {phase.drawerStage === "sent" ? <CheckCircle2 size={20} /> : <Mail size={20} />}
+                </span>
+                <div>
+                  <strong>Adam Johns</strong>
+                  <span>adam@topshelfhomes.ca</span>
+                </div>
+              </div>
+              <p>
+                Subject: Quick question about your quoting process — a short note asking how you currently handle
+                quotes for new jobs.
+              </p>
+              <div className="preview-evidence">
+                <span>Draft</span>
+                <span>Personalized</span>
+                <span>{phase.drawerStage === "sent" ? "Sent" : "Awaiting approval"}</span>
+              </div>
+              <div className="preview-actions">
+                <button type="button">Edit draft</button>
+                <button type="button">{phase.drawerStage === "sent" ? "Sent ✓" : "Approve & send"}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="preview-drawer-header">
+                <span className="preview-score large">{topLead.score}</span>
+                <div>
+                  <strong>Top Shelf Painting</strong>
+                  <span>Owner/operator · {topLead.location}</span>
+                </div>
+              </div>
+              <p>
+                Independent painting contractor with on-site estimating, a verified email, and direct phone
+                contact.
+              </p>
+              <div className="preview-evidence">
+                <span>Website found</span>
+                <span>Email deliverable</span>
+                <span>Owner identified</span>
+              </div>
+              <div className="preview-actions">
+                <button type="button">Shortlist</button>
+                <button type="button">Review outreach</button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -318,61 +422,5 @@ function GoalCard({ body, tag, title }: { body: string; tag: string; title: stri
       <h3>{title}</h3>
       <p>{body}</p>
     </div>
-  );
-}
-
-function ExampleCard({ niche, query }: { niche: string; query: string }) {
-  return (
-    <div className="landing-example-card">
-      <span className="landing-example-label">{niche}</span>
-      <p className="landing-example-query">{query}</p>
-    </div>
-  );
-}
-
-function PreviewLead({
-  name,
-  score,
-  status,
-  verified,
-}: {
-  name: string;
-  score: string;
-  status: string;
-  verified?: boolean;
-}) {
-  return (
-    <div className="preview-lead">
-      <span className="preview-score">{score}</span>
-      <div>
-        <strong>{name}</strong>
-        <span>Residential painting contractor · Toronto, ON</span>
-      </div>
-      <em>{verified ? "Verified" : status}</em>
-    </div>
-  );
-}
-
-function AuthScreen({
-  actions,
-  body,
-  eyebrow,
-  title,
-}: {
-  actions?: ReactNode;
-  body?: string;
-  eyebrow: string;
-  title: string;
-}) {
-  return (
-    <main className="auth-screen">
-      <section className="auth-panel">
-        <span className="auth-mark">S</span>
-        <p>{eyebrow}</p>
-        <h1>{title}</h1>
-        {body ? <span className="auth-body">{body}</span> : null}
-        {actions ? <div className="auth-actions">{actions}</div> : null}
-      </section>
-    </main>
   );
 }

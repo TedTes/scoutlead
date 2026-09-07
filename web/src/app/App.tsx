@@ -22,12 +22,13 @@ import { baseExportFileName, defaultExportFileName, normalizeExportFileName } fr
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
   accountSlot?: ReactNode;
+  approverLabel?: string;
 };
 
-export function App({ getAuthToken, accountSlot }: AppProps = {}) {
+export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {}) {
   return (
     <ToastProvider>
-      <AppDataProvider getAuthToken={getAuthToken}>
+      <AppDataProvider getAuthToken={getAuthToken} approverLabel={approverLabel}>
         <AppShell accountSlot={accountSlot} />
       </AppDataProvider>
     </ToastProvider>
@@ -70,7 +71,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     selectedDiscoveryRunId && selectedDiscoveryRun
       ? listLabel(selectedDiscoveryRun)
       : draftRunName?.trim() || "";
-  const isTraceRoute = routePath === "/trace" || routePath === "/debug/trace";
+  const isTraceRoute =
+    routePath === "/trace" ||
+    routePath === "/debug/trace" ||
+    routePath === "/app/trace" ||
+    routePath === "/app/debug/trace";
   const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
     setDraftRunNameState((current) => {
       const next =
@@ -83,8 +88,8 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   };
 
   const returnToApp = () => {
-    window.history.pushState(null, "", "/");
-    setRoutePath("/");
+    window.history.pushState(null, "", "/app");
+    setRoutePath("/app");
   };
 
   const startNewProduct = () => {
