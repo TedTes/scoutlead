@@ -14,6 +14,9 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from app.config import Settings
 
 
+JWKS_PATH = "/.well-known/jwks.json"
+
+
 class AuthError(Exception):
     pass
 
@@ -37,10 +40,14 @@ class ClerkClaims:
 
 class ClerkTokenVerifier:
     def __init__(self, settings: Settings, *, cache_ttl_seconds: int = 300) -> None:
-        self.issuer = (settings.clerk_jwt_issuer or "").rstrip("/")
-        self.jwks_url = settings.clerk_jwks_url or (
-            f"{self.issuer}/.well-known/jwks.json" if self.issuer else ""
-        )
+        issuer = _clean_endpoint(settings.clerk_jwt_issuer)
+        jwks_url = _dedupe_jwks_path(settings.clerk_jwks_url)
+        if issuer.endswith(JWKS_PATH):
+            jwks_url = jwks_url or issuer
+            issuer = issuer[: -len(JWKS_PATH)]
+
+        self.issuer = issuer
+        self.jwks_url = jwks_url or (f"{self.issuer}{JWKS_PATH}" if self.issuer else "")
         self.cache_ttl_seconds = cache_ttl_seconds
         self._jwks_expires_at = 0.0
         self._jwks: list[dict[str, Any]] = []
@@ -162,3 +169,15 @@ def _base64url_decode(value: str) -> bytes:
 
 def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _clean_endpoint(value: str | None) -> str:
+    return (value or "").strip().rstrip("/")
+
+
+def _dedupe_jwks_path(value: str | None) -> str:
+    normalized = _clean_endpoint(value)
+    duplicate = f"{JWKS_PATH}{JWKS_PATH}"
+    while normalized.endswith(duplicate):
+        normalized = normalized[: -len(JWKS_PATH)]
+    return normalized
