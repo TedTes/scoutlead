@@ -41,10 +41,10 @@ class ClerkClaims:
 class ClerkTokenVerifier:
     def __init__(self, settings: Settings, *, cache_ttl_seconds: int = 300) -> None:
         raw_issuer = _clean_endpoint(settings.clerk_jwt_issuer)
-        jwks_url = _dedupe_jwks_path(settings.clerk_jwks_url)
+        jwks_url = _normalize_jwks_url(settings.clerk_jwks_url)
         issuer = _strip_jwks_path(raw_issuer)
         if raw_issuer != issuer:
-            jwks_url = jwks_url or _dedupe_jwks_path(raw_issuer)
+            jwks_url = jwks_url or _normalize_jwks_url(raw_issuer)
 
         self.issuer = issuer
         self.jwks_url = jwks_url or (f"{self.issuer}{JWKS_PATH}" if self.issuer else "")
@@ -149,7 +149,10 @@ def _split_token(token: str) -> tuple[bytes, bytes]:
     parts = token.split(".")
     if len(parts) != 3:
         raise AuthError("invalid Clerk token")
-    return f"{parts[0]}.{parts[1]}".encode("ascii"), _base64url_decode(parts[2])
+    try:
+        return f"{parts[0]}.{parts[1]}".encode("ascii"), _base64url_decode(parts[2])
+    except ValueError as exc:
+        raise AuthError("invalid Clerk token") from exc
 
 
 def _decode_token_json(token: str, index: int) -> dict[str, Any]:
@@ -175,11 +178,15 @@ def _clean_endpoint(value: str | None) -> str:
     return (value or "").strip().rstrip("/")
 
 
-def _dedupe_jwks_path(value: str | None) -> str:
+def _normalize_jwks_url(value: str | None) -> str:
     normalized = _clean_endpoint(value)
+    if not normalized:
+        return ""
     duplicate = f"{JWKS_PATH}{JWKS_PATH}"
     while normalized.endswith(duplicate):
         normalized = normalized[: -len(JWKS_PATH)]
+    if not normalized.endswith(JWKS_PATH):
+        normalized = f"{normalized}{JWKS_PATH}"
     return normalized
 
 
