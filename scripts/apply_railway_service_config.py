@@ -21,6 +21,7 @@ PROJECT_FLAG_UNSUPPORTED_MARKERS = (
     "unrecognized option",
     "found argument '--project'",
 )
+COMMAND_TIMEOUT_SECONDS = int(os.environ.get("RAILWAY_CONFIG_COMMAND_TIMEOUT_SECONDS", "60"))
 
 
 @dataclass(frozen=True)
@@ -187,16 +188,42 @@ def _apply_setting(
 
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        command,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = _timeout_output(exc)
+        if output:
+            print(output, end="" if output.endswith("\n") else "\n")
+        print(
+            "::warning::Railway CLI command timed out after "
+            f"{COMMAND_TIMEOUT_SECONDS}s: {_redacted_command(command)}",
+            file=sys.stderr,
+        )
+        return subprocess.CompletedProcess(command, 124, output)
     if completed.stdout:
         print(completed.stdout, end="")
     return completed
+
+
+def _timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    stdout = exc.stdout or ""
+    stderr = exc.stderr or ""
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode("utf-8", errors="replace")
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    return f"{stdout}{stderr}"
+
+
+def _redacted_command(command: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in command)
 
 
 def _project_flag_was_rejected(output: str) -> bool:

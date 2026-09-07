@@ -188,8 +188,11 @@ jobs:
 
       - name: Apply Railway service config
         if: steps.changes.outputs.release_needed == 'true'
+        timeout-minutes: 3
+        continue-on-error: true
         env:
           RAILWAY_CONFIG_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || vars.RAILWAY_API_TOKEN }}
+          RAILWAY_CONFIG_COMMAND_TIMEOUT_SECONDS: 60
         run: |
           if [ -n "$RAILWAY_CONFIG_API_TOKEN" ]; then
             unset RAILWAY_TOKEN
