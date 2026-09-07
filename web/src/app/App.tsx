@@ -10,7 +10,7 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
@@ -67,9 +67,13 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   } = useAppData();
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
+  const productRunLabels = useMemo(() => uniqueRunLabels(productDiscoveryRuns), [productDiscoveryRuns]);
+  const selectedRunDisplay = selectedDiscoveryRunId
+    ? productRunLabels.find((item) => item.run.id === selectedDiscoveryRunId)
+    : undefined;
   const selectedRunLabel =
     selectedDiscoveryRunId && selectedDiscoveryRun
-      ? listLabel(selectedDiscoveryRun)
+      ? selectedRunDisplay?.title || listLabel(selectedDiscoveryRun)
       : draftRunName?.trim() || "";
   const isTraceRoute =
     routePath === "/trace" ||
@@ -105,7 +109,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
     setActiveScreen("overview");
-    setDraftRunName((current) => current ?? readDraftRunName(selectedProductId) ?? "Page name");
+    const existingNames = productRunLabels.map((item) => item.title);
+    const savedDraftName = readDraftRunName(selectedProductId);
+    setDraftRunName((current) => current ?? savedDraftName ?? uniqueListName("Page name", existingNames));
     setSelectedDiscoveryRunId("");
   };
 
@@ -137,7 +143,10 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   };
 
   const handleRenameRun = async (runId: string, name: string) => {
-    await renameDiscoveryRun(runId, name);
+    const existingNames = productRunLabels
+      .filter((item) => item.run.id !== runId)
+      .map((item) => item.title);
+    await renameDiscoveryRun(runId, uniqueListName(name, existingNames));
     showToast({ title: "List renamed", tone: "green" });
   };
 
@@ -232,6 +241,16 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setDraftRunNameState(readDraftRunName(selectedProductId));
   }, [selectedProductId]);
 
+  useEffect(() => {
+    if (!selectedProductId || !selectedDiscoveryRunId || draftRunName === null) return;
+    const draftName = draftRunName.trim();
+    if (!draftName) return;
+    const selectedName = productRunLabels.find((item) => item.run.id === selectedDiscoveryRunId)?.title || "";
+    if (!sameListName(draftName, selectedName)) return;
+    writeDraftRunName(selectedProductId, null);
+    setDraftRunNameState(null);
+  }, [draftRunName, productRunLabels, selectedDiscoveryRunId, selectedProductId]);
+
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
       <header className="mobile-topbar">
@@ -293,6 +312,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             {draftRunName !== null ? (
               <RunHistoryDraft
                 active={!isTraceRoute && activeScreen === "overview" && !selectedDiscoveryRunId}
+                existingNames={productRunLabels.map((item) => item.title)}
                 value={draftRunName}
                 onChange={setDraftRunName}
                 onSelect={startNewList}
@@ -305,8 +325,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 <div className="s">Start a search to create the first saved list.</div>
               </div>
             ) : null}
-            {productDiscoveryRuns.map((run) => {
-              const title = listLabel(run);
+            {productRunLabels.map(({ run, title }) => {
               return (
                 <RunHistoryItem
                   active={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id}
@@ -578,12 +597,14 @@ function manageItemClass(enabled: boolean, active: boolean) {
 
 function RunHistoryDraft({
   active,
+  existingNames,
   value,
   onChange,
   onSelect,
   onDelete,
 }: {
   active: boolean;
+  existingNames: string[];
   value: string;
   onChange: (value: string) => void;
   onSelect: () => void;
@@ -602,7 +623,7 @@ function RunHistoryDraft({
   }, [active, displayName]);
 
   const commitName = () => {
-    onChange(displayName);
+    onChange(uniqueListName(displayName, existingNames));
     setEditing(false);
   };
 
@@ -925,6 +946,40 @@ function listLabel(run: DiscoveryRun) {
   if (prompt) return titleFromQuery(prompt) || prompt;
   if (run.name) return run.name;
   return "Untitled list";
+}
+
+function uniqueRunLabels(runs: DiscoveryRun[]) {
+  const usedNames: string[] = [];
+  return runs.map((run) => {
+    const title = uniqueListName(listLabel(run), usedNames);
+    usedNames.push(title);
+    return { run, title };
+  });
+}
+
+function uniqueListName(requestedName: string, existingNames: string[]) {
+  const baseName = collapseListName(requestedName) || "Untitled list";
+  const existing = new Set(existingNames.map(nameKey).filter(Boolean));
+  if (!existing.has(nameKey(baseName))) return baseName;
+
+  let suffix = 1;
+  while (true) {
+    const candidate = `${baseName} ${suffix}`;
+    if (!existing.has(nameKey(candidate))) return candidate;
+    suffix += 1;
+  }
+}
+
+function sameListName(left: string, right: string) {
+  return Boolean(left && right && nameKey(left) === nameKey(right));
+}
+
+function nameKey(value: string) {
+  return collapseListName(value).toLowerCase();
+}
+
+function collapseListName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
 }
 
 function isGeneratedRunName(value: string) {

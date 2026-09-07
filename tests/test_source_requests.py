@@ -95,7 +95,7 @@ def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -
         rerun_sources = CampaignSourceRepository(session).list_by_campaign(rerun.run.id)
 
         assert rerun.run.id != first.run.id
-        assert rerun.run.name == "Painters Toronto shortlist"
+        assert rerun.run.name == "Painters Toronto shortlist 1"
         assert rerun_sources[0].provider_id == GOOGLE_PLACES_PROVIDER_ID
         assert rerun_sources[0].input["source_request_source"] == GOOGLE_PLACES_PROVIDER_ID
         assert rerun_sources[0].input["source_request_prompt"] == "List painting service contacts in Toronto ON"

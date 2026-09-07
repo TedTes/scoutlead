@@ -36,9 +36,10 @@ class CampaignRepository:
         data.pop("source_input", None)
         data.pop("source_inputs", None)
         self._assert_product_in_scope(data["product_id"])
+        requested_name = data.pop("name") or f"Campaign {utcnow().date().isoformat()}"
         model = CampaignModel(
             id=new_id("campaign"),
-            name=data.pop("name") or f"Campaign {utcnow().date().isoformat()}",
+            name=self._unique_name(data["product_id"], requested_name),
             status=CampaignStatus.DRAFT.value,
             stage=CampaignStage.DISCOVERY.value,
             **data,
@@ -98,6 +99,8 @@ class CampaignRepository:
     def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
         model = self.get(campaign_id)
         data = update.model_dump(mode="python", exclude_unset=True)
+        if "name" in data and data["name"] is not None:
+            data["name"] = self._unique_name(model.product_id, data["name"], exclude_id=campaign_id)
         for field, value in data.items():
             setattr(model, field, value)
         model.updated_at = utcnow()
@@ -123,6 +126,22 @@ class CampaignRepository:
         if not exists:
             raise NotFoundError("product not found", {"product_id": product_id})
 
+    def _unique_name(self, product_id: str, requested_name: str, *, exclude_id: str | None = None) -> str:
+        base_name = _fit_campaign_name(_collapse_spaces(requested_name) or "Untitled list")
+        statement = select(CampaignModel.name).where(CampaignModel.product_id == product_id)
+        if exclude_id:
+            statement = statement.where(CampaignModel.id != exclude_id)
+        existing = {_name_key(name) for name in self.session.scalars(statement) if name}
+        if _name_key(base_name) not in existing:
+            return base_name
+
+        suffix = 1
+        while True:
+            candidate = _fit_campaign_name_with_suffix(base_name, suffix)
+            if _name_key(candidate) not in existing:
+                return candidate
+            suffix += 1
+
     def update_status(
         self,
         campaign_id: str,
@@ -145,3 +164,24 @@ class CampaignRepository:
         self.session.commit()
         self.session.refresh(model)
         return model
+
+
+def _collapse_spaces(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _name_key(value: str) -> str:
+    return _collapse_spaces(value).casefold()
+
+
+def _fit_campaign_name(value: str, max_length: int = 255) -> str:
+    cleaned = _collapse_spaces(value)
+    if len(cleaned) <= max_length:
+        return cleaned
+    return cleaned[:max_length].rstrip()
+
+
+def _fit_campaign_name_with_suffix(value: str, suffix: int, max_length: int = 255) -> str:
+    suffix_text = f" {suffix}"
+    base = _fit_campaign_name(value, max_length=max_length - len(suffix_text))
+    return f"{base}{suffix_text}"
