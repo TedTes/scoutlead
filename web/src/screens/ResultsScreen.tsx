@@ -21,7 +21,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { OverviewScreen } from "./OverviewScreen";
-import { ExportContactsDialog, useToast } from "../shared-ui";
+import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
@@ -41,7 +41,7 @@ import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-
 type ResultStage = "all" | "shortlisted" | "needs_review";
 type ResultAttributeFilter = "good_fit" | "verified" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
-type DrawerTab = "overview" | "evidence" | "outreach";
+type DrawerTab = "overview" | "evidence";
 type ContactActivityTone = "done" | "pending" | "warning" | "blocked";
 type ContactActivityItem = {
   label: string;
@@ -748,12 +748,17 @@ function ContactDrawer({
   const [draftBody, setDraftBody] = useState("");
   const [savingDraft, setSavingDraft] = useState(false);
   const [activeTab, setActiveTab] = useState<DrawerTab>("overview");
+  const [outreachOpen, setOutreachOpen] = useState(false);
   const signals = contact ? contactSignals(contact) : [];
   const website = contact?.website_url || contact?.research?.website_url || "";
   const email = contact?.contact_email || contact?.research?.contact_email || "";
   const verified = contact ? isVerifiedContact(contact) : false;
   const canDraft = Boolean(!blocked && shortlisted && canShortlist && verified && email);
   const canSend = Boolean(message && message.status === "approved" && email && canDraft);
+  const approvedBy =
+    message?.approval && typeof message.approval === "object" && "approved_by" in message.approval
+      ? String((message.approval as Record<string, unknown>).approved_by)
+      : undefined;
   const phone = contact ? getPhone(contact) : "";
   const contactName = contact ? getContactName(contact) : "";
   const address = contact ? getAddress(contact) : "";
@@ -806,6 +811,7 @@ function ContactDrawer({
 
   useEffect(() => {
     setActiveTab("overview");
+    setOutreachOpen(false);
   }, [contact?.id]);
 
   const saveLeadUpdate = async (update: LeadUpdateInput, successTitle: string) => {
@@ -1041,13 +1047,6 @@ function ContactDrawer({
                 Evidence
                 <span>{evidenceCount}</span>
               </button>
-              <button
-                className={activeTab === "outreach" ? "active" : ""}
-                type="button"
-                onClick={() => setActiveTab("outreach")}
-              >
-                Outreach
-              </button>
             </nav>
 
             <div className="drawer-body">
@@ -1263,81 +1262,6 @@ function ContactDrawer({
                 </>
               ) : null}
 
-              {activeTab === "outreach" ? (
-                <section className="drawer-outreach-panel">
-                  <div className="drawer-section-heading">
-                    <h3>Outreach</h3>
-                    <span>{message ? messageStatusLabel(message.status) : canDraft ? "Not generated" : "Shortlist required"}</span>
-                  </div>
-                  {message ? (
-                    <>
-                      <label className="draft-field">
-                        <span>Subject</span>
-                        <input
-                          value={draftSubject}
-                          onChange={(event) => setDraftSubject(event.target.value)}
-                          disabled={message.status === "sent"}
-                        />
-                      </label>
-                      <label className="draft-field">
-                        <span>Body</span>
-                        <textarea
-                          value={draftBody}
-                          onChange={(event) => setDraftBody(event.target.value)}
-                          disabled={message.status === "sent"}
-                        />
-                      </label>
-                      <div className="draft-action-row">
-                        <button type="button" disabled={savingDraft || !draftBody.trim() || message.status === "sent"} onClick={saveDraft}>
-                          Save
-                        </button>
-                        <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={copyDraft}>
-                          <Copy size={13} />
-                          Copy
-                        </button>
-                        {message.status === "pending_approval" || message.status === "draft" ? (
-                          <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={approveDraft}>
-                            Approve
-                          </button>
-                        ) : null}
-                        {message.status === "approved" ? (
-                          <button type="button" disabled={savingDraft || !canSend} onClick={sendDraft}>
-                            Send email
-                          </button>
-                        ) : null}
-                        {message.status === "sent" ? (
-                          <button type="button" disabled={savingDraft} onClick={markReplied}>
-                            Mark replied
-                          </button>
-                        ) : null}
-                      </div>
-                      {message.status === "approved" && !canSend ? (
-                        <p className="draft-warning">
-                          {blocked
-                            ? "This contact is blocked from outreach."
-                            : !email
-                              ? "Add or find an email before sending."
-                              : "Keep this contact shortlisted before sending."}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : canDraft ? (
-                    <button className="generate-draft-button" type="button" disabled={savingDraft} onClick={generateDraft}>
-                      Generate draft
-                    </button>
-                  ) : (
-                    <p className="draft-warning">
-                      {blocked
-                        ? "This contact is blocked from outreach."
-                        : shortlisted && !verified
-                          ? "Verify this contact before generating outreach."
-                          : !email
-                            ? "Find an email before generating outreach."
-                            : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
-                    </p>
-                  )}
-                </section>
-              ) : null}
             </div>
 
             <footer className="drawer-footer drawer-action-footer">
@@ -1359,7 +1283,7 @@ function ContactDrawer({
                   Pass
                 </button>
               </div>
-              <button className="drawer-primary-action" type="button" onClick={() => setActiveTab("outreach")}>
+              <button className="drawer-primary-action" type="button" onClick={() => setOutreachOpen(true)}>
                 Review outreach
                 <ArrowRight size={14} />
               </button>
@@ -1367,6 +1291,92 @@ function ContactDrawer({
           </>
         ) : null}
       </aside>
+
+      {outreachOpen && contact ? (
+        <Modal title={contactName || "Outreach"} onClose={() => setOutreachOpen(false)}>
+          <div className="outreach-modal-body">
+          <div className="outreach-modal-recipient">
+            <span>To</span>
+            <strong>{contactName || "Unknown contact"}</strong>
+            <span>{email || "No email on file"}</span>
+          </div>
+          <div className="drawer-section-heading">
+            <h3>Status</h3>
+            <span>{message ? messageStatusLabel(message.status) : canDraft ? "Not generated" : "Shortlist required"}</span>
+          </div>
+          {message ? (
+            <>
+              <label className="draft-field">
+                <span>Subject</span>
+                <input
+                  value={draftSubject}
+                  onChange={(event) => setDraftSubject(event.target.value)}
+                  disabled={message.status === "sent"}
+                />
+              </label>
+              <label className="draft-field">
+                <span>Body</span>
+                <textarea
+                  value={draftBody}
+                  onChange={(event) => setDraftBody(event.target.value)}
+                  disabled={message.status === "sent"}
+                />
+              </label>
+              {approvedBy && (message.status === "approved" || message.status === "sent") ? (
+                <p className="outreach-modal-approved">Approved by {approvedBy}</p>
+              ) : null}
+              <div className="draft-action-row">
+                <button type="button" disabled={savingDraft || !draftBody.trim() || message.status === "sent"} onClick={saveDraft}>
+                  Save
+                </button>
+                <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={copyDraft}>
+                  <Copy size={13} />
+                  Copy
+                </button>
+                {message.status === "pending_approval" || message.status === "draft" ? (
+                  <button type="button" disabled={savingDraft || !draftBody.trim()} onClick={approveDraft}>
+                    Approve
+                  </button>
+                ) : null}
+                {message.status === "approved" ? (
+                  <button type="button" disabled={savingDraft || !canSend} onClick={sendDraft}>
+                    Send email
+                  </button>
+                ) : null}
+                {message.status === "sent" ? (
+                  <button type="button" disabled={savingDraft} onClick={markReplied}>
+                    Mark replied
+                  </button>
+                ) : null}
+              </div>
+              {message.status === "approved" && !canSend ? (
+                <p className="draft-warning">
+                  {blocked
+                    ? "This contact is blocked from outreach."
+                    : !email
+                      ? "Add or find an email before sending."
+                      : "Keep this contact shortlisted before sending."}
+                </p>
+              ) : null}
+            </>
+          ) : canDraft ? (
+            <button className="generate-draft-button" type="button" disabled={savingDraft} onClick={generateDraft}>
+              Generate draft
+            </button>
+          ) : (
+            <p className="draft-warning">
+              {blocked
+                ? "This contact is blocked from outreach."
+                : shortlisted && !verified
+                  ? "Verify this contact before generating outreach."
+                  : !email
+                    ? "Find an email before generating outreach."
+                    : "Mark this contact as Good fit or Maybe, then shortlist it before drafting."}
+            </p>
+          )}
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
