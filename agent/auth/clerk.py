@@ -40,11 +40,11 @@ class ClerkClaims:
 
 class ClerkTokenVerifier:
     def __init__(self, settings: Settings, *, cache_ttl_seconds: int = 300) -> None:
-        issuer = _clean_endpoint(settings.clerk_jwt_issuer)
+        raw_issuer = _clean_endpoint(settings.clerk_jwt_issuer)
         jwks_url = _dedupe_jwks_path(settings.clerk_jwks_url)
-        if issuer.endswith(JWKS_PATH):
-            jwks_url = jwks_url or issuer
-            issuer = issuer[: -len(JWKS_PATH)]
+        issuer = _strip_jwks_path(raw_issuer)
+        if raw_issuer != issuer:
+            jwks_url = jwks_url or _dedupe_jwks_path(raw_issuer)
 
         self.issuer = issuer
         self.jwks_url = jwks_url or (f"{self.issuer}{JWKS_PATH}" if self.issuer else "")
@@ -180,4 +180,11 @@ def _dedupe_jwks_path(value: str | None) -> str:
     duplicate = f"{JWKS_PATH}{JWKS_PATH}"
     while normalized.endswith(duplicate):
         normalized = normalized[: -len(JWKS_PATH)]
+    return normalized
+
+
+def _strip_jwks_path(value: str) -> str:
+    normalized = value
+    while normalized.endswith(JWKS_PATH):
+        normalized = normalized[: -len(JWKS_PATH)].rstrip("/")
     return normalized
