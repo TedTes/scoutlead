@@ -84,7 +84,7 @@ git diff --check
    ```bash
    VITE_CLERK_PUBLISHABLE_KEY=...
    REQUIRE_USER_AUTH=true
-   CLERK_JWT_ISSUER=https://your-clerk-issuer
+   CLERK_JWT_ISSUER=<your Clerk issuer URL only>
    CLERK_SECRET_KEY=...
    ```
 
