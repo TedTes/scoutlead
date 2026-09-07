@@ -142,21 +142,20 @@ Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TA
 The repo includes `.github/workflows/ci-release.yml`.
 
 On pull requests, it runs backend tests and the web production build. On pushes to `main`,
-it deploys the GitHub `dev` environment by default when deployable files changed. Manual
-`workflow_dispatch` from `main` lets you choose either `dev` or `production`; the release
-job binds to that GitHub Environment, runs Alembic against the matching Railway environment
-when migrations changed, then deploys the API, worker, and web services that need updates.
+it deploys the GitHub `dev` environment when deployable files changed. Manual
+`workflow_dispatch` from `main` also deploys `dev` only. The release job refuses to run
+unless `RAILWAY_ENVIRONMENT=dev`, runs Alembic against the dev Railway environment when
+migrations changed, then deploys the API, worker, and web services that need updates.
 
 Configure these GitHub repository settings before relying on the workflow. Add the same keys
-under each GitHub Environment you deploy from:
+under the GitHub `dev` Environment:
 
 - `Settings -> Environments -> dev`
-- `Settings -> Environments -> production`
 
 - Secret: `RAILWAY_TOKEN` — Railway project token scoped to the target environment.
 - Secret: `RAILWAY_MIGRATION_DATABASE_URL` — Railway Postgres public connection URL for that environment.
 - Variable: `RAILWAY_PROJECT_ID` — Railway project ID.
-- Variable: `RAILWAY_ENVIRONMENT` — matching Railway environment name or ID, for example `dev` or `production`.
+- Variable: `RAILWAY_ENVIRONMENT` — must be `dev`.
 - Variable: `RAILWAY_API_SERVICE` — API service name or ID.
 - Variable: `RAILWAY_WORKER_SERVICE` — worker service name or ID.
 - Variable: `RAILWAY_WEB_SERVICE` — web service name or ID.

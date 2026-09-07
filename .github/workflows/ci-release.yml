@@ -6,21 +6,12 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      target_environment:
-        description: GitHub/Railway environment to deploy
-        required: true
-        type: choice
-        default: dev
-        options:
-          - dev
-          - production
 
 permissions:
   contents: read
 
 concurrency:
-  group: scoutlead-release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }}
+  group: scoutlead-release-${{ github.ref }}-dev
   cancel-in-progress: true
 
 jobs:
@@ -66,15 +57,15 @@ jobs:
         run: npm run build
 
   release:
-    name: Migrate and Deploy to Railway (${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }})
+    name: Migrate and Deploy to Railway (dev)
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }}
+    environment: dev
     needs:
       - backend
       - web
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     env:
-      RELEASE_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'dev' }}
+      RELEASE_ENVIRONMENT: dev
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN || vars.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID || secrets.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT || secrets.RAILWAY_ENVIRONMENT }}
@@ -144,6 +135,14 @@ jobs:
         run: |
           echo "GitHub release environment: $RELEASE_ENVIRONMENT"
           missing=0
+          if [ "$RELEASE_ENVIRONMENT" != "dev" ]; then
+            echo "::error::This workflow is dev-only; RELEASE_ENVIRONMENT must be dev"
+            missing=1
+          fi
+          if [ "$RAILWAY_ENVIRONMENT" != "dev" ]; then
+            echo "::error::This workflow is dev-only; RAILWAY_ENVIRONMENT must be dev"
+            missing=1
+          fi
           required="RAILWAY_TOKEN RAILWAY_PROJECT_ID RAILWAY_ENVIRONMENT"
           if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
             required="$required RAILWAY_API_SERVICE RAILWAY_WORKER_SERVICE"
