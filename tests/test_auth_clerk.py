@@ -77,6 +77,40 @@ def test_clerk_verifier_keeps_issuer_fallback_when_explicit_jwks_is_set() -> Non
     ]
 
 
+def test_clerk_verifier_ignores_pasted_env_name_in_issuer_value() -> None:
+    verifier = ClerkTokenVerifier(
+        Settings(
+            _env_file=None,
+            clerk_jwt_issuer=(
+                "CLERK_JWT_ISSUER=https://modest-turkey-522.clerk.accounts.dev"
+            ),
+        )
+    )
+
+    assert verifier.issuer == "https://modest-turkey-522.clerk.accounts.dev"
+    assert verifier.jwks_url == (
+        "https://modest-turkey-522.clerk.accounts.dev/.well-known/jwks.json"
+    )
+
+
+def test_clerk_verifier_ignores_pasted_env_name_with_markdown_link() -> None:
+    verifier = ClerkTokenVerifier(
+        Settings(
+            _env_file=None,
+            clerk_jwt_issuer=(
+                "CLERK_JWT_ISSUER="
+                "[https://modest-turkey-522.clerk.accounts.dev/.well-known/jwks.json]"
+                "(https://modest-turkey-522.clerk.accounts.dev/.well-known/jwks.json)"
+            ),
+        )
+    )
+
+    assert verifier.issuer == "https://modest-turkey-522.clerk.accounts.dev"
+    assert verifier.jwks_url == (
+        "https://modest-turkey-522.clerk.accounts.dev/.well-known/jwks.json"
+    )
+
+
 def test_split_token_rejects_malformed_signature() -> None:
     try:
         _split_token("header.payload.signature")

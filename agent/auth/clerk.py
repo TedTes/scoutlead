@@ -193,7 +193,12 @@ def _optional_string(value: Any) -> str | None:
 
 
 def _clean_endpoint(value: str | None) -> str:
-    return (value or "").strip().rstrip("/")
+    normalized = (value or "").strip().strip("\"'")
+    prefix, separator, endpoint = normalized.partition("=")
+    if separator and _looks_like_env_name(prefix):
+        normalized = endpoint.strip().strip("\"'")
+    normalized = _unwrap_markdown_link(normalized)
+    return normalized.rstrip("/").rstrip(",")
 
 
 def _normalize_jwks_url(value: str | None) -> str:
@@ -231,3 +236,17 @@ def _describe_endpoint(value: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return value
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _looks_like_env_name(value: str) -> bool:
+    normalized = value.strip()
+    return bool(normalized) and normalized.upper() == normalized and normalized.replace("_", "").isalnum()
+
+
+def _unwrap_markdown_link(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("[") and "](" in normalized and normalized.endswith(")"):
+        link_target = normalized.rsplit("](", 1)[1][:-1].strip()
+        if link_target.startswith(("http://", "https://")):
+            return link_target
+    return normalized
