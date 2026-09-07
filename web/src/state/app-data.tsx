@@ -313,7 +313,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       const nextRunId =
         storedRunId && productRunList.some((run) => run.id === storedRunId)
           ? storedRunId
-          : storedRunIdValue === null
+          : productRunList.length === 1 || storedRunIdValue === null
             ? productRunList[0]?.id || ""
             : "";
       setSelectedDiscoveryRunIdState(nextRunId);
