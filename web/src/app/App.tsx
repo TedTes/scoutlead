@@ -234,6 +234,12 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, [activeScreen, productDiscoveryRuns, selectedDiscoveryRunId]);
 
   useEffect(() => {
+    if (loading || isTraceRoute || activeScreen !== "overview" || !selectedDiscoveryRunId) return;
+    const hasSelectedRun = productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId);
+    if (hasSelectedRun) setActiveScreen("results");
+  }, [activeScreen, isTraceRoute, loading, productDiscoveryRuns, selectedDiscoveryRunId]);
+
+  useEffect(() => {
     if (!selectedProductId) {
       setDraftRunNameState(null);
       return;
