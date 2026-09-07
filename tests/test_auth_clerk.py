@@ -62,6 +62,21 @@ def test_clerk_verifier_appends_jwks_path_to_explicit_base_url() -> None:
     )
 
 
+def test_clerk_verifier_keeps_issuer_fallback_when_explicit_jwks_is_set() -> None:
+    verifier = ClerkTokenVerifier(
+        Settings(
+            _env_file=None,
+            clerk_jwt_issuer="https://modest-turkey-522.clerk.accounts.dev",
+            clerk_jwks_url="https://bad-clerk.example.com/.well-known/jwks.json",
+        )
+    )
+
+    assert verifier.jwks_urls == [
+        "https://bad-clerk.example.com/.well-known/jwks.json",
+        "https://modest-turkey-522.clerk.accounts.dev/.well-known/jwks.json",
+    ]
+
+
 def test_split_token_rejects_malformed_signature() -> None:
     try:
         _split_token("header.payload.signature")

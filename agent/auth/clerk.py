@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import base64
+import binascii
 from dataclasses import dataclass
 import json
+import logging
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -15,6 +18,7 @@ from app.config import Settings
 
 
 JWKS_PATH = "/.well-known/jwks.json"
+logger = logging.getLogger(__name__)
 
 
 class AuthError(Exception):
@@ -41,13 +45,15 @@ class ClerkClaims:
 class ClerkTokenVerifier:
     def __init__(self, settings: Settings, *, cache_ttl_seconds: int = 300) -> None:
         raw_issuer = _clean_endpoint(settings.clerk_jwt_issuer)
-        jwks_url = _normalize_jwks_url(settings.clerk_jwks_url)
+        explicit_jwks_url = _normalize_jwks_url(settings.clerk_jwks_url)
         issuer = _strip_jwks_path(raw_issuer)
-        if raw_issuer != issuer:
-            jwks_url = jwks_url or _normalize_jwks_url(raw_issuer)
+        issuer_jwks_url = _normalize_jwks_url(raw_issuer) if raw_issuer != issuer else ""
+        if issuer and not issuer_jwks_url:
+            issuer_jwks_url = f"{issuer}{JWKS_PATH}"
 
         self.issuer = issuer
-        self.jwks_url = jwks_url or (f"{self.issuer}{JWKS_PATH}" if self.issuer else "")
+        self.jwks_urls = _unique_nonempty([explicit_jwks_url, issuer_jwks_url])
+        self.jwks_url = self.jwks_urls[0] if self.jwks_urls else ""
         self.cache_ttl_seconds = cache_ttl_seconds
         self._jwks_expires_at = 0.0
         self._jwks: list[dict[str, Any]] = []
@@ -107,22 +113,34 @@ class ClerkTokenVerifier:
     async def _get_jwks(self) -> list[dict[str, Any]]:
         if self._jwks and self._jwks_expires_at > time.time():
             return self._jwks
-        if not self.jwks_url:
+        if not self.jwks_urls:
             raise AuthConfigurationError("CLERK_JWKS_URL or CLERK_JWT_ISSUER is required")
 
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(self.jwks_url)
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError) as exc:
-            raise AuthConfigurationError("could not load Clerk JWKS") from exc
-        keys = payload.get("keys")
-        if not isinstance(keys, list):
-            raise AuthConfigurationError("Clerk JWKS response did not include keys")
-        self._jwks = [dict(key) for key in keys if isinstance(key, dict)]
-        self._jwks_expires_at = time.time() + self.cache_ttl_seconds
-        return self._jwks
+        attempted: list[str] = []
+        last_error: Exception | None = None
+        async with httpx.AsyncClient(timeout=10) as client:
+            for jwks_url in self.jwks_urls:
+                attempted.append(_describe_endpoint(jwks_url))
+                try:
+                    response = await client.get(jwks_url)
+                    response.raise_for_status()
+                    payload = response.json()
+                    keys = payload.get("keys")
+                    if not isinstance(keys, list):
+                        raise AuthConfigurationError("Clerk JWKS response did not include keys")
+                except (httpx.HTTPError, json.JSONDecodeError, AuthConfigurationError) as exc:
+                    last_error = exc
+                    logger.warning("Could not load Clerk JWKS from %s", attempted[-1])
+                    continue
+
+                self.jwks_url = jwks_url
+                self._jwks = [dict(key) for key in keys if isinstance(key, dict)]
+                self._jwks_expires_at = time.time() + self.cache_ttl_seconds
+                return self._jwks
+
+        raise AuthConfigurationError(
+            f"could not load Clerk JWKS from {', '.join(attempted)}"
+        ) from last_error
 
     def _validate_payload(self, payload: dict[str, Any]) -> None:
         now = int(time.time())
@@ -151,7 +169,7 @@ def _split_token(token: str) -> tuple[bytes, bytes]:
         raise AuthError("invalid Clerk token")
     try:
         return f"{parts[0]}.{parts[1]}".encode("ascii"), _base64url_decode(parts[2])
-    except ValueError as exc:
+    except (binascii.Error, ValueError) as exc:
         raise AuthError("invalid Clerk token") from exc
 
 
@@ -195,3 +213,21 @@ def _strip_jwks_path(value: str) -> str:
     while normalized.endswith(JWKS_PATH):
         normalized = normalized[: -len(JWKS_PATH)].rstrip("/")
     return normalized
+
+
+def _unique_nonempty(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
+def _describe_endpoint(value: str) -> str:
+    parsed = urlsplit(value)
+    if not parsed.scheme or not parsed.netloc:
+        return value
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
