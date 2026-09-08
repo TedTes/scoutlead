@@ -195,35 +195,24 @@ function LandingPage() {
           </div>
         </section>
 
-        <section className="landing-section landing-trust-section" aria-label="Privacy and compliance">
-          <div className="landing-section-heading">
-            <p className="landing-eyebrow">Privacy and compliance</p>
-            <h2>Outreach has guardrails before it reaches Gmail, exports, or webhooks</h2>
-            <p className="landing-lede">
-              Verification, suppression, human approval, and provider checks are handled once in the workflow.
-            </p>
-          </div>
-          <div className="landing-trust-row">
-            <LandingTrustItem icon={<ShieldCheck size={15} />} title="Verify first">
-              Leads need a reachable email or phone before they move into outreach.
-            </LandingTrustItem>
-            <LandingTrustItem icon={<Ban size={15} />} title="Respect suppression">
-              Bounced, opted-out, and never-contact contacts stay blocked across future runs.
-            </LandingTrustItem>
-            <LandingTrustItem icon={<UserCheck size={15} />} title="Require approval">
-              Drafts, exports, and sends wait for a human decision.
-            </LandingTrustItem>
-            <LandingTrustItem icon={<ListChecks size={15} />} title="Check providers">
-              Campaigns surface missing search, verification, or sending configuration before work proceeds.
-            </LandingTrustItem>
-          </div>
-        </section>
+        <TrustSection />
 
         <section className="landing-cta" aria-label="Get started">
           <h2>Build a shortlist that gets smarter every run</h2>
           <p className="landing-lede">
             Describe your target customer and turn public business data into a private, reviewed pipeline.
           </p>
+          <div className="landing-proof-row landing-cta-proof" aria-label="Included with every account">
+            <span>
+              <CheckCircle2 size={14} /> Verified before outreach
+            </span>
+            <span>
+              <CheckCircle2 size={14} /> Human approval required
+            </span>
+            <span>
+              <CheckCircle2 size={14} /> Sends from your own Gmail
+            </span>
+          </div>
           <div className="landing-actions">
             <a className="landing-primary" href="/app">
               Sign in <ArrowRight size={16} />
@@ -265,9 +254,6 @@ function AppRouteLoading() {
   );
 }
 
-const PREVIEW_QUERY =
-  "independent residential painters in Toronto with a website, quote form, and owner contact";
-
 const PREVIEW_LEADS = [
   {
     name: "Esposito's Painting Services",
@@ -302,13 +288,27 @@ const PREVIEW_LEADS = [
     body: "Professional painting service matching intended user role for QuoteVan.",
     missing: "Missing: Explicit customer problem statements from the lead.",
   },
+  {
+    name: "DewDrop - Professional Painting Services Mississauga",
+    category: "Professional Painting Services",
+    location: "Mississauga, ON, Canada",
+    score: 90,
+    status: "Unknown",
+    statusTone: "amber",
+    fit: "Agent good fit",
+    body: "Painter business with a local service footprint.",
+    missing: "Missing: email",
+  },
 ];
 
+const PREVIEW_QUERY =
+  "independent residential painters in Toronto with a website, quote form, and owner contact";
+
 const PREVIEW_RUNS = [
-  { title: "smaller niches", meta: "new search", count: "", date: "draft", tone: "blue" },
-  { title: "Painting Services", meta: "6 · 3 verified", count: "completed", date: "Sep 7", tone: "green" },
-  { title: "new test2", meta: "4 · 3 verified", count: "completed", date: "Sep 7", tone: "green" },
-  { title: "new test", meta: "3 found", count: "researching", date: "Sep 7", tone: "amber" },
+  { title: "Mississauga Painters", meta: "new search", count: "", date: "draft", tone: "blue" },
+  { title: "Toronto Painting Services", meta: "6 · 3 verified", count: "completed", date: "Sep 7", tone: "green" },
+  { title: "GTA Solo Painters", meta: "4 · 3 verified", count: "completed", date: "Sep 7", tone: "green" },
+  { title: "Quote-Ready Painters", meta: "3 found", count: "researching", date: "Sep 7", tone: "amber" },
 ];
 
 function AnimatedPreview() {
@@ -356,9 +356,9 @@ function AnimatedPreview() {
 
   return (
     <div className="landing-preview preview-app" aria-label="ScoutLead product preview">
-      <PreviewRail activeManage="" activeRun="smaller niches" />
+      <PreviewRail activeManage="" activeRun="Mississauga Painters" />
       <div className="preview-main-panel">
-        <PreviewAppTopbar pageName="smaller niches" />
+        <PreviewAppTopbar pageName="Mississauga Painters" />
         <div className="preview-stage">
           {showResults ? (
             <PreviewResults visibleCount={visibleLeads} />
@@ -617,10 +617,9 @@ function PreviewResults({
 }) {
   return (
     <section
-      className={`preview-results-screen${showDrawer && drawerVisible ? " has-drawer" : ""}`}
+      className={`preview-results-screen${showDrawer ? " has-detail" : ""}${showDrawer && drawerVisible ? " is-open" : ""}`}
       aria-label="Preview results"
     >
-      <PreviewSearchBar />
       <div className="preview-results-meta">6 found · 6 reachable · 3 verified · 6 good fit</div>
       <div className="preview-results-controls">
         <div className="preview-tabs">
@@ -636,41 +635,39 @@ function PreviewResults({
           </button>
         </div>
       </div>
-      <div className="preview-lead-list">
-        {PREVIEW_LEADS.map((lead, idx) => (
-          <PreviewLeadCard lead={lead} key={lead.name} visible={idx < visibleCount} clicked={idx === clickedIndex} />
-        ))}
+      <div className="preview-results-body">
+        <div className="preview-lead-list">
+          {PREVIEW_LEADS.map((lead, idx) => (
+            <PreviewLeadCard
+              lead={lead}
+              key={lead.name}
+              visible={idx < visibleCount}
+              clicked={idx === clickedIndex}
+              selected={idx === clickedIndex}
+            />
+          ))}
+        </div>
+        {showDrawer ? <PreviewDetailDrawer visible={drawerVisible} /> : null}
       </div>
-      {showDrawer ? <PreviewDetailDrawer visible={drawerVisible} /> : null}
     </section>
-  );
-}
-
-function PreviewSearchBar() {
-  return (
-    <div className="preview-searchbar">
-      <Search size={14} />
-      <span>Describe the businesses to find</span>
-      <button type="button" tabIndex={-1} aria-label="Run preview search">
-        <ArrowRight size={14} />
-      </button>
-    </div>
   );
 }
 
 function PreviewLeadCard({
   clicked = false,
   lead,
+  selected = false,
   visible = true,
 }: {
   clicked?: boolean;
   lead: (typeof PREVIEW_LEADS)[number];
+  selected?: boolean;
   visible?: boolean;
 }) {
   return (
     <article
       aria-hidden={!visible}
-      className={`preview-lead-card${visible ? "" : " is-hidden"}${clicked ? " is-clicked" : ""}`}
+      className={`preview-lead-card${visible ? "" : " is-hidden"}${clicked ? " is-clicked" : ""}${selected ? " is-selected" : ""}`}
     >
       <span className="preview-lead-score">{lead.score}</span>
       <div className="preview-lead-copy">
@@ -700,6 +697,7 @@ function PreviewDetailDrawer({ visible = true }: { visible?: boolean }) {
       aria-label="Preview lead drawer"
       className={`preview-detail-drawer${visible ? "" : " is-hidden"}`}
     >
+      <div className={`preview-detail-drawer-content${visible ? "" : " is-hidden"}`}>
       <div className="preview-detail-head">
         <span className="preview-lead-score">90</span>
         <div>
@@ -732,6 +730,7 @@ function PreviewDetailDrawer({ visible = true }: { visible?: boolean }) {
         <button type="button" tabIndex={-1}>Shortlist</button>
         <button type="button" tabIndex={-1}>Pass</button>
         <button type="button" tabIndex={-1}>Review outreach <ArrowRight size={13} /></button>
+      </div>
       </div>
     </aside>
   );
@@ -940,6 +939,36 @@ function LandingStep({
         <p>{children}</p>
       </div>
     </div>
+  );
+}
+
+function TrustSection() {
+  const [ref, active] = useRevealOnScroll<HTMLDivElement>();
+
+  return (
+    <section className="landing-section landing-trust-section" aria-label="Privacy and compliance">
+      <div className="landing-section-heading">
+        <p className="landing-eyebrow">Privacy and compliance</p>
+        <h2>Outreach has guardrails before it reaches Gmail, exports, or webhooks</h2>
+        <p className="landing-lede">
+          Verification, suppression, human approval, and provider checks are handled once in the workflow.
+        </p>
+      </div>
+      <div className={`landing-trust-row${active ? " is-active" : ""}`} ref={ref}>
+        <LandingTrustItem icon={<ShieldCheck size={15} />} title="Verify first">
+          Leads need a reachable email or phone before they move into outreach.
+        </LandingTrustItem>
+        <LandingTrustItem icon={<Ban size={15} />} title="Respect suppression">
+          Bounced, opted-out, and never-contact contacts stay blocked across future runs.
+        </LandingTrustItem>
+        <LandingTrustItem icon={<UserCheck size={15} />} title="Require approval">
+          Drafts, exports, and sends wait for a human decision.
+        </LandingTrustItem>
+        <LandingTrustItem icon={<ListChecks size={15} />} title="Check providers">
+          Campaigns surface missing search, verification, or sending configuration before work proceeds.
+        </LandingTrustItem>
+      </div>
+    </section>
   );
 }
 

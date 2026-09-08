@@ -550,19 +550,21 @@ export function ResultsScreen() {
           </section>
         )}
 
-        <ContactDrawer
-          contact={selectedContact}
-          message={selectedMessage}
-          onClose={() => setSelectedContactId("")}
-          onApproveMessage={approveMessage}
-          onCreateDraft={createOutreachDraft}
-          onQualifyLead={qualifyLead}
-          onMarkMessageReplied={markMessageReplied}
-          onSendMessage={sendMessage}
-          onUpdateContactPolicy={updateLeadContactPolicy}
-          onUpdateLead={updateLead}
-          onUpdateMessage={updateMessage}
-        />
+        {selectedContact ? (
+          <ContactDrawer
+            contact={selectedContact}
+            message={selectedMessage}
+            onClose={() => setSelectedContactId("")}
+            onApproveMessage={approveMessage}
+            onCreateDraft={createOutreachDraft}
+            onQualifyLead={qualifyLead}
+            onMarkMessageReplied={markMessageReplied}
+            onSendMessage={sendMessage}
+            onUpdateContactPolicy={updateLeadContactPolicy}
+            onUpdateLead={updateLead}
+            onUpdateMessage={updateMessage}
+          />
+        ) : null}
       </div>
 
       {pendingExport ? (
@@ -757,7 +759,7 @@ function ContactDrawer({
   onUpdateLead,
   onUpdateMessage,
 }: {
-  contact: DiscoveryResult | undefined;
+  contact: DiscoveryResult;
   message: Message | undefined;
   onClose: () => void;
   onApproveMessage: (messageId: string) => Promise<void>;
@@ -770,14 +772,13 @@ function ContactDrawer({
   onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
 }) {
   const { showToast } = useToast();
-  const open = Boolean(contact);
-  const score = contact ? contactScore(contact) : 0;
-  const currentReviewStatus = contact ? reviewStatus(contact) : "unreviewed";
-  const agentAssessment = contact ? getAgentAssessment(contact) : undefined;
-  const policyStatus = contact ? contactPolicyStatus(contact) : "allowed";
-  const blocked = contact ? isContactBlocked(contact) : false;
-  const canShortlist = contact ? canShortlistContact(contact) && !blocked : false;
-  const shortlisted = Boolean(contact?.shortlisted_at);
+  const score = contactScore(contact);
+  const currentReviewStatus = reviewStatus(contact);
+  const agentAssessment = getAgentAssessment(contact);
+  const policyStatus = contactPolicyStatus(contact);
+  const blocked = isContactBlocked(contact);
+  const canShortlist = canShortlistContact(contact) && !blocked;
+  const shortlisted = Boolean(contact.shortlisted_at);
   const [reviewNote, setReviewNote] = useState("");
   const [qualifying, setQualifying] = useState(false);
   const [savingReview, setSavingReview] = useState(false);
@@ -786,56 +787,53 @@ function ContactDrawer({
   const [savingDraft, setSavingDraft] = useState(false);
   const [activeTab, setActiveTab] = useState<DrawerTab>("overview");
   const [outreachOpen, setOutreachOpen] = useState(false);
-  const signals = contact ? contactSignals(contact) : [];
-  const website = contact?.website_url || contact?.research?.website_url || "";
-  const email = contact?.contact_email || contact?.research?.contact_email || "";
-  const verified = contact ? isVerifiedContact(contact) : false;
+  const signals = contactSignals(contact);
+  const website = contact.website_url || contact.research?.website_url || "";
+  const email = contact.contact_email || contact.research?.contact_email || "";
+  const verified = isVerifiedContact(contact);
   const canDraft = Boolean(!blocked && shortlisted && canShortlist && verified && email);
   const canSend = Boolean(message && message.status === "approved" && email && canDraft);
   const approvedBy =
     message?.approval && typeof message.approval === "object" && "approved_by" in message.approval
       ? String((message.approval as Record<string, unknown>).approved_by)
       : undefined;
-  const phone = contact ? getPhone(contact) : "";
-  const contactName = contact ? getContactName(contact) : "";
-  const address = contact ? getAddress(contact) : "";
-  const rating = contact ? getRating(contact) : "";
-  const reviewCount = contact ? getReviewCount(contact) : "";
-  const price = contact ? getPrice(contact) : "";
-  const posted = contact ? getPostedDate(contact) : "";
-  const confidence = contact?.research?.confidence ? `${contact.research.confidence}%` : "—";
-  const evidenceNotes = contact
-    ? [
-        ...(contact.research?.pain_indicators || []),
-        ...(contact.research?.disqualifiers || []),
-        ...(contact.qualification?.criteria || []).flatMap((criterion) => criterion.evidence || []),
-      ].filter(Boolean)
-    : [];
-  const fitStatus = contact ? displayFitStatus(contact) : { label: "Needs review", className: "fit-neutral" };
+  const phone = getPhone(contact);
+  const contactName = getContactName(contact);
+  const address = getAddress(contact);
+  const rating = getRating(contact);
+  const reviewCount = getReviewCount(contact);
+  const price = getPrice(contact);
+  const posted = getPostedDate(contact);
+  const confidence = contact.research?.confidence ? `${contact.research.confidence}%` : "—";
+  const evidenceNotes = [
+    ...(contact.research?.pain_indicators || []),
+    ...(contact.research?.disqualifiers || []),
+    ...(contact.qualification?.criteria || []).flatMap((criterion) => criterion.evidence || []),
+  ].filter(Boolean);
+  const fitStatus = displayFitStatus(contact);
   const fitScore = agentAssessment?.score ?? score;
-  const verification = contact ? verificationStatus(contact) : "unverified";
-  const verificationDetails = verificationDetailChips(contact?.verification_details);
-  const activityItems = contact ? contactActivityItems(contact, message) : [];
+  const verification = verificationStatus(contact);
+  const verificationDetails = verificationDetailChips(contact.verification_details);
+  const activityItems = contactActivityItems(contact, message);
   const evidenceCount = new Set([
     ...signals,
     ...evidenceNotes,
     ...verificationDetails,
-    contact?.verification_reason || "",
+    contact.verification_reason || "",
     agentAssessment?.rationale || "",
   ].filter(Boolean)).size;
 
   useEffect(() => {
-    if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, open]);
+  }, [onClose]);
 
   useEffect(() => {
-    setReviewNote(contact?.review_note || "");
-  }, [contact?.id, contact?.review_note]);
+    setReviewNote(contact.review_note || "");
+  }, [contact.id, contact.review_note]);
 
   useEffect(() => {
     setDraftSubject(message?.subject || "");
@@ -845,10 +843,10 @@ function ContactDrawer({
   useEffect(() => {
     setActiveTab("overview");
     setOutreachOpen(false);
-  }, [contact?.id]);
+  }, [contact.id]);
 
   const saveLeadUpdate = async (update: LeadUpdateInput, successTitle: string) => {
-    if (!contact || savingReview) return;
+    if (savingReview) return;
     setSavingReview(true);
     try {
       await onUpdateLead(contact.id, update);
@@ -862,7 +860,7 @@ function ContactDrawer({
   };
 
   const runAgentCheck = async () => {
-    if (!contact || qualifying) return;
+    if (qualifying) return;
     setQualifying(true);
     try {
       await onQualifyLead(contact.id);
@@ -890,7 +888,7 @@ function ContactDrawer({
   };
 
   const toggleShortlist = () => {
-    if (!contact || !canShortlist) return;
+    if (!canShortlist) return;
     void saveLeadUpdate(
       { shortlisted: !shortlisted },
       shortlisted ? "Removed from shortlist" : "Shortlisted",
@@ -898,7 +896,7 @@ function ContactDrawer({
   };
 
   const updateContactPolicy = async (update: LeadContactPolicyInput, successTitle: string) => {
-    if (!contact || savingReview) return;
+    if (savingReview) return;
     const isBlocking = update.status !== "allowed";
     if (isBlocking) {
       const confirmed = window.confirm(`${successTitle}? This contact will be removed from shortlist and blocked from outreach.`);
@@ -921,7 +919,7 @@ function ContactDrawer({
   };
 
   const generateDraft = async () => {
-    if (!contact || savingDraft) return;
+    if (savingDraft) return;
     setSavingDraft(true);
     try {
       const created = await onCreateDraft(contact.id);
@@ -1017,28 +1015,26 @@ function ContactDrawer({
   };
 
   return (
-    <div className={`contact-drawer-overlay${open ? " open" : ""}`} aria-hidden={!open}>
+    <div className="contact-drawer-overlay open">
       <button className="contact-drawer-backdrop" type="button" aria-label="Close details" onClick={onClose} />
       <aside className="contact-drawer-panel" aria-label="Contact details">
-        {contact ? (
-          <>
-            <header className="contact-drawer-header">
-              <div className="drawer-title-row">
-                <span className={`score-ring large ${scoreClass(score)}`}>
-                  <strong>{score}</strong>
-                </span>
-                <div className="drawer-title-copy">
-                  <h2>{contact.company_name}</h2>
-                  <p>
-                    {contact.research?.business_type || contact.description || "Business"}
-                    {contact.geography || contact.research?.geography ? ` · ${contact.geography || contact.research?.geography}` : ""}
-                  </p>
-                </div>
-              </div>
-              <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">
-                <X size={18} />
-              </button>
-            </header>
+        <header className="contact-drawer-header">
+          <div className="drawer-title-row">
+            <span className={`score-ring large ${scoreClass(score)}`}>
+              <strong>{score}</strong>
+            </span>
+            <div className="drawer-title-copy">
+              <h2>{contact.company_name}</h2>
+              <p>
+                {contact.research?.business_type || contact.description || "Business"}
+                {contact.geography || contact.research?.geography ? ` · ${contact.geography || contact.research?.geography}` : ""}
+              </p>
+            </div>
+          </div>
+          <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </header>
 
             <section className="drawer-signal-summary" aria-label="Contact summary">
               <div className={`drawer-fit-verdict ${fitStatus.className}`}>
@@ -1321,11 +1317,9 @@ function ContactDrawer({
                 <ArrowRight size={14} />
               </button>
             </footer>
-          </>
-        ) : null}
       </aside>
 
-      {outreachOpen && contact ? (
+      {outreachOpen ? (
         <Modal title={contactName || "Outreach"} onClose={() => setOutreachOpen(false)}>
           <div className="outreach-modal-body">
           <div className="outreach-modal-recipient">

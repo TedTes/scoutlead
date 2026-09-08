@@ -302,6 +302,31 @@ a {
   width: 100%;
 }
 
+.landing-preview.preview-app {
+  height: clamp(500px, 52vw, 580px);
+  min-height: 0;
+}
+
+.landing-preview.preview-app .preview-results-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.landing-preview.preview-app .preview-results-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.landing-preview.preview-app .preview-lead-list {
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
 .landing-preview-focused {
   grid-template-columns: minmax(0, 1fr);
   min-height: 0;
@@ -313,7 +338,9 @@ a {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
   padding: 12px 8px 10px;
 }
 
@@ -391,6 +418,11 @@ a {
 .preview-run-list {
   display: grid;
   gap: 4px;
+  max-height: 300px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
 }
 
 .preview-run {
@@ -461,7 +493,7 @@ a {
   border-top: 1px solid var(--line);
   display: grid;
   gap: 4px;
-  margin-top: auto;
+  margin-top: 8px;
   padding-top: 10px;
 }
 
@@ -621,22 +653,17 @@ a {
   max-width: 620px;
 }
 
-.preview-composer,
-.preview-searchbar {
-  align-items: center;
+.preview-composer {
+  align-items: flex-start;
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
   display: flex;
   gap: 10px;
-  min-width: 0;
-}
-
-.preview-composer {
-  align-items: flex-start;
   margin-top: 16px;
   min-height: 88px;
+  min-width: 0;
   padding: 16px 12px;
 }
 
@@ -648,8 +675,7 @@ a {
   min-width: 0;
 }
 
-.preview-composer button,
-.preview-searchbar button {
+.preview-composer button {
   align-items: center;
   background: #8e949b;
   border: 0;
@@ -717,21 +743,6 @@ a {
   font-size: 10.5px;
   line-height: 1.45;
   margin: 12px 0 0;
-}
-
-.preview-searchbar {
-  height: 44px;
-  padding: 0 10px;
-}
-
-.preview-searchbar > span {
-  color: var(--faint);
-  flex: 1;
-  font-size: 12px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .preview-results-meta {
@@ -847,6 +858,11 @@ a {
 .preview-lead-card.is-clicked {
   animation: preview-card-click 260ms var(--ease-spring);
   border-color: var(--line-strong);
+}
+
+.preview-lead-card.is-selected {
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--text);
 }
 
 @keyframes preview-card-click {
@@ -981,7 +997,12 @@ a {
   color: var(--amber);
 }
 
-.preview-results-screen.has-drawer::before {
+.preview-results-body {
+  min-width: 0;
+  position: relative;
+}
+
+.preview-results-screen.has-detail.is-open::before {
   background: rgba(27, 31, 36, 0.42);
   content: "";
   inset: -24px;
@@ -1010,6 +1031,53 @@ a {
   opacity: 0;
   pointer-events: none;
   transform: translateX(14px);
+}
+
+/* At comfortable widths, dock the detail panel beside the list instead of
+   overlaying it with a dimming scrim - same split-view pattern used in the
+   product itself. Below this the overlay drawer above remains the fallback. */
+@media (min-width: 1024px) {
+  .preview-results-screen.has-detail::before {
+    display: none;
+  }
+
+  .preview-results-screen.has-detail .preview-results-body {
+    align-items: start;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) minmax(230px, 280px);
+  }
+
+  .preview-results-screen.has-detail .preview-detail-drawer {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    bottom: auto;
+    box-shadow: var(--shadow-sm);
+    position: static;
+    right: auto;
+    top: auto;
+    width: 100%;
+  }
+
+  /* The docked panel's card shell stays visible the whole time it's
+     reserving grid space; only its content fades/slides in on click. */
+  .preview-results-screen.has-detail .preview-detail-drawer.is-hidden {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+
+  .preview-results-screen.has-detail .preview-detail-drawer-content {
+    transition:
+      opacity var(--dur-slow) var(--ease-out),
+      transform var(--dur-slow) var(--ease-out);
+  }
+
+  .preview-results-screen.has-detail .preview-detail-drawer-content.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+  }
 }
 
 .preview-reveal {
@@ -1564,7 +1632,33 @@ a {
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
   min-width: 0;
+  opacity: 0;
   padding: 18px;
+  transform: translateY(10px);
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+}
+
+.landing-trust-row.is-active .landing-trust-item {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.landing-trust-row.is-active .landing-trust-item:nth-child(1) {
+  transition-delay: 0ms;
+}
+
+.landing-trust-row.is-active .landing-trust-item:nth-child(2) {
+  transition-delay: 80ms;
+}
+
+.landing-trust-row.is-active .landing-trust-item:nth-child(3) {
+  transition-delay: 160ms;
+}
+
+.landing-trust-row.is-active .landing-trust-item:nth-child(4) {
+  transition-delay: 240ms;
 }
 
 .landing-trust-item > span {
@@ -1612,6 +1706,11 @@ a {
 
 .landing-cta .landing-actions {
   justify-content: center;
+}
+
+.landing-cta-proof {
+  justify-content: center;
+  margin-top: 16px;
 }
 
 .landing-footer {
@@ -2593,6 +2692,7 @@ a {
 
 .content {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 24px 26px 48px;
 }
@@ -3958,8 +4058,8 @@ a {
 }
 
 .contact-card.is-selected {
-  border-color: var(--text);
-  box-shadow: 0 0 0 1px var(--text);
+  border-color: var(--line-strong);
+  box-shadow: inset 2px 0 0 var(--text), var(--shadow-sm);
 }
 
 .contact-main {
@@ -4212,19 +4312,49 @@ a {
 /* Below 1160px there isn't room for list + detail side by side, so the
    detail panel stays the full-screen overlay defined further down. */
 @media (min-width: 1160px) {
+  body.has-contact-detail .content {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .results-workspace.has-detail {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .results-workspace.has-detail .results-controlbar {
+    flex: 0 0 auto;
+  }
+
   .results-body.has-detail {
-    align-items: start;
+    align-items: stretch;
     display: grid;
+    flex: 1 1 auto;
     gap: 18px;
     grid-template-columns: minmax(0, 1fr) minmax(430px, 500px);
+    min-height: 0;
+    overflow: hidden;
   }
 
   .results-body.has-detail .contact-card-list {
+    max-height: 100%;
+    min-height: 0;
     min-width: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 3px 4px 8px 2px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
   }
 
   .results-body.has-detail .contact-drawer-overlay {
+    height: 100%;
     inset: auto;
+    min-height: 0;
+    overflow: hidden;
     pointer-events: auto;
     position: static;
     z-index: auto;
@@ -4238,11 +4368,12 @@ a {
     border: 1px solid var(--line);
     border-radius: 11px;
     box-shadow: var(--shadow-sm);
-    max-height: calc(100vh - 32px);
+    height: 100%;
+    max-height: 100%;
     max-width: none;
-    position: sticky;
+    position: static;
     right: auto;
-    top: 16px;
+    top: auto;
     transform: none;
     transition: border-color 160ms ease, box-shadow 160ms ease;
     width: 100%;
@@ -4253,10 +4384,42 @@ a {
   body.has-contact-detail {
     overflow: hidden;
   }
+
+  body.has-contact-detail .contact-drawer-overlay {
+    align-items: stretch;
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+    z-index: 120;
+  }
+
+  body.has-contact-detail .contact-drawer-backdrop {
+    position: fixed;
+  }
+
+  body.has-contact-detail .contact-drawer-panel {
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    bottom: auto;
+    height: auto;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    max-width: 680px;
+    position: relative;
+    right: auto;
+    top: auto;
+    transform: translateY(10px);
+    width: min(680px, calc(100vw - 32px));
+  }
+
+  body.has-contact-detail .contact-drawer-overlay.open .contact-drawer-panel {
+    transform: translateY(0);
+  }
 }
 
 .contact-drawer-overlay {
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
   position: fixed;
   z-index: 90;
@@ -5560,12 +5723,14 @@ a {
 }
 
 .content::-webkit-scrollbar,
-.drawer-body::-webkit-scrollbar {
+.drawer-body::-webkit-scrollbar,
+.results-body.has-detail .contact-card-list::-webkit-scrollbar {
   width: 10px;
 }
 
 .content::-webkit-scrollbar-thumb,
-.drawer-body::-webkit-scrollbar-thumb {
+.drawer-body::-webkit-scrollbar-thumb,
+.results-body.has-detail .contact-card-list::-webkit-scrollbar-thumb {
   background: rgba(27, 31, 36, 0.14);
   background-clip: content-box;
   border: 2px solid transparent;
@@ -5573,7 +5738,8 @@ a {
 }
 
 .content::-webkit-scrollbar-thumb:hover,
-.drawer-body::-webkit-scrollbar-thumb:hover {
+.drawer-body::-webkit-scrollbar-thumb:hover,
+.results-body.has-detail .contact-card-list::-webkit-scrollbar-thumb:hover {
   background: rgba(27, 31, 36, 0.22);
   background-clip: content-box;
 }
@@ -5631,6 +5797,15 @@ a {
 
   .landing-preview {
     min-height: 520px;
+  }
+
+  .landing-preview.preview-app {
+    height: clamp(500px, 62vw, 560px);
+    min-height: 0;
+  }
+
+  .preview-run-list {
+    max-height: 220px;
   }
 
   .landing-section h2,
@@ -5767,9 +5942,13 @@ a {
     display: none;
   }
 
-  .main,
-  .content {
+  .main {
     overflow: visible;
+  }
+
+  .content {
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .main {
@@ -5884,6 +6063,11 @@ a {
     border-radius: 8px;
     grid-template-columns: 1fr;
     min-height: 540px;
+  }
+
+  .landing-preview.preview-app {
+    height: 540px;
+    min-height: 0;
   }
 
   .preview-rail {
@@ -6152,6 +6336,31 @@ a {
   }
 }
 
+@media (max-width: 900px) {
+  body.has-contact-detail .contact-drawer-overlay {
+    padding: 0;
+  }
+
+  body.has-contact-detail .contact-drawer-panel {
+    border: 0;
+    border-radius: 0;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    max-width: none;
+    width: 100vw;
+  }
+
+  body.has-contact-detail .contact-drawer-header,
+  body.has-contact-detail .drawer-signal-summary,
+  body.has-contact-detail .drawer-tabs,
+  body.has-contact-detail .drawer-body,
+  body.has-contact-detail .drawer-footer {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
+
 @media (max-width: 480px) {
   .landing-primary,
   .landing-secondary {
@@ -6167,12 +6376,8 @@ a {
   }
 
   .preview-detail-drawer,
-  .preview-results-screen.has-drawer::before {
+  .preview-results-screen.has-detail.is-open::before {
     display: none;
-  }
-
-  .preview-composer {
-    min-height: 112px;
   }
 
   .preview-tabs {
@@ -6180,6 +6385,20 @@ a {
     overflow-x: auto;
     padding-bottom: 2px;
     width: 100%;
+  }
+
+  .landing-preview.preview-app {
+    height: 520px;
+  }
+
+  .preview-stage {
+    padding: 14px;
+  }
+
+  .preview-lead-card {
+    gap: 9px;
+    min-height: 72px;
+    padding: 9px;
   }
 
   .content {
@@ -6213,6 +6432,24 @@ a {
 
   .drawer-mini-grid {
     grid-template-columns: 1fr;
+  }
+
+  body.has-contact-detail .drawer-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  body.has-contact-detail .drawer-footer-secondary {
+    width: 100%;
+  }
+
+  body.has-contact-detail .drawer-footer-secondary button {
+    flex: 1 1 0;
+  }
+
+  body.has-contact-detail .drawer-primary-action {
+    max-width: none;
+    width: 100%;
   }
 
   .prompt-template-grid {
