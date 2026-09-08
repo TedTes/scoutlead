@@ -42,7 +42,7 @@ type AppDataContextValue = {
   setSelectedProductId: (productId: string) => void;
   setSelectedDiscoveryRunId: (runId: string) => void;
   setActiveSourceIds: (sourceIds: SourceRequestSource[]) => void;
-  refreshAll: () => Promise<void>;
+  refreshAll: (options?: RefreshAllOptions) => Promise<void>;
   refreshSnapshot: (runId?: string) => Promise<void>;
   refreshGmailConnection: (productId?: string) => Promise<void>;
   getGmailAuthorizationUrl: (productId?: string) => Promise<GmailAuthorizationUrl | null>;
@@ -93,6 +93,10 @@ type AppDataProviderProps = {
   approverLabel?: string;
   children: React.ReactNode;
   getAuthToken?: () => Promise<string | null>;
+};
+
+type RefreshAllOptions = {
+  showLoading?: boolean;
 };
 
 function readStoredActiveSourceIds() {
@@ -279,8 +283,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     [api],
   );
 
-  const refreshAll = useCallback(async () => {
-    setLoading(true);
+  const refreshAll = useCallback(async ({ showLoading = true }: RefreshAllOptions = {}) => {
+    if (showLoading) setLoading(true);
     setError("");
     try {
       const [health, nextProducts, nextRuns, nextSourceProviders] = await Promise.all([
@@ -326,21 +330,18 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [api, refreshGmailConnection, refreshProductContacts, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
       setError("");
-      setLoading(true);
       try {
         await action();
-        await refreshAll();
+        await refreshAll({ showLoading: false });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setLoading(false);
       }
     },
     [refreshAll],
@@ -428,35 +429,35 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       runSourceRequest: async (input) => {
         let created: SourceRequestRun | null = null;
         setError("");
-        setLoading(true);
         try {
           const result = await api.createSourceRequest(input);
           localStorage.setItem("selectedDiscoveryRunId", result.run.id);
+          selectedDiscoveryRunIdRef.current = result.run.id;
+          setSelectedDiscoveryRunIdState(result.run.id);
+          setDiscoveryRuns((current) => upsertDiscoveryRun(current, result.run));
           created = result;
-          await refreshAll();
+          await refreshAll({ showLoading: false });
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
           throw err;
-        } finally {
-          setLoading(false);
         }
         return created;
       },
       rerunSourceRequest: async (runId = selectedDiscoveryRunIdState) => {
         let created: SourceRequestRun | null = null;
         setError("");
-        setLoading(true);
         try {
           if (!runId) return null;
           const result = await api.rerunSourceRequest(runId);
           localStorage.setItem("selectedDiscoveryRunId", result.run.id);
+          selectedDiscoveryRunIdRef.current = result.run.id;
+          setSelectedDiscoveryRunIdState(result.run.id);
+          setDiscoveryRuns((current) => upsertDiscoveryRun(current, result.run));
           created = result;
-          await refreshAll();
+          await refreshAll({ showLoading: false });
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
           throw err;
-        } finally {
-          setLoading(false);
         }
         return created;
       },
@@ -617,6 +618,11 @@ function dedupeContacts(contacts: DiscoveryResult[]) {
     deduped.push(contact);
   }
   return deduped;
+}
+
+function upsertDiscoveryRun(runs: DiscoveryRun[], nextRun: DiscoveryRun) {
+  const withoutExisting = runs.filter((run) => run.id !== nextRun.id);
+  return [nextRun, ...withoutExisting];
 }
 
 function contactKey(contact: DiscoveryResult) {

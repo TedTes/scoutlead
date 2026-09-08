@@ -2,7 +2,7 @@ import { Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
-import type { SourceRequestSource } from "../types/domain";
+import type { DiscoveryRun, SourceRequestSource } from "../types/domain";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 import { searchDiscoveryTemplates } from "../utils/template-search";
 
@@ -13,7 +13,7 @@ export function OverviewScreen({
 }: {
   draftRunName?: string;
   emptyMessage?: string;
-  onRunCreated?: () => void;
+  onRunCreated?: (run: DiscoveryRun) => void;
 }) {
   const {
     runSourceRequest,
@@ -69,7 +69,7 @@ export function OverviewScreen({
           message: foundCount ? `${foundCount} contact${foundCount === 1 ? "" : "s"} found.` : "No contacts were returned. Try another search.",
           tone: foundCount ? "green" : "amber",
         });
-        onRunCreated?.();
+        onRunCreated?.(result.run);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

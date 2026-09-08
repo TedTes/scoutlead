@@ -25,6 +25,8 @@ type AppProps = {
   approverLabel?: string;
 };
 
+type AppViewMode = "auto" | "new-search" | "product" | "integrations";
+
 export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {}) {
   return (
     <ToastProvider>
@@ -36,7 +38,7 @@ export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {})
 }
 
 function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
-  const [activeScreen, setActiveScreen] = useState<Screen>("overview");
+  const [viewMode, setViewMode] = useState<AppViewMode>("auto");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
@@ -80,6 +82,15 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     routePath === "/debug/trace" ||
     routePath === "/app/trace" ||
     routePath === "/app/debug/trace";
+  const selectedRunExists = Boolean(
+    selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
+  );
+  const activeScreen = resolveActiveScreen(viewMode, selectedRunExists);
+  const savedRunMatchingDraft = draftRunName
+    ? productRunLabels.find((item) => sameListName(draftRunName, item.title))
+    : undefined;
+  const shouldShowDraftRun = draftRunName !== null && !savedRunMatchingDraft;
+
   const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
     setDraftRunNameState((current) => {
       const next =
@@ -108,7 +119,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setOpenContextMenu(null);
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
-    setActiveScreen("overview");
+    setViewMode("new-search");
     const existingNames = productRunLabels.map((item) => item.title);
     const savedDraftName = readDraftRunName(selectedProductId);
     setDraftRunName((current) => current ?? savedDraftName ?? uniqueListName("Page name", existingNames));
@@ -117,7 +128,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
 
   const selectScreen = (screen: Screen) => {
     if (isTraceRoute) returnToApp();
-    setActiveScreen(screen);
+    setViewMode(screen === "product" || screen === "integrations" ? screen : "auto");
     setMobileRailOpen(false);
   };
 
@@ -126,7 +137,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setIsCreatingProduct(false);
     setSelectedProductId(productId);
     setSelectedDiscoveryRunId("");
-    setActiveScreen("overview");
+    setViewMode("new-search");
     setDraftRunNameState(null);
     setMobileRailOpen(false);
   };
@@ -138,7 +149,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     writeDraftRunName(selectedProduct.id, null);
     setDraftRunNameState(null);
     setSelectedDiscoveryRunId("");
-    setActiveScreen("overview");
+    setViewMode("new-search");
     showToast({ title: "Product deleted", message: `${selectedProductName} was removed.`, tone: "green" });
   };
 
@@ -154,7 +165,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     await deleteDiscoveryRuns([run.id]);
     if (selectedDiscoveryRunId === run.id) {
       setSelectedDiscoveryRunId("");
-      setActiveScreen("overview");
+      setViewMode("new-search");
     }
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
@@ -162,7 +173,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const handleDeleteDraftRun = () => {
     setDraftRunName(null);
     setSelectedDiscoveryRunId("");
-    setActiveScreen("overview");
+    setViewMode("new-search");
   };
 
   const handleExportProductContacts = () => {
@@ -228,18 +239,6 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (activeScreen !== "results") return;
-    const hasSelectedRun = productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId);
-    if (!hasSelectedRun) setActiveScreen("overview");
-  }, [activeScreen, productDiscoveryRuns, selectedDiscoveryRunId]);
-
-  useEffect(() => {
-    if (loading || isTraceRoute || activeScreen !== "overview" || !selectedDiscoveryRunId) return;
-    const hasSelectedRun = productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId);
-    if (hasSelectedRun) setActiveScreen("results");
-  }, [activeScreen, isTraceRoute, loading, productDiscoveryRuns, selectedDiscoveryRunId]);
-
-  useEffect(() => {
     if (!selectedProductId) {
       setDraftRunNameState(null);
       return;
@@ -248,14 +247,15 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, [selectedProductId]);
 
   useEffect(() => {
-    if (!selectedProductId || !selectedDiscoveryRunId || draftRunName === null) return;
+    if (!selectedProductId || draftRunName === null) return;
     const draftName = draftRunName.trim();
     if (!draftName) return;
-    const selectedName = productRunLabels.find((item) => item.run.id === selectedDiscoveryRunId)?.title || "";
-    if (!sameListName(draftName, selectedName)) return;
+    const matchingRun = productRunLabels.find((item) => sameListName(draftName, item.title))?.run;
+    if (!matchingRun) return;
     writeDraftRunName(selectedProductId, null);
     setDraftRunNameState(null);
-  }, [draftRunName, productRunLabels, selectedDiscoveryRunId, selectedProductId]);
+    if (!selectedDiscoveryRunId) setSelectedDiscoveryRunId(matchingRun.id);
+  }, [draftRunName, productRunLabels, selectedDiscoveryRunId, selectedProductId, setSelectedDiscoveryRunId]);
 
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
@@ -315,7 +315,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           </div>
 
           <div className="list-nav-section">
-            {draftRunName !== null ? (
+            {shouldShowDraftRun ? (
               <RunHistoryDraft
                 active={!isTraceRoute && activeScreen === "overview" && !selectedDiscoveryRunId}
                 existingNames={productRunLabels.map((item) => item.title)}
@@ -325,7 +325,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 onDelete={handleDeleteDraftRun}
               />
             ) : null}
-            {draftRunName === null && productDiscoveryRuns.length === 0 ? (
+            {!shouldShowDraftRun && productDiscoveryRuns.length === 0 ? (
               <div className="nav-empty">
                 <div className="t">No runs yet</div>
                 <div className="s">Start a search to create the first saved list.</div>
@@ -404,9 +404,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
               },
               {
                 draftRunName: draftRunName ?? undefined,
-                onRunCreated: () => {
-                  setDraftRunName(null);
-                  setActiveScreen("results");
+                onRunCreated: (run) => {
+                  writeDraftRunName(run.product_id, null);
+                  if (run.product_id === selectedProductId) setDraftRunNameState(null);
+                  setSelectedDiscoveryRunId(run.id);
+                  setViewMode("auto");
                 },
               },
             )
@@ -423,7 +425,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             if (created) {
               setSelectedProductId(created.id);
               setSelectedDiscoveryRunId("");
-              setActiveScreen("overview");
+              setViewMode("new-search");
             }
             return created;
           }}
@@ -599,6 +601,12 @@ function ProductManagementSection({
 
 function manageItemClass(enabled: boolean, active: boolean) {
   return [enabled ? "mng-item" : "mng-item is-disabled", active ? "is-active" : ""].filter(Boolean).join(" ");
+}
+
+function resolveActiveScreen(viewMode: AppViewMode, hasSelectedRun: boolean): Screen {
+  if (viewMode === "product" || viewMode === "integrations") return viewMode;
+  if (viewMode === "new-search") return "overview";
+  return hasSelectedRun ? "results" : "overview";
 }
 
 function RunHistoryDraft({

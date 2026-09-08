@@ -2,6 +2,7 @@ import { OverviewScreen } from "../screens/OverviewScreen";
 import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
+import type { DiscoveryRun } from "../types/domain";
 import type { Screen } from "../types/navigation";
 
 export function renderScreen(
@@ -17,7 +18,7 @@ export function renderScreen(
   },
   discoveryDraft: {
     draftRunName?: string;
-    onRunCreated?: () => void;
+    onRunCreated?: (run: DiscoveryRun) => void;
   } = {},
 ) {
   switch (screen) {
