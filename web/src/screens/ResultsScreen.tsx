@@ -13,7 +13,6 @@ import {
   Play,
   PlugZap,
   RotateCw,
-  Search,
   Trash2,
   User,
   X,
@@ -58,7 +57,6 @@ export function ResultsScreen() {
   const {
     activeSourceIds,
     runSourceRequest,
-    rerunSourceRequest,
     selectedDiscoveryRun,
     selectedDiscoveryRunId,
     selectedProduct,
@@ -92,6 +90,7 @@ export function ResultsScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
@@ -102,7 +101,7 @@ export function ResultsScreen() {
   const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
-  const query = draftPrompt.trim() || runPrompt;
+  const query = runPrompt;
   const selectedSource = selectedSources[0] || getRunSource(selectedDiscoveryRun) || "";
   const activeMessages = snapshot.messages.filter((message) => message.status !== "cancelled");
   const messageByLeadId = new Map(activeMessages.map((message) => [message.lead_id, message]));
@@ -172,6 +171,7 @@ export function ResultsScreen() {
     setSelectedContactId("");
     setStage("all");
     setAttributeFilter(null);
+    setRerunPromptOpen(false);
   }, [selectedDiscoveryRunId, runPrompt]);
 
   useEffect(() => {
@@ -211,8 +211,25 @@ export function ResultsScreen() {
 
   const updateSearch = async () => {
     const request = draftPrompt.trim() || runPrompt;
-    if (!selectedProductId || !request || !selectedSource || running) return;
+    if (running) return;
+    if (!selectedProductId) {
+      showToast({ title: "Select a product", message: "Create or choose a product before re-running discovery.", tone: "amber" });
+      return;
+    }
+    if (request.length < 4) {
+      showToast({ title: "Enter a search prompt", message: "Describe the businesses to find before re-running discovery.", tone: "amber" });
+      return;
+    }
+    if (!selectedSource) {
+      showToast({ title: "No discovery source", message: "Connect or enable a source before re-running discovery.", tone: "amber" });
+      return;
+    }
     setRunning(true);
+    showToast({
+      title: "Search started",
+      message: "ScoutLead is finding and scoring contacts. This can take a little while.",
+      tone: "blue",
+    });
     try {
       const result = await runSourceRequest({
         product_id: selectedProductId,
@@ -223,6 +240,7 @@ export function ResultsScreen() {
         run_immediately: true,
       });
       if (result) {
+        setRerunPromptOpen(false);
         const foundCount = result.summary?.discovered_lead_count ?? 0;
         showToast({
           title: foundCount ? "Updated search complete" : "Search finished",
@@ -257,26 +275,11 @@ export function ResultsScreen() {
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
 
-  const rerunCurrentSearch = async () => {
+  const openRerunPrompt = () => {
     if (!selectedDiscoveryRun || running) return;
     setRunMenuOpen(false);
-    setRunning(true);
-    try {
-      const result = await rerunSourceRequest(selectedDiscoveryRun.id);
-      if (result) {
-        const foundCount = result.summary?.discovered_lead_count ?? 0;
-        showToast({
-          title: foundCount ? "Re-run complete" : "Re-run finished",
-          message: foundCount ? `${foundCount} contact${foundCount === 1 ? "" : "s"} found.` : "No contacts were returned. Try another search.",
-          tone: foundCount ? "green" : "amber",
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      showToast({ title: "Re-run failed", message, tone: "red" });
-    } finally {
-      setRunning(false);
-    }
+    setDraftPrompt(runPrompt);
+    setRerunPromptOpen(true);
   };
 
   const draftCurrentShortlist = async () => {
@@ -358,15 +361,6 @@ export function ResultsScreen() {
 
   return (
     <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
-      <SearchStrip
-        draftPrompt={draftPrompt}
-        onChange={setDraftPrompt}
-        onSubmit={updateSearch}
-        query={runPrompt}
-        running={running}
-        ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSource)}
-      />
-
       <div className="results-controlbar">
         <div className="workflow-tabs" aria-label="Workflow stage">
           <button className={stage === "all" ? "active" : ""} type="button" onClick={() => setStage("all")}>
@@ -519,7 +513,7 @@ export function ResultsScreen() {
                 <button type="button" onClick={() => void renameCurrentRun()}>
                   Rename run
                 </button>
-                <button type="button" disabled={running} onClick={() => void rerunCurrentSearch()}>
+                <button type="button" disabled={running} onClick={openRerunPrompt}>
                   <RotateCw size={14} />
                   Re-run search
                 </button>
@@ -584,50 +578,70 @@ export function ResultsScreen() {
           onExport={confirmContactsExport}
         />
       ) : null}
+      {rerunPromptOpen ? (
+        <RerunSearchDialog
+          prompt={draftPrompt}
+          running={running}
+          ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSource)}
+          onChange={setDraftPrompt}
+          onClose={() => setRerunPromptOpen(false)}
+          onSubmit={updateSearch}
+        />
+      ) : null}
     </section>
   );
 }
 
-function SearchStrip({
-  draftPrompt,
+function RerunSearchDialog({
   onChange,
+  onClose,
   onSubmit,
-  query,
+  prompt,
   ready,
   running,
 }: {
-  draftPrompt: string;
   onChange: (value: string) => void;
+  onClose: () => void;
   onSubmit: () => void;
-  query: string;
+  prompt: string;
   ready: boolean;
   running: boolean;
 }) {
   return (
-    <form
-      className={running ? "searchbar is-running" : "searchbar"}
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      <Search size={15} />
-      <input
-        aria-label="Search prompt"
-        placeholder={query || "Describe the businesses to find"}
-        value={draftPrompt}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <button
-        aria-label={running ? "Finding contacts" : "Find contacts"}
-        className="runbtn icon-run"
-        disabled={!ready || running}
-        title={running ? "Finding contacts" : "Find contacts"}
-        type="submit"
+    <Modal title="Re-run search" onClose={onClose}>
+      <form
+        className="rerun-search-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
       >
-        <Play size={13} />
-      </button>
-    </form>
+        <label className="field rerun-search-field">
+          <span>Prompt</span>
+          <textarea
+            autoFocus
+            aria-label="Search prompt"
+            placeholder="Describe the businesses to find"
+            value={prompt}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </label>
+        {running ? (
+          <p className="rerun-search-status" role="status">
+            Finding and scoring contacts. Keep this dialog open while the run finishes.
+          </p>
+        ) : null}
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="runbtn" disabled={!ready || running} type="submit">
+            {running ? "Running..." : "Run again"}
+            <Play size={13} />
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

@@ -5299,6 +5299,32 @@ a {
   box-shadow: 0 0 0 3px rgba(27, 31, 36, 0.1);
 }
 
+.rerun-search-form {
+  display: grid;
+  gap: 13px;
+}
+
+.rerun-search-field {
+  margin-bottom: 0;
+}
+
+.rerun-search-field textarea {
+  line-height: 1.55;
+  min-height: 132px;
+  resize: vertical;
+}
+
+.rerun-search-status {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: -4px 0 0;
+}
+
+.rerun-search-form .dialog-actions {
+  margin-top: 0;
+}
+
 .field em,
 .form-error {
   color: var(--red);

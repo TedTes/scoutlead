@@ -50,9 +50,26 @@ export function OverviewScreen({
 
   const submitSourceRequest = async (nextPrompt = prompt) => {
     const request = nextPrompt.trim();
-    if (!selectedProductId || !request || running || !selectedSource) return;
+    if (running) return;
+    if (!selectedProductId) {
+      showToast({ title: "Select a product", message: "Create or choose a product before running discovery.", tone: "amber" });
+      return;
+    }
+    if (request.length < 4) {
+      showToast({ title: "Enter a search prompt", message: "Describe the businesses to find before running discovery.", tone: "amber" });
+      return;
+    }
+    if (!selectedSource) {
+      showToast({ title: "No discovery source", message: "Connect or enable a source before running discovery.", tone: "amber" });
+      return;
+    }
     const requestedName = draftRunName?.trim();
     setRunning(true);
+    showToast({
+      title: "Search started",
+      message: "ScoutLead is finding and scoring contacts. This can take a little while.",
+      tone: "blue",
+    });
     try {
       const result = await runSourceRequest({
         product_id: selectedProductId,
@@ -109,7 +126,11 @@ export function OverviewScreen({
             />
           </label>
           <div className="composer-submit-group">
-            {!running && promptValue.length > 0 && promptValue.length < 4 ? (
+            {running ? (
+              <span className="composer-hint" role="status">
+                Finding contacts...
+              </span>
+            ) : promptValue.length > 0 && promptValue.length < 4 ? (
               <span className="composer-hint">Type at least 4 characters</span>
             ) : null}
             <button
