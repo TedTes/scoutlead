@@ -292,6 +292,15 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         />
       ) : null}
 
+      <button
+        aria-label={mobileRailOpen ? "Close menu" : "Open menu"}
+        className="detail-rail-menu-button"
+        type="button"
+        onClick={() => setMobileRailOpen((open) => !open)}
+      >
+        <Menu size={18} />
+      </button>
+
       <aside className="rail">
         <div className="brand">
           <span className="brand-mark">S</span>
