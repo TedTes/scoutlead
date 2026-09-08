@@ -237,6 +237,7 @@ class CanonicalRepository:
             external_id=external_id_from_raw(raw),
             normalized_name=normalized_name,
             domain=domain,
+            phone=phone,
             geography=normalized_geography,
         )
         if business is None:
@@ -289,6 +290,7 @@ class CanonicalRepository:
         external_id: str | None,
         normalized_name: str,
         domain: str | None,
+        phone: str | None,
         geography: str | None,
     ) -> BusinessModel | None:
         if external_id:
@@ -308,6 +310,16 @@ class CanonicalRepository:
             business = self.session.scalar(
                 select(BusinessModel)
                 .where(BusinessModel.domain == domain)
+                .order_by(BusinessModel.created_at)
+                .limit(1)
+            )
+            if business:
+                return business
+
+        if phone:
+            business = self.session.scalar(
+                select(BusinessModel)
+                .where(BusinessModel.phone == phone)
                 .order_by(BusinessModel.created_at)
                 .limit(1)
             )

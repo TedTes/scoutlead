@@ -1,6 +1,9 @@
 node_modules/
 dist/
-/data/
+/data/*
+!/data/seeds/
+/data/seeds/*
+!/data/seeds/*.sample.jsonl
 .env
 .env.local
 .env.*.local
