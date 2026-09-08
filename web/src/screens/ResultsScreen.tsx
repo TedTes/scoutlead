@@ -163,6 +163,11 @@ export function ResultsScreen() {
   const selectedMessage = selectedContact ? messageByLeadId.get(selectedContact.id) : undefined;
 
   useEffect(() => {
+    document.body.classList.toggle("has-contact-detail", Boolean(selectedContact));
+    return () => document.body.classList.remove("has-contact-detail");
+  }, [selectedContact]);
+
+  useEffect(() => {
     setDraftPrompt(runPrompt);
     setSelectedContactId("");
     setStage("all");
@@ -352,7 +357,7 @@ export function ResultsScreen() {
   }
 
   return (
-    <section className="results-workspace">
+    <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
       <SearchStrip
         draftPrompt={draftPrompt}
         onChange={setDraftPrompt}
@@ -528,40 +533,43 @@ export function ResultsScreen() {
         </div>
       </div>
 
-      {visibleContacts.length ? (
-        <ul className="contact-card-list">
-          {visibleContacts.map((contact) => (
-            <ContactCard
-              contact={contact}
-              key={contact.id}
-              onOpen={() => setSelectedContactId(contact.id)}
-            />
-          ))}
-        </ul>
-      ) : (
-        <section className="result-empty-card">
-          <strong>No contacts match this view.</strong>
-          <p>
-            {contacts.length
-              ? "Change the filter to inspect the contacts in this run."
-              : "This run has no contacts yet."}
-          </p>
-        </section>
-      )}
+      <div className={selectedContact ? "results-body has-detail" : "results-body"}>
+        {visibleContacts.length ? (
+          <ul className="contact-card-list">
+            {visibleContacts.map((contact) => (
+              <ContactCard
+                contact={contact}
+                key={contact.id}
+                selected={contact.id === selectedContactId}
+                onOpen={() => setSelectedContactId(contact.id)}
+              />
+            ))}
+          </ul>
+        ) : (
+          <section className="result-empty-card">
+            <strong>No contacts match this view.</strong>
+            <p>
+              {contacts.length
+                ? "Change the filter to inspect the contacts in this run."
+                : "This run has no contacts yet."}
+            </p>
+          </section>
+        )}
 
-      <ContactDrawer
-        contact={selectedContact}
-        message={selectedMessage}
-        onClose={() => setSelectedContactId("")}
-        onApproveMessage={approveMessage}
-        onCreateDraft={createOutreachDraft}
-        onQualifyLead={qualifyLead}
-        onMarkMessageReplied={markMessageReplied}
-        onSendMessage={sendMessage}
-        onUpdateContactPolicy={updateLeadContactPolicy}
-        onUpdateLead={updateLead}
-        onUpdateMessage={updateMessage}
-      />
+        <ContactDrawer
+          contact={selectedContact}
+          message={selectedMessage}
+          onClose={() => setSelectedContactId("")}
+          onApproveMessage={approveMessage}
+          onCreateDraft={createOutreachDraft}
+          onQualifyLead={qualifyLead}
+          onMarkMessageReplied={markMessageReplied}
+          onSendMessage={sendMessage}
+          onUpdateContactPolicy={updateLeadContactPolicy}
+          onUpdateLead={updateLead}
+          onUpdateMessage={updateMessage}
+        />
+      </div>
 
       {pendingExport ? (
         <ExportContactsDialog
@@ -623,7 +631,15 @@ function SearchStrip({
   );
 }
 
-function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: () => void }) {
+function ContactCard({
+  contact,
+  onOpen,
+  selected = false,
+}: {
+  contact: DiscoveryResult;
+  onOpen: () => void;
+  selected?: boolean;
+}) {
   const score = contactScore(contact);
   const fitStatus = displayFitStatus(contact);
   const evidence = contactEvidenceLine(contact);
@@ -631,11 +647,18 @@ function ContactCard({ contact, onOpen }: { contact: DiscoveryResult; onOpen: ()
   const verification = verificationStatus(contact);
   const policy = contactPolicyStatus(contact);
   const blocked = isContactBlocked(contact);
+  const cardClass = [
+    "contact-card",
+    isReachableContact(contact) ? "" : "no-contact",
+    selected ? "is-selected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <li>
       <article
-        className={isReachableContact(contact) ? "contact-card" : "contact-card no-contact"}
+        className={cardClass}
         role="button"
         tabIndex={0}
         onClick={onOpen}
@@ -792,12 +815,8 @@ function ContactDrawer({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = "";
-      window.removeEventListener("keydown", onKey);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [onClose, open]);
 
   useEffect(() => {
