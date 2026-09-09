@@ -3096,6 +3096,17 @@ a {
   border-color: #d8e6fb;
 }
 
+.integration-account-banner.connected {
+  background: var(--green-bg);
+  border-color: var(--green-line);
+  color: #177245;
+}
+
+.integration-account-banner.connected:hover {
+  background: #dcf6ea;
+  border-color: #b9ead3;
+}
+
 .integration-account-banner > svg {
   flex: 0 0 auto;
 }
@@ -5042,6 +5053,14 @@ a {
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
+}
+
+.approval-send-warning {
+  color: var(--muted);
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 8px 0 0;
 }
 
 .drawer-detail-list {

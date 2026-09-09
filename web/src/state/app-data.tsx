@@ -565,10 +565,16 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         mutate(async () => {
           await api.approveMessage(messageId, approverLabel || "operator");
         }),
-      sendMessage: (messageId) =>
-        mutate(async () => {
+      sendMessage: async (messageId) => {
+        setError("");
+        try {
           await api.sendMessage(messageId);
-        }),
+        } catch (err) {
+          await refreshAll({ showLoading: false });
+          throw err;
+        }
+        await refreshAll({ showLoading: false });
+      },
       markMessageReplied: (messageId, body) =>
         mutate(async () => {
           await api.markMessageReplied(messageId, body);

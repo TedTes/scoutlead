@@ -72,6 +72,7 @@ export function ResultsScreen() {
     updateMessage,
     approveMessage,
     sendMessage,
+    gmailConnectionStatus,
     markMessageReplied,
     sendApprovedShortlistWebhook,
     snapshot,
@@ -123,6 +124,7 @@ export function ResultsScreen() {
   const webhookReady = Boolean(
     selectedProduct?.webhook_enabled && selectedProduct.webhook_url && approvedShortlistContacts.length,
   );
+  const gmailConnected = Boolean(gmailConnectionStatus?.connected);
   const draftableShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
   );
@@ -554,6 +556,7 @@ export function ResultsScreen() {
           <ContactDrawer
             contact={selectedContact}
             message={selectedMessage}
+            gmailConnected={gmailConnected}
             onClose={() => setSelectedContactId("")}
             onApproveMessage={approveMessage}
             onCreateDraft={createOutreachDraft}
@@ -748,6 +751,7 @@ function ContactCard({
 
 function ContactDrawer({
   contact,
+  gmailConnected,
   message,
   onClose,
   onApproveMessage,
@@ -760,6 +764,7 @@ function ContactDrawer({
   onUpdateMessage,
 }: {
   contact: DiscoveryResult;
+  gmailConnected: boolean;
   message: Message | undefined;
   onClose: () => void;
   onApproveMessage: (messageId: string) => Promise<void>;
@@ -792,7 +797,17 @@ function ContactDrawer({
   const email = contact.contact_email || contact.research?.contact_email || "";
   const verified = isVerifiedContact(contact);
   const canDraft = Boolean(!blocked && shortlisted && canShortlist && verified && email);
-  const canSend = Boolean(message && message.status === "approved" && email && canDraft);
+  const sendBlockReason =
+    blocked
+      ? "This contact is blocked from outreach."
+      : !email
+        ? "Add or find an email before sending."
+        : !canDraft
+          ? "Keep this contact shortlisted before sending."
+          : !gmailConnected
+            ? "Connect Gmail in Integrations before sending."
+            : "";
+  const canSend = Boolean(message && message.status === "approved" && !sendBlockReason);
   const approvedBy =
     message?.approval && typeof message.approval === "object" && "approved_by" in message.approval
       ? String((message.approval as Record<string, unknown>).approved_by)
@@ -1377,13 +1392,7 @@ function ContactDrawer({
                 ) : null}
               </div>
               {message.status === "approved" && !canSend ? (
-                <p className="draft-warning">
-                  {blocked
-                    ? "This contact is blocked from outreach."
-                    : !email
-                      ? "Add or find an email before sending."
-                      : "Keep this contact shortlisted before sending."}
-                </p>
+                <p className="draft-warning">{sendBlockReason}</p>
               ) : null}
             </>
           ) : canDraft ? (

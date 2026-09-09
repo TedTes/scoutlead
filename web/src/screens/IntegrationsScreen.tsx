@@ -75,12 +75,12 @@ export function IntegrationsScreen() {
     }
   };
 
-  const disconnectProductGmail = async () => {
+  const disconnectAccountGmail = async () => {
     if (!selectedProduct || disconnectingGmail) return;
     setDisconnectingGmail(true);
     try {
       await disconnectGmail(selectedProduct.id);
-      showToast({ title: "Gmail disconnected", message: "This product will not send through Gmail.", tone: "green" });
+      showToast({ title: "Gmail disconnected", message: "This account will not send through Gmail.", tone: "green" });
     } catch (error) {
       showToast({
         title: "Gmail disconnect failed",
@@ -145,7 +145,7 @@ export function IntegrationsScreen() {
     return (
       <div className="integrations-page">
         <section className="integrations-empty">
-          <p>Create or select a product before connecting workflow tools.</p>
+          <p>Create or select a product before connecting account and workflow tools.</p>
         </section>
       </div>
     );
@@ -156,18 +156,31 @@ export function IntegrationsScreen() {
       <div className="integrations-wrap">
         <header className="integrations-header">
           <p>
-            Connect where {selectedProduct.product_name}'s approved contacts and outreach go. Nothing sends or
-            exports until you approve a contact.
+            Connect where approved contacts and outreach go. Gmail connects once for this account and is available
+            across products; product-specific workflow outputs stay below.
           </p>
         </header>
 
-        <button className="integration-account-banner" type="button" onClick={() => void connectGmail()}>
-          <Info size={16} />
+        <button
+          className={gmailConnected ? "integration-account-banner connected" : "integration-account-banner"}
+          disabled={connectingGmail}
+          type="button"
+          onClick={() => void connectGmail()}
+        >
+          {gmailConnected ? <Check size={16} /> : <Info size={16} />}
           <span>
-            <b>Gmail & account services connect once</b>, on your account - used by all products.
+            {gmailConnected ? (
+              <>
+                <b>Gmail connected once for this account</b> - {gmailEmail} is available to every product.
+              </>
+            ) : (
+              <>
+                <b>Gmail connects once for this account</b> - used by every product after approval.
+              </>
+            )}
           </span>
           <strong>
-            Account connections <ArrowRight size={14} />
+            {gmailConnected ? "Reconnect Gmail" : "Account connections"} <ArrowRight size={14} />
           </strong>
         </button>
 
@@ -177,31 +190,30 @@ export function IntegrationsScreen() {
           logo="G"
           logoTone="gmail"
           title="Gmail"
-          status={gmailConnected ? "On" : "Off"}
+          status={gmailConnected ? "Connected" : "Off"}
           statusTone={gmailConnected ? "on" : "off"}
           description={
             gmailConnected ? (
               <>
                 <span className="integration-ok">
-                  <Check size={12} /> using account Gmail
+                  <Check size={12} /> account Gmail ready
                 </span>{" "}
-                - {gmailEmail} - sends this product's approved outreach
+                - {gmailEmail} can send approved outreach for any product
               </>
             ) : (
-              "Send approved outreach from your connected Gmail account."
+              "Connect Gmail once before sending approved outreach."
             )
           }
           action={
             gmailConnected ? (
               <button
-                aria-pressed
                 aria-label="Disconnect Gmail"
-                className="integration-toggle on"
+                className="integration-button"
                 disabled={disconnectingGmail}
                 type="button"
-                onClick={() => void disconnectProductGmail()}
+                onClick={() => void disconnectAccountGmail()}
               >
-                <span />
+                {disconnectingGmail ? "Disconnecting..." : "Disconnect"}
               </button>
             ) : (
               <button
@@ -237,16 +249,12 @@ export function IntegrationsScreen() {
           logoTone="sheets"
           title="Google Sheets"
           description={
-            gmailConnected ? (
-              "Google account connected - Sheets export can be wired next."
-            ) : (
-              <>
-                <span className="integration-warn">
-                  <AlertTriangle size={12} /> needs Google connected
-                </span>{" "}
-                - connect in account
-              </>
-            )
+            <>
+              <span className="integration-warn">
+                <AlertTriangle size={12} /> needs Google Sheets permission
+              </span>{" "}
+              - connect separately
+            </>
           }
           action={
             <button className="integration-toggle" disabled type="button" aria-label="Google Sheets unavailable">

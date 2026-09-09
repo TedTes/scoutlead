@@ -105,6 +105,7 @@ export type SourceProvider = {
 
 export type GmailConnectionStatus = {
   product_id: string;
+  workspace_id?: string | null;
   provider: "gmail";
   connected: boolean;
   email_address?: string | null;
