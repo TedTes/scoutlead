@@ -19,6 +19,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import worldMapTextureUrl from "../assets/world-map-equirectangular.svg";
 
 const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
 
@@ -134,6 +135,8 @@ function LandingPage() {
           <AnimatedPreview />
         </section>
 
+        <GlobeActivityPreview />
+
         <section className="landing-section landing-workflow-section" aria-label="How ScoutLead works">
           <div className="landing-workflow-layout">
             <div>
@@ -165,7 +168,7 @@ function LandingPage() {
 
         <section className="landing-section landing-settings-section" aria-label="Product settings">
           <div className="landing-workflow-layout landing-workflow-layout-reverse">
-            <SettingsRevealPreview />
+            <FitComparisonPreview />
             <div>
               <div className="landing-section-heading">
                 <p className="landing-eyebrow">One product, scored consistently</p>
@@ -315,6 +318,8 @@ function AnimatedPreview() {
   const [typed, setTyped] = useState(0);
   const [showResults, setShowResults] = useState(false);
   const [visibleLeads, setVisibleLeads] = useState(0);
+  const [cursorVisible, setCursorVisible] = useState(false);
+  const [cursorPressed, setCursorPressed] = useState(false);
   const [cycle, setCycle] = useState(0);
 
   useEffect(() => {
@@ -334,6 +339,8 @@ function AnimatedPreview() {
     setTyped(0);
     setShowResults(false);
     setVisibleLeads(0);
+    setCursorVisible(false);
+    setCursorPressed(false);
 
     const CHAR_MS = 24;
     for (let i = 1; i <= PREVIEW_QUERY.length; i++) {
@@ -341,13 +348,20 @@ function AnimatedPreview() {
     }
     const typingDone = PREVIEW_QUERY.length * CHAR_MS;
 
-    at(typingDone + 500, () => setShowResults(true));
+    // a cursor arrives at the send button and clicks it before results appear
+    at(typingDone + 140, () => setCursorVisible(true));
+    at(typingDone + 400, () => setCursorPressed(true));
+    at(typingDone + 620, () => {
+      setShowResults(true);
+      setCursorVisible(false);
+      setCursorPressed(false);
+    });
 
     const REVEAL_GAP = 260;
     PREVIEW_LEADS.forEach((_, idx) => {
-      at(typingDone + 700 + idx * REVEAL_GAP, () => setVisibleLeads(idx + 1));
+      at(typingDone + 820 + idx * REVEAL_GAP, () => setVisibleLeads(idx + 1));
     });
-    const revealDone = typingDone + 700 + PREVIEW_LEADS.length * REVEAL_GAP;
+    const revealDone = typingDone + 820 + PREVIEW_LEADS.length * REVEAL_GAP;
 
     at(revealDone + 2600, () => setCycle((c) => c + 1));
 
@@ -363,7 +377,7 @@ function AnimatedPreview() {
           {showResults ? (
             <PreviewResults visibleCount={visibleLeads} />
           ) : (
-            <PreviewDiscovery typedLength={typed} />
+            <PreviewDiscovery cursorPressed={cursorPressed} cursorVisible={cursorVisible} typedLength={typed} />
           )}
         </div>
       </div>
@@ -374,6 +388,7 @@ function AnimatedPreview() {
 function WorkflowProofPreview() {
   const [ref, active] = useRevealOnScroll<HTMLDivElement>();
   const [visibleLeads, setVisibleLeads] = useState(0);
+  const [cursorVisible, setCursorVisible] = useState(false);
   const [clickedIndex, setClickedIndex] = useState(-1);
   const [drawerVisible, setDrawerVisible] = useState(false);
 
@@ -395,7 +410,8 @@ function WorkflowProofPreview() {
     });
     const revealDone = PREVIEW_LEADS.length * REVEAL_GAP;
 
-    // pause so the list settles, then simulate clicking the first result before the drawer opens
+    // pause so the list settles, then a cursor arrives and clicks the first result before the drawer opens
+    at(revealDone + 330, () => setCursorVisible(true));
     at(revealDone + 550, () => setClickedIndex(0));
     at(revealDone + 550 + 220, () => setDrawerVisible(true));
 
@@ -412,6 +428,7 @@ function WorkflowProofPreview() {
             visibleCount={visibleLeads}
             drawerVisible={drawerVisible}
             clickedIndex={clickedIndex}
+            cursorIndex={cursorVisible ? 0 : -1}
           />
         </div>
       </div>
@@ -419,39 +436,70 @@ function WorkflowProofPreview() {
   );
 }
 
-function SettingsRevealPreview() {
+function FitComparisonPreview() {
   const [ref, active] = useRevealOnScroll<HTMLDivElement>();
-  const [step, setStep] = useState(0);
-  const [hintClicked, setHintClicked] = useState(false);
-  const [hintAdded, setHintAdded] = useState(false);
+  const [nameVisible, setNameVisible] = useState(false);
+  const [goodScore, setGoodScore] = useState(0);
+  const [badScore, setBadScore] = useState(0);
+  const [goodSettled, setGoodSettled] = useState(false);
+  const [badSettled, setBadSettled] = useState(false);
 
   useEffect(() => {
     if (!active) return;
 
     if (prefersReducedMotion()) {
-      setStep(3);
-      setHintClicked(true);
-      setHintAdded(true);
+      setNameVisible(true);
+      setGoodScore(90);
+      setBadScore(25);
+      setGoodSettled(true);
+      setBadSettled(true);
       return;
     }
 
     const timers: number[] = [];
     const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
-    at(150, () => setStep(1));
-    at(600, () => setStep(2));
-    at(1150, () => setStep(3));
-    at(1700, () => setHintClicked(true));
-    at(1920, () => setHintAdded(true));
+
+    setNameVisible(false);
+    setGoodScore(0);
+    setBadScore(0);
+    setGoodSettled(false);
+    setBadSettled(false);
+
+    at(120, () => setNameVisible(true));
+
+    const GOOD_STEPS = [18, 40, 62, 90];
+    GOOD_STEPS.forEach((value, idx) => at(420 + idx * 110, () => setGoodScore(value)));
+    const goodDone = 420 + GOOD_STEPS.length * 110;
+    at(goodDone + 60, () => setGoodSettled(true));
+
+    const badStart = goodDone + 520;
+    const BAD_STEPS = [10, 18, 25];
+    BAD_STEPS.forEach((value, idx) => at(badStart + idx * 110, () => setBadScore(value)));
+    at(badStart + BAD_STEPS.length * 110 + 60, () => setBadSettled(true));
 
     return () => timers.forEach(clearTimeout);
   }, [active]);
 
   return (
-    <div className="landing-preview landing-preview-focused" aria-label="Example product settings" ref={ref}>
-      <div className="preview-main-panel">
-        <PreviewAppTopbar pageName="Painting Services" />
-        <div className="preview-stage">
-          <PreviewSettings revealStep={step} hintClicked={hintClicked && !hintAdded} hintAdded={hintAdded} />
+    <div
+      className="fit-compare"
+      aria-label="The same business scored for two different products"
+      ref={ref}
+    >
+      <div className={`fit-compare-name${nameVisible ? " is-visible" : ""}`}>Esposito's Painting Services</div>
+      <div className="fit-compare-row">
+        <div className={`fit-compare-side${goodSettled ? " is-settled" : ""}`}>
+          <span className="fit-compare-score tone-good">{goodScore}</span>
+          <strong className="fit-compare-verdict tone-good">Agent good fit</strong>
+          <span className="fit-compare-context">for Quotevan</span>
+          <span className="fit-compare-context faint">painting quotes</span>
+        </div>
+        <span className="fit-compare-divider">vs</span>
+        <div className={`fit-compare-side${badSettled ? " is-settled" : ""}`}>
+          <span className="fit-compare-score tone-bad">{badScore}</span>
+          <strong className="fit-compare-verdict tone-bad">Agent not fit</strong>
+          <span className="fit-compare-context">for Ledgerly</span>
+          <span className="fit-compare-context faint">seller bookkeeping</span>
         </div>
       </div>
     </div>
@@ -461,6 +509,7 @@ function SettingsRevealPreview() {
 function IntegrationsRevealPreview() {
   const [ref, active] = useRevealOnScroll<HTMLDivElement>();
   const [step, setStep] = useState(0);
+  const [cursorVisible, setCursorVisible] = useState(false);
   const [connectClicked, setConnectClicked] = useState(false);
   const [gmailConnected, setGmailConnected] = useState(false);
 
@@ -479,6 +528,7 @@ function IntegrationsRevealPreview() {
     at(150, () => setStep(1));
     at(600, () => setStep(2));
     at(1050, () => setStep(3));
+    at(1780, () => setCursorVisible(true));
     at(2000, () => setConnectClicked(true));
     at(2000 + 220, () => setGmailConnected(true));
 
@@ -490,7 +540,12 @@ function IntegrationsRevealPreview() {
       <div className="preview-main-panel">
         <PreviewAppTopbar pageName="Painting Services" />
         <div className="preview-stage">
-          <PreviewIntegrations revealStep={step} gmailConnected={gmailConnected} connectClicked={connectClicked} />
+          <PreviewIntegrations
+            revealStep={step}
+            gmailConnected={gmailConnected}
+            connectClicked={connectClicked}
+            cursorVisible={cursorVisible && !gmailConnected}
+          />
         </div>
       </div>
     </div>
@@ -562,7 +617,43 @@ function PreviewAppTopbar({ pageName }: { pageName: string }) {
   );
 }
 
-function PreviewDiscovery({ typedLength = PREVIEW_QUERY.length }: { typedLength?: number }) {
+function PreviewCursor({
+  className = "",
+  pressed = false,
+  visible = false,
+}: {
+  className?: string;
+  pressed?: boolean;
+  visible?: boolean;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`preview-cursor-actor${visible ? " is-visible" : ""}${pressed ? " is-pressed" : ""}${className ? ` ${className}` : ""}`}
+    >
+      <span className="preview-cursor-ring" />
+      <svg viewBox="0 0 20 20" width="18" height="18">
+        <path
+          d="M3.2 1.8 L3.2 15.4 L6.6 12.2 L9 17.6 L11.5 16.5 L9.1 11.1 L14 11.1 Z"
+          fill="#1f6feb"
+          stroke="#ffffff"
+          strokeWidth="1.1"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function PreviewDiscovery({
+  cursorPressed = false,
+  cursorVisible = false,
+  typedLength = PREVIEW_QUERY.length,
+}: {
+  cursorPressed?: boolean;
+  cursorVisible?: boolean;
+  typedLength?: number;
+}) {
   return (
     <section className="preview-discovery-screen" aria-label="Preview discovery input">
       <h3>Who should we find?</h3>
@@ -572,9 +663,12 @@ function PreviewDiscovery({ typedLength = PREVIEW_QUERY.length }: { typedLength?
           {PREVIEW_QUERY.slice(0, typedLength)}
           <span className="preview-cursor" aria-hidden="true" />
         </span>
-        <button type="button" tabIndex={-1} aria-label="Run preview search">
-          <ArrowRight size={14} />
-        </button>
+        <div className="preview-composer-send">
+          <button type="button" tabIndex={-1} aria-label="Run preview search">
+            <ArrowRight size={14} />
+          </button>
+          <PreviewCursor className="preview-cursor-actor--composer" pressed={cursorPressed} visible={cursorVisible} />
+        </div>
       </div>
       <span className="preview-section-label">Or start from an example</span>
       <div className="preview-template-grid">
@@ -609,11 +703,13 @@ function PreviewResults({
   visibleCount = PREVIEW_LEADS.length,
   drawerVisible = true,
   clickedIndex = -1,
+  cursorIndex = -1,
 }: {
   showDrawer?: boolean;
   visibleCount?: number;
   drawerVisible?: boolean;
   clickedIndex?: number;
+  cursorIndex?: number;
 }) {
   return (
     <section
@@ -644,6 +740,8 @@ function PreviewResults({
               visible={idx < visibleCount}
               clicked={idx === clickedIndex}
               selected={idx === clickedIndex}
+              showCursor={idx === cursorIndex}
+              cursorPressed={idx === clickedIndex}
             />
           ))}
         </div>
@@ -655,13 +753,17 @@ function PreviewResults({
 
 function PreviewLeadCard({
   clicked = false,
+  cursorPressed = false,
   lead,
   selected = false,
+  showCursor = false,
   visible = true,
 }: {
   clicked?: boolean;
+  cursorPressed?: boolean;
   lead: (typeof PREVIEW_LEADS)[number];
   selected?: boolean;
+  showCursor?: boolean;
   visible?: boolean;
 }) {
   return (
@@ -669,6 +771,7 @@ function PreviewLeadCard({
       aria-hidden={!visible}
       className={`preview-lead-card${visible ? "" : " is-hidden"}${clicked ? " is-clicked" : ""}${selected ? " is-selected" : ""}`}
     >
+      <PreviewCursor className="preview-cursor-actor--lead-card" pressed={cursorPressed} visible={showCursor} />
       <span className="preview-lead-score">{lead.score}</span>
       <div className="preview-lead-copy">
         <div className="preview-lead-title">
@@ -748,10 +851,12 @@ function PreviewDetailRow({ icon, label, value }: { icon: ReactNode; label: stri
 
 function PreviewIntegrations({
   connectClicked = false,
+  cursorVisible = false,
   gmailConnected = false,
   revealStep = 3,
 }: {
   connectClicked?: boolean;
+  cursorVisible?: boolean;
   gmailConnected?: boolean;
   revealStep?: number;
 }) {
@@ -772,6 +877,7 @@ function PreviewIntegrations({
         <PreviewIntegrationGroup label="Sending">
           <PreviewIntegrationRow
             actionClicked={connectClicked && !gmailConnected}
+            showCursor={cursorVisible}
             badge="G"
             green={gmailConnected}
             title="Gmail"
@@ -815,6 +921,7 @@ function PreviewIntegrationRow({
   dark = false,
   green = false,
   purple = false,
+  showCursor = false,
   status,
   title,
   toggle = false,
@@ -827,6 +934,7 @@ function PreviewIntegrationRow({
   dark?: boolean;
   green?: boolean;
   purple?: boolean;
+  showCursor?: boolean;
   status?: string;
   title: string;
   toggle?: boolean;
@@ -848,71 +956,8 @@ function PreviewIntegrationRow({
           </button>
         ) : null}
         {toggle ? <span className="preview-toggle" /> : null}
+        <PreviewCursor className="preview-cursor-actor--connect" pressed={actionClicked} visible={showCursor} />
       </div>
-    </div>
-  );
-}
-
-function PreviewSettings({
-  revealStep = 3,
-  hintClicked = false,
-  hintAdded = true,
-}: {
-  revealStep?: number;
-  hintClicked?: boolean;
-  hintAdded?: boolean;
-}) {
-  return (
-    <section className="preview-settings-screen" aria-label="Preview product settings">
-      <div className="preview-settings-head">
-        <span>4 runs</span>
-        <span>14 contacts</span>
-        <span>updated Sep 7</span>
-        <button type="button" tabIndex={-1}>
-          <ArrowRight size={13} /> Finder
-        </button>
-      </div>
-      <div aria-hidden={revealStep < 1} className={`preview-reveal${revealStep >= 1 ? "" : " is-hidden"}`}>
-        <PreviewSettingsField label="Product name" value="Quotevan" />
-      </div>
-      <div aria-hidden={revealStep < 2} className={`preview-reveal${revealStep >= 2 ? "" : " is-hidden"}`}>
-        <div className="preview-settings-field">
-          <strong>Product description</strong>
-          <div className="preview-settings-textarea">
-            QuoteVan turns a job walkthrough into a professional, priced quote you can send before you leave the
-            driveway - built for solo painters and field-service pros.
-          </div>
-          <span>285 chars</span>
-        </div>
-        <p className="preview-settings-help">
-          This is what the finder scores against. The more specific the product context, the sharper the fit
-          scoring.
-        </p>
-      </div>
-      <div aria-hidden={revealStep < 3} className={`preview-reveal${revealStep >= 3 ? "" : " is-hidden"}`}>
-        <div className="preview-settings-field">
-          <strong>Focus hints <em>optional</em></strong>
-          <div className="preview-settings-chips">
-            <span>Toronto / GTA</span>
-            <span>Solo & small crews</span>
-            <span aria-hidden={!hintAdded} className={`preview-reveal preview-settings-chip-new${hintAdded ? "" : " is-hidden"}`}>
-              Insured & licensed
-            </span>
-            <button type="button" tabIndex={-1} className={hintClicked ? "is-clicked" : ""}>
-              + add hint
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PreviewSettingsField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="preview-settings-field">
-      <strong>{label}</strong>
-      <div className="preview-settings-input">{value}</div>
     </div>
   );
 }
@@ -940,6 +985,309 @@ function LandingStep({
       </div>
     </div>
   );
+}
+
+type GlobeMarker = {
+  lat: number;
+  lng: number;
+  phase: number;
+  speed: number;
+};
+
+const THREE_RAD_TO_DEG = 180 / Math.PI;
+const GLOBE_MARKERS: GlobeMarker[] = createGlobeMarkers(420);
+
+function createGlobeMarkers(count: number) {
+  let seed = 148735;
+  const markers: GlobeMarker[] = [];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+  for (let index = 0; index < count; index += 1) {
+    const latitudeJitter = (nextGlobeRandom() - 0.5) * (1.4 / count);
+    const longitudeJitter = (nextGlobeRandom() - 0.5) * goldenAngle * 0.55;
+    const y = clamp(1 - (2 * (index + 0.5)) / count + latitudeJitter, -0.98, 0.98);
+    const lng = THREE_RAD_TO_DEG * ((index * goldenAngle + longitudeJitter) % (Math.PI * 2)) - 180;
+
+    markers.push({
+      lat: THREE_RAD_TO_DEG * Math.asin(y),
+      lng,
+      phase: nextGlobeRandom() * Math.PI * 2,
+      speed: 0.95 + nextGlobeRandom() * 0.9,
+    });
+  }
+
+  return markers;
+
+  function nextGlobeRandom() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  }
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function GlobeActivityPreview() {
+  const [ref, active] = useRevealOnScroll<HTMLDivElement>();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const host = ref.current;
+    if (!active || !canvas || !host) return;
+    const canvasElement = canvas;
+    const hostElement = host;
+
+    let animationFrame = 0;
+    let disposed = false;
+    let renderer: import("three").WebGLRenderer | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let disposeScene = () => {};
+
+    void setupGlobe();
+
+    async function setupGlobe() {
+      const THREE = await import("three");
+      if (disposed) return;
+
+      const radius = 1;
+      const inactiveColor = new THREE.Color(0x9aa6b2);
+      const activeColor = new THREE.Color(0x00945f);
+      const markerTexture = createLocationPinTexture(THREE);
+      const landTexture = new THREE.TextureLoader().load(worldMapTextureUrl);
+      landTexture.colorSpace = THREE.SRGBColorSpace;
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 20);
+      camera.position.set(0, 0, 8);
+
+      renderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        canvas: canvasElement,
+        powerPreference: "low-power",
+        preserveDrawingBuffer: true,
+      });
+      renderer.setClearColor(0xffffff, 0);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+      scene.add(new THREE.AmbientLight(0xffffff, 1.15));
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.7);
+      keyLight.position.set(-3.4, 4.2, 5.2);
+      scene.add(keyLight);
+      const rimLight = new THREE.DirectionalLight(0xcbd5e1, 0.85);
+      rimLight.position.set(4.5, 1.5, 3);
+      scene.add(rimLight);
+
+      const root = new THREE.Group();
+      scene.add(root);
+
+      const globe = new THREE.Group();
+      globe.rotation.x = -0.1;
+      globe.rotation.z = -0.025;
+      root.add(globe);
+
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 96, 64),
+        new THREE.MeshStandardMaterial({
+          color: 0xf7f9fb,
+          emissive: 0xffffff,
+          emissiveIntensity: 0.22,
+          metalness: 0,
+          roughness: 0.94,
+        }),
+      );
+      globe.add(sphere);
+
+      const landOverlay = new THREE.Mesh(
+        new THREE.SphereGeometry(radius + 0.002, 96, 64),
+        new THREE.MeshBasicMaterial({
+          map: landTexture,
+          transparent: true,
+          opacity: 0.36,
+          depthTest: true,
+          depthWrite: false,
+        }),
+      );
+      globe.add(landOverlay);
+
+      const markerEntries = GLOBE_MARKERS.map((marker) => {
+        const normal = latLngVector(THREE, marker.lat, marker.lng).normalize();
+        const group = new THREE.Group();
+        group.position.copy(normal).multiplyScalar(radius + 0.004);
+        group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+        const markerShape = createLocationMarker(THREE, markerTexture, inactiveColor);
+        group.add(markerShape.pin);
+        globe.add(group);
+        return { group, marker, normal, ...markerShape };
+      });
+
+      const clock = new THREE.Clock();
+      const reducedMotion = prefersReducedMotion();
+      const rotationStart = -0.78;
+      const rotationSpeed = reducedMotion ? 0 : 0.024;
+      const worldPosition = new THREE.Vector3();
+      let visibleHalfWidth = 1;
+      let globeScale = 1;
+      let markerHeight = 0.054;
+
+      const resize = () => {
+        const width = Math.max(1, Math.floor(hostElement.clientWidth));
+        const height = Math.max(1, Math.floor(hostElement.clientHeight));
+        const aspect = width / height;
+        renderer?.setSize(width, height, false);
+        camera.left = -aspect;
+        camera.right = aspect;
+        camera.top = 1;
+        camera.bottom = -1;
+        camera.position.z = 8;
+        camera.updateProjectionMatrix();
+        visibleHalfWidth = aspect;
+        globeScale = Math.max(width < 560 ? 2.7 : 5.2, aspect * (width < 560 ? 1.45 : 1.55));
+        root.scale.setScalar(globeScale);
+        root.position.y = (width < 560 ? 0.18 : 0.34) - globeScale;
+        markerHeight = width < 560 ? 0.034 : 0.028;
+        renderer?.render(scene, camera);
+      };
+
+      const renderFrame = () => {
+        if (disposed || !renderer) return;
+
+        const elapsed = reducedMotion ? 9 : clock.getElapsedTime();
+        globe.rotation.y = rotationStart + elapsed * rotationSpeed;
+
+        markerEntries.forEach((entry, index) => {
+          entry.group.getWorldPosition(worldPosition);
+          const frontAmount = smoothStep(-0.05 * globeScale, 0.54 * globeScale, worldPosition.z);
+          const isInFrame =
+            worldPosition.y > -1.04 &&
+            worldPosition.y < 0.5 &&
+            Math.abs(worldPosition.x) < visibleHalfWidth + 0.22;
+          const isVisible = frontAmount > 0.01 && isInFrame;
+          const pulseWave = (Math.sin(elapsed * entry.marker.speed + entry.marker.phase) + 1) / 2;
+          const randomGreenWave = (Math.sin(elapsed * 0.92 + entry.marker.phase * 1.9 + index) + 1) / 2;
+          const pop = isVisible ? smoothStep(0.38, 0.66, pulseWave) * (1 - smoothStep(0.8, 1, pulseWave)) * frontAmount : 0;
+          const green = Math.max(pop * 0.96, isVisible ? smoothStep(0.72, 1, randomGreenWave) * frontAmount * 0.68 : 0);
+          const reveal = isVisible ? Math.max(0.24, frontAmount) : 0;
+
+          entry.group.visible = isVisible;
+          entry.group.position.copy(entry.normal).multiplyScalar(radius + 0.004);
+          entry.pin.scale.set(markerHeight * (0.48 + reveal * 0.28 + pop * 0.34), markerHeight * (0.68 + reveal * 0.36 + pop * 0.52), 1);
+          entry.pinMaterial.color.copy(inactiveColor).lerp(activeColor, green);
+          entry.pinMaterial.opacity = reveal * (0.3 + pop * 0.28 + green * 0.52);
+        });
+
+        renderer.render(scene, camera);
+        if (!reducedMotion) {
+          animationFrame = window.requestAnimationFrame(renderFrame);
+        }
+      };
+
+      resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(hostElement);
+      resize();
+      renderFrame();
+
+      disposeScene = () => {
+        markerTexture.dispose();
+        landTexture.dispose();
+        scene.traverse((object) => {
+          const mesh = object as import("three").Mesh;
+          mesh.geometry?.dispose();
+          const material = mesh.material;
+          if (Array.isArray(material)) {
+            material.forEach((item) => item.dispose());
+          } else {
+            material?.dispose();
+          }
+        });
+      };
+    }
+
+    return () => {
+      disposed = true;
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+      disposeScene();
+      renderer?.dispose();
+    };
+  }, [active, ref]);
+
+  return (
+    <div
+      className="globe-section"
+      aria-label="Businesses lighting up green as ScoutLead finds a fit"
+      ref={ref}
+    >
+      <div className={`globe-frame${active ? " is-active" : ""}`}>
+        <canvas className="globe-canvas" ref={canvasRef} />
+      </div>
+    </div>
+  );
+}
+
+function createLocationMarker(
+  THREE: typeof import("three"),
+  texture: import("three").CanvasTexture,
+  inactiveColor: import("three").Color,
+) {
+  const pinMaterial = new THREE.SpriteMaterial({
+    map: texture,
+    color: inactiveColor.clone(),
+    depthTest: true,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0,
+  });
+  const pin = new THREE.Sprite(pinMaterial);
+  pin.center.set(0.5, 0.1);
+
+  return { pin, pinMaterial };
+}
+
+function createLocationPinTexture(THREE: typeof import("three")) {
+  const textureCanvas = document.createElement("canvas");
+  textureCanvas.width = 96;
+  textureCanvas.height = 120;
+  const context = textureCanvas.getContext("2d");
+  if (!context) return new THREE.CanvasTexture(textureCanvas);
+
+  context.clearRect(0, 0, textureCanvas.width, textureCanvas.height);
+  context.strokeStyle = "#ffffff";
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = 8;
+
+  context.beginPath();
+  context.moveTo(48, 108);
+  context.bezierCurveTo(28, 78, 20, 60, 20, 42);
+  context.bezierCurveTo(20, 25, 32, 14, 48, 14);
+  context.bezierCurveTo(64, 14, 76, 25, 76, 42);
+  context.bezierCurveTo(76, 60, 68, 78, 48, 108);
+  context.stroke();
+
+  context.beginPath();
+  context.arc(48, 42, 11, 0, Math.PI * 2);
+  context.stroke();
+
+  const texture = new THREE.CanvasTexture(textureCanvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function latLngVector(THREE: typeof import("three"), lat: number, lng: number, radius = 1) {
+  const phi = THREE.MathUtils.degToRad(90 - lat);
+  const theta = THREE.MathUtils.degToRad(lng);
+  return new THREE.Vector3(
+    Math.sin(phi) * Math.cos(theta) * radius,
+    Math.cos(phi) * radius,
+    Math.sin(phi) * Math.sin(theta) * radius,
+  );
+}
+
+function smoothStep(edge0: number, edge1: number, value: number) {
+  const amount = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return amount * amount * (3 - 2 * amount);
 }
 
 function TrustSection() {
