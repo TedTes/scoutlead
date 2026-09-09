@@ -21,7 +21,7 @@ from leads.schemas import (
 from messages.schemas import MessageApproval, MessageReplyMark, MessageStatus, OutreachDraft
 from messages.service import MessageService
 from products.repository import ProductRepository
-from shared.errors import ConflictError
+from shared.errors import ConfigurationError, ConflictError
 from tests.test_discovery_candidates import product_input
 from tools.email import EmailTool
 
@@ -44,6 +44,17 @@ class DraftLLM:
             personalization_notes=["Mentions residential painting."],
             approach_tag="manual_shortlist",
         )
+
+
+class FailingEmail:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    def bind_session(self, session):
+        return self
+
+    def send(self, *, product, lead, message):
+        raise self.exc
 
 
 def test_shortlisted_lead_can_generate_one_pending_outreach_draft() -> None:
@@ -367,6 +378,65 @@ def test_not_fit_review_clears_shortlist_and_blocks_sending() -> None:
         assert not_fit.shortlisted_at is None
         with pytest.raises(ConflictError):
             service.send(message.id)
+
+
+def test_send_failure_records_user_message_without_advancing_campaign() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(product_input())
+        campaign = CampaignRepository(session).create(
+            CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
+        )
+        lead_repo = LeadRepository(session)
+        lead = lead_repo.create_from_seed(
+            campaign.id,
+            product.id,
+            LeadSeedInput(
+                company_name="Cedar & Sons Painting",
+                website_url="https://cedarpaint.example",
+                contact_email="owner@cedarpaint.example",
+                geography="Toronto, ON",
+                description="Residential painting company",
+            ),
+        )
+        lead_repo.update(
+            lead.id,
+            LeadUpdate(review_status=LeadReviewStatus.GOOD_FIT, shortlisted=True),
+        )
+        lead_repo.attach_verification(
+            lead.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
+        )
+
+        service = MessageService(
+            session=session,
+            email=FailingEmail(
+                ConfigurationError(
+                    "Gmail is not connected for this account",
+                    {"user_message": "Connect Gmail in Integrations before sending outreach."},
+                )
+            ),
+            llm=DraftLLM(),
+        )
+        message = service.create_outreach_draft_for_lead(lead.id)
+        service.approve(message.id, MessageApproval(approved_by="operator"))
+        campaign_status_before = CampaignRepository(session).get(campaign.id).status
+
+        with pytest.raises(ConfigurationError):
+            service.send(message.id)
+
+        failed = service.messages.get(message.id)
+        assert failed.status == MessageStatus.FAILED.value
+        assert failed.failure_reason == "Connect Gmail in Integrations before sending outreach."
+        assert CampaignRepository(session).get(campaign.id).status == campaign_status_before
 
 
 def test_sent_message_can_be_marked_replied() -> None:

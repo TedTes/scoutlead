@@ -9,12 +9,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
+from db.models import WorkspaceModel
 from db.session import create_database
 from email_connections.crypto import TokenCipher
 from email_connections.repository import EmailConnectionRepository
 from email_connections.service import GmailOAuthService
 from products.repository import ProductRepository
 from products.schemas import DiscoverySource, DiscoverySourceType, ProductCreate, QualificationCriterion
+
+WORKSPACE_ID = "workspace:gmail"
 
 
 def test_gmail_authorization_url_contains_send_scope_and_signed_product_state() -> None:
@@ -23,8 +26,9 @@ def test_gmail_authorization_url_contains_send_scope_and_signed_product_state() 
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory() as session:
-        product = ProductRepository(session).create(_product_create())
-        service = GmailOAuthService(session=session, settings=_settings())
+        _create_workspace(session)
+        product = ProductRepository(session, workspace_id=WORKSPACE_ID).create(_product_create())
+        service = GmailOAuthService(session=session, settings=_settings(), workspace_id=WORKSPACE_ID)
 
         result = service.authorization_url(product.id)
 
@@ -36,7 +40,9 @@ def test_gmail_authorization_url_contains_send_scope_and_signed_product_state() 
         assert params["prompt"] == ["consent"]
         scopes = params["scope"][0].split()
         assert scopes == ["openid", "email", "https://www.googleapis.com/auth/gmail.send"]
-        assert service._decode_state(params["state"][0])["product_id"] == product.id
+        decoded_state = service._decode_state(params["state"][0])
+        assert decoded_state["product_id"] == product.id
+        assert decoded_state["workspace_id"] == WORKSPACE_ID
 
 
 def test_gmail_oauth_callback_stores_encrypted_refresh_token(monkeypatch) -> None:
@@ -73,16 +79,24 @@ def test_gmail_oauth_callback_stores_encrypted_refresh_token(monkeypatch) -> Non
     monkeypatch.setattr("email_connections.service.httpx.post", fake_post)
 
     with session_factory() as session:
-        product = ProductRepository(session).create(_product_create())
-        service = GmailOAuthService(session=session, settings=_settings(key=key))
+        _create_workspace(session)
+        settings = _settings(key=key)
+        product = ProductRepository(session, workspace_id=WORKSPACE_ID).create(_product_create())
+        service = GmailOAuthService(session=session, settings=settings, workspace_id=WORKSPACE_ID)
         state = parse_qs(urlparse(service.authorization_url(product.id).authorization_url).query)["state"][0]
 
-        connection = service.complete_oauth(code="oauth-code", state=state)
+        connection = GmailOAuthService(session=session, settings=settings).complete_oauth(
+            code="oauth-code",
+            state=state,
+        )
 
-        stored = EmailConnectionRepository(session).get_active_for_product(product.id)
+        stored = EmailConnectionRepository(session).get_active_for_workspace(WORKSPACE_ID)
         assert connection.connected is True
+        assert connection.workspace_id == WORKSPACE_ID
+        assert connection.product_id is None
         assert connection.email_address == "founder@example.com"
         assert stored is not None
+        assert stored.product_id is None
         assert stored.encrypted_refresh_token != "refresh-token"
         assert TokenCipher(key).decrypt(stored.encrypted_refresh_token or "") == "refresh-token"
 
@@ -94,22 +108,59 @@ def test_gmail_disconnect_clears_stored_refresh_token() -> None:
     key = Fernet.generate_key().decode()
 
     with session_factory() as session:
-        product = ProductRepository(session).create(_product_create())
+        _create_workspace(session)
+        product = ProductRepository(session, workspace_id=WORKSPACE_ID).create(_product_create())
         EmailConnectionRepository(session).upsert(
-            product_id=product.id,
+            workspace_id=WORKSPACE_ID,
             provider="gmail",
             email_address="founder@example.com",
             encrypted_refresh_token=TokenCipher(key).encrypt("refresh-token"),
             scopes=["openid", "email", "https://www.googleapis.com/auth/gmail.send"],
         )
 
-        status = GmailOAuthService(session=session, settings=_settings(key=key)).disconnect(product.id)
+        status = GmailOAuthService(
+            session=session,
+            settings=_settings(key=key),
+            workspace_id=WORKSPACE_ID,
+        ).disconnect(product.id)
 
-        stored = EmailConnectionRepository(session).get_for_product(product.id)
+        stored = EmailConnectionRepository(session).get_for_workspace(WORKSPACE_ID)
         assert status.connected is False
+        assert status.workspace_id == WORKSPACE_ID
         assert stored is not None
         assert stored.disconnected_at is not None
         assert stored.encrypted_refresh_token is None
+
+
+def test_gmail_status_reuses_workspace_connection_across_products() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    key = Fernet.generate_key().decode()
+
+    with session_factory() as session:
+        _create_workspace(session)
+        products = ProductRepository(session, workspace_id=WORKSPACE_ID)
+        products.create(_product_create())
+        second_product = products.create(_product_create(product_name="PaintOps"))
+        EmailConnectionRepository(session).upsert(
+            workspace_id=WORKSPACE_ID,
+            provider="gmail",
+            email_address="founder@example.com",
+            encrypted_refresh_token=TokenCipher(key).encrypt("refresh-token"),
+            scopes=["openid", "email", "https://www.googleapis.com/auth/gmail.send"],
+        )
+
+        status = GmailOAuthService(
+            session=session,
+            settings=_settings(key=key),
+            workspace_id=WORKSPACE_ID,
+        ).status(second_product.id)
+
+        assert status.connected is True
+        assert status.product_id == second_product.id
+        assert status.workspace_id == WORKSPACE_ID
+        assert status.email_address == "founder@example.com"
 
 
 def _settings(key: str | None = None) -> Settings:
@@ -122,9 +173,9 @@ def _settings(key: str | None = None) -> Settings:
     )
 
 
-def _product_create() -> ProductCreate:
+def _product_create(product_name: str = "QuoteVan") -> ProductCreate:
     return ProductCreate(
-        product_name="QuoteVan",
+        product_name=product_name,
         product_description="Mobile quoting software for painters.",
         target_customer="Residential painters",
         problem_being_solved="Quotes are slow.",
@@ -138,6 +189,11 @@ def _product_create() -> ProductCreate:
         outreach_objective="Ask for a short product conversation.",
         constraints=[],
     )
+
+
+def _create_workspace(session, workspace_id: str = WORKSPACE_ID) -> None:
+    session.add(WorkspaceModel(id=workspace_id, name="Test workspace"))
+    session.commit()
 
 
 def _fake_id_token(payload: dict) -> str:

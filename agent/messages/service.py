@@ -26,7 +26,7 @@ from prompts.outreach_learn import outreach_learn_prompt
 from prompts.outreach_sell import outreach_sell_prompt
 from products.repository import ProductRepository
 from products.schemas import ProductRead
-from shared.errors import ConflictError
+from shared.errors import ConflictError, SoutleadError
 from tools.email import EmailTool
 
 
@@ -209,16 +209,14 @@ class MessageService:
         email = lead_email(lead)
         if email and lead.contact_email != email:
             lead.contact_email = email
-        if campaign.status == CampaignStatus.AWAITING_APPROVAL.value:
-            self.campaigns.update_status(message.campaign_id, CampaignStatus.SENDING)
-
         try:
             result = self.email.send(product=product, lead=lead, message=message)
         except Exception as exc:
+            failure_reason = _send_failure_reason(exc)
             self.messages.set_status(
                 message_id,
                 MessageStatus.FAILED,
-                failure_reason=str(exc),
+                failure_reason=failure_reason,
             )
             raise
         sent_at = datetime.fromisoformat(result.sent_at)
@@ -236,7 +234,7 @@ class MessageService:
         self.conversations.add_outbound_event(conversation.id, message.id, message.body)
 
         campaign = self.campaigns.get(message.campaign_id)
-        if campaign.status == CampaignStatus.SENDING.value:
+        if campaign.status in {CampaignStatus.AWAITING_APPROVAL.value, CampaignStatus.SENDING.value}:
             self.campaigns.update_status(message.campaign_id, CampaignStatus.TRACKING)
 
         return MessageRead.model_validate(updated)
@@ -247,3 +245,12 @@ def _message_channel(campaign: CampaignRead) -> OutreachChannel:
         return OutreachChannel.EMAIL
     value = campaign.channels[0]
     return value if isinstance(value, OutreachChannel) else OutreachChannel(str(value))
+
+
+def _send_failure_reason(exc: Exception) -> str:
+    if isinstance(exc, SoutleadError):
+        user_message = exc.details.get("user_message")
+        if isinstance(user_message, str) and user_message.strip():
+            return user_message.strip()
+    message = str(exc).strip()
+    return message or exc.__class__.__name__

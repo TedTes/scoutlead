@@ -70,6 +70,7 @@ def create_database(engine: Engine) -> None:
     _ensure_canonical_contact_columns(engine)
     _ensure_business_semantic_columns(engine)
     _ensure_product_workspace_columns(engine)
+    _ensure_email_connection_workspace_columns(engine)
 
 
 def _ensure_pgvector_extension(engine: Engine) -> None:
@@ -281,3 +282,102 @@ def _ensure_product_workspace_columns(engine: Engine) -> None:
                     "ON products (workspace_id, source_fingerprint)"
                 )
             )
+
+
+def _ensure_email_connection_workspace_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if (
+        not inspector.has_table("email_connections")
+        or not inspector.has_table("products")
+        or not inspector.has_table("workspaces")
+    ):
+        return
+
+    existing_columns = {column["name"]: column for column in inspector.get_columns("email_connections")}
+    existing_indexes = {index["name"]: index for index in inspector.get_indexes("email_connections")}
+    existing_uniques = {
+        constraint["name"] for constraint in inspector.get_unique_constraints("email_connections")
+    }
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO workspaces (id, name, clerk_organization_id, created_at, updated_at)
+                SELECT 'workspace_default', 'Default workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_default')
+                """
+            )
+        )
+        if "workspace_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE email_connections ADD COLUMN workspace_id VARCHAR(255)"))
+
+        connection.execute(
+            text(
+                """
+                UPDATE email_connections
+                SET workspace_id = COALESCE(
+                    (
+                        SELECT products.workspace_id
+                        FROM products
+                        WHERE products.id = email_connections.product_id
+                    ),
+                    'workspace_default'
+                )
+                WHERE workspace_id IS NULL
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                DELETE FROM email_connections
+                WHERE id IN (
+                    SELECT id
+                    FROM (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY workspace_id, provider
+                                ORDER BY
+                                    CASE WHEN disconnected_at IS NULL THEN 0 ELSE 1 END,
+                                    updated_at DESC,
+                                    connected_at DESC,
+                                    created_at DESC,
+                                    id DESC
+                            ) AS duplicate_rank
+                        FROM email_connections
+                        WHERE workspace_id IS NOT NULL
+                    ) ranked_connections
+                    WHERE duplicate_rank > 1
+                )
+                """
+            )
+        )
+
+        if "ix_email_connections_workspace_id" not in existing_indexes:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_email_connections_workspace_id "
+                    "ON email_connections (workspace_id)"
+                )
+            )
+
+        if engine.dialect.name == "postgresql":
+            if "uq_email_connections_product_provider" in existing_uniques:
+                connection.execute(
+                    text(
+                        "ALTER TABLE email_connections "
+                        "DROP CONSTRAINT IF EXISTS uq_email_connections_product_provider"
+                    )
+                )
+            connection.execute(text("ALTER TABLE email_connections ALTER COLUMN product_id DROP NOT NULL"))
+            connection.execute(text("ALTER TABLE email_connections ALTER COLUMN workspace_id SET NOT NULL"))
+            if "uq_email_connections_workspace_provider" not in existing_uniques:
+                connection.execute(
+                    text(
+                        "ALTER TABLE email_connections "
+                        "ADD CONSTRAINT uq_email_connections_workspace_provider "
+                        "UNIQUE (workspace_id, provider)"
+                    )
+                )

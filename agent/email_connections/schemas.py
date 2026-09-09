@@ -12,7 +12,8 @@ class EmailConnectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    product_id: str
+    workspace_id: str
+    product_id: str | None = None
     provider: EmailProvider
     email_address: str
     scopes: list[str]

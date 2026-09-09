@@ -334,11 +334,12 @@ class MessageModel(TimestampMixin, Base):
 class EmailConnectionModel(TimestampMixin, Base):
     __tablename__ = "email_connections"
     __table_args__ = (
-        UniqueConstraint("product_id", "provider", name="uq_email_connections_product_provider"),
+        UniqueConstraint("workspace_id", "provider", name="uq_email_connections_workspace_provider"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True, index=True)
     provider: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     email_address: Mapped[str] = mapped_column(String(320), nullable=False)
     encrypted_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -347,6 +348,7 @@ class EmailConnectionModel(TimestampMixin, Base):
     disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    workspace: Mapped[WorkspaceModel] = relationship()
     product: Mapped[ProductModel] = relationship()
 
 

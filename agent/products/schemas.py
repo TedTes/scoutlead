@@ -98,6 +98,7 @@ class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    workspace_id: str | None = None
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

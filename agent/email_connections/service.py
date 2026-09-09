@@ -26,6 +26,7 @@ class GmailAuthorizationUrl(BaseModel):
 
 class GmailConnectionStatus(BaseModel):
     product_id: str
+    workspace_id: str | None = None
     provider: EmailProvider = EmailProvider.GMAIL
     connected: bool
     email_address: str | None = None
@@ -43,16 +44,22 @@ class GmailOAuthService:
     ) -> None:
         self.session = session
         self.settings = settings
+        self.workspace_id = workspace_id
         self.connections = EmailConnectionRepository(session)
         self.products = ProductRepository(session, workspace_id=workspace_id)
 
     def status(self, product_id: str) -> GmailConnectionStatus:
-        self.products.get(product_id)
-        connection = self.connections.get_active_for_product(product_id, EmailProvider.GMAIL)
+        workspace_id = self._workspace_id_for_product(product_id)
+        connection = self.connections.get_active_for_workspace(workspace_id, EmailProvider.GMAIL)
         if connection is None:
-            return GmailConnectionStatus(product_id=product_id, connected=False)
+            return GmailConnectionStatus(
+                product_id=product_id,
+                workspace_id=workspace_id,
+                connected=False,
+            )
         return GmailConnectionStatus(
             product_id=product_id,
+            workspace_id=workspace_id,
             connected=True,
             email_address=connection.email_address,
             scopes=connection.scopes,
@@ -60,9 +67,11 @@ class GmailOAuthService:
         )
 
     def authorization_url(self, product_id: str) -> GmailAuthorizationUrl:
-        self.products.get(product_id)
+        workspace_id = self._workspace_id_for_product(product_id)
         self._assert_oauth_configured()
-        state = self._encode_state({"product_id": product_id, "issued_at": int(time.time())})
+        state = self._encode_state(
+            {"product_id": product_id, "workspace_id": workspace_id, "issued_at": int(time.time())}
+        )
         params = {
             "client_id": self.settings.google_oauth_client_id,
             "redirect_uri": self.settings.google_oauth_redirect_uri,
@@ -80,16 +89,20 @@ class GmailOAuthService:
     def complete_oauth(self, *, code: str, state: str) -> EmailConnectionRead:
         payload = self._decode_state(state)
         product_id = str(payload.get("product_id") or "")
+        workspace_id = str(payload.get("workspace_id") or "")
         if not product_id:
             raise ValidationError("Gmail OAuth state is missing a product id")
-        self.products.get(product_id)
+        product = self.products.get(product_id)
+        workspace_id = workspace_id or product.workspace_id or ""
+        if not workspace_id or product.workspace_id != workspace_id:
+            raise ValidationError("Gmail OAuth state is invalid for this product")
         self._assert_oauth_configured()
 
         token_payload = self._exchange_code(code)
         refresh_token = str(token_payload.get("refresh_token") or "")
         if not refresh_token:
-            existing = self.connections.get_active_for_product(product_id, EmailProvider.GMAIL)
-            if existing is None:
+            existing = self.connections.get_active_for_workspace(workspace_id, EmailProvider.GMAIL)
+            if existing is None or not existing.encrypted_refresh_token:
                 raise ConfigurationError(
                     "Google did not return a Gmail refresh token",
                     {
@@ -119,7 +132,7 @@ class GmailOAuthService:
             refresh_token
         )
         connection = self.connections.upsert(
-            product_id=product_id,
+            workspace_id=workspace_id,
             provider=EmailProvider.GMAIL,
             email_address=email_address,
             encrypted_refresh_token=encrypted_refresh_token,
@@ -128,11 +141,18 @@ class GmailOAuthService:
         return EmailConnectionRead.model_validate(connection)
 
     def disconnect(self, product_id: str) -> GmailConnectionStatus:
-        self.products.get(product_id)
-        connection = self.connections.get_for_product(product_id, EmailProvider.GMAIL)
+        workspace_id = self._workspace_id_for_product(product_id)
+        connection = self.connections.get_for_workspace(workspace_id, EmailProvider.GMAIL)
         if connection is not None and connection.disconnected_at is None:
-            self.connections.disconnect(product_id, EmailProvider.GMAIL)
-        return GmailConnectionStatus(product_id=product_id, connected=False)
+            self.connections.disconnect(workspace_id=workspace_id, provider=EmailProvider.GMAIL)
+        return GmailConnectionStatus(product_id=product_id, workspace_id=workspace_id, connected=False)
+
+    def _workspace_id_for_product(self, product_id: str) -> str:
+        product = self.products.get(product_id)
+        workspace_id = product.workspace_id or self.workspace_id
+        if not workspace_id:
+            raise ValidationError("Product is not assigned to a workspace")
+        return workspace_id
 
     def _assert_oauth_configured(self) -> None:
         missing = [

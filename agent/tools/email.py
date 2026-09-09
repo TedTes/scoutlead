@@ -196,25 +196,39 @@ class EmailTool:
     ) -> SendEmailResult:
         if not self.google_oauth_client_id or not self.google_oauth_client_secret:
             raise ConfigurationError(
-                "Gmail email provider requires GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET"
+                "Gmail email provider requires GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET",
+                {"user_message": "Gmail sending is not configured in this environment."},
             )
         if self.session is None:
-            raise ConfigurationError("Gmail email provider requires an active database session")
-
-        connection = EmailConnectionRepository(self.session).get_active_for_product(
-            product.id, EmailProvider.GMAIL
-        )
-        if connection is None or not connection.encrypted_refresh_token:
             raise ConfigurationError(
-                "Gmail is not connected for this product",
-                {"product_id": product.id, "user_message": "Connect Gmail before sending outreach."},
+                "Gmail email provider requires an active database session",
+                {"user_message": "Gmail sending is unavailable because the server cannot load the account connection."},
             )
 
         repository = EmailConnectionRepository(self.session)
-        refresh_token = TokenCipher(self.google_token_encryption_key).decrypt(
-            connection.encrypted_refresh_token
+        connection = (
+            repository.get_active_for_workspace(product.workspace_id, EmailProvider.GMAIL)
+            if product.workspace_id
+            else repository.get_active_for_product(product.id, EmailProvider.GMAIL)
         )
-        access_token = self._refresh_gmail_access_token(refresh_token)
+        if connection is None or not connection.encrypted_refresh_token:
+            raise ConfigurationError(
+                "Gmail is not connected for this account",
+                {
+                    "product_id": product.id,
+                    "workspace_id": product.workspace_id,
+                    "user_message": "Connect Gmail in Integrations before sending outreach.",
+                },
+            )
+
+        try:
+            refresh_token = TokenCipher(self.google_token_encryption_key).decrypt(
+                connection.encrypted_refresh_token
+            )
+            access_token = self._refresh_gmail_access_token(refresh_token)
+        except ConfigurationError as exc:
+            repository.set_last_error(connection.id, _provider_failure_reason(exc))
+            raise
         mime_message = self._build_gmail_message(
             from_address=connection.email_address,
             to_address=lead.contact_email,
@@ -223,16 +237,23 @@ class EmailTool:
             message_id=message.id,
         )
         raw_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode("ascii")
-        response = httpx.post(
-            f"{self.gmail_api_base_url}/users/me/messages/send",
-            headers={
-                "authorization": f"Bearer {access_token}",
-                "accept": "application/json",
-                "content-type": "application/json",
-            },
-            timeout=self.timeout_seconds,
-            json={"raw": raw_message},
-        )
+        try:
+            response = httpx.post(
+                f"{self.gmail_api_base_url}/users/me/messages/send",
+                headers={
+                    "authorization": f"Bearer {access_token}",
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                },
+                timeout=self.timeout_seconds,
+                json={"raw": raw_message},
+            )
+        except httpx.RequestError as exc:
+            repository.set_last_error(connection.id, str(exc)[:1000])
+            raise ConfigurationError(
+                "Gmail message send request failed",
+                {"user_message": "Gmail could not be reached. Try sending again."},
+            ) from exc
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -255,17 +276,23 @@ class EmailTool:
         )
 
     def _refresh_gmail_access_token(self, refresh_token: str) -> str:
-        response = httpx.post(
-            self.google_oauth_token_url,
-            headers={"accept": "application/json"},
-            data={
-                "client_id": self.google_oauth_client_id,
-                "client_secret": self.google_oauth_client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-            },
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = httpx.post(
+                self.google_oauth_token_url,
+                headers={"accept": "application/json"},
+                data={
+                    "client_id": self.google_oauth_client_id,
+                    "client_secret": self.google_oauth_client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=self.timeout_seconds,
+            )
+        except httpx.RequestError as exc:
+            raise ConfigurationError(
+                "Gmail access token refresh request failed",
+                {"user_message": "Gmail could not be reached. Try sending again."},
+            ) from exc
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -277,9 +304,18 @@ class EmailTool:
                     "user_message": "Reconnect Gmail before sending outreach.",
                 },
             ) from exc
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ConfigurationError(
+                "Gmail token refresh returned an invalid response",
+                {"user_message": "Reconnect Gmail before sending outreach."},
+            ) from exc
         if not isinstance(payload, dict) or not payload.get("access_token"):
-            raise ConfigurationError("Gmail token refresh returned an invalid response")
+            raise ConfigurationError(
+                "Gmail token refresh returned an invalid response",
+                {"user_message": "Reconnect Gmail before sending outreach."},
+            )
         return str(payload["access_token"])
 
     def _build_gmail_message(
@@ -302,3 +338,10 @@ class EmailTool:
             email_message["Reply-To"] = self.reply_to
         email_message.set_content(body)
         return email_message
+
+
+def _provider_failure_reason(exc: ConfigurationError) -> str:
+    user_message = exc.details.get("user_message")
+    if isinstance(user_message, str) and user_message.strip():
+        return user_message.strip()[:1000]
+    return (str(exc).strip() or exc.__class__.__name__)[:1000]
