@@ -1,4 +1,4 @@
-import { Play } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
@@ -140,7 +140,7 @@ export function OverviewScreen({
               title={running ? "Finding contacts" : "Find contacts"}
               type="submit"
             >
-              <Play size={14} />
+              <ArrowRight size={14} />
             </button>
           </div>
         </div>

@@ -10,7 +10,6 @@ import {
   MapPin,
   MoreVertical,
   Phone,
-  Play,
   PlugZap,
   RotateCw,
   Trash2,
@@ -642,7 +641,7 @@ function RerunSearchDialog({
           </button>
           <button className="runbtn" disabled={!ready || running} type="submit">
             {running ? "Running..." : "Run again"}
-            <Play size={13} />
+            <ArrowRight size={13} />
           </button>
         </div>
       </form>

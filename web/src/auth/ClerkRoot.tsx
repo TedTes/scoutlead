@@ -493,8 +493,6 @@ function WorkflowProofPreview() {
   const [reviewStage, setReviewStage] = useState(0);
   const [accordionOpen, setAccordionOpen] = useState(false);
   const [cycle, setCycle] = useState(0);
-  const accordionListRef = useRef<HTMLDivElement | null>(null);
-  const accordionCardRefs = useRef<(HTMLElement | null)[]>([]);
 
   useEffect(() => {
     if (!active) return;
@@ -530,18 +528,9 @@ function WorkflowProofPreview() {
     }
 
     // On narrow viewports the accordion (not the docked/overlay panel) is what's
-    // visible, so it gets its own tap-to-expand, scroll-to-collapse beat: expand
-    // inline below the row, hold, simulate scrolling past it, then collapse and
-    // reset scroll before the next lead's turn.
-    const collapseAndResetScroll = (idx: number) => {
-      setAccordionOpen(false);
-      const list = accordionListRef.current;
-      const card = accordionCardRefs.current[idx];
-      if (list && card && typeof list.scrollTo === "function") {
-        list.scrollTo({ top: Math.max(0, card.offsetTop - 8), behavior: "smooth" });
-      }
-    };
-
+    // visible, so it gets its own tap-to-expand beat: expand inline below the
+    // row, pushing the rest of the list down, hold, then collapse before the
+    // next lead's turn - the panel's height simply reflows, no scrolling.
     const revealDone = cycle === 0 ? PREVIEW_LEADS.length * REVEAL_GAP : 0;
     PREVIEW_LEADS.forEach((_, idx) => {
       const clickStart = revealDone + 360 + idx * CLICK_GAP;
@@ -561,17 +550,7 @@ function WorkflowProofPreview() {
       at(clickStart + 1180, () => setReviewStage(1));
       at(clickStart + 1580, () => setReviewStage(2));
       at(clickStart + 2060, () => setReviewStage(3));
-
-      const scrollAt = clickStart + 1680;
-      at(scrollAt, () => {
-        const list = accordionListRef.current;
-        const card = accordionCardRefs.current[idx];
-        if (list && card && typeof list.scrollTo === "function") {
-          const target = card.offsetTop + card.offsetHeight - list.clientHeight + 20;
-          list.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-        }
-      });
-      at(scrollAt + 560, () => collapseAndResetScroll(idx));
+      at(clickStart + 2240, () => setAccordionOpen(false));
     });
 
     at(revealDone + 360 + PREVIEW_LEADS.length * CLICK_GAP + 1200, () => setCycle((current) => current + 1));
@@ -592,8 +571,6 @@ function WorkflowProofPreview() {
             cursorPressed={cursorPressed}
             reviewStage={reviewStage}
             accordionOpen={accordionOpen}
-            listRef={accordionListRef}
-            cardRefs={accordionCardRefs}
           />
         </div>
       </div>
@@ -987,8 +964,6 @@ function PreviewResults({
   cursorPressed = false,
   reviewStage = 0,
   accordionOpen = false,
-  listRef,
-  cardRefs,
 }: {
   showDrawer?: boolean;
   visibleCount?: number;
@@ -998,8 +973,6 @@ function PreviewResults({
   cursorPressed?: boolean;
   reviewStage?: number;
   accordionOpen?: boolean;
-  listRef?: React.RefObject<HTMLDivElement>;
-  cardRefs?: React.RefObject<(HTMLElement | null)[]>;
 }) {
   const selectedLead = PREVIEW_LEADS[Math.max(0, clickedIndex)] ?? PREVIEW_LEADS[0];
   const reviewedCount = showDrawer && drawerVisible && reviewStage >= 3 ? 1 : 0;
@@ -1025,7 +998,7 @@ function PreviewResults({
         </div>
       </div>
       <div className="preview-results-body">
-        <div className="preview-lead-list" ref={listRef}>
+        <div className="preview-lead-list">
           {PREVIEW_LEADS.map((lead, idx) => (
             <PreviewLeadCard
               lead={lead}
@@ -1037,9 +1010,6 @@ function PreviewResults({
               cursorPressed={idx === cursorIndex && cursorPressed}
               expanded={showDrawer && idx === clickedIndex && accordionOpen}
               reviewStage={reviewStage}
-              cardRef={(node) => {
-                if (cardRefs?.current) cardRefs.current[idx] = node;
-              }}
             />
           ))}
         </div>
@@ -1050,7 +1020,6 @@ function PreviewResults({
 }
 
 function PreviewLeadCard({
-  cardRef,
   clicked = false,
   cursorPressed = false,
   expanded = false,
@@ -1060,7 +1029,6 @@ function PreviewLeadCard({
   showCursor = false,
   visible = true,
 }: {
-  cardRef?: (node: HTMLElement | null) => void;
   clicked?: boolean;
   cursorPressed?: boolean;
   expanded?: boolean;
@@ -1074,7 +1042,6 @@ function PreviewLeadCard({
     <article
       aria-hidden={!visible}
       className={`preview-lead-card${visible ? "" : " is-hidden"}${clicked ? " is-clicked" : ""}${selected ? " is-selected" : ""}`}
-      ref={cardRef}
     >
       <PreviewCursor className="preview-cursor-actor--lead-card" pressed={cursorPressed} visible={showCursor} />
       <span className="preview-lead-score">{lead.score}</span>
