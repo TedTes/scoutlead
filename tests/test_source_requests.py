@@ -6,7 +6,9 @@ from agent_runs.service import AgentRunService
 from campaign_sources.repository import CampaignSourceRepository
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
+from canonical.repository import CanonicalRepository
 from db.session import create_database
+from leads.repository import LeadRepository
 from products.repository import ProductRepository
 from products.schemas import (
     DiscoverySource,
@@ -230,6 +232,77 @@ def test_source_request_rejects_unconfigured_source_adapter() -> None:
             )
 
 
+def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+        CanonicalRepository(session, embedding=FakeEmbeddingClient()).upsert_from_discovery_result(
+            company_name="All Painting Toronto",
+            website_url="https://allpainting.ca",
+            contact_email="info@allpainting.ca",
+            geography="Toronto, ON",
+            description="Professional painting company offering residential painting and free quotes.",
+            source="google_places",
+            raw={
+                "id": "places/all-painting",
+                "query": "painting service Toronto ON",
+                "nationalPhoneNumber": "(416) 710-4224",
+                "source_request_intent": {
+                    "business_category": "painting service",
+                    "location": "Toronto ON",
+                    "country": "Canada",
+                    "required_signals": ["contact details"],
+                    "search_query": "painting service Toronto ON",
+                },
+                "website_enrichment": {
+                    "quote_signals": ["free quote"],
+                    "service_signals": ["residential painting"],
+                    "has_contact_form": True,
+                    "has_quote_form": True,
+                },
+            },
+        )
+        search_tool = CountingSearchTool()
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=search_tool,
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+                embedding=FakeEmbeddingClient(),
+                semantic_cache_min_score=0.2,
+                semantic_cache_min_results=1,
+            ),
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source=GOOGLE_PLACES_PROVIDER_ID,
+                prompt="List painting service contacts in Toronto ON",
+                max_results=5,
+                run_immediately=True,
+            )
+        )
+
+        leads = LeadRepository(session).list_by_campaign(result.run.id)
+
+    assert search_tool.calls == 0
+    assert result.summary is not None
+    assert result.summary.discovered_lead_count == 1
+    assert result.summary.drafted_message_count == 0
+    assert result.run.status == "completed"
+    assert leads[0].company_name == "All Painting Toronto"
+    assert leads[0].contact_email == "info@allpainting.ca"
+    assert leads[0].research is not None
+    assert leads[0].qualification is not None
+    assert leads[0].raw_sources[0]["from_semantic_cache"] is True
+
+
 def test_contact_listing_run_does_not_create_outreach_drafts() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
@@ -329,6 +402,36 @@ def _product() -> ProductCreate:
         outreach_objective="No outreach for listing requests.",
         constraints=["Human approval required before outbound messages are sent."],
     )
+
+
+class CountingSearchTool(SearchTool):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    @property
+    def is_configured(self) -> bool:
+        return True
+
+    def search(self, *args, **kwargs):
+        self.calls += 1
+        return []
+
+
+class FakeEmbeddingClient:
+    model = "fake-embedding"
+    dimension = 6
+
+    def embed_text(self, text: str) -> list[float]:
+        lower = text.lower()
+        return [
+            sum(lower.count(term) for term in ("paint", "painter", "painting")),
+            sum(lower.count(term) for term in ("toronto", "ontario", "canada")),
+            sum(lower.count(term) for term in ("quote", "estimate")),
+            sum(lower.count(term) for term in ("phone", "contact", "email")),
+            sum(lower.count(term) for term in ("roof", "hvac", "plumb")),
+            1.0,
+        ]
 
 
 def _product_with_seed() -> ProductCreate:

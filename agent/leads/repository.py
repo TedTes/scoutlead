@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from agents.embeddings import EmbeddingClient
 from campaigns.schemas import LeadSeedInput
 from canonical.repository import CanonicalRepository
-from db.models import DiscoveryCandidateModel, LeadModel, ProductModel
+from canonical.normalization import normalize_email
+from db.models import BusinessModel, ContactModel, DiscoveryCandidateModel, LeadModel, ProductModel
 from leads.policy import can_shortlist_lead, normalize_qualification_result
 from leads.schemas import (
     ContactPolicyStatus,
@@ -117,6 +118,63 @@ class LeadRepository:
             status=LeadStatus.DISCOVERED.value,
             review_status=LeadReviewStatus.UNREVIEWED.value,
             verification_status=ContactVerificationStatus.UNVERIFIED.value,
+            raw_sources=[result],
+        )
+        self.session.add(model)
+        ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
+    def create_from_cached_result(
+        self,
+        campaign_id: str,
+        product_id: str,
+        result: dict[str, Any],
+    ) -> LeadModel:
+        self._assert_product_in_scope(product_id)
+        raw = result.get("raw") if isinstance(result.get("raw"), dict) else {}
+        business_id = raw.get("canonical_business_id")
+        business = self.session.get(BusinessModel, business_id) if isinstance(business_id, str) else None
+        if business is None:
+            return self.create_from_search_result(campaign_id, product_id, result)
+
+        company_name = str(result.get("title") or result.get("company_name") or business.display_name).strip()
+        if not company_name:
+            company_name = business.display_name
+        website_url = normalize_url(result.get("url") or result.get("website_url") or business.website_url)
+        existing = self.find_existing(campaign_id, company_name, website_url)
+        if existing:
+            return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
+
+        contact_email = normalize_email(str(result.get("contact_email") or "")) or None
+        contact = self._find_cached_contact(business.id, contact_email)
+        contact_email = contact_email or (contact.email if contact and contact.email else None)
+        verification_status = (
+            contact.verification_status
+            if contact and contact.email and contact.verification_status
+            else ContactVerificationStatus.UNVERIFIED.value
+        )
+        model = LeadModel(
+            id=new_id("lead"),
+            campaign_id=campaign_id,
+            product_id=product_id,
+            business_id=business.id,
+            contact_id=contact.id if contact else None,
+            company_name=company_name,
+            website_url=website_url,
+            contact_email=contact_email,
+            geography=str(result.get("geography") or business.geography or ""),
+            description=str(result.get("snippet") or business.semantic_text or ""),
+            source=str(result.get("source") or raw.get("provider_id") or "canonical_cache"),
+            status=LeadStatus.DISCOVERED.value,
+            review_status=LeadReviewStatus.UNREVIEWED.value,
+            verification_status=verification_status,
+            verification_provider=contact.verification_provider if contact else None,
+            verification_checked_at=contact.verification_checked_at if contact else None,
+            verification_reason=contact.verification_reason if contact else None,
+            verification_score=contact.verification_score if contact else None,
+            verification_details=contact.verification_details if contact else None,
             raw_sources=[result],
         )
         self.session.add(model)
@@ -313,6 +371,23 @@ class LeadRepository:
                 return lead
         return None
 
+    def _find_cached_contact(self, business_id: str, email: str | None) -> ContactModel | None:
+        if email:
+            contact = self.session.scalar(
+                select(ContactModel)
+                .where(ContactModel.business_id == business_id, ContactModel.email == email)
+                .order_by(ContactModel.created_at)
+                .limit(1)
+            )
+            if contact:
+                return contact
+        contacts = list(
+            self.session.scalars(
+                select(ContactModel).where(ContactModel.business_id == business_id).order_by(ContactModel.created_at)
+            )
+        )
+        return _best_cached_contact(contacts)
+
     def _scope(self, statement):
         if not self.workspace_id:
             return statement
@@ -330,3 +405,19 @@ class LeadRepository:
         )
         if not exists:
             raise NotFoundError("product not found", {"product_id": product_id})
+
+
+def _best_cached_contact(contacts: list[ContactModel]) -> ContactModel | None:
+    if not contacts:
+        return None
+    ranked = sorted(
+        contacts,
+        key=lambda contact: (
+            1 if contact.email and contact.verification_status == ContactVerificationStatus.VALID.value else 0,
+            1 if contact.email else 0,
+            1 if contact.phone else 0,
+            contact.created_at,
+        ),
+        reverse=True,
+    )
+    return ranked[0]

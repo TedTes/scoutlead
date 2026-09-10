@@ -24,13 +24,24 @@ from campaigns.schemas import (
 )
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
+from canonical.repository import CanonicalRepository
 from db.models import CampaignModel
 from discovery.repository import DiscoveryCandidateRepository
+from discovery.classifier import assess_discovery_candidate
+from discovery.schemas import DiscoveryCandidateCreate
 from evaluation.campaign_metrics import calculate_campaign_metrics
 from evaluation.schemas import CampaignMetrics
 from icp.service import ICPPresetService
 from leads.repository import LeadRepository
-from leads.schemas import LeadRead
+from leads.schemas import (
+    AgentFitStatus,
+    ContactVerificationStatus,
+    CriterionScore,
+    LeadFitType,
+    LeadRead,
+    LeadResearch,
+    QualificationResult,
+)
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
@@ -45,9 +56,9 @@ from source_presets.service import SourcePresetService
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.verify import EmailVerificationTool
-from tools.search import SearchTool
+from tools.search import SearchResult, SearchTool
 from tools.source_registry import SourceAdapterRegistry
-from workflows.discovery import DiscoveryWorkflow
+from workflows.discovery import DiscoveryWorkflow, _rows_with_semantic_context, _rows_with_source_context
 from workflows.contact import ContactWorkflow
 from workflows.outreach import OutreachWorkflow
 from workflows.qualification import QualificationWorkflow
@@ -494,11 +505,218 @@ class CampaignService:
         *,
         agent_run_id: str | None = None,
     ) -> CampaignRunSummary:
+        cached_summary = self._run_cached_contact_listing(campaign_id, agent_run_id=agent_run_id)
+        if cached_summary is not None:
+            return cached_summary
         return self.run_campaign(
             campaign_id,
             agent_run_id=agent_run_id,
             draft_outreach=False,
         )
+
+    def _run_cached_contact_listing(
+        self,
+        campaign_id: str,
+        *,
+        agent_run_id: str | None,
+    ) -> CampaignRunSummary | None:
+        campaign = self.campaigns.get(campaign_id)
+        product = ProductRead.model_validate(self.products.get(campaign.product_id))
+        campaign_read = CampaignRead.model_validate(campaign)
+        self._assert_runnable_campaign(campaign_read)
+
+        cached_rows = self._cached_discovery_rows(product=product, campaign=campaign_read)
+        if not cached_rows:
+            return None
+
+        assessed_rows = self._assessed_cached_rows(product=product, rows=cached_rows)
+        if not any(assessment.is_promotable for _, _, assessment in assessed_rows):
+            return None
+
+        try:
+            if agent_run_id:
+                self.agent_runs.start(agent_run_id)
+
+            self.campaigns.update_status(
+                campaign_id,
+                CampaignStatus.DISCOVERING,
+                stage=CampaignStage.DISCOVERY,
+            )
+            discovered = self._run_agent_step(
+                agent_run_id=agent_run_id,
+                campaign_id=campaign_id,
+                phase=CampaignStage.DISCOVERY.value,
+                sequence=1,
+                objective="List contacts from the cached canonical business pool.",
+                input_snapshot=self._campaign_step_input(product, campaign_read),
+                action=lambda _step_id: self._create_cached_contact_listing(
+                    product=product,
+                    campaign=campaign_read,
+                    assessed_rows=assessed_rows,
+                ),
+            )
+
+            self.campaigns.update_status(
+                campaign_id,
+                CampaignStatus.RESEARCHING,
+                stage=CampaignStage.RESEARCH,
+            )
+            self.campaigns.update_status(
+                campaign_id,
+                CampaignStatus.QUALIFYING,
+                stage=CampaignStage.QUALIFICATION,
+            )
+            completed_campaign = self.campaigns.update_status(campaign_id, CampaignStatus.COMPLETED)
+            summary = CampaignRunSummary(
+                campaign=CampaignRead.model_validate(completed_campaign),
+                discovered_lead_count=len(discovered),
+                researched_lead_count=len(discovered),
+                contacted_lead_count=sum(1 for lead in discovered if lead.contact_email),
+                verified_lead_count=sum(
+                    1
+                    for lead in discovered
+                    if lead.verification_status != ContactVerificationStatus.UNVERIFIED
+                ),
+                signaled_lead_count=len(discovered),
+                qualified_lead_count=sum(
+                    1
+                    for lead in discovered
+                    if lead.qualification and lead.qualification.qualified
+                ),
+                drafted_message_count=0,
+            )
+            if agent_run_id:
+                self.agent_runs.complete(agent_run_id, summary.model_dump(mode="json"))
+            return summary
+        except Exception as exc:
+            if agent_run_id:
+                self.agent_runs.fail(agent_run_id, str(exc))
+            raise
+
+    def _cached_discovery_rows(
+        self,
+        *,
+        product: ProductRead,
+        campaign: CampaignRead,
+    ) -> list[dict[str, Any]]:
+        sources = [
+            CampaignSourceRead.model_validate(source)
+            for source in self.campaign_sources.list_by_campaign(
+                campaign.id,
+                slot=CampaignSourceSlot.DISCOVERY,
+                enabled_only=True,
+            )
+        ]
+        canonical = CanonicalRepository(self.session, embedding=self.embedding)
+        min_results = min(self.semantic_cache_min_results, campaign.max_leads)
+        for source in sources:
+            source_query = str(source.input.get("query") or campaign.source_input or "").strip()
+            semantic_rows = canonical.list_semantic_discovery_results(
+                source_inputs=source.input,
+                source_input=source_query,
+                limit=campaign.max_leads,
+                min_score=self.semantic_cache_min_score,
+                min_results=min_results,
+            )
+            if semantic_rows:
+                return _rows_with_semantic_context(semantic_rows)
+
+        cached_results: list[dict[str, Any]] = []
+        for source in sources:
+            limit = int(source.config.get("limit") or campaign.max_leads)
+            cached_rows = canonical.list_cached_discovery_results(
+                source=source.provider_id,
+                source_input=source.input,
+                limit=limit,
+            )
+            if cached_rows:
+                cached_results.extend(
+                    _rows_with_source_context(
+                        rows=cached_rows,
+                        source=source,
+                        from_cache=True,
+                    )
+                )
+        if len(cached_results) < min_results:
+            return []
+        return cached_results[: campaign.max_leads]
+
+    @staticmethod
+    def _assessed_cached_rows(
+        *,
+        product: ProductRead,
+        rows: list[dict[str, Any]],
+    ):
+        assessed = []
+        for row in rows:
+            search_result = SearchResult.model_validate(row)
+            assessed.append((row, search_result, assess_discovery_candidate(search_result, product)))
+        return assessed
+
+    def _create_cached_contact_listing(
+        self,
+        *,
+        product: ProductRead,
+        campaign: CampaignRead,
+        assessed_rows,
+    ) -> list[LeadRead]:
+        discovered: list[LeadRead] = []
+        for row, search_result, assessment in assessed_rows:
+            candidate = self.discovery_candidates.create(
+                DiscoveryCandidateCreate(
+                    campaign_id=campaign.id,
+                    product_id=product.id,
+                    query=str(row.get("discovery_query") or search_result.raw.get("query") or ""),
+                    title=search_result.title,
+                    url=search_result.url,
+                    snippet=search_result.snippet,
+                    geography=search_result.geography,
+                    contact_email=search_result.contact_email,
+                    source=search_result.source,
+                    raw=row,
+                    candidate_type=assessment.candidate_type,
+                    confidence=assessment.confidence,
+                    rejection_reason=assessment.rejection_reason,
+                )
+            )
+            if not assessment.is_promotable or len(discovered) >= campaign.max_leads:
+                continue
+            lead = self.leads.create_from_cached_result(
+                campaign_id=campaign.id,
+                product_id=product.id,
+                result=row,
+            )
+            self.discovery_candidates.mark_promoted(candidate.id, lead.id)
+            lead = self.leads.attach_research(
+                lead.id,
+                _cached_lead_research(
+                    product=product,
+                    lead=LeadRead.model_validate(lead),
+                    row=row,
+                    confidence=assessment.confidence,
+                ),
+            )
+            lead = self.leads.attach_qualification(
+                lead.id,
+                _cached_qualification(
+                    product=product,
+                    lead=LeadRead.model_validate(lead),
+                    row=row,
+                    confidence=assessment.confidence,
+                ),
+            )
+            discovered.append(LeadRead.model_validate(lead))
+
+        self.memory.create_observation(
+            CampaignMemoryCreate(
+                product_id=product.id,
+                campaign_id=campaign.id,
+                type=ObservationType.LEAD_QUALITY,
+                content=f"Cached contact listing produced {len(discovered)} leads.",
+                tags=["discovery", "cache", product.target_customer],
+            )
+        )
+        return discovered
 
     def _log_hit_rates(self, *, agent_run_id: str, campaign_id: str, product_id: str) -> None:
         """Surface per-provider hit-rate for this run as a readable observation.
@@ -903,6 +1121,162 @@ class CampaignService:
         if value is None or isinstance(value, str | int | float | bool):
             return value
         return str(value)
+
+
+def _cached_lead_research(
+    *,
+    product: ProductRead,
+    lead: LeadRead,
+    row: dict[str, Any],
+    confidence: int,
+) -> LeadResearch:
+    signals = _cached_signals(row=row, lead=lead)
+    summary = truncate(
+        lead.description
+        or f"{lead.company_name} matched cached business-pool evidence for {product.product_name}.",
+        700,
+    )
+    return LeadResearch(
+        summary=summary,
+        lead_type=LeadFitType.TARGET_CUSTOMER,
+        business_type=_cached_business_type(product=product, row=row, lead=lead),
+        geography=lead.geography,
+        website_url=lead.website_url,
+        contact_email=lead.contact_email,
+        contact_candidates=[lead.contact_email] if lead.contact_email else [],
+        signals=signals,
+        pain_indicators=[],
+        disqualifiers=[],
+        sources=_cached_sources(row=row, lead=lead),
+        confidence=max(0, min(100, confidence)),
+    )
+
+
+def _cached_qualification(
+    *,
+    product: ProductRead,
+    lead: LeadRead,
+    row: dict[str, Any],
+    confidence: int,
+) -> QualificationResult:
+    signals = _cached_signals(row=row, lead=lead)
+    missing = _cached_missing_evidence(row=row, lead=lead)
+    score = _cached_fit_score(row=row, lead=lead, confidence=confidence)
+    qualified = score >= 65
+    fit_status = (
+        AgentFitStatus.GOOD_FIT
+        if score >= 80
+        else AgentFitStatus.MAYBE
+        if qualified
+        else AgentFitStatus.NOT_FIT
+    )
+    return QualificationResult(
+        qualified=qualified,
+        fit_status=fit_status,
+        score=score,
+        rationale=(
+            f"{lead.company_name} matched cached public business evidence for "
+            f"{product.product_name}."
+        ),
+        positive_signals=signals[:6],
+        missing_evidence=missing,
+        risks=[],
+        criteria=[
+            CriterionScore(
+                criterion_id=criterion.id or criterion.label,
+                label=criterion.label,
+                score=score,
+                evidence=signals[:3],
+                missing_evidence=missing[:2],
+            )
+            for criterion in product.qualification_criteria
+        ],
+        recommended_next_step=(
+            "Review the contact and shortlist manually before outreach."
+            if qualified
+            else "Review manually before taking action."
+        ),
+    )
+
+
+def _cached_fit_score(*, row: dict[str, Any], lead: LeadRead, confidence: int) -> int:
+    score = max(65, min(90, confidence))
+    if lead.contact_email:
+        score += 5
+    if _cached_phone(row):
+        score += 3
+    if _cached_has_quote_signal(row):
+        score += 4
+    if lead.verification_status == ContactVerificationStatus.VALID:
+        score += 3
+    return max(0, min(95, score))
+
+
+def _cached_missing_evidence(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
+    missing: list[str] = []
+    if not lead.contact_email:
+        missing.append("Direct email not found.")
+    elif lead.verification_status == ContactVerificationStatus.UNVERIFIED:
+        missing.append("Email deliverability not verified.")
+    if not _cached_has_quote_signal(row):
+        missing.append("Explicit quote or estimate signal not found.")
+    return missing
+
+
+def _cached_signals(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
+    signals: list[str] = []
+    signals.extend(signal for signal in raw.get("signals", []) if isinstance(signal, str))
+    signals.extend(signal for signal in enrichment.get("service_signals", []) if isinstance(signal, str))
+    signals.extend(signal for signal in enrichment.get("quote_signals", []) if isinstance(signal, str))
+    if enrichment.get("has_quote_form"):
+        signals.append("quote or estimate form")
+    if enrichment.get("has_contact_form"):
+        signals.append("contact form")
+    if lead.contact_email:
+        signals.append("public email")
+    if _cached_phone(row):
+        signals.append("public phone")
+    if not signals and lead.description:
+        signals.append(truncate(lead.description, 120))
+    return list(dict.fromkeys(signals))[:8]
+
+
+def _cached_has_quote_signal(row: dict[str, Any]) -> bool:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
+    return bool(enrichment.get("has_quote_form") or enrichment.get("quote_signals"))
+
+
+def _cached_phone(row: dict[str, Any]) -> str | None:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    for source in (row, raw):
+        for key in ("phone", "contact_phone", "nationalPhoneNumber", "internationalPhoneNumber"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _cached_sources(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
+    sources = []
+    if lead.website_url:
+        sources.append(lead.website_url)
+    if isinstance(enrichment.get("inspected_urls"), list):
+        sources.extend(url for url in enrichment["inspected_urls"] if isinstance(url, str))
+    return list(dict.fromkeys(sources))[:5]
+
+
+def _cached_business_type(*, product: ProductRead, row: dict[str, Any], lead: LeadRead) -> str:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
+    service_signals = enrichment.get("service_signals")
+    if isinstance(service_signals, list) and service_signals:
+        return ", ".join(str(signal) for signal in service_signals[:3])
+    return lead.description or product.target_customer
 
 
 def email_provider_setup_hint(provider: str) -> str:
