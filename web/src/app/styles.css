@@ -365,20 +365,16 @@ a {
 
 .landing-proof-section .preview-detail-drawer {
   min-height: 0;
-  overflow: hidden;
 }
 
 .landing-proof-section .preview-detail-drawer-content {
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
 }
 
 .landing-proof-section .preview-detail-list {
-  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .preview-rail {
@@ -902,6 +898,14 @@ a {
     transform var(--dur-slow) var(--ease-out);
 }
 
+/* The nested grid-in-grid row-sizing (card -> accordion, both using an
+   auto/fr track) can measure the expanded accordion's contribution a few
+   pixels short of its true rendered height in some engines. A small extra
+   bottom pad while expanded keeps that from ever clipping the last row. */
+.preview-lead-card:has(.preview-lead-accordion.is-expanded) {
+  padding-bottom: 18px;
+}
+
 .preview-lead-card.is-hidden {
   opacity: 0;
   pointer-events: none;
@@ -916,6 +920,38 @@ a {
 .preview-lead-card.is-selected {
   border-color: var(--text);
   box-shadow: 0 0 0 1px var(--text);
+}
+
+/* Below the split-view breakpoint, tapping a lead expands its detail inline
+   (accordion) instead of opening the docked/overlay panel. Hidden entirely
+   at desktop widths, where the docked panel (.preview-detail-drawer) is used
+   instead - see the matching min-width:1024px rule further down. */
+.preview-lead-accordion {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-slow) var(--ease-out);
+}
+
+.preview-lead-accordion.is-expanded {
+  grid-template-rows: 1fr;
+}
+
+/* display:flex + gap (rather than margin-top on each child) so the grid's
+   0fr->1fr row-sizing pass above always measures the true content height -
+   margin-based spacing on children of a single-row auto/fr grid track can
+   read a few pixels short in some engines and silently clip the last child. */
+.preview-lead-accordion-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 40px;
+}
+
+.preview-lead-accordion .preview-detail-head {
+  margin-top: 2px;
 }
 
 @keyframes preview-card-click {
@@ -1248,6 +1284,10 @@ a {
     display: none;
   }
 
+  .preview-lead-accordion {
+    display: none;
+  }
+
   .preview-results-screen.has-detail .preview-results-body {
     align-items: start;
     display: grid;
@@ -1292,37 +1332,11 @@ a {
 }
 
 @media (max-width: 1023px) {
+  /* Below the split-view breakpoint, the inline accordion on each lead card
+     replaces both the docked panel and the old overlay/scrim fallback. */
+  .landing-proof-section .preview-detail-drawer,
   .landing-proof-section .preview-results-screen.has-detail.is-open::before {
-    display: block;
-    inset: -18px;
-  }
-
-  .landing-proof-section .preview-detail-drawer {
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    bottom: 18px;
-    box-shadow: 0 24px 60px rgba(20, 25, 35, 0.24);
-    left: max(18px, 8%);
-    right: max(18px, 8%);
-    top: 76px;
-    width: auto;
-  }
-
-  .landing-proof-section .preview-detail-drawer.is-hidden {
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(10px);
-  }
-
-  .landing-proof-section .preview-detail-drawer-content {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-  }
-
-  .landing-proof-section .preview-detail-list {
-    flex: 1 1 auto;
+    display: none;
   }
 }
 
@@ -1413,115 +1427,12 @@ a {
   }
 }
 
-.preview-detail-tabs {
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  gap: 18px;
-  margin: 14px 0 0;
-}
-
-.preview-detail-tabs strong,
-.preview-detail-tabs span {
-  font-size: 11.5px;
-  padding: 0 0 10px;
-  position: relative;
-}
-
-.preview-detail-tabs strong {
-  color: var(--muted);
-}
-
-.preview-detail-tabs span,
-.preview-detail-tabs em {
-  color: var(--muted);
-  font-style: normal;
-}
-
-.preview-detail-tabs .is-active {
-  color: var(--text);
-}
-
-.preview-detail-tabs .is-active::after {
-  background: var(--text);
-  bottom: -1px;
-  content: "";
-  height: 2px;
-  left: 0;
-  position: absolute;
-  width: 100%;
-}
-
-.preview-detail-drawer > p {
+.preview-detail-drawer-content > p,
+.preview-lead-accordion-inner > p {
   color: var(--text);
   font-size: 11px;
   line-height: 1.55;
   margin: 14px 0;
-}
-
-.preview-evidence-panel {
-  background: var(--panel-muted);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  display: grid;
-  gap: 5px;
-  margin: 0;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  padding: 0 10px;
-  transform: translateY(-4px);
-  transition:
-    margin var(--dur-slow) var(--ease-out),
-    max-height var(--dur-slow) var(--ease-out),
-    opacity var(--dur-slow) var(--ease-out),
-    padding var(--dur-slow) var(--ease-out),
-    transform var(--dur-slow) var(--ease-out);
-}
-
-.preview-evidence-panel.is-visible {
-  border-color: var(--line);
-  margin-bottom: 10px;
-  margin-top: -4px;
-  max-height: 96px;
-  opacity: 1;
-  padding: 8px 10px;
-  transform: translateY(0);
-}
-
-.preview-evidence-item {
-  align-items: center;
-  color: var(--muted);
-  display: flex;
-  font-size: 10px;
-  gap: 6px;
-  min-width: 0;
-  opacity: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transform: translateY(4px);
-  transition:
-    opacity var(--dur-slow) var(--ease-out),
-    transform var(--dur-slow) var(--ease-out);
-  white-space: nowrap;
-}
-
-.preview-evidence-item svg {
-  color: var(--green);
-  flex: 0 0 auto;
-}
-
-.preview-evidence-panel.is-visible .preview-evidence-item {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.preview-evidence-panel.is-visible .preview-evidence-item:nth-child(2) {
-  transition-delay: 80ms;
-}
-
-.preview-evidence-panel.is-visible .preview-evidence-item:nth-child(3) {
-  transition-delay: 160ms;
 }
 
 .preview-detail-list {
@@ -2211,8 +2122,29 @@ a {
 }
 
 .landing-proof-section .landing-preview-focused {
-  height: clamp(560px, 50vw, 620px);
-  min-height: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  height: auto;
+  min-height: clamp(560px, 48vw, 610px);
+}
+
+/* Below 1024px the accordion expands inline within the list (see
+   .preview-lead-accordion), so the card must grow to fit whichever lead is
+   open rather than clipping it - height:auto plus the min-height above lets
+   it hug content while still keeping a sensible floor when nothing is
+   expanded. */
+
+/* The split-view panel (>=1024px) is a static, non-scrolling layout, unlike
+   the accordion used below that width where internal scrolling is expected.
+   Give it a fixed height generous enough that the detail content (header,
+   chips, overview, info rows, footer) never clips or needs its own
+   scrollbar. This must come after the clamp() rule above to win the cascade
+   at equal specificity. */
+@media (min-width: 1024px) {
+  .landing-proof-section .landing-preview-focused {
+    height: 680px;
+  }
 }
 
 .landing-trust-row {
@@ -6415,6 +6347,10 @@ a {
     min-height: 520px;
   }
 
+  .landing-preview-focused {
+    min-height: 0;
+  }
+
   .landing-preview.preview-app {
     height: clamp(500px, 62vw, 560px);
     min-height: 0;
@@ -6474,8 +6410,8 @@ a {
   }
 
   .landing-proof-section .landing-preview-focused {
-    height: 540px;
-    min-height: 0;
+    height: auto;
+    min-height: 540px;
   }
 
   .readiness-preview {
@@ -6733,6 +6669,10 @@ a {
     min-height: 540px;
   }
 
+  .landing-preview-focused {
+    min-height: 0;
+  }
+
   .landing-preview.preview-app {
     height: 540px;
     min-height: 0;
@@ -6780,13 +6720,6 @@ a {
   .preview-lead-actions {
     grid-column: 2;
     justify-self: start;
-  }
-
-  .landing-proof-section .preview-detail-drawer {
-    bottom: 14px;
-    left: 14px;
-    right: 14px;
-    top: 70px;
   }
 
   .landing-proof-section .preview-detail-head {
@@ -7091,19 +7024,6 @@ a {
     display: none;
   }
 
-  .landing-proof-section .preview-detail-drawer {
-    bottom: 10px;
-    display: flex;
-    left: 10px;
-    right: 10px;
-    top: 64px;
-    width: auto;
-  }
-
-  .landing-proof-section .preview-results-screen.has-detail.is-open::before {
-    display: block;
-  }
-
   .preview-tabs {
     gap: 12px;
     overflow-x: auto;
@@ -7133,17 +7053,14 @@ a {
   }
 
   .landing-proof-section .landing-preview-focused {
-    height: 560px;
+    height: auto;
+    min-height: 560px;
   }
 
   .preview-lead-card {
     gap: 9px;
     min-height: 72px;
     padding: 9px;
-  }
-
-  .landing-proof-section .preview-detail-drawer {
-    padding: 14px 12px;
   }
 
   .landing-proof-section .preview-detail-head {
@@ -7157,10 +7074,6 @@ a {
   .landing-proof-section .preview-detail-chips span {
     font-size: 9.5px;
     padding: 4px 7px;
-  }
-
-  .landing-proof-section .preview-detail-tabs {
-    gap: 14px;
   }
 
   .landing-proof-section .preview-detail-footer {

@@ -310,8 +310,6 @@ const PREVIEW_LEADS = [
       contact: "No contact name found",
       email: "No email found",
       emailStatus: "Email · missing",
-      evidence: ["Website describes painting services", "Mississauga service area matches", "Reviews and phone are public"],
-      evidenceCount: 9,
       overview:
         "Maple Ridge Painting Co. is a professional painting contractor in Mississauga with strong customer reviews and direct phone contact.",
       phone: "(416) 555-0148",
@@ -333,8 +331,6 @@ const PREVIEW_LEADS = [
       contact: "Owner contact not published",
       email: "info@precisionpaintinginc.ca",
       emailStatus: "Email · deliverable",
-      evidence: ["Full-service painting history found", "Public website and phone checked", "Email passes contact review"],
-      evidenceCount: 7,
       overview:
         "Precision Painting Inc. operates as a full-service painting company with a public website, local service history, and contact paths suitable for reviewed outreach.",
       phone: "Public phone found",
@@ -356,8 +352,6 @@ const PREVIEW_LEADS = [
       contact: "No contact name found",
       email: "Contact form available",
       emailStatus: "Email · review",
-      evidence: ["Painting category matches", "Local service footprint found", "Contact form needs review"],
-      evidenceCount: 8,
       overview:
         "Buffalo Painters matches the painting-service niche and local geography, with enough public evidence to review fit before deciding whether to shortlist.",
       phone: "Public phone found",
@@ -379,12 +373,31 @@ const PREVIEW_LEADS = [
       contact: "No contact name found",
       email: "No email found",
       emailStatus: "Email · missing",
-      evidence: ["Painting service match found", "Local website reviewed", "Email still missing"],
-      evidenceCount: 6,
       overview:
         "DewDrop appears to serve the target painting category and location, but needs more contact evidence before it is ready for outreach.",
       phone: "Public phone found",
       website: "dewdroppainting.ca",
+    },
+  },
+  {
+    name: "GreenLeaf Painting & Renovations",
+    category: "painting & renovation contractor",
+    location: "Mississauga, ON, Canada",
+    score: 85,
+    status: "Verified",
+    statusTone: "green",
+    fit: "Agent good fit",
+    body: "Residential painting and renovation crew serving the GTA.",
+    missing: "",
+    detail: {
+      address: "Mississauga, ON",
+      contact: "Dana Whitfield, Office Manager",
+      email: "hello@greenleafpainting.ca",
+      emailStatus: "Email · deliverable",
+      overview:
+        "GreenLeaf Painting & Renovations combines painting with light renovation work in Mississauga, with a named contact and deliverable email ready for reviewed outreach.",
+      phone: "(905) 555-0173",
+      website: "greenleafpainting.ca",
     },
   },
 ];
@@ -478,7 +491,10 @@ function WorkflowProofPreview() {
   const [clickedIndex, setClickedIndex] = useState(-1);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [reviewStage, setReviewStage] = useState(0);
+  const [accordionOpen, setAccordionOpen] = useState(false);
   const [cycle, setCycle] = useState(0);
+  const accordionListRef = useRef<HTMLDivElement | null>(null);
+  const accordionCardRefs = useRef<(HTMLElement | null)[]>([]);
 
   useEffect(() => {
     if (!active) return;
@@ -488,6 +504,7 @@ function WorkflowProofPreview() {
       setClickedIndex(0);
       setDrawerVisible(true);
       setReviewStage(3);
+      setAccordionOpen(true);
       return;
     }
 
@@ -500,6 +517,7 @@ function WorkflowProofPreview() {
     setCursorIndex(-1);
     setCursorPressed(false);
     setReviewStage(0);
+    setAccordionOpen(false);
     if (cycle === 0) {
       setVisibleLeads(0);
       setClickedIndex(-1);
@@ -510,6 +528,19 @@ function WorkflowProofPreview() {
     } else {
       setVisibleLeads(PREVIEW_LEADS.length);
     }
+
+    // On narrow viewports the accordion (not the docked/overlay panel) is what's
+    // visible, so it gets its own tap-to-expand, scroll-to-collapse beat: expand
+    // inline below the row, hold, simulate scrolling past it, then collapse and
+    // reset scroll before the next lead's turn.
+    const collapseAndResetScroll = (idx: number) => {
+      setAccordionOpen(false);
+      const list = accordionListRef.current;
+      const card = accordionCardRefs.current[idx];
+      if (list && card && typeof list.scrollTo === "function") {
+        list.scrollTo({ top: Math.max(0, card.offsetTop - 8), behavior: "smooth" });
+      }
+    };
 
     const revealDone = cycle === 0 ? PREVIEW_LEADS.length * REVEAL_GAP : 0;
     PREVIEW_LEADS.forEach((_, idx) => {
@@ -523,12 +554,24 @@ function WorkflowProofPreview() {
         setCursorPressed(true);
         setClickedIndex(idx);
         setDrawerVisible(true);
+        setAccordionOpen(true);
       });
       at(clickStart + 660, () => setCursorPressed(false));
       at(clickStart + 980, () => setCursorIndex(-1));
       at(clickStart + 1180, () => setReviewStage(1));
       at(clickStart + 1580, () => setReviewStage(2));
       at(clickStart + 2060, () => setReviewStage(3));
+
+      const scrollAt = clickStart + 1680;
+      at(scrollAt, () => {
+        const list = accordionListRef.current;
+        const card = accordionCardRefs.current[idx];
+        if (list && card && typeof list.scrollTo === "function") {
+          const target = card.offsetTop + card.offsetHeight - list.clientHeight + 20;
+          list.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+        }
+      });
+      at(scrollAt + 560, () => collapseAndResetScroll(idx));
     });
 
     at(revealDone + 360 + PREVIEW_LEADS.length * CLICK_GAP + 1200, () => setCycle((current) => current + 1));
@@ -539,7 +582,6 @@ function WorkflowProofPreview() {
   return (
     <div className="landing-preview landing-preview-focused" aria-label="Example lead detail" ref={ref}>
       <div className="preview-main-panel">
-        <PreviewAppTopbar pageName="Painting Services" />
         <div className="preview-stage">
           <PreviewResults
             showDrawer
@@ -549,6 +591,9 @@ function WorkflowProofPreview() {
             cursorIndex={cursorIndex}
             cursorPressed={cursorPressed}
             reviewStage={reviewStage}
+            accordionOpen={accordionOpen}
+            listRef={accordionListRef}
+            cardRefs={accordionCardRefs}
           />
         </div>
       </div>
@@ -941,6 +986,9 @@ function PreviewResults({
   cursorIndex = -1,
   cursorPressed = false,
   reviewStage = 0,
+  accordionOpen = false,
+  listRef,
+  cardRefs,
 }: {
   showDrawer?: boolean;
   visibleCount?: number;
@@ -949,6 +997,9 @@ function PreviewResults({
   cursorIndex?: number;
   cursorPressed?: boolean;
   reviewStage?: number;
+  accordionOpen?: boolean;
+  listRef?: React.RefObject<HTMLDivElement>;
+  cardRefs?: React.RefObject<(HTMLElement | null)[]>;
 }) {
   const selectedLead = PREVIEW_LEADS[Math.max(0, clickedIndex)] ?? PREVIEW_LEADS[0];
   const reviewedCount = showDrawer && drawerVisible && reviewStage >= 3 ? 1 : 0;
@@ -974,7 +1025,7 @@ function PreviewResults({
         </div>
       </div>
       <div className="preview-results-body">
-        <div className="preview-lead-list">
+        <div className="preview-lead-list" ref={listRef}>
           {PREVIEW_LEADS.map((lead, idx) => (
             <PreviewLeadCard
               lead={lead}
@@ -984,6 +1035,11 @@ function PreviewResults({
               selected={idx === clickedIndex}
               showCursor={idx === cursorIndex}
               cursorPressed={idx === cursorIndex && cursorPressed}
+              expanded={showDrawer && idx === clickedIndex && accordionOpen}
+              reviewStage={reviewStage}
+              cardRef={(node) => {
+                if (cardRefs?.current) cardRefs.current[idx] = node;
+              }}
             />
           ))}
         </div>
@@ -994,16 +1050,22 @@ function PreviewResults({
 }
 
 function PreviewLeadCard({
+  cardRef,
   clicked = false,
   cursorPressed = false,
+  expanded = false,
   lead,
+  reviewStage = 0,
   selected = false,
   showCursor = false,
   visible = true,
 }: {
+  cardRef?: (node: HTMLElement | null) => void;
   clicked?: boolean;
   cursorPressed?: boolean;
+  expanded?: boolean;
   lead: (typeof PREVIEW_LEADS)[number];
+  reviewStage?: number;
   selected?: boolean;
   showCursor?: boolean;
   visible?: boolean;
@@ -1012,6 +1074,7 @@ function PreviewLeadCard({
     <article
       aria-hidden={!visible}
       className={`preview-lead-card${visible ? "" : " is-hidden"}${clicked ? " is-clicked" : ""}${selected ? " is-selected" : ""}`}
+      ref={cardRef}
     >
       <PreviewCursor className="preview-cursor-actor--lead-card" pressed={cursorPressed} visible={showCursor} />
       <span className="preview-lead-score">{lead.score}</span>
@@ -1031,6 +1094,11 @@ function PreviewLeadCard({
         <Mail size={13} />
         <Phone size={13} />
       </div>
+      <div className={`preview-lead-accordion${expanded ? " is-expanded" : ""}`} aria-hidden={!expanded}>
+        <div className="preview-lead-accordion-inner">
+          <PreviewDetailBody lead={lead} reviewStage={reviewStage} />
+        </div>
+      </div>
     </article>
   );
 }
@@ -1044,11 +1112,6 @@ function PreviewDetailDrawer({
   reviewStage?: number;
   visible?: boolean;
 }) {
-  const emailChipClass = lead.detail.emailStatus.includes("deliverable") ? "" : "tone-amber";
-  const evidenceActive = reviewStage >= 1;
-  const readinessActive = reviewStage >= 2;
-  const actionReady = reviewStage >= 3;
-
   return (
     <aside
       aria-hidden={!visible}
@@ -1056,62 +1119,67 @@ function PreviewDetailDrawer({
       className={`preview-detail-drawer${visible ? "" : " is-hidden"}`}
     >
       <div className={`preview-detail-drawer-content${visible ? "" : " is-hidden"}`} key={lead.name}>
-        <div className="preview-detail-head">
-          <span className="preview-lead-score">{lead.score}</span>
-          <div>
-            <strong>{lead.name}</strong>
-            <span>
-              {lead.category} · {lead.location}
-            </span>
-          </div>
-          <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
-        </div>
-        <div className={`preview-detail-chips${readinessActive ? " is-readiness-active" : ""}`}>
-          <span className={readinessActive ? "is-reviewed" : ""}>
-            <CheckCircle2 size={12} /> {lead.fit} · {lead.score}
-          </span>
-          <span className={`${emailChipClass}${readinessActive ? " is-reviewed" : ""}`.trim()}>
-            <Mail size={12} /> {lead.detail.emailStatus}
-          </span>
-          <span className={readinessActive ? "is-reviewed" : ""}>
-            <Phone size={12} /> Phone
-          </span>
-        </div>
-        <div className={`preview-detail-tabs${evidenceActive ? " is-evidence-active" : ""}`}>
-          <strong className={evidenceActive ? "" : "is-active"}>Overview</strong>
-          <span className={evidenceActive ? "is-active" : ""}>
-            Evidence <em>{lead.detail.evidenceCount}</em>
-          </span>
-        </div>
-        <p>{lead.detail.overview}</p>
-        <div className={`preview-evidence-panel${evidenceActive ? " is-visible" : ""}`} aria-hidden={!evidenceActive}>
-          {lead.detail.evidence.map((evidence) => (
-            <span className="preview-evidence-item" key={`${lead.name}-${evidence}`}>
-              <CheckCircle2 size={12} /> {evidence}
-            </span>
-          ))}
-        </div>
-        <dl className="preview-detail-list">
-          <PreviewDetailRow icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
-          <PreviewDetailRow icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
-          <PreviewDetailRow icon={<UserCheck size={14} />} label="Contact" value={lead.detail.contact} />
-          <PreviewDetailRow icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
-          <PreviewDetailRow icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
-        </dl>
-        <div className={`preview-detail-footer${actionReady ? " is-action-ready" : ""}`}>
-          <button className={actionReady ? "is-reviewed" : ""} type="button" tabIndex={-1}>Shortlist</button>
-          <button type="button" tabIndex={-1}>Pass</button>
-          <button className={actionReady ? "is-action-ready" : ""} type="button" tabIndex={-1}>
-            Review outreach <ArrowRight size={13} />
-            <PreviewCursor
-              className="preview-cursor-actor--review-action"
-              pressed={actionReady}
-              visible={actionReady}
-            />
-          </button>
-        </div>
+        <PreviewDetailBody lead={lead} reviewStage={reviewStage} />
       </div>
     </aside>
+  );
+}
+
+function PreviewDetailBody({
+  lead,
+  reviewStage = 0,
+}: {
+  lead: (typeof PREVIEW_LEADS)[number];
+  reviewStage?: number;
+}) {
+  const emailChipClass = lead.detail.emailStatus.includes("deliverable") ? "" : "tone-amber";
+  const readinessActive = reviewStage >= 2;
+  const actionReady = reviewStage >= 3;
+
+  return (
+    <>
+      <div className="preview-detail-head">
+        <span className="preview-lead-score">{lead.score}</span>
+        <div>
+          <strong>{lead.name}</strong>
+          <span>
+            {lead.category} · {lead.location}
+          </span>
+        </div>
+        <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
+      </div>
+      <div className={`preview-detail-chips${readinessActive ? " is-readiness-active" : ""}`}>
+        <span className={readinessActive ? "is-reviewed" : ""}>
+          <CheckCircle2 size={12} /> {lead.fit} · {lead.score}
+        </span>
+        <span className={`${emailChipClass}${readinessActive ? " is-reviewed" : ""}`.trim()}>
+          <Mail size={12} /> {lead.detail.emailStatus}
+        </span>
+        <span className={readinessActive ? "is-reviewed" : ""}>
+          <Phone size={12} /> Phone
+        </span>
+      </div>
+      <p>{lead.detail.overview}</p>
+      <dl className="preview-detail-list">
+        <PreviewDetailRow icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
+        <PreviewDetailRow icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
+        <PreviewDetailRow icon={<UserCheck size={14} />} label="Contact" value={lead.detail.contact} />
+        <PreviewDetailRow icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
+        <PreviewDetailRow icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
+      </dl>
+      <div className={`preview-detail-footer${actionReady ? " is-action-ready" : ""}`}>
+        <button className={actionReady ? "is-reviewed" : ""} type="button" tabIndex={-1}>Shortlist</button>
+        <button type="button" tabIndex={-1}>Pass</button>
+        <button className={actionReady ? "is-action-ready" : ""} type="button" tabIndex={-1}>
+          Review outreach <ArrowRight size={13} />
+          <PreviewCursor
+            className="preview-cursor-actor--review-action"
+            pressed={actionReady}
+            visible={actionReady}
+          />
+        </button>
+      </div>
+    </>
   );
 }
 
