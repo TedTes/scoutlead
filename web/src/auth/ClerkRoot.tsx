@@ -77,6 +77,30 @@ function useRevealOnScroll<T extends HTMLElement>() {
   return [ref, active] as const;
 }
 
+function useActiveOnScroll<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (prefersReducedMotion()) {
+      setActive(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setActive(Boolean(entries[0]?.isIntersecting));
+      },
+      { threshold: 0.3 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, active] as const;
+}
+
 function LandingPage() {
   useEffect(() => {
     document.body.classList.add("landing-route");
@@ -180,16 +204,16 @@ function LandingPage() {
           </div>
         </section>
 
-        <section className="landing-section landing-settings-section" aria-label="Product settings">
+        <section className="landing-section landing-draft-section" aria-label="Outreach draft, approval, and send">
           <div className="landing-workflow-layout landing-workflow-layout-reverse">
-            <FitComparisonPreview />
+            <DraftSendPreview />
             <div>
               <div className="landing-section-heading">
-                <p className="landing-eyebrow">One product, scored consistently</p>
-                <h2>Fit scoring reads from your product description, not a generic checklist</h2>
+                <p className="landing-eyebrow">Draft, approved, sent</p>
+                <h2>Every draft is written from what ScoutLead actually found</h2>
                 <p className="landing-lede">
-                  The name, description, and optional focus hints you set once are what every candidate gets scored
-                  against — the same painter can be a strong fit for one product and a weak fit for another.
+                  The message references real evidence — reviews, service area, what's missing — then waits for a
+                  person to approve it before anything reaches Gmail.
                 </p>
               </div>
             </div>
@@ -273,7 +297,7 @@ function AppRouteLoading() {
 
 const PREVIEW_LEADS = [
   {
-    name: "Esposito's Painting Services",
+    name: "Maple Ridge Painting Co.",
     category: "painting contractor",
     location: "Mississauga, ON, Canada",
     score: 90,
@@ -283,15 +307,16 @@ const PREVIEW_LEADS = [
     body: "Professional painting service with strong customer reviews.",
     missing: "Missing: Direct contact email or name for outreach",
     detail: {
-      address: "7199 Fayette Cir, Mississauga, ON",
+      address: "482 Harborview Rd, Mississauga, ON",
       contact: "No contact name found",
       email: "No email found",
       emailStatus: "Email · missing",
+      evidence: ["Website describes painting services", "Mississauga service area matches", "Reviews and phone are public"],
       evidenceCount: 9,
       overview:
-        "Esposito's Painting Services is a professional painting contractor in Mississauga with strong customer reviews and direct phone contact.",
-      phone: "(416) 809-3641",
-      website: "espositospaintingservices.com",
+        "Maple Ridge Painting Co. is a professional painting contractor in Mississauga with strong customer reviews and direct phone contact.",
+      phone: "(416) 555-0148",
+      website: "mapleridgepainting.ca",
     },
   },
   {
@@ -309,6 +334,7 @@ const PREVIEW_LEADS = [
       contact: "Owner contact not published",
       email: "info@precisionpaintinginc.ca",
       emailStatus: "Email · deliverable",
+      evidence: ["Full-service painting history found", "Public website and phone checked", "Email passes contact review"],
       evidenceCount: 7,
       overview:
         "Precision Painting Inc. operates as a full-service painting company with a public website, local service history, and contact paths suitable for reviewed outreach.",
@@ -331,6 +357,7 @@ const PREVIEW_LEADS = [
       contact: "No contact name found",
       email: "Contact form available",
       emailStatus: "Email · review",
+      evidence: ["Painting category matches", "Local service footprint found", "Contact form needs review"],
       evidenceCount: 8,
       overview:
         "Buffalo Painters matches the painting-service niche and local geography, with enough public evidence to review fit before deciding whether to shortlist.",
@@ -353,6 +380,7 @@ const PREVIEW_LEADS = [
       contact: "No contact name found",
       email: "No email found",
       emailStatus: "Email · missing",
+      evidence: ["Painting service match found", "Local website reviewed", "Email still missing"],
       evidenceCount: 6,
       overview:
         "DewDrop appears to serve the target painting category and location, but needs more contact evidence before it is ready for outreach.",
@@ -450,6 +478,7 @@ function WorkflowProofPreview() {
   const [cursorPressed, setCursorPressed] = useState(false);
   const [clickedIndex, setClickedIndex] = useState(-1);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [reviewStage, setReviewStage] = useState(0);
   const [cycle, setCycle] = useState(0);
 
   useEffect(() => {
@@ -459,17 +488,19 @@ function WorkflowProofPreview() {
       setVisibleLeads(PREVIEW_LEADS.length);
       setClickedIndex(0);
       setDrawerVisible(true);
+      setReviewStage(3);
       return;
     }
 
     const timers: number[] = [];
     const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
 
-    const REVEAL_GAP = 220;
-    const CLICK_GAP = 1280;
+    const REVEAL_GAP = 320;
+    const CLICK_GAP = 2400;
 
     setCursorIndex(-1);
     setCursorPressed(false);
+    setReviewStage(0);
     if (cycle === 0) {
       setVisibleLeads(0);
       setClickedIndex(-1);
@@ -487,17 +518,21 @@ function WorkflowProofPreview() {
       at(clickStart, () => {
         setCursorIndex(idx);
         setCursorPressed(false);
+        setReviewStage(0);
       });
-      at(clickStart + 240, () => {
+      at(clickStart + 360, () => {
         setCursorPressed(true);
         setClickedIndex(idx);
         setDrawerVisible(true);
       });
-      at(clickStart + 480, () => setCursorPressed(false));
-      at(clickStart + 760, () => setCursorIndex(-1));
+      at(clickStart + 660, () => setCursorPressed(false));
+      at(clickStart + 980, () => setCursorIndex(-1));
+      at(clickStart + 1180, () => setReviewStage(1));
+      at(clickStart + 1580, () => setReviewStage(2));
+      at(clickStart + 2060, () => setReviewStage(3));
     });
 
-    at(revealDone + 360 + PREVIEW_LEADS.length * CLICK_GAP + 720, () => setCycle((current) => current + 1));
+    at(revealDone + 360 + PREVIEW_LEADS.length * CLICK_GAP + 1200, () => setCycle((current) => current + 1));
 
     return () => timers.forEach(clearTimeout);
   }, [active, cycle]);
@@ -514,6 +549,7 @@ function WorkflowProofPreview() {
             clickedIndex={clickedIndex}
             cursorIndex={cursorIndex}
             cursorPressed={cursorPressed}
+            reviewStage={reviewStage}
           />
         </div>
       </div>
@@ -521,104 +557,219 @@ function WorkflowProofPreview() {
   );
 }
 
-function FitComparisonPreview() {
+const DRAFT_SUBJECT = "Quick note about Maple Ridge Painting Co.";
+const DRAFT_BODY_WORDS =
+  "Hi there — came across Maple Ridge Painting Co. while researching painters in Mississauga. Strong reviews, but no direct email listed on your site, so reaching out here instead."
+    .split(" ");
+
+function DraftSendPreview() {
   const [ref, active] = useRevealOnScroll<HTMLDivElement>();
-  const [nameVisible, setNameVisible] = useState(false);
-  const [goodScore, setGoodScore] = useState(0);
-  const [badScore, setBadScore] = useState(0);
-  const [goodSettled, setGoodSettled] = useState(false);
-  const [badSettled, setBadSettled] = useState(false);
+  const [subjectChars, setSubjectChars] = useState(0);
+  const [bodyWords, setBodyWords] = useState(0);
+  const [actionsVisible, setActionsVisible] = useState(false);
+  const [cursorTarget, setCursorTarget] = useState<"approve" | "send" | null>(null);
+  const [cursorPressed, setCursorPressed] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [cycle, setCycle] = useState(0);
 
   useEffect(() => {
     if (!active) return;
 
     if (prefersReducedMotion()) {
-      setNameVisible(true);
-      setGoodScore(90);
-      setBadScore(25);
-      setGoodSettled(true);
-      setBadSettled(true);
+      setSubjectChars(DRAFT_SUBJECT.length);
+      setBodyWords(DRAFT_BODY_WORDS.length);
+      setActionsVisible(true);
+      setApproved(true);
+      setSent(true);
       return;
     }
 
     const timers: number[] = [];
     const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
 
-    setNameVisible(false);
-    setGoodScore(0);
-    setBadScore(0);
-    setGoodSettled(false);
-    setBadSettled(false);
+    setSubjectChars(0);
+    setBodyWords(0);
+    setActionsVisible(false);
+    setCursorTarget(null);
+    setCursorPressed(false);
+    setApproved(false);
+    setSent(false);
 
-    at(120, () => setNameVisible(true));
+    const SUBJECT_CHAR_MS = 26;
+    for (let i = 1; i <= DRAFT_SUBJECT.length; i++) {
+      at(i * SUBJECT_CHAR_MS, () => setSubjectChars(i));
+    }
+    const subjectDone = DRAFT_SUBJECT.length * SUBJECT_CHAR_MS;
 
-    const GOOD_STEPS = [18, 40, 62, 90];
-    GOOD_STEPS.forEach((value, idx) => at(420 + idx * 110, () => setGoodScore(value)));
-    const goodDone = 420 + GOOD_STEPS.length * 110;
-    at(goodDone + 60, () => setGoodSettled(true));
+    const WORD_MS = 58;
+    DRAFT_BODY_WORDS.forEach((_, idx) => {
+      at(subjectDone + 260 + idx * WORD_MS, () => setBodyWords(idx + 1));
+    });
+    const bodyDone = subjectDone + 260 + DRAFT_BODY_WORDS.length * WORD_MS;
 
-    const badStart = goodDone + 520;
-    const BAD_STEPS = [10, 18, 25];
-    BAD_STEPS.forEach((value, idx) => at(badStart + idx * 110, () => setBadScore(value)));
-    at(badStart + BAD_STEPS.length * 110 + 60, () => setBadSettled(true));
+    at(bodyDone + 300, () => setActionsVisible(true));
+    at(bodyDone + 620, () => setCursorTarget("approve"));
+    at(bodyDone + 840, () => setCursorPressed(true));
+    at(bodyDone + 1000, () => {
+      setApproved(true);
+      setCursorPressed(false);
+      setCursorTarget(null);
+    });
+    at(bodyDone + 1320, () => setCursorTarget("send"));
+    at(bodyDone + 1540, () => setCursorPressed(true));
+    at(bodyDone + 1700, () => {
+      setSent(true);
+      setCursorPressed(false);
+      setCursorTarget(null);
+    });
+    at(bodyDone + 1700 + 2800, () => setCycle((c) => c + 1));
 
     return () => timers.forEach(clearTimeout);
-  }, [active]);
+  }, [active, cycle]);
+
+  const subjectTypingDone = subjectChars >= DRAFT_SUBJECT.length;
+  const bodyTypingDone = bodyWords >= DRAFT_BODY_WORDS.length;
 
   return (
     <div
-      className="fit-compare"
-      aria-label="The same business scored for two different products"
+      className="draft-preview"
+      aria-label="ScoutLead generating, approving, and sending an outreach draft"
       ref={ref}
     >
-      <div className={`fit-compare-name${nameVisible ? " is-visible" : ""}`}>Esposito's Painting Services</div>
-      <div className="fit-compare-row">
-        <div className={`fit-compare-side${goodSettled ? " is-settled" : ""}`}>
-          <span className="fit-compare-score tone-good">{goodScore}</span>
-          <strong className="fit-compare-verdict tone-good">Agent good fit</strong>
-          <span className="fit-compare-context">for Quotevan</span>
-          <span className="fit-compare-context faint">painting quotes</span>
+      <div className="draft-card">
+        <div className="draft-card-head">
+          <Mail size={13} />
+          <span>New message</span>
+          <em className={`draft-badge${sent ? " is-sent" : approved ? " is-approved" : ""}`}>
+            {sent ? "Sent" : approved ? "Approved" : "Draft"}
+          </em>
         </div>
-        <span className="fit-compare-divider">vs</span>
-        <div className={`fit-compare-side${badSettled ? " is-settled" : ""}`}>
-          <span className="fit-compare-score tone-bad">{badScore}</span>
-          <strong className="fit-compare-verdict tone-bad">Agent not fit</strong>
-          <span className="fit-compare-context">for Ledgerly</span>
-          <span className="fit-compare-context faint">seller bookkeeping</span>
+        <div className="draft-field">
+          <span>To</span>
+          <strong>Maple Ridge Painting Co.</strong>
+        </div>
+        <div className="draft-field">
+          <span>Subject</span>
+          <strong>
+            {DRAFT_SUBJECT.slice(0, subjectChars)}
+            {!subjectTypingDone ? <span className="preview-cursor" aria-hidden="true" /> : null}
+          </strong>
+        </div>
+        <div className="draft-body">
+          {DRAFT_BODY_WORDS.slice(0, bodyWords).join(" ")}
+          {subjectTypingDone && !bodyTypingDone ? <span className="preview-cursor" aria-hidden="true" /> : null}
+        </div>
+        <div className={`draft-actions${actionsVisible ? " is-visible" : ""}`}>
+          <div className="draft-action-wrap">
+            <button type="button" tabIndex={-1} className={`draft-approve${approved ? " is-done" : ""}`}>
+              {approved ? (
+                <>
+                  <CheckCircle2 size={13} /> Approved
+                </>
+              ) : (
+                "Approve draft"
+              )}
+            </button>
+            <PreviewCursor
+              className="preview-cursor-actor--connect"
+              pressed={cursorTarget === "approve" && cursorPressed}
+              visible={cursorTarget === "approve"}
+            />
+          </div>
+          <div className="draft-action-wrap">
+            <button type="button" tabIndex={-1} disabled={!approved} className={`draft-send${sent ? " is-done" : ""}`}>
+              {sent ? (
+                <>
+                  <CheckCircle2 size={13} /> Sent
+                </>
+              ) : (
+                <>
+                  Send <ArrowRight size={13} />
+                </>
+              )}
+            </button>
+            <PreviewCursor
+              className="preview-cursor-actor--connect"
+              pressed={cursorTarget === "send" && cursorPressed}
+              visible={cursorTarget === "send"}
+            />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+type PreviewIntegrationTarget = "gmail" | "resend" | "sheets" | "webhook" | "hubspot";
+
+const INITIAL_PREVIEW_INTEGRATIONS: Record<PreviewIntegrationTarget, boolean> = {
+  gmail: false,
+  hubspot: false,
+  resend: false,
+  sheets: false,
+  webhook: false,
+};
+
 function IntegrationsRevealPreview() {
-  const [ref, active] = useRevealOnScroll<HTMLDivElement>();
+  const [ref, active] = useActiveOnScroll<HTMLDivElement>();
   const [step, setStep] = useState(0);
-  const [cursorVisible, setCursorVisible] = useState(false);
-  const [connectClicked, setConnectClicked] = useState(false);
-  const [gmailConnected, setGmailConnected] = useState(false);
+  const [cursorTarget, setCursorTarget] = useState<PreviewIntegrationTarget | "">("");
+  const [cursorPressed, setCursorPressed] = useState(false);
+  const [connected, setConnected] =
+    useState<Record<PreviewIntegrationTarget, boolean>>(INITIAL_PREVIEW_INTEGRATIONS);
+  const [cycle, setCycle] = useState(0);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      setCursorTarget("");
+      setCursorPressed(false);
+      return;
+    }
 
     if (prefersReducedMotion()) {
       setStep(3);
-      setConnectClicked(true);
-      setGmailConnected(true);
+      setCursorTarget("");
+      setCursorPressed(false);
+      setConnected({
+        gmail: true,
+        hubspot: true,
+        resend: true,
+        sheets: true,
+        webhook: true,
+      });
       return;
     }
 
     const timers: number[] = [];
     const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
+    const clickIntegration = (target: PreviewIntegrationTarget, start: number) => {
+      at(start, () => {
+        setCursorTarget(target);
+        setCursorPressed(false);
+      });
+      at(start + 220, () => setCursorPressed(true));
+      at(start + 460, () => setConnected((current) => ({ ...current, [target]: true })));
+      at(start + 540, () => setCursorPressed(false));
+      at(start + 780, () => setCursorTarget(""));
+    };
+
+    setCursorTarget("");
+    setCursorPressed(false);
+    setStep(0);
+    setConnected(INITIAL_PREVIEW_INTEGRATIONS);
     at(150, () => setStep(1));
     at(600, () => setStep(2));
     at(1050, () => setStep(3));
-    at(1780, () => setCursorVisible(true));
-    at(2000, () => setConnectClicked(true));
-    at(2000 + 220, () => setGmailConnected(true));
+    clickIntegration("gmail", 1700);
+    clickIntegration("resend", 2480);
+    clickIntegration("sheets", 3260);
+    clickIntegration("webhook", 4040);
+    clickIntegration("hubspot", 4820);
+    at(6700, () => setCycle((current) => current + 1));
 
     return () => timers.forEach(clearTimeout);
-  }, [active]);
+  }, [active, cycle]);
 
   return (
     <div className="landing-preview landing-preview-focused" aria-label="Example integrations page" ref={ref}>
@@ -627,9 +778,9 @@ function IntegrationsRevealPreview() {
         <div className="preview-stage">
           <PreviewIntegrations
             revealStep={step}
-            gmailConnected={gmailConnected}
-            connectClicked={connectClicked}
-            cursorVisible={cursorVisible && !gmailConnected}
+            connected={connected}
+            cursorPressed={cursorPressed}
+            cursorTarget={cursorTarget}
           />
         </div>
       </div>
@@ -790,6 +941,7 @@ function PreviewResults({
   clickedIndex = -1,
   cursorIndex = -1,
   cursorPressed = false,
+  reviewStage = 0,
 }: {
   showDrawer?: boolean;
   visibleCount?: number;
@@ -797,8 +949,10 @@ function PreviewResults({
   clickedIndex?: number;
   cursorIndex?: number;
   cursorPressed?: boolean;
+  reviewStage?: number;
 }) {
   const selectedLead = PREVIEW_LEADS[Math.max(0, clickedIndex)] ?? PREVIEW_LEADS[0];
+  const reviewedCount = showDrawer && drawerVisible && reviewStage >= 3 ? 1 : 0;
 
   return (
     <section
@@ -809,8 +963,8 @@ function PreviewResults({
       <div className="preview-results-controls">
         <div className="preview-tabs">
           <strong>All <span>6</span></strong>
-          <span>Shortlisted <em>0</em></span>
-          <span>Needs review <em>6</em></span>
+          <span>Shortlisted <em>{reviewedCount}</em></span>
+          <span>Needs review <em>{6 - reviewedCount}</em></span>
         </div>
         <div className="preview-sort-actions">
           <button type="button" tabIndex={-1}>Filter <strong>All</strong></button>
@@ -834,7 +988,7 @@ function PreviewResults({
             />
           ))}
         </div>
-        {showDrawer ? <PreviewDetailDrawer lead={selectedLead} visible={drawerVisible} /> : null}
+        {showDrawer ? <PreviewDetailDrawer lead={selectedLead} reviewStage={reviewStage} visible={drawerVisible} /> : null}
       </div>
     </section>
   );
@@ -884,12 +1038,17 @@ function PreviewLeadCard({
 
 function PreviewDetailDrawer({
   lead,
+  reviewStage = 0,
   visible = true,
 }: {
   lead: (typeof PREVIEW_LEADS)[number];
+  reviewStage?: number;
   visible?: boolean;
 }) {
   const emailChipClass = lead.detail.emailStatus.includes("deliverable") ? "" : "tone-amber";
+  const evidenceActive = reviewStage >= 1;
+  const readinessActive = reviewStage >= 2;
+  const actionReady = reviewStage >= 3;
 
   return (
     <aside
@@ -908,24 +1067,31 @@ function PreviewDetailDrawer({
           </div>
           <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
         </div>
-        <div className="preview-detail-chips">
-          <span>
+        <div className={`preview-detail-chips${readinessActive ? " is-readiness-active" : ""}`}>
+          <span className={readinessActive ? "is-reviewed" : ""}>
             <CheckCircle2 size={12} /> {lead.fit} · {lead.score}
           </span>
-          <span className={emailChipClass}>
+          <span className={`${emailChipClass}${readinessActive ? " is-reviewed" : ""}`.trim()}>
             <Mail size={12} /> {lead.detail.emailStatus}
           </span>
-          <span>
+          <span className={readinessActive ? "is-reviewed" : ""}>
             <Phone size={12} /> Phone
           </span>
         </div>
-        <div className="preview-detail-tabs">
-          <strong>Overview</strong>
-          <span>
+        <div className={`preview-detail-tabs${evidenceActive ? " is-evidence-active" : ""}`}>
+          <strong className={evidenceActive ? "" : "is-active"}>Overview</strong>
+          <span className={evidenceActive ? "is-active" : ""}>
             Evidence <em>{lead.detail.evidenceCount}</em>
           </span>
         </div>
         <p>{lead.detail.overview}</p>
+        <div className={`preview-evidence-panel${evidenceActive ? " is-visible" : ""}`} aria-hidden={!evidenceActive}>
+          {lead.detail.evidence.map((evidence) => (
+            <span className="preview-evidence-item" key={`${lead.name}-${evidence}`}>
+              <CheckCircle2 size={12} /> {evidence}
+            </span>
+          ))}
+        </div>
         <dl className="preview-detail-list">
           <PreviewDetailRow icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
           <PreviewDetailRow icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
@@ -933,11 +1099,16 @@ function PreviewDetailDrawer({
           <PreviewDetailRow icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
           <PreviewDetailRow icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
         </dl>
-        <div className="preview-detail-footer">
-          <button type="button" tabIndex={-1}>Shortlist</button>
+        <div className={`preview-detail-footer${actionReady ? " is-action-ready" : ""}`}>
+          <button className={actionReady ? "is-reviewed" : ""} type="button" tabIndex={-1}>Shortlist</button>
           <button type="button" tabIndex={-1}>Pass</button>
-          <button type="button" tabIndex={-1}>
+          <button className={actionReady ? "is-action-ready" : ""} type="button" tabIndex={-1}>
             Review outreach <ArrowRight size={13} />
+            <PreviewCursor
+              className="preview-cursor-actor--review-action"
+              pressed={actionReady}
+              visible={actionReady}
+            />
           </button>
         </div>
       </div>
@@ -956,14 +1127,14 @@ function PreviewDetailRow({ icon, label, value }: { icon: ReactNode; label: stri
 }
 
 function PreviewIntegrations({
-  connectClicked = false,
-  cursorVisible = false,
-  gmailConnected = false,
+  connected = INITIAL_PREVIEW_INTEGRATIONS,
+  cursorPressed = false,
+  cursorTarget = "",
   revealStep = 3,
 }: {
-  connectClicked?: boolean;
-  cursorVisible?: boolean;
-  gmailConnected?: boolean;
+  connected?: Record<PreviewIntegrationTarget, boolean>;
+  cursorPressed?: boolean;
+  cursorTarget?: PreviewIntegrationTarget | "";
   revealStep?: number;
 }) {
   return (
@@ -982,27 +1153,91 @@ function PreviewIntegrations({
       <div aria-hidden={revealStep < 2} className={`preview-reveal${revealStep >= 2 ? "" : " is-hidden"}`}>
         <PreviewIntegrationGroup label="Sending">
           <PreviewIntegrationRow
-            actionClicked={connectClicked && !gmailConnected}
-            showCursor={cursorVisible}
+            actionClicked={cursorTarget === "gmail" && cursorPressed}
+            actionConnected={connected.gmail}
+            connected={connected.gmail}
+            showCursor={cursorTarget === "gmail"}
             badge="G"
-            green={gmailConnected}
+            gmail
             title="Gmail"
-            status={gmailConnected ? "Connected" : "Off"}
+            status={connected.gmail ? "Connected" : "Off"}
             body={
-              gmailConnected
+              connected.gmail
                 ? "Approved outreach now sends from your connected Gmail account."
                 : "Send approved outreach from your connected Gmail account."
             }
-            action={gmailConnected ? undefined : "Connect"}
+            action={connected.gmail ? "Connected" : "Connect"}
           />
-          <PreviewIntegrationRow badge="R" dark title="Resend" status="Disabled" body="Transactional sending from a verified domain - alternative to Gmail" action="Enable" />
+          <PreviewIntegrationRow
+            actionClicked={cursorTarget === "resend" && cursorPressed}
+            actionConnected={connected.resend}
+            connected={connected.resend}
+            showCursor={cursorTarget === "resend"}
+            badge="R"
+            dark
+            title="Resend"
+            status={connected.resend ? "Enabled" : "Disabled"}
+            body={
+              connected.resend
+                ? "Transactional sending is enabled as a verified-domain alternative."
+                : "Transactional sending from a verified domain - alternative to Gmail"
+            }
+            action={connected.resend ? "Enabled" : "Enable"}
+          />
         </PreviewIntegrationGroup>
       </div>
       <div aria-hidden={revealStep < 3} className={`preview-reveal${revealStep >= 3 ? "" : " is-hidden"}`}>
         <PreviewIntegrationGroup label="Workflow outputs">
-          <PreviewIntegrationRow badge="S" green title="Google Sheets" body="needs Google connected - connect in account" toggle />
-          <PreviewIntegrationRow badge="{}" purple title="Webhook" body="POST approved contacts as JSON - Airtable, Notion, custom, Zapier" action="Configure" toggle />
-          <PreviewIntegrationRow badge="H" coral title="HubSpot" status="Later" body="Create/update CRM contacts with fit verdict and evidence" action="Soon" />
+          <PreviewIntegrationRow
+            actionClicked={cursorTarget === "sheets" && cursorPressed}
+            connected={connected.sheets}
+            showCursor={cursorTarget === "sheets"}
+            badge="S"
+            green
+            title="Google Sheets"
+            status={connected.sheets ? "On" : undefined}
+            body={
+              connected.sheets
+                ? "Approved contacts sync to the connected sheet after review."
+                : "needs Google connected - connect in account"
+            }
+            toggle
+            toggleOn={connected.sheets}
+          />
+          <PreviewIntegrationRow
+            actionClicked={cursorTarget === "webhook" && cursorPressed}
+            actionConnected={connected.webhook}
+            connected={connected.webhook}
+            showCursor={cursorTarget === "webhook"}
+            badge="{}"
+            purple
+            title="Webhook"
+            status={connected.webhook ? "Linked" : undefined}
+            body={
+              connected.webhook
+                ? "Webhook link added for approved contacts and outreach events."
+                : "POST approved contacts as JSON - Airtable, Notion, custom, Zapier"
+            }
+            action={connected.webhook ? "Linked" : "Add link"}
+            toggle
+            toggleOn={connected.webhook}
+          />
+          <PreviewIntegrationRow
+            actionClicked={cursorTarget === "hubspot" && cursorPressed}
+            actionConnected={connected.hubspot}
+            connected={connected.hubspot}
+            showCursor={cursorTarget === "hubspot"}
+            badge="H"
+            coral
+            title="HubSpot"
+            status={connected.hubspot ? "Connected" : "Off"}
+            body={
+              connected.hubspot
+                ? "CRM sync is connected for reviewed contacts with fit verdicts."
+                : "Create/update CRM contacts with fit verdict and evidence"
+            }
+            action={connected.hubspot ? "Connected" : "Connect"}
+          />
         </PreviewIntegrationGroup>
       </div>
     </section>
@@ -1021,33 +1256,41 @@ function PreviewIntegrationGroup({ children, label }: { children: ReactNode; lab
 function PreviewIntegrationRow({
   action,
   actionClicked = false,
+  actionConnected = false,
   badge,
   body,
+  connected = false,
   coral = false,
   dark = false,
+  gmail = false,
   green = false,
   purple = false,
   showCursor = false,
   status,
   title,
   toggle = false,
+  toggleOn = false,
 }: {
   action?: string;
   actionClicked?: boolean;
+  actionConnected?: boolean;
   badge: string;
   body: string;
+  connected?: boolean;
   coral?: boolean;
   dark?: boolean;
+  gmail?: boolean;
   green?: boolean;
   purple?: boolean;
   showCursor?: boolean;
   status?: string;
   title: string;
   toggle?: boolean;
+  toggleOn?: boolean;
 }) {
-  const badgeTone = dark ? " dark" : green ? " green" : purple ? " purple" : coral ? " coral" : "";
+  const badgeTone = gmail ? " gmail" : dark ? " dark" : green ? " green" : purple ? " purple" : coral ? " coral" : "";
   return (
-    <div className="preview-integration-row">
+    <div className={`preview-integration-row${connected ? " is-connected" : ""}`}>
       <span className={`preview-integration-badge${badgeTone}`}>{badge}</span>
       <div>
         <strong>
@@ -1057,12 +1300,22 @@ function PreviewIntegrationRow({
       </div>
       <div className="preview-integration-actions">
         {action ? (
-          <button className={actionClicked ? "is-clicked" : ""} tabIndex={-1} type="button">
-            {action}
-          </button>
+          <span className="preview-integration-action-wrap">
+            <button
+              className={`${actionClicked ? "is-clicked" : ""}${actionConnected ? " is-connected" : ""}`.trim()}
+              tabIndex={-1}
+              type="button"
+            >
+              {actionConnected ? <CheckCircle2 size={12} /> : null}
+              {action}
+            </button>
+            <PreviewCursor className="preview-cursor-actor--connect" pressed={actionClicked} visible={showCursor} />
+          </span>
         ) : null}
-        {toggle ? <span className="preview-toggle" /> : null}
-        <PreviewCursor className="preview-cursor-actor--connect" pressed={actionClicked} visible={showCursor} />
+        {toggle ? <span className={`preview-toggle${toggleOn ? " is-on" : ""}`} /> : null}
+        {!action ? (
+          <PreviewCursor className="preview-cursor-actor--connect" pressed={actionClicked} visible={showCursor} />
+        ) : null}
       </div>
     </div>
   );
