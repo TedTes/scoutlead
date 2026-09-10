@@ -127,8 +127,7 @@ function LandingPage() {
 
         <section className="landing-hero">
           <div className="landing-copy">
-            <p className="landing-eyebrow">Lead qualification workspace</p>
-            <h1>ScoutLead</h1>
+            <h1 className="landing-eyebrow landing-hero-eyebrow">Lead qualification workspace</h1>
             <p className="landing-lede">
               Find local businesses, score why they fit your product, and build a reviewed outreach pipeline that
               remembers every contact you've already seen.

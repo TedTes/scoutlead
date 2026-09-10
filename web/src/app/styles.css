@@ -206,6 +206,12 @@ a {
   margin: 0;
 }
 
+.landing-copy h1.landing-hero-eyebrow {
+  font-size: 14px;
+  line-height: 1.2;
+  margin: 0 0 14px;
+}
+
 .landing-lede {
   color: var(--muted);
   font-size: 17px;
