@@ -137,31 +137,45 @@ function LandingPage() {
 
         <GlobeActivityPreview />
 
-        <section className="landing-section landing-workflow-section" aria-label="How ScoutLead works">
-          <div className="landing-workflow-layout">
-            <div>
-              <div className="landing-section-heading">
+        <section className="landing-section landing-story-section" aria-label="How ScoutLead works">
+          <div className="landing-story-inner">
+            <div className="landing-section-heading landing-story-heading">
+              <div className="landing-story-title">
                 <p className="landing-eyebrow">How it works</p>
-                <h2>From one sentence to a reviewed shortlist</h2>
-                <p className="landing-lede">
-                  Public sources are raw material. ScoutLead makes the useful layer: deduped businesses, product-fit
-                  judgment, evidence, and contact state you can keep working.
-                </p>
+                <h2>How a search becomes a reviewed shortlist</h2>
               </div>
-              <div className="landing-workflow-steps">
-                <LandingStep number="01" icon={<Search size={16} />} title="Describe the niche">
-                  ScoutLead checks known businesses first, then refreshes public sources only to fill gaps.
-                </LandingStep>
-                <LandingStep number="02" icon={<Target size={16} />} title="Qualify with evidence">
-                  Candidates are scored against your product with fit reasons, contactability, and missing proof
-                  visible.
-                </LandingStep>
-                <LandingStep number="03" icon={<UserCheck size={16} />} title="Approve the next action">
-                  Shortlist, pass, draft, export, or send from reviewed contacts instead of raw search results.
-                </LandingStep>
-              </div>
+              <p className="landing-lede">
+                ScoutLead follows one loop: ask for a niche, reuse what is already known, score each business against
+                the product, then review the contact before outreach.
+              </p>
             </div>
+            <div className="landing-story-steps">
+              <LandingStep number="01" icon={<Search size={16} />} title="Describe the niche">
+                Start with the kind of business, location, and signals that matter for this product.
+              </LandingStep>
+              <LandingStep number="02" icon={<ListChecks size={16} />} title="Gather and dedupe">
+                Known businesses are checked first, then public sources fill the gaps without repeating contacts.
+              </LandingStep>
+              <LandingStep number="03" icon={<Target size={16} />} title="Score the fit">
+                Each candidate gets product-fit judgment, supporting evidence, and missing proof made visible.
+              </LandingStep>
+              <LandingStep number="04" icon={<UserCheck size={16} />} title="Review the action">
+                Shortlist, pass, export, draft, or send only after the business has been inspected.
+              </LandingStep>
+            </div>
+          </div>
+        </section>
 
+        <section className="landing-section landing-proof-section" aria-label="Lead review example">
+          <div className="landing-proof-inner">
+            <div className="landing-section-heading landing-proof-heading">
+              <p className="landing-eyebrow">Lead review</p>
+              <h2>Click a candidate and the evidence opens beside the list</h2>
+              <p className="landing-lede">
+                The results stay scannable on the left while the selected business opens on the right with fit reasons,
+                contact state, and approval actions.
+              </p>
+            </div>
             <WorkflowProofPreview />
           </div>
         </section>
@@ -268,6 +282,17 @@ const PREVIEW_LEADS = [
     fit: "Agent good fit",
     body: "Professional painting service with strong customer reviews.",
     missing: "Missing: Direct contact email or name for outreach",
+    detail: {
+      address: "7199 Fayette Cir, Mississauga, ON",
+      contact: "No contact name found",
+      email: "No email found",
+      emailStatus: "Email · missing",
+      evidenceCount: 9,
+      overview:
+        "Esposito's Painting Services is a professional painting contractor in Mississauga with strong customer reviews and direct phone contact.",
+      phone: "(416) 809-3641",
+      website: "espositospaintingservices.com",
+    },
   },
   {
     name: "Precision Painting Inc.",
@@ -279,6 +304,17 @@ const PREVIEW_LEADS = [
     fit: "Agent good fit",
     body: "Operating full-service painting company since 2004.",
     missing: "",
+    detail: {
+      address: "Mississauga, ON",
+      contact: "Owner contact not published",
+      email: "info@precisionpaintinginc.ca",
+      emailStatus: "Email · deliverable",
+      evidenceCount: 7,
+      overview:
+        "Precision Painting Inc. operates as a full-service painting company with a public website, local service history, and contact paths suitable for reviewed outreach.",
+      phone: "Public phone found",
+      website: "precisionpaintinginc.ca",
+    },
   },
   {
     name: "Buffalo Painters - Professional Painting Services Mississauga",
@@ -290,6 +326,17 @@ const PREVIEW_LEADS = [
     fit: "Agent good fit",
     body: "Professional painting service matching intended user role for QuoteVan.",
     missing: "Missing: Explicit customer problem statements from the lead.",
+    detail: {
+      address: "Mississauga, ON",
+      contact: "No contact name found",
+      email: "Contact form available",
+      emailStatus: "Email · review",
+      evidenceCount: 8,
+      overview:
+        "Buffalo Painters matches the painting-service niche and local geography, with enough public evidence to review fit before deciding whether to shortlist.",
+      phone: "Public phone found",
+      website: "buffalopainters.ca",
+    },
   },
   {
     name: "DewDrop - Professional Painting Services Mississauga",
@@ -301,6 +348,17 @@ const PREVIEW_LEADS = [
     fit: "Agent good fit",
     body: "Painter business with a local service footprint.",
     missing: "Missing: email",
+    detail: {
+      address: "Mississauga, ON",
+      contact: "No contact name found",
+      email: "No email found",
+      emailStatus: "Email · missing",
+      evidenceCount: 6,
+      overview:
+        "DewDrop appears to serve the target painting category and location, but needs more contact evidence before it is ready for outreach.",
+      phone: "Public phone found",
+      website: "dewdroppainting.ca",
+    },
   },
 ];
 
@@ -388,15 +446,18 @@ function AnimatedPreview() {
 function WorkflowProofPreview() {
   const [ref, active] = useRevealOnScroll<HTMLDivElement>();
   const [visibleLeads, setVisibleLeads] = useState(0);
-  const [cursorVisible, setCursorVisible] = useState(false);
+  const [cursorIndex, setCursorIndex] = useState(-1);
+  const [cursorPressed, setCursorPressed] = useState(false);
   const [clickedIndex, setClickedIndex] = useState(-1);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [cycle, setCycle] = useState(0);
 
   useEffect(() => {
     if (!active) return;
 
     if (prefersReducedMotion()) {
       setVisibleLeads(PREVIEW_LEADS.length);
+      setClickedIndex(0);
       setDrawerVisible(true);
       return;
     }
@@ -405,18 +466,41 @@ function WorkflowProofPreview() {
     const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
 
     const REVEAL_GAP = 220;
-    PREVIEW_LEADS.forEach((_, idx) => {
-      at(idx * REVEAL_GAP, () => setVisibleLeads(idx + 1));
-    });
-    const revealDone = PREVIEW_LEADS.length * REVEAL_GAP;
+    const CLICK_GAP = 1280;
 
-    // pause so the list settles, then a cursor arrives and clicks the first result before the drawer opens
-    at(revealDone + 330, () => setCursorVisible(true));
-    at(revealDone + 550, () => setClickedIndex(0));
-    at(revealDone + 550 + 220, () => setDrawerVisible(true));
+    setCursorIndex(-1);
+    setCursorPressed(false);
+    if (cycle === 0) {
+      setVisibleLeads(0);
+      setClickedIndex(-1);
+      setDrawerVisible(false);
+      PREVIEW_LEADS.forEach((_, idx) => {
+        at(idx * REVEAL_GAP, () => setVisibleLeads(idx + 1));
+      });
+    } else {
+      setVisibleLeads(PREVIEW_LEADS.length);
+    }
+
+    const revealDone = cycle === 0 ? PREVIEW_LEADS.length * REVEAL_GAP : 0;
+    PREVIEW_LEADS.forEach((_, idx) => {
+      const clickStart = revealDone + 360 + idx * CLICK_GAP;
+      at(clickStart, () => {
+        setCursorIndex(idx);
+        setCursorPressed(false);
+      });
+      at(clickStart + 240, () => {
+        setCursorPressed(true);
+        setClickedIndex(idx);
+        setDrawerVisible(true);
+      });
+      at(clickStart + 480, () => setCursorPressed(false));
+      at(clickStart + 760, () => setCursorIndex(-1));
+    });
+
+    at(revealDone + 360 + PREVIEW_LEADS.length * CLICK_GAP + 720, () => setCycle((current) => current + 1));
 
     return () => timers.forEach(clearTimeout);
-  }, [active]);
+  }, [active, cycle]);
 
   return (
     <div className="landing-preview landing-preview-focused" aria-label="Example lead detail" ref={ref}>
@@ -428,7 +512,8 @@ function WorkflowProofPreview() {
             visibleCount={visibleLeads}
             drawerVisible={drawerVisible}
             clickedIndex={clickedIndex}
-            cursorIndex={cursorVisible ? 0 : -1}
+            cursorIndex={cursorIndex}
+            cursorPressed={cursorPressed}
           />
         </div>
       </div>
@@ -704,13 +789,17 @@ function PreviewResults({
   drawerVisible = true,
   clickedIndex = -1,
   cursorIndex = -1,
+  cursorPressed = false,
 }: {
   showDrawer?: boolean;
   visibleCount?: number;
   drawerVisible?: boolean;
   clickedIndex?: number;
   cursorIndex?: number;
+  cursorPressed?: boolean;
 }) {
+  const selectedLead = PREVIEW_LEADS[Math.max(0, clickedIndex)] ?? PREVIEW_LEADS[0];
+
   return (
     <section
       className={`preview-results-screen${showDrawer ? " has-detail" : ""}${showDrawer && drawerVisible ? " is-open" : ""}`}
@@ -741,11 +830,11 @@ function PreviewResults({
               clicked={idx === clickedIndex}
               selected={idx === clickedIndex}
               showCursor={idx === cursorIndex}
-              cursorPressed={idx === clickedIndex}
+              cursorPressed={idx === cursorIndex && cursorPressed}
             />
           ))}
         </div>
-        {showDrawer ? <PreviewDetailDrawer visible={drawerVisible} /> : null}
+        {showDrawer ? <PreviewDetailDrawer lead={selectedLead} visible={drawerVisible} /> : null}
       </div>
     </section>
   );
@@ -793,47 +882,64 @@ function PreviewLeadCard({
   );
 }
 
-function PreviewDetailDrawer({ visible = true }: { visible?: boolean }) {
+function PreviewDetailDrawer({
+  lead,
+  visible = true,
+}: {
+  lead: (typeof PREVIEW_LEADS)[number];
+  visible?: boolean;
+}) {
+  const emailChipClass = lead.detail.emailStatus.includes("deliverable") ? "" : "tone-amber";
+
   return (
     <aside
       aria-hidden={!visible}
       aria-label="Preview lead drawer"
       className={`preview-detail-drawer${visible ? "" : " is-hidden"}`}
     >
-      <div className={`preview-detail-drawer-content${visible ? "" : " is-hidden"}`}>
-      <div className="preview-detail-head">
-        <span className="preview-lead-score">90</span>
-        <div>
-          <strong>Esposito's Painting Services</strong>
-          <span>painting contractor · Mississauga, ON, Canada</span>
+      <div className={`preview-detail-drawer-content${visible ? "" : " is-hidden"}`} key={lead.name}>
+        <div className="preview-detail-head">
+          <span className="preview-lead-score">{lead.score}</span>
+          <div>
+            <strong>{lead.name}</strong>
+            <span>
+              {lead.category} · {lead.location}
+            </span>
+          </div>
+          <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
         </div>
-        <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
-      </div>
-      <div className="preview-detail-chips">
-        <span><CheckCircle2 size={12} /> Agent good fit · 90</span>
-        <span className="tone-amber"><Mail size={12} /> Email · missing</span>
-        <span><Phone size={12} /> Phone</span>
-      </div>
-      <div className="preview-detail-tabs">
-        <strong>Overview</strong>
-        <span>Evidence <em>9</em></span>
-      </div>
-      <p>
-        Esposito's Painting Services is a professional painting contractor in Mississauga with strong customer
-        reviews and direct phone contact.
-      </p>
-      <dl className="preview-detail-list">
-        <PreviewDetailRow icon={<MapPin size={14} />} label="Address" value="7199 Fayette Cir, Mississauga, ON" />
-        <PreviewDetailRow icon={<Globe size={14} />} label="Website" value="espositospaintingservices.com" />
-        <PreviewDetailRow icon={<UserCheck size={14} />} label="Contact" value="No contact name found" />
-        <PreviewDetailRow icon={<Mail size={14} />} label="Email" value="No email found" />
-        <PreviewDetailRow icon={<Phone size={14} />} label="Phone" value="(416) 809-3641" />
-      </dl>
-      <div className="preview-detail-footer">
-        <button type="button" tabIndex={-1}>Shortlist</button>
-        <button type="button" tabIndex={-1}>Pass</button>
-        <button type="button" tabIndex={-1}>Review outreach <ArrowRight size={13} /></button>
-      </div>
+        <div className="preview-detail-chips">
+          <span>
+            <CheckCircle2 size={12} /> {lead.fit} · {lead.score}
+          </span>
+          <span className={emailChipClass}>
+            <Mail size={12} /> {lead.detail.emailStatus}
+          </span>
+          <span>
+            <Phone size={12} /> Phone
+          </span>
+        </div>
+        <div className="preview-detail-tabs">
+          <strong>Overview</strong>
+          <span>
+            Evidence <em>{lead.detail.evidenceCount}</em>
+          </span>
+        </div>
+        <p>{lead.detail.overview}</p>
+        <dl className="preview-detail-list">
+          <PreviewDetailRow icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
+          <PreviewDetailRow icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
+          <PreviewDetailRow icon={<UserCheck size={14} />} label="Contact" value={lead.detail.contact} />
+          <PreviewDetailRow icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
+          <PreviewDetailRow icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
+        </dl>
+        <div className="preview-detail-footer">
+          <button type="button" tabIndex={-1}>Shortlist</button>
+          <button type="button" tabIndex={-1}>Pass</button>
+          <button type="button" tabIndex={-1}>
+            Review outreach <ArrowRight size={13} />
+          </button>
+        </div>
       </div>
     </aside>
   );
