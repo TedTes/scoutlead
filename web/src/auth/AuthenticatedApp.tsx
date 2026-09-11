@@ -1,8 +1,8 @@
-import { ClerkProvider, SignInButton, SignUpButton, UserButton, useAuth, useUser } from "@clerk/react";
-import { ArrowRight } from "lucide-react";
+import { RedirectToSignIn, RedirectToSignUp, UserButton, useAuth, useUser } from "@clerk/react";
 import { useCallback, useEffect, useRef } from "react";
 import { App } from "../app/App";
 import { getClerkPublishableKey } from "../config/env";
+import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
 export default function AuthenticatedApp() {
   const publishableKey = getClerkPublishableKey();
@@ -11,11 +11,7 @@ export default function AuthenticatedApp() {
     return <App />;
   }
 
-  return (
-    <ClerkProvider publishableKey={publishableKey}>
-      <ClerkGate />
-    </ClerkProvider>
-  );
+  return <ClerkGate />;
 }
 
 function ClerkGate() {
@@ -28,11 +24,19 @@ function ClerkGate() {
   const getAuthToken = useCallback(() => getTokenRef.current(), []);
 
   if (!isLoaded) {
-    return <AuthAccessScreen mode="loading" title="Loading account" />;
+    return <AuthLoadingScreen />;
   }
 
   if (!isSignedIn) {
-    return <AuthAccessScreen mode={preferredAuthMode()} title="Sign in to ScoutLead" />;
+    const redirectProps = {
+      fallbackRedirectUrl: "/app",
+      forceRedirectUrl: "/app",
+    };
+    return preferredAuthMode() === "signup" ? (
+      <RedirectToSignUp {...redirectProps} />
+    ) : (
+      <RedirectToSignIn {...redirectProps} />
+    );
   }
 
   const approverLabel =
@@ -44,64 +48,6 @@ function ClerkGate() {
       accountSlot={<UserButton appearance={{ elements: { avatarBox: "clerk-avatar-box" } }} />}
       approverLabel={approverLabel}
     />
-  );
-}
-
-function AuthAccessScreen({ mode, title }: { mode: "loading" | "signin" | "signup"; title: string }) {
-  return (
-    <main className="landing-page">
-      <div className="landing-shell">
-        <nav className="landing-nav" aria-label="ScoutLead">
-          <a className="landing-brand" href="/">
-            <span className="landing-mark">S</span>
-            <div>
-              <strong>ScoutLead</strong>
-              <span>Discovery Console</span>
-            </div>
-          </a>
-        </nav>
-        <section className="landing-hero">
-          <div className="landing-copy">
-            <p className="landing-eyebrow">Account access</p>
-            <h1>{title}</h1>
-            <p className="landing-lede">
-              Sign in to load your products, saved discoveries, outreach drafts, and integrations.
-            </p>
-            {mode === "loading" ? null : (
-              <div className="landing-actions">
-                {mode === "signup" ? (
-                  <>
-                    <SignUpButton mode="modal">
-                      <button className="landing-primary" type="button">
-                        Create account <ArrowRight size={16} />
-                      </button>
-                    </SignUpButton>
-                    <SignInButton mode="modal">
-                      <button className="landing-secondary" type="button">
-                        Sign in
-                      </button>
-                    </SignInButton>
-                  </>
-                ) : (
-                  <>
-                    <SignInButton mode="modal">
-                      <button className="landing-primary" type="button">
-                        Sign in <ArrowRight size={16} />
-                      </button>
-                    </SignInButton>
-                    <SignUpButton mode="modal">
-                      <button className="landing-secondary" type="button">
-                        Create account
-                      </button>
-                    </SignUpButton>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-    </main>
   );
 }
 

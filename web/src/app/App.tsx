@@ -390,7 +390,6 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             <AccountControl accountSlot={accountSlot} placement="desktop" />
           </div>
         </header>
-        {error && <div className="app-banner">{error}</div>}
         {loading ? (
           <div className="loading-overlay" aria-live="polite">
             <div className="loading-indicator">

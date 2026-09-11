@@ -128,6 +128,10 @@ a {
   min-width: 0;
 }
 
+.landing-brand div {
+  min-width: 0;
+}
+
 .landing-mark {
   align-items: center;
   background: var(--black);
@@ -189,6 +193,7 @@ a {
 
 .landing-copy {
   max-width: 460px;
+  min-width: 0;
 }
 
 .landing-eyebrow {
@@ -324,14 +329,18 @@ a {
 .landing-preview.preview-app .preview-results-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .landing-preview.preview-app .preview-lead-list {
-  max-height: 100%;
-  overflow-y: auto;
-  padding-right: 2px;
-  scrollbar-width: thin;
+  max-height: none;
+  overflow-y: visible;
+  padding-right: 0;
+  scrollbar-width: none;
+}
+
+.landing-preview.preview-app .preview-lead-list::-webkit-scrollbar {
+  display: none;
 }
 
 .landing-preview-focused {
@@ -353,14 +362,11 @@ a {
 .landing-proof-section .preview-results-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .landing-proof-section .preview-lead-list {
-  max-height: 100%;
-  overflow-y: auto;
-  padding-right: 2px;
-  scrollbar-width: thin;
+  min-height: 0;
 }
 
 .landing-proof-section .preview-detail-drawer {
@@ -665,11 +671,54 @@ a {
   position: relative;
 }
 
+.preview-scene-stack {
+  display: grid;
+  min-width: 0;
+}
+
+.preview-scene {
+  grid-area: 1 / 1;
+  min-width: 0;
+  opacity: 1;
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    visibility var(--dur-slow) var(--ease-out);
+  visibility: visible;
+}
+
+.preview-scene.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .landing-preview.preview-app .preview-scene:not(.is-hidden) .preview-results-screen {
+    animation: preview-results-drop-in 500ms var(--ease-out) both;
+  }
+
+  .landing-preview.preview-app .preview-lead-card.is-hidden {
+    transform: translateY(-14px);
+  }
+}
+
 @keyframes preview-scene-in {
   from {
     opacity: 0;
     transform: translateY(8px);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes preview-results-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -814,6 +863,11 @@ a {
   display: flex;
   gap: 16px;
   min-width: 0;
+  scrollbar-width: none;
+}
+
+.preview-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .preview-tabs strong,
@@ -888,7 +942,7 @@ a {
   box-shadow: var(--shadow-sm);
   display: grid;
   gap: 12px;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr);
   min-height: 78px;
   min-width: 0;
   padding: 10px;
@@ -930,11 +984,16 @@ a {
   display: grid;
   grid-column: 1 / -1;
   grid-template-rows: 0fr;
+  opacity: 0;
+  overflow: hidden;
   transition: grid-template-rows var(--dur-slow) var(--ease-out);
+  visibility: hidden;
 }
 
 .preview-lead-accordion.is-expanded {
   grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
 }
 
 /* display:flex + gap (rather than margin-top on each child) so the grid's
@@ -947,11 +1006,19 @@ a {
   gap: 14px;
   min-height: 0;
   overflow: hidden;
-  padding-bottom: 40px;
 }
 
 .preview-lead-accordion .preview-detail-head {
   margin-top: 2px;
+}
+
+/* The safety buffer lives on the last child (clipped by the inner wrapper's
+   own overflow:hidden) rather than as padding on the wrapper itself - padding
+   on the wrapper is part of its own box height and can't compress to 0 when
+   the accordion collapses, which left a residual sliver of the previous
+   card's content peeking through. */
+.preview-lead-accordion .preview-detail-footer {
+  padding-bottom: 40px;
 }
 
 @keyframes preview-card-click {
@@ -1197,27 +1264,6 @@ a {
   margin-top: 3px;
 }
 
-.preview-lead-actions {
-  align-items: center;
-  color: var(--green);
-  display: flex;
-  gap: 7px;
-}
-
-.preview-status-chip {
-  border-radius: 999px;
-  font-size: 9.5px;
-  padding: 4px 8px;
-  white-space: nowrap;
-}
-
-.preview-status-chip.tone-green {
-  background: var(--green-bg);
-  border: 1px solid var(--green-line);
-  color: var(--green);
-}
-
-.preview-status-chip.tone-amber,
 .preview-detail-chips .tone-amber {
   background: var(--amber-bg);
   border: 1px solid var(--amber-line);
@@ -3907,14 +3953,6 @@ a {
   outline: none;
 }
 
-.app-banner {
-  background: var(--amber-bg);
-  border-bottom: 1px solid var(--amber-line);
-  color: var(--amber);
-  font-size: 12px;
-  padding: 9px 14px;
-}
-
 .loading-overlay {
   align-items: center;
   background: rgba(244, 245, 246, 0.66);
@@ -3924,6 +3962,15 @@ a {
   pointer-events: none;
   position: absolute;
   z-index: 70;
+}
+
+.auth-loading-screen {
+  align-items: center;
+  background: var(--bg);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
 }
 
 .loading-indicator {
@@ -6352,8 +6399,19 @@ a {
   }
 
   .landing-preview.preview-app {
-    height: clamp(500px, 62vw, 560px);
+    height: auto;
     min-height: 0;
+  }
+
+  .landing-preview.preview-app .preview-main-panel,
+  .landing-preview.preview-app .preview-stage {
+    height: auto;
+    min-height: 0;
+  }
+
+  .landing-preview.preview-app .preview-stage {
+    flex: 0 0 auto;
+    overflow: visible;
   }
 
   .globe-section {
@@ -6640,6 +6698,11 @@ a {
 
   .landing-nav {
     gap: 12px;
+    min-width: 0;
+  }
+
+  .landing-nav .landing-brand {
+    flex: 1 1 auto;
   }
 
   .landing-brand span:last-child {
@@ -6674,8 +6737,23 @@ a {
   }
 
   .landing-preview.preview-app {
-    height: 540px;
+    height: auto;
     min-height: 0;
+  }
+
+  .landing-preview.preview-app .preview-results-body {
+    overflow: visible;
+  }
+
+  .landing-preview.preview-app .preview-lead-list {
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+    scrollbar-width: none;
+  }
+
+  .landing-preview.preview-app .preview-lead-list::-webkit-scrollbar {
+    display: none;
   }
 
   .preview-rail {
@@ -6702,6 +6780,7 @@ a {
   .preview-results-controls {
     align-items: flex-start;
     flex-direction: column;
+    gap: 12px;
   }
 
   .landing-proof-section .preview-results-controls {
@@ -6717,9 +6796,12 @@ a {
     grid-template-columns: 38px minmax(0, 1fr);
   }
 
-  .preview-lead-actions {
-    grid-column: 2;
-    justify-self: start;
+  .landing-preview.preview-app .preview-lead-accordion {
+    display: none;
+  }
+
+  .landing-preview.preview-app .preview-lead-card {
+    min-height: 86px;
   }
 
   .landing-proof-section .preview-detail-head {
@@ -7031,8 +7113,12 @@ a {
     width: 100%;
   }
 
+  .landing-preview.preview-app .preview-scene-stack {
+    min-height: 548px;
+  }
+
   .landing-preview.preview-app {
-    height: 520px;
+    height: auto;
   }
 
   .landing-story-section,
@@ -7049,7 +7135,7 @@ a {
   }
 
   .preview-stage {
-    padding: 12px;
+    padding: 14px;
   }
 
   .landing-proof-section .landing-preview-focused {
@@ -7059,8 +7145,14 @@ a {
 
   .preview-lead-card {
     gap: 9px;
-    min-height: 72px;
+    grid-template-columns: 36px minmax(0, 1fr);
+    min-height: 82px;
     padding: 9px;
+  }
+
+  .landing-preview.preview-app .preview-lead-card {
+    grid-template-columns: 36px minmax(0, 1fr);
+    min-height: 92px;
   }
 
   .landing-proof-section .preview-detail-head {

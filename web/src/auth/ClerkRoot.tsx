@@ -1,4 +1,9 @@
 import {
+  ClerkProvider,
+  SignInButton,
+  SignUpButton,
+} from "@clerk/react";
+import {
   ArrowRight,
   Ban,
   ChevronDown,
@@ -20,10 +25,22 @@ import {
 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import worldMapTextureUrl from "../assets/world-map-equirectangular.svg";
+import { getClerkPublishableKey } from "../config/env";
+import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
 const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
+const APP_ROUTE = "/app";
 
 export function RootApp() {
+  const publishableKey = getClerkPublishableKey();
+  const app = <RootAppContent authEnabled={Boolean(publishableKey)} />;
+
+  if (!publishableKey) return app;
+
+  return <ClerkProvider publishableKey={publishableKey}>{app}</ClerkProvider>;
+}
+
+function RootAppContent({ authEnabled }: { authEnabled: boolean }) {
   const [path, setPath] = useState(() => window.location.pathname);
 
   useEffect(() => {
@@ -32,10 +49,10 @@ export function RootApp() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  if (!isAppRoute(path)) return <LandingPage />;
+  if (!isAppRoute(path)) return <LandingPage authEnabled={authEnabled} />;
 
   return (
-    <Suspense fallback={<AppRouteLoading />}>
+    <Suspense fallback={<AuthLoadingScreen />}>
       <AuthenticatedApp />
     </Suspense>
   );
@@ -101,7 +118,7 @@ function useActiveOnScroll<T extends HTMLElement>() {
   return [ref, active] as const;
 }
 
-function LandingPage() {
+function LandingPage({ authEnabled }: { authEnabled: boolean }) {
   useEffect(() => {
     document.body.classList.add("landing-route");
     return () => document.body.classList.remove("landing-route");
@@ -119,9 +136,9 @@ function LandingPage() {
             </div>
           </div>
           <div className="landing-nav-actions">
-            <a className="landing-nav-button" href="/app">
+            <LandingSignInAction authEnabled={authEnabled} className="landing-nav-button">
               Sign in
-            </a>
+            </LandingSignInAction>
           </div>
         </nav>
 
@@ -133,12 +150,12 @@ function LandingPage() {
               remembers every contact you've already seen.
             </p>
             <div className="landing-actions">
-              <a className="landing-primary" href="/app">
+              <LandingSignInAction authEnabled={authEnabled} className="landing-primary">
                 Sign in <ArrowRight size={16} />
-              </a>
-              <a className="landing-secondary" href="/app?signup=1">
+              </LandingSignInAction>
+              <LandingSignUpAction authEnabled={authEnabled} className="landing-secondary">
                 Create account
-              </a>
+              </LandingSignUpAction>
             </div>
             <div className="landing-proof-row" aria-label="Product safeguards">
               <span>
@@ -254,12 +271,12 @@ function LandingPage() {
             </span>
           </div>
           <div className="landing-actions">
-            <a className="landing-primary" href="/app">
+            <LandingSignInAction authEnabled={authEnabled} className="landing-primary">
               Sign in <ArrowRight size={16} />
-            </a>
-            <a className="landing-secondary" href="/app?signup=1">
+            </LandingSignInAction>
+            <LandingSignUpAction authEnabled={authEnabled} className="landing-secondary">
               Create account
-            </a>
+            </LandingSignUpAction>
           </div>
         </section>
 
@@ -278,19 +295,67 @@ function LandingPage() {
   );
 }
 
-function AppRouteLoading() {
+function LandingSignInAction({
+  authEnabled,
+  children,
+  className,
+}: {
+  authEnabled: boolean;
+  children: ReactNode;
+  className: string;
+}) {
+  if (!authEnabled) {
+    return (
+      <a className={className} href={APP_ROUTE}>
+        {children}
+      </a>
+    );
+  }
+
   return (
-    <main className="landing-page">
-      <div className="landing-shell">
-        <section className="landing-hero">
-          <div className="landing-copy">
-            <p className="landing-eyebrow">Account access</p>
-            <h1>Loading ScoutLead</h1>
-            <p className="landing-lede">Preparing the workspace.</p>
-          </div>
-        </section>
-      </div>
-    </main>
+    <SignInButton
+      mode="modal"
+      fallbackRedirectUrl={APP_ROUTE}
+      forceRedirectUrl={APP_ROUTE}
+      signUpFallbackRedirectUrl={APP_ROUTE}
+      signUpForceRedirectUrl={APP_ROUTE}
+    >
+      <button className={className} type="button">
+        {children}
+      </button>
+    </SignInButton>
+  );
+}
+
+function LandingSignUpAction({
+  authEnabled,
+  children,
+  className,
+}: {
+  authEnabled: boolean;
+  children: ReactNode;
+  className: string;
+}) {
+  if (!authEnabled) {
+    return (
+      <a className={className} href={`${APP_ROUTE}?signup=1`}>
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <SignUpButton
+      mode="modal"
+      fallbackRedirectUrl={APP_ROUTE}
+      forceRedirectUrl={APP_ROUTE}
+      signInFallbackRedirectUrl={APP_ROUTE}
+      signInForceRedirectUrl={APP_ROUTE}
+    >
+      <button className={className} type="button">
+        {children}
+      </button>
+    </SignUpButton>
   );
 }
 
@@ -359,27 +424,6 @@ const PREVIEW_LEADS = [
     },
   },
   {
-    name: "DewDrop - Professional Painting Services Mississauga",
-    category: "Professional Painting Services",
-    location: "Mississauga, ON, Canada",
-    score: 90,
-    status: "Unknown",
-    statusTone: "amber",
-    fit: "Agent good fit",
-    body: "Painter business with a local service footprint.",
-    missing: "Missing: email",
-    detail: {
-      address: "Mississauga, ON",
-      contact: "No contact name found",
-      email: "No email found",
-      emailStatus: "Email · missing",
-      overview:
-        "DewDrop appears to serve the target painting category and location, but needs more contact evidence before it is ready for outreach.",
-      phone: "Public phone found",
-      website: "dewdroppainting.ca",
-    },
-  },
-  {
     name: "GreenLeaf Painting & Renovations",
     category: "painting & renovation contractor",
     location: "Mississauga, ON, Canada",
@@ -402,12 +446,21 @@ const PREVIEW_LEADS = [
   },
 ];
 
+const PREVIEW_LEAD_TOTAL = PREVIEW_LEADS.length;
+const PREVIEW_VERIFIED_TOTAL = PREVIEW_LEADS.filter((lead) => lead.statusTone === "green").length;
+
 const PREVIEW_QUERY =
   "independent residential painters in Toronto with a website, quote form, and owner contact";
 
 const PREVIEW_RUNS = [
   { title: "Mississauga Painters", meta: "new search", count: "", date: "draft", tone: "blue" },
-  { title: "Toronto Painting Services", meta: "6 · 3 verified", count: "completed", date: "Sep 7", tone: "green" },
+  {
+    title: "Toronto Painting Services",
+    meta: `${PREVIEW_LEAD_TOTAL} · ${PREVIEW_VERIFIED_TOTAL} verified`,
+    count: "completed",
+    date: "Sep 7",
+    tone: "green",
+  },
   { title: "GTA Solo Painters", meta: "4 · 3 verified", count: "completed", date: "Sep 7", tone: "green" },
   { title: "Quote-Ready Painters", meta: "3 found", count: "researching", date: "Sep 7", tone: "amber" },
 ];
@@ -472,11 +525,14 @@ function AnimatedPreview() {
       <div className="preview-main-panel">
         <PreviewAppTopbar pageName="Mississauga Painters" />
         <div className="preview-stage">
-          {showResults ? (
-            <PreviewResults visibleCount={visibleLeads} />
-          ) : (
-            <PreviewDiscovery cursorPressed={cursorPressed} cursorVisible={cursorVisible} typedLength={typed} />
-          )}
+          <div className="preview-scene-stack">
+            <div aria-hidden={showResults} className={showResults ? "preview-scene is-hidden" : "preview-scene"}>
+              <PreviewDiscovery cursorPressed={cursorPressed} cursorVisible={cursorVisible} typedLength={typed} />
+            </div>
+            <div aria-hidden={!showResults} className={showResults ? "preview-scene" : "preview-scene is-hidden"}>
+              <PreviewResults visibleCount={visibleLeads} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -957,7 +1013,7 @@ function PreviewTemplate({ children, tag, title }: { children: ReactNode; tag: s
 
 function PreviewResults({
   showDrawer = false,
-  visibleCount = PREVIEW_LEADS.length,
+  visibleCount = PREVIEW_LEAD_TOTAL,
   drawerVisible = true,
   clickedIndex = -1,
   cursorIndex = -1,
@@ -976,18 +1032,22 @@ function PreviewResults({
 }) {
   const selectedLead = PREVIEW_LEADS[Math.max(0, clickedIndex)] ?? PREVIEW_LEADS[0];
   const reviewedCount = showDrawer && drawerVisible && reviewStage >= 3 ? 1 : 0;
+  const needsReviewCount = Math.max(0, PREVIEW_LEAD_TOTAL - reviewedCount);
 
   return (
     <section
       className={`preview-results-screen${showDrawer ? " has-detail" : ""}${showDrawer && drawerVisible ? " is-open" : ""}`}
       aria-label="Preview results"
     >
-      <div className="preview-results-meta">6 found · 6 reachable · 3 verified · 6 good fit</div>
+      <div className="preview-results-meta">
+        {PREVIEW_LEAD_TOTAL} found · {PREVIEW_LEAD_TOTAL} reachable · {PREVIEW_VERIFIED_TOTAL} verified ·{" "}
+        {PREVIEW_LEAD_TOTAL} good fit
+      </div>
       <div className="preview-results-controls">
         <div className="preview-tabs">
-          <strong>All <span>6</span></strong>
+          <strong>All <span>{PREVIEW_LEAD_TOTAL}</span></strong>
           <span>Shortlisted <em>{reviewedCount}</em></span>
-          <span>Needs review <em>{6 - reviewedCount}</em></span>
+          <span>Needs review <em>{needsReviewCount}</em></span>
         </div>
         <div className="preview-sort-actions">
           <button type="button" tabIndex={-1}>Filter <strong>All</strong></button>
@@ -1055,11 +1115,6 @@ function PreviewLeadCard({
         </span>
         <p>{lead.body}</p>
         {lead.missing ? <small>{lead.missing}</small> : null}
-      </div>
-      <div className="preview-lead-actions">
-        <strong className={`preview-status-chip tone-${lead.statusTone}`}>{lead.status}</strong>
-        <Mail size={13} />
-        <Phone size={13} />
       </div>
       <div className={`preview-lead-accordion${expanded ? " is-expanded" : ""}`} aria-hidden={!expanded}>
         <div className="preview-lead-accordion-inner">
