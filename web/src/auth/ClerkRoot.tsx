@@ -23,7 +23,7 @@ import {
   Target,
   UserCheck,
 } from "lucide-react";
-import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import worldMapTextureUrl from "../assets/world-map-equirectangular.svg";
 import { getClerkPublishableKey } from "../config/env";
 import { AuthLoadingScreen } from "./AuthLoadingScreen";
@@ -210,10 +210,10 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
           <div className="landing-proof-inner">
             <div className="landing-section-heading landing-proof-heading">
               <p className="landing-eyebrow">Lead review</p>
-              <h2>Click a candidate and the evidence opens beside the list</h2>
+              <h2>Select a lead, then review the evidence</h2>
               <p className="landing-lede">
-                The results stay scannable on the left while the selected business opens on the right with fit reasons,
-                contact state, and approval actions.
+                ScoutLead keeps the list scannable where there is room, then focuses the selected business with fit,
+                contact readiness, supporting evidence, and approval controls before outreach.
               </p>
             </div>
             <WorkflowProofPreview />
@@ -448,6 +448,15 @@ const PREVIEW_LEADS = [
 
 const PREVIEW_LEAD_TOTAL = PREVIEW_LEADS.length;
 const PREVIEW_VERIFIED_TOTAL = PREVIEW_LEADS.filter((lead) => lead.statusTone === "green").length;
+const PROOF_LEAD_INDEX = 0;
+const PROOF_VISIBLE_LEAD_COUNT = Math.min(3, PREVIEW_LEAD_TOTAL);
+
+const PROOF_LIST_MIN_WIDTH = 360;
+const PROOF_DRAWER_MIN_WIDTH = 320;
+const PROOF_COLUMN_GAP = 14;
+const PROOF_STAGE_PADDING_X = 48;
+const PROOF_CRAMPED_WIDTH =
+  PROOF_LIST_MIN_WIDTH + PROOF_COLUMN_GAP + PROOF_DRAWER_MIN_WIDTH + PROOF_STAGE_PADDING_X;
 
 const PREVIEW_QUERY =
   "independent residential painters in Toronto with a website, quote form, and owner contact";
@@ -540,93 +549,106 @@ function AnimatedPreview() {
 }
 
 function WorkflowProofPreview() {
-  const [ref, active] = useRevealOnScroll<HTMLDivElement>();
+  const [ref, active] = useActiveOnScroll<HTMLDivElement>();
+  const [detailOnly, setDetailOnly] = useState(true);
   const [visibleLeads, setVisibleLeads] = useState(0);
   const [cursorIndex, setCursorIndex] = useState(-1);
   const [cursorPressed, setCursorPressed] = useState(false);
   const [clickedIndex, setClickedIndex] = useState(-1);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [reviewStage, setReviewStage] = useState(0);
-  const [accordionOpen, setAccordionOpen] = useState(false);
-  const [cycle, setCycle] = useState(0);
+
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
+    const evaluate = (width: number) => setDetailOnly(width < PROOF_CRAMPED_WIDTH);
+    evaluate(node.getBoundingClientRect().width);
+
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width === "number") evaluate(width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
 
   useEffect(() => {
     if (!active) return;
 
     if (prefersReducedMotion()) {
-      setVisibleLeads(PREVIEW_LEADS.length);
-      setClickedIndex(0);
+      setVisibleLeads(PROOF_VISIBLE_LEAD_COUNT);
+      setClickedIndex(PROOF_LEAD_INDEX);
       setDrawerVisible(true);
       setReviewStage(3);
-      setAccordionOpen(true);
       return;
     }
 
     const timers: number[] = [];
     const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
 
-    const REVEAL_GAP = 320;
-    const CLICK_GAP = 2400;
-
     setCursorIndex(-1);
     setCursorPressed(false);
     setReviewStage(0);
-    setAccordionOpen(false);
-    if (cycle === 0) {
-      setVisibleLeads(0);
-      setClickedIndex(-1);
-      setDrawerVisible(false);
-      PREVIEW_LEADS.forEach((_, idx) => {
-        at(idx * REVEAL_GAP, () => setVisibleLeads(idx + 1));
+    setVisibleLeads(0);
+    setClickedIndex(-1);
+    setDrawerVisible(false);
+
+    if (detailOnly) {
+      setVisibleLeads(PROOF_VISIBLE_LEAD_COUNT);
+      at(220, () => {
+        setClickedIndex(PROOF_LEAD_INDEX);
+        setDrawerVisible(true);
       });
-    } else {
-      setVisibleLeads(PREVIEW_LEADS.length);
+
+      const detailStart = 680;
+      at(detailStart, () => setReviewStage(1));
+      at(detailStart + 620, () => setReviewStage(2));
+      at(detailStart + 1240, () => setReviewStage(3));
+
+      return () => timers.forEach(clearTimeout);
     }
 
-    // On narrow viewports the accordion (not the docked/overlay panel) is what's
-    // visible, so it gets its own tap-to-expand beat: expand inline below the
-    // row, pushing the rest of the list down, hold, then collapse before the
-    // next lead's turn - the panel's height simply reflows, no scrolling.
-    const revealDone = cycle === 0 ? PREVIEW_LEADS.length * REVEAL_GAP : 0;
-    PREVIEW_LEADS.forEach((_, idx) => {
-      const clickStart = revealDone + 360 + idx * CLICK_GAP;
-      at(clickStart, () => {
-        setCursorIndex(idx);
-        setCursorPressed(false);
-        setReviewStage(0);
-      });
-      at(clickStart + 360, () => {
-        setCursorPressed(true);
-        setClickedIndex(idx);
-        setDrawerVisible(true);
-        setAccordionOpen(true);
-      });
-      at(clickStart + 660, () => setCursorPressed(false));
-      at(clickStart + 980, () => setCursorIndex(-1));
-      at(clickStart + 1180, () => setReviewStage(1));
-      at(clickStart + 1580, () => setReviewStage(2));
-      at(clickStart + 2060, () => setReviewStage(3));
-      at(clickStart + 2240, () => setAccordionOpen(false));
-    });
+    for (let index = 0; index < PROOF_VISIBLE_LEAD_COUNT; index += 1) {
+      at(160 + index * 140, () => setVisibleLeads(index + 1));
+    }
 
-    at(revealDone + 360 + PREVIEW_LEADS.length * CLICK_GAP + 1200, () => setCycle((current) => current + 1));
+    at(760, () => {
+      setCursorIndex(PROOF_LEAD_INDEX);
+      setCursorPressed(false);
+    });
+    at(1140, () => {
+      setCursorPressed(true);
+      setClickedIndex(PROOF_LEAD_INDEX);
+      setDrawerVisible(true);
+    });
+    at(1400, () => setCursorPressed(false));
+    at(1680, () => setCursorIndex(-1));
+
+    const detailStart = 1900;
+    at(detailStart, () => setReviewStage(1));
+    at(detailStart + 620, () => setReviewStage(2));
+    at(detailStart + 1240, () => setReviewStage(3));
 
     return () => timers.forEach(clearTimeout);
-  }, [active, cycle]);
+  }, [active, detailOnly]);
 
   return (
     <div className="landing-preview landing-preview-focused" aria-label="Example lead detail" ref={ref}>
       <div className="preview-main-panel">
         <div className="preview-stage">
           <PreviewResults
+            compactDetail
+            leadLimit={PROOF_VISIBLE_LEAD_COUNT}
+            mobileDetailOnly={detailOnly}
+            proofReview
             showDrawer
-            visibleCount={visibleLeads}
             drawerVisible={drawerVisible}
+            visibleCount={visibleLeads}
             clickedIndex={clickedIndex}
             cursorIndex={cursorIndex}
             cursorPressed={cursorPressed}
             reviewStage={reviewStage}
-            accordionOpen={accordionOpen}
           />
         </div>
       </div>
@@ -1012,6 +1034,12 @@ function PreviewTemplate({ children, tag, title }: { children: ReactNode; tag: s
 }
 
 function PreviewResults({
+  detailIndex,
+  compactDetail = false,
+  leadStartIndex = 0,
+  leadLimit,
+  mobileDetailOnly = false,
+  proofReview = false,
   showDrawer = false,
   visibleCount = PREVIEW_LEAD_TOTAL,
   drawerVisible = true,
@@ -1019,8 +1047,13 @@ function PreviewResults({
   cursorIndex = -1,
   cursorPressed = false,
   reviewStage = 0,
-  accordionOpen = false,
 }: {
+  detailIndex?: number;
+  compactDetail?: boolean;
+  leadStartIndex?: number;
+  leadLimit?: number;
+  mobileDetailOnly?: boolean;
+  proofReview?: boolean;
   showDrawer?: boolean;
   visibleCount?: number;
   drawerVisible?: boolean;
@@ -1028,15 +1061,19 @@ function PreviewResults({
   cursorIndex?: number;
   cursorPressed?: boolean;
   reviewStage?: number;
-  accordionOpen?: boolean;
 }) {
-  const selectedLead = PREVIEW_LEADS[Math.max(0, clickedIndex)] ?? PREVIEW_LEADS[0];
-  const reviewedCount = showDrawer && drawerVisible && reviewStage >= 3 ? 1 : 0;
+  const selectedLead = PREVIEW_LEADS[Math.max(0, detailIndex ?? clickedIndex)] ?? PREVIEW_LEADS[0];
+  const startIndex = Math.max(0, Math.min(leadStartIndex, PREVIEW_LEADS.length - 1));
+  const renderedLeads =
+    typeof leadLimit === "number"
+      ? PREVIEW_LEADS.slice(startIndex, startIndex + leadLimit)
+      : PREVIEW_LEADS.slice(startIndex);
+  const reviewedCount = showDrawer && clickedIndex >= 0 && reviewStage >= 3 ? 1 : 0;
   const needsReviewCount = Math.max(0, PREVIEW_LEAD_TOTAL - reviewedCount);
 
   return (
     <section
-      className={`preview-results-screen${showDrawer ? " has-detail" : ""}${showDrawer && drawerVisible ? " is-open" : ""}`}
+      className={`preview-results-screen${showDrawer ? " has-detail" : ""}${showDrawer && drawerVisible ? " is-open" : ""}${proofReview ? " is-proof-review" : ""}${mobileDetailOnly ? " is-mobile-detail-only" : ""}`}
       aria-label="Preview results"
     >
       <div className="preview-results-meta">
@@ -1059,21 +1096,29 @@ function PreviewResults({
       </div>
       <div className="preview-results-body">
         <div className="preview-lead-list">
-          {PREVIEW_LEADS.map((lead, idx) => (
-            <PreviewLeadCard
-              lead={lead}
-              key={lead.name}
-              visible={idx < visibleCount}
-              clicked={idx === clickedIndex}
-              selected={idx === clickedIndex}
-              showCursor={idx === cursorIndex}
-              cursorPressed={idx === cursorIndex && cursorPressed}
-              expanded={showDrawer && idx === clickedIndex && accordionOpen}
-              reviewStage={reviewStage}
-            />
-          ))}
+          {renderedLeads.map((lead, idx) => {
+            const leadIndex = startIndex + idx;
+            return (
+              <PreviewLeadCard
+                lead={lead}
+                key={lead.name}
+                visible={idx < visibleCount}
+                clicked={leadIndex === clickedIndex}
+                selected={leadIndex === clickedIndex}
+                showCursor={leadIndex === cursorIndex}
+                cursorPressed={leadIndex === cursorIndex && cursorPressed}
+              />
+            );
+          })}
         </div>
-        {showDrawer ? <PreviewDetailDrawer lead={selectedLead} reviewStage={reviewStage} visible={drawerVisible} /> : null}
+        {showDrawer ? (
+          <PreviewDetailDrawer
+            compactEvidence={compactDetail}
+            lead={selectedLead}
+            reviewStage={reviewStage}
+            visible={drawerVisible}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -1082,18 +1127,14 @@ function PreviewResults({
 function PreviewLeadCard({
   clicked = false,
   cursorPressed = false,
-  expanded = false,
   lead,
-  reviewStage = 0,
   selected = false,
   showCursor = false,
   visible = true,
 }: {
   clicked?: boolean;
   cursorPressed?: boolean;
-  expanded?: boolean;
   lead: (typeof PREVIEW_LEADS)[number];
-  reviewStage?: number;
   selected?: boolean;
   showCursor?: boolean;
   visible?: boolean;
@@ -1116,20 +1157,17 @@ function PreviewLeadCard({
         <p>{lead.body}</p>
         {lead.missing ? <small>{lead.missing}</small> : null}
       </div>
-      <div className={`preview-lead-accordion${expanded ? " is-expanded" : ""}`} aria-hidden={!expanded}>
-        <div className="preview-lead-accordion-inner">
-          <PreviewDetailBody lead={lead} reviewStage={reviewStage} />
-        </div>
-      </div>
     </article>
   );
 }
 
 function PreviewDetailDrawer({
+  compactEvidence = false,
   lead,
   reviewStage = 0,
   visible = true,
 }: {
+  compactEvidence?: boolean;
   lead: (typeof PREVIEW_LEADS)[number];
   reviewStage?: number;
   visible?: boolean;
@@ -1140,54 +1178,110 @@ function PreviewDetailDrawer({
       aria-label="Preview lead drawer"
       className={`preview-detail-drawer${visible ? "" : " is-hidden"}`}
     >
+      <div className={`preview-detail-empty${visible ? " is-hidden" : ""}`} aria-hidden={visible}>
+        <PreviewDetailSkeleton />
+      </div>
       <div className={`preview-detail-drawer-content${visible ? "" : " is-hidden"}`} key={lead.name}>
-        <PreviewDetailBody lead={lead} reviewStage={reviewStage} />
+        <PreviewDetailBody compactEvidence={compactEvidence} lead={lead} reviewStage={reviewStage} />
       </div>
     </aside>
   );
 }
 
+function PreviewDetailSkeleton() {
+  return (
+    <div className="preview-skeleton" aria-hidden="true">
+      <div className="preview-skeleton-head">
+        <span className="preview-skeleton-badge" />
+        <div className="preview-skeleton-head-lines">
+          <span className="preview-skeleton-line" style={{ width: "68%" }} />
+          <span className="preview-skeleton-line" style={{ width: "42%" }} />
+        </div>
+      </div>
+      <div className="preview-skeleton-chips">
+        <span className="preview-skeleton-chip" />
+        <span className="preview-skeleton-chip" />
+        <span className="preview-skeleton-chip" />
+      </div>
+      <div className="preview-skeleton-lines">
+        <span className="preview-skeleton-line" style={{ width: "100%" }} />
+        <span className="preview-skeleton-line" style={{ width: "80%" }} />
+      </div>
+      <div className="preview-skeleton-grid">
+        <span className="preview-skeleton-block" />
+        <span className="preview-skeleton-block" />
+        <span className="preview-skeleton-block" />
+        <span className="preview-skeleton-block" />
+      </div>
+      <div className="preview-skeleton-footer">
+        <span className="preview-skeleton-btn" />
+        <span className="preview-skeleton-btn" />
+        <span className="preview-skeleton-btn" />
+      </div>
+    </div>
+  );
+}
+
 function PreviewDetailBody({
+  compactEvidence = false,
   lead,
   reviewStage = 0,
+  showHeader = true,
 }: {
+  compactEvidence?: boolean;
   lead: (typeof PREVIEW_LEADS)[number];
   reviewStage?: number;
+  showHeader?: boolean;
 }) {
   const emailChipClass = lead.detail.emailStatus.includes("deliverable") ? "" : "tone-amber";
-  const readinessActive = reviewStage >= 2;
+  const fitActive = reviewStage >= 1;
+  const evidenceActive = reviewStage >= 2;
   const actionReady = reviewStage >= 3;
+  const chipClass = (active: boolean, extra = "") => `${extra}${active ? " is-reviewed" : " is-pending"}`.trim();
 
   return (
     <>
-      <div className="preview-detail-head">
-        <span className="preview-lead-score">{lead.score}</span>
-        <div>
-          <strong>{lead.name}</strong>
-          <span>
-            {lead.category} · {lead.location}
-          </span>
+      {showHeader ? (
+        <div className="preview-detail-head">
+          <span className="preview-lead-score">{lead.score}</span>
+          <div>
+            <strong>{lead.name}</strong>
+            <span>
+              {lead.category} · {lead.location}
+            </span>
+          </div>
+          <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
         </div>
-        <button type="button" tabIndex={-1} aria-label="Close preview drawer">×</button>
-      </div>
-      <div className={`preview-detail-chips${readinessActive ? " is-readiness-active" : ""}`}>
-        <span className={readinessActive ? "is-reviewed" : ""}>
+      ) : null}
+      <div className="preview-detail-chips">
+        <span className={chipClass(fitActive)}>
           <CheckCircle2 size={12} /> {lead.fit} · {lead.score}
         </span>
-        <span className={`${emailChipClass}${readinessActive ? " is-reviewed" : ""}`.trim()}>
+        <span className={chipClass(evidenceActive, emailChipClass)}>
           <Mail size={12} /> {lead.detail.emailStatus}
         </span>
-        <span className={readinessActive ? "is-reviewed" : ""}>
+        <span className={chipClass(evidenceActive)}>
           <Phone size={12} /> Phone
         </span>
       </div>
-      <p>{lead.detail.overview}</p>
+      <p className={`preview-detail-summary${fitActive ? " is-reviewed" : " is-pending"}`}>{lead.detail.overview}</p>
       <dl className="preview-detail-list">
-        <PreviewDetailRow icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
-        <PreviewDetailRow icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
-        <PreviewDetailRow icon={<UserCheck size={14} />} label="Contact" value={lead.detail.contact} />
-        <PreviewDetailRow icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
-        <PreviewDetailRow icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
+        {compactEvidence ? (
+          <>
+            <PreviewDetailRow active={fitActive} icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
+            <PreviewDetailRow active={fitActive} icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
+            <PreviewDetailRow active={evidenceActive} icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
+            <PreviewDetailRow active={evidenceActive} icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
+          </>
+        ) : (
+          <>
+            <PreviewDetailRow active={fitActive} icon={<MapPin size={14} />} label="Address" value={lead.detail.address} />
+            <PreviewDetailRow active={fitActive} icon={<Globe size={14} />} label="Website" value={lead.detail.website} />
+            <PreviewDetailRow active={evidenceActive} icon={<UserCheck size={14} />} label="Contact" value={lead.detail.contact} />
+            <PreviewDetailRow active={evidenceActive} icon={<Mail size={14} />} label="Email" value={lead.detail.email} />
+            <PreviewDetailRow active={evidenceActive} icon={<Phone size={14} />} label="Phone" value={lead.detail.phone} />
+          </>
+        )}
       </dl>
       <div className={`preview-detail-footer${actionReady ? " is-action-ready" : ""}`}>
         <button className={actionReady ? "is-reviewed" : ""} type="button" tabIndex={-1}>Shortlist</button>
@@ -1205,9 +1299,19 @@ function PreviewDetailBody({
   );
 }
 
-function PreviewDetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function PreviewDetailRow({
+  active = true,
+  icon,
+  label,
+  value,
+}: {
+  active?: boolean;
+  icon: ReactNode;
+  label: string;
+  value: string;
+}) {
   return (
-    <div>
+    <div className={active ? "is-reviewed" : "is-pending"}>
       {icon}
       <dt>{label}</dt>
       <dd>{value}</dd>

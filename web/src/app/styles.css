@@ -952,14 +952,6 @@ a {
     transform var(--dur-slow) var(--ease-out);
 }
 
-/* The nested grid-in-grid row-sizing (card -> accordion, both using an
-   auto/fr track) can measure the expanded accordion's contribution a few
-   pixels short of its true rendered height in some engines. A small extra
-   bottom pad while expanded keeps that from ever clipping the last row. */
-.preview-lead-card:has(.preview-lead-accordion.is-expanded) {
-  padding-bottom: 18px;
-}
-
 .preview-lead-card.is-hidden {
   opacity: 0;
   pointer-events: none;
@@ -976,49 +968,64 @@ a {
   box-shadow: 0 0 0 1px var(--text);
 }
 
-/* Below the split-view breakpoint, tapping a lead expands its detail inline
-   (accordion) instead of opening the docked/overlay panel. Hidden entirely
-   at desktop widths, where the docked panel (.preview-detail-drawer) is used
-   instead - see the matching min-width:1024px rule further down. */
-.preview-lead-accordion {
+.preview-results-screen.is-proof-review .preview-results-meta {
+  margin-top: 0;
+}
+
+.preview-results-screen.is-proof-review .preview-results-controls {
+  margin-top: 8px;
+}
+
+.preview-results-screen.is-proof-review .preview-results-body {
+  padding-top: 14px;
+}
+
+.preview-results-screen.is-proof-review .preview-lead-list {
+  gap: 10px;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.preview-results-screen.is-proof-review .preview-lead-card {
+  min-height: 84px;
+}
+
+.preview-results-screen.is-proof-review .preview-lead-card.is-selected {
+  border-color: var(--line-strong);
+  box-shadow:
+    0 0 0 1px rgba(27, 31, 36, 0.34),
+    var(--shadow-sm);
+}
+
+.preview-results-screen.is-proof-review .preview-detail-drawer {
+  padding: 16px;
+}
+
+.preview-results-screen.is-proof-review .preview-detail-summary {
+  margin: 12px 0;
+}
+
+.preview-results-screen.is-proof-review .preview-detail-list {
   display: grid;
-  grid-column: 1 / -1;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  overflow: hidden;
-  transition: grid-template-rows var(--dur-slow) var(--ease-out);
-  visibility: hidden;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.preview-lead-accordion.is-expanded {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  visibility: visible;
+.preview-results-screen.is-proof-review .preview-detail-list div {
+  border-top: 1px solid var(--line);
+  padding: 8px 10px;
 }
 
-/* display:flex + gap (rather than margin-top on each child) so the grid's
-   0fr->1fr row-sizing pass above always measures the true content height -
-   margin-based spacing on children of a single-row auto/fr grid track can
-   read a few pixels short in some engines and silently clip the last child. */
-.preview-lead-accordion-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-height: 0;
-  overflow: hidden;
+.preview-results-screen.is-proof-review .preview-detail-list div:nth-child(-n + 2) {
+  border-top: 0;
 }
 
-.preview-lead-accordion .preview-detail-head {
-  margin-top: 2px;
+.preview-results-screen.is-proof-review .preview-detail-list div:nth-child(even) {
+  border-left: 1px solid var(--line);
 }
 
-/* The safety buffer lives on the last child (clipped by the inner wrapper's
-   own overflow:hidden) rather than as padding on the wrapper itself - padding
-   on the wrapper is part of its own box height and can't compress to 0 when
-   the accordion collapses, which left a residual sliver of the previous
-   card's content peeking through. */
-.preview-lead-accordion .preview-detail-footer {
-  padding-bottom: 40px;
+.preview-results-screen.is-proof-review .preview-detail-footer {
+  margin-bottom: -16px;
 }
 
 @keyframes preview-card-click {
@@ -1308,6 +1315,129 @@ a {
 
 .preview-detail-drawer-content {
   animation: preview-detail-swap 320ms var(--ease-out);
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+}
+
+.preview-detail-drawer-content.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+}
+
+.preview-detail-empty {
+  inset: 0;
+  padding: 18px 16px;
+  position: absolute;
+  transition: opacity var(--dur-slow) var(--ease-out);
+}
+
+.preview-detail-empty.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.preview-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.preview-skeleton-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.preview-skeleton-head-lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.preview-skeleton-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.preview-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.preview-skeleton-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.preview-skeleton-footer {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr 1.8fr;
+  margin-top: 2px;
+}
+
+.preview-skeleton-badge,
+.preview-skeleton-line,
+.preview-skeleton-chip,
+.preview-skeleton-block,
+.preview-skeleton-btn {
+  animation: preview-skeleton-pulse 1.4s ease-in-out infinite;
+  background: var(--line);
+  border-radius: 4px;
+}
+
+.preview-skeleton-badge {
+  border-radius: 8px;
+  flex-shrink: 0;
+  height: 32px;
+  width: 32px;
+}
+
+.preview-skeleton-line {
+  height: 8px;
+}
+
+.preview-skeleton-chip {
+  border-radius: 999px;
+  height: 20px;
+  width: 74px;
+}
+
+.preview-skeleton-block {
+  border-radius: 8px;
+  height: 40px;
+}
+
+.preview-skeleton-btn {
+  border-radius: 8px;
+  height: 32px;
+}
+
+@keyframes preview-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-skeleton-badge,
+  .preview-skeleton-line,
+  .preview-skeleton-chip,
+  .preview-skeleton-block,
+  .preview-skeleton-btn {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 @keyframes preview-detail-swap {
@@ -1322,68 +1452,83 @@ a {
   }
 }
 
-/* At comfortable widths, dock the detail panel beside the list instead of
-   overlaying it with a dimming scrim - same split-view pattern used in the
-   product itself. Below this the overlay drawer above remains the fallback. */
-@media (min-width: 1024px) {
-  .preview-results-screen.has-detail::before {
-    display: none;
-  }
-
-  .preview-lead-accordion {
-    display: none;
-  }
-
-  .preview-results-screen.has-detail .preview-results-body {
-    align-items: start;
-    display: grid;
-    gap: 14px;
-    grid-template-columns: minmax(0, 1fr) minmax(230px, 280px);
-  }
-
-  .landing-proof-section .preview-results-screen.has-detail .preview-results-body {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
-  }
-
-  .preview-results-screen.has-detail .preview-detail-drawer {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    bottom: auto;
-    box-shadow: var(--shadow-sm);
-    position: static;
-    right: auto;
-    top: auto;
-    width: 100%;
-  }
-
-  /* The docked panel's card shell stays visible the whole time it's
-     reserving grid space; only its content fades/slides in on click. */
-  .preview-results-screen.has-detail .preview-detail-drawer.is-hidden {
-    opacity: 1;
-    pointer-events: auto;
-    transform: none;
-  }
-
-  .preview-results-screen.has-detail .preview-detail-drawer-content {
-    transition:
-      opacity var(--dur-slow) var(--ease-out),
-      transform var(--dur-slow) var(--ease-out);
-  }
-
-  .preview-results-screen.has-detail .preview-detail-drawer-content.is-hidden {
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(6px);
-  }
+.preview-results-screen.has-detail::before {
+  display: none;
 }
 
-@media (max-width: 1023px) {
-  /* Below the split-view breakpoint, the inline accordion on each lead card
-     replaces both the docked panel and the old overlay/scrim fallback. */
-  .landing-proof-section .preview-detail-drawer,
-  .landing-proof-section .preview-results-screen.has-detail.is-open::before {
-    display: none;
-  }
+.preview-results-screen.has-detail .preview-results-body {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 280px);
+}
+
+.landing-proof-section .preview-results-screen.has-detail .preview-results-body {
+  grid-template-columns: minmax(360px, 1fr) minmax(320px, 0.72fr);
+}
+
+.preview-results-screen.has-detail .preview-detail-drawer {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  bottom: auto;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  right: auto;
+  top: auto;
+  width: 100%;
+}
+
+.preview-results-screen.has-detail .preview-detail-drawer.is-hidden {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.landing-proof-section .preview-results-screen.has-detail.is-open::before {
+  display: none;
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-results-meta,
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-results-controls,
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-lead-list {
+  display: none;
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-results-body {
+  display: block;
+  padding-top: 0;
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-detail-drawer {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  bottom: auto;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  position: relative;
+  right: auto;
+  top: auto;
+  width: 100%;
+  z-index: 1;
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-detail-drawer.is-hidden {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-detail-list {
+  grid-template-columns: 1fr;
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-detail-list div:nth-child(n) {
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+
+.preview-results-screen.is-proof-review.is-mobile-detail-only .preview-detail-list div:first-child {
+  border-top: 0;
 }
 
 .preview-reveal {
@@ -1450,6 +1595,25 @@ a {
   padding: 5px 8px;
 }
 
+.preview-detail-chips span,
+.preview-detail-summary,
+.preview-detail-list div {
+  transition:
+    background-color var(--dur-slow) var(--ease-out),
+    border-color var(--dur-slow) var(--ease-out),
+    box-shadow var(--dur-slow) var(--ease-out),
+    color var(--dur-slow) var(--ease-out),
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+}
+
+.preview-detail-chips span.is-pending,
+.preview-detail-summary.is-pending,
+.preview-detail-list div.is-pending {
+  opacity: 0.34;
+  transform: translateY(6px);
+}
+
 .preview-detail-chips span.is-reviewed {
   animation: preview-readiness-check 480ms var(--ease-spring);
   box-shadow: 0 0 0 3px rgba(0, 148, 95, 0.08);
@@ -1474,7 +1638,7 @@ a {
 }
 
 .preview-detail-drawer-content > p,
-.preview-lead-accordion-inner > p {
+.preview-detail-summary {
   color: var(--text);
   font-size: 11px;
   line-height: 1.55;
@@ -1497,6 +1661,10 @@ a {
   padding: 9px 10px;
 }
 
+.preview-detail-list div.is-reviewed {
+  background: rgba(0, 148, 95, 0.025);
+}
+
 .preview-detail-list div:first-child {
   border-top: 0;
 }
@@ -1504,6 +1672,10 @@ a {
 .preview-detail-list svg {
   color: var(--faint);
   grid-row: span 2;
+}
+
+.preview-detail-list div.is-reviewed svg {
+  color: var(--green);
 }
 
 .preview-detail-list dt {
@@ -2172,24 +2344,16 @@ a {
   border: 0;
   box-shadow: none;
   height: auto;
-  min-height: clamp(560px, 48vw, 610px);
+  min-height: clamp(420px, 30vw, 480px);
 }
 
-/* Below 1024px the accordion expands inline within the list (see
-   .preview-lead-accordion), so the card must grow to fit whichever lead is
-   open rather than clipping it - height:auto plus the min-height above lets
-   it hug content while still keeping a sensible floor when nothing is
-   expanded. */
-
-/* The split-view panel (>=1024px) is a static, non-scrolling layout, unlike
-   the accordion used below that width where internal scrolling is expected.
-   Give it a fixed height generous enough that the detail content (header,
-   chips, overview, info rows, footer) never clips or needs its own
-   scrollbar. This must come after the clamp() rule above to win the cascade
-   at equal specificity. */
 @media (min-width: 1024px) {
   .landing-proof-section .landing-preview-focused {
-    height: 680px;
+    height: auto;
+  }
+
+  .landing-proof-section .preview-stage {
+    padding-top: 18px;
   }
 }
 
@@ -6469,7 +6633,7 @@ a {
 
   .landing-proof-section .landing-preview-focused {
     height: auto;
-    min-height: 540px;
+    min-height: 460px;
   }
 
   .readiness-preview {
@@ -6796,10 +6960,6 @@ a {
     grid-template-columns: 38px minmax(0, 1fr);
   }
 
-  .landing-preview.preview-app .preview-lead-accordion {
-    display: none;
-  }
-
   .landing-preview.preview-app .preview-lead-card {
     min-height: 86px;
   }
@@ -7101,11 +7261,6 @@ a {
     display: grid;
   }
 
-  .preview-detail-drawer,
-  .preview-results-screen.has-detail.is-open::before {
-    display: none;
-  }
-
   .preview-tabs {
     gap: 12px;
     overflow-x: auto;
@@ -7140,7 +7295,7 @@ a {
 
   .landing-proof-section .landing-preview-focused {
     height: auto;
-    min-height: 560px;
+    min-height: 500px;
   }
 
   .preview-lead-card {
