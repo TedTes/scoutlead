@@ -28,6 +28,7 @@ def test_cached_fit_score_does_not_increase_for_email() -> None:
     assert email_result.score_breakdown is not None
     assert email_result.score_breakdown.fit_score == no_email_result.score_breakdown.fit_score
     assert email_result.score == no_email_result.score
+    assert email_result.score < 95
     assert email_result.score_breakdown.reachability_score > no_email_result.score_breakdown.reachability_score
 
 

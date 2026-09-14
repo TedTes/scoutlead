@@ -139,11 +139,11 @@ def problem_fit_score(*, product: ProductRead, row: dict[str, Any], lead: LeadRe
     text = evidence_text(row=row, lead=lead, extra=service_signals)
     matched_target_terms = sum(1 for term in target_terms(product) if term in text)
 
-    score = 35
-    score += min(matched_target_terms * 8, 35)
-    score += min(len(service_signals) * 8, 20)
+    score = 30
+    score += min(matched_target_terms * 7, 30)
+    score += min(len(service_signals) * 6, 18)
     if has_quote_signal(row):
-        score += 10
+        score += 15
     if product.target_geography.lower() and product.target_geography.lower() in text:
         score += 5
     if product_problem_signal_required(product) and not has_product_problem_signal(

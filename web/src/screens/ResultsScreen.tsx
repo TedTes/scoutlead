@@ -2256,7 +2256,10 @@ function agentFitStatusLabel(status: AgentFitStatus) {
 function getAgentAssessment(contact: DiscoveryResult) {
   const qualification = contact.qualification;
   if (!qualification) return undefined;
-  const fitStatus = qualification.fit_status || deriveAgentFitStatus(qualification.qualified, qualification.score, qualification.recommended_next_step);
+  const fitStatus = legacyAdjustedFitStatus(
+    contact,
+    qualification.fit_status || deriveAgentFitStatus(qualification.qualified, qualification.score, qualification.recommended_next_step),
+  );
   const criteriaEvidence = (qualification.criteria || []).flatMap((criterion) => criterion.evidence || []);
   const criteriaMissing = (qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || []);
   const scoreBreakdown = getScoreBreakdown(contact);
@@ -2300,7 +2303,7 @@ function displayFitStatus(contact: DiscoveryResult): { label: string; className:
 function getScoreBreakdown(contact: DiscoveryResult) {
   const breakdown = contact.qualification?.score_breakdown;
   return {
-    fitScore: clampScore(breakdown?.fit_score ?? contact.qualification?.score ?? contact.research?.confidence ?? 0),
+    fitScore: clampScore(breakdown?.fit_score ?? legacyFitScore(contact)),
     reachabilityScore: clampScore(breakdown?.reachability_score ?? derivedReachabilityScore(contact)),
     sourceQualityScore: clampScore(breakdown?.source_quality_score ?? contact.research?.confidence ?? 0),
     notes: breakdown?.scoring_notes || [],
@@ -2321,6 +2324,36 @@ function contactReachabilityScore(contact: DiscoveryResult) {
 
 function contactSourceQualityScore(contact: DiscoveryResult) {
   return getScoreBreakdown(contact).sourceQualityScore;
+}
+
+function legacyFitScore(contact: DiscoveryResult) {
+  const qualification = contact.qualification;
+  let score = clampScore(qualification?.score ?? contact.research?.confidence ?? 0);
+  if (!qualification?.score_breakdown && legacyMissingProblemEvidence(contact)) {
+    score = Math.min(score, 74);
+  }
+  if (!qualification?.score_breakdown && qualification?.fit_status === "maybe") {
+    score = Math.min(score, 79);
+  }
+  if (!qualification?.score_breakdown && qualification?.fit_status === "not_fit") {
+    score = Math.min(score, 49);
+  }
+  return score;
+}
+
+function legacyAdjustedFitStatus(contact: DiscoveryResult, status: AgentFitStatus): AgentFitStatus {
+  if (contact.qualification?.score_breakdown || status !== "good_fit") return status;
+  return legacyMissingProblemEvidence(contact) ? "maybe" : status;
+}
+
+function legacyMissingProblemEvidence(contact: DiscoveryResult) {
+  const qualification = contact.qualification;
+  if (!qualification) return false;
+  const missing = [
+    ...(qualification.missing_evidence || []),
+    ...((qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || [])),
+  ];
+  return missing.some((item) => /quote|estimate|product\/problem|problem signal|problem fit/i.test(item || ""));
 }
 
 function derivedReachabilityScore(contact: DiscoveryResult) {
@@ -2665,7 +2698,7 @@ function formatActivityDate(value?: string | null) {
 }
 
 function contactScore(contact: DiscoveryResult) {
-  return Math.max(0, Math.min(100, Math.round(contact.qualification?.score ?? contact.research?.confidence ?? 0)));
+  return contactFitScore(contact);
 }
 
 function scoreClass(score: number) {
