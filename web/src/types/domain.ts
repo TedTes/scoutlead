@@ -214,6 +214,12 @@ export type DiscoveryResult = {
     qualified: boolean;
     fit_status?: AgentFitStatus | null;
     score: number;
+    score_breakdown?: {
+      fit_score: number;
+      reachability_score: number;
+      source_quality_score: number;
+      scoring_notes?: string[];
+    } | null;
     rationale: string;
     positive_signals?: string[];
     missing_evidence?: string[];
@@ -277,6 +283,43 @@ export type Message = {
   failure_reason?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type CampaignOutreachAudience = "selected" | "ready_contacts" | "ready_shortlist";
+
+export type CampaignOutreachDraftInput = {
+  audience?: CampaignOutreachAudience;
+  lead_ids?: string[];
+  subject: string;
+  body: string;
+  approach_tag?: string;
+};
+
+export type CampaignMessageApprovalInput = {
+  message_ids?: string[];
+  approved_by: string;
+  notes?: string | null;
+};
+
+export type CampaignMessageSendInput = {
+  message_ids?: string[];
+};
+
+export type CampaignMessageSkip = {
+  lead_id?: string | null;
+  message_id?: string | null;
+  company_name?: string | null;
+  reason: string;
+};
+
+export type CampaignMessageBatchResult = {
+  messages: Message[];
+  skipped: CampaignMessageSkip[];
+  created_count: number;
+  reused_count: number;
+  approved_count: number;
+  sent_count: number;
+  failed_count: number;
 };
 
 export type WebhookDelivery = {

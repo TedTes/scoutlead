@@ -8,6 +8,8 @@ import type {
   DiscoveryResult,
   DiscoverySnapshot,
   DiscoveryTrace,
+  CampaignMessageBatchResult,
+  CampaignOutreachDraftInput,
   GmailAuthorizationUrl,
   GmailConnectionStatus,
   LeadContactPolicyInput,
@@ -69,6 +71,18 @@ type AppDataContextValue = {
   updateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
   updateLeadContactPolicy: (leadId: string, update: LeadContactPolicyInput) => Promise<void>;
   draftShortlist: (runId?: string) => Promise<Message[]>;
+  createCampaignOutreachDrafts: (
+    input: CampaignOutreachDraftInput,
+    runId?: string,
+  ) => Promise<CampaignMessageBatchResult | null>;
+  approveCampaignOutreachDrafts: (
+    input?: { message_ids?: string[]; notes?: string | null },
+    runId?: string,
+  ) => Promise<CampaignMessageBatchResult | null>;
+  sendCampaignOutreachDrafts: (
+    input?: { message_ids?: string[] },
+    runId?: string,
+  ) => Promise<CampaignMessageBatchResult | null>;
   createOutreachDraft: (leadId: string) => Promise<Message | null>;
   updateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
   approveMessage: (messageId: string) => Promise<void>;
@@ -550,6 +564,36 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         });
         return created;
       },
+      createCampaignOutreachDrafts: async (input, runId = selectedDiscoveryRunIdState) => {
+        let result: CampaignMessageBatchResult | null = null;
+        await mutate(async () => {
+          if (!runId) return;
+          result = await api.createCampaignDrafts(runId, input);
+        });
+        return result;
+      },
+      approveCampaignOutreachDrafts: async (input = {}, runId = selectedDiscoveryRunIdState) => {
+        let result: CampaignMessageBatchResult | null = null;
+        await mutate(async () => {
+          if (!runId) return;
+          result = await api.approveCampaignDrafts(runId, {
+            message_ids: input.message_ids ?? [],
+            approved_by: approverLabel || "operator",
+            notes: input.notes,
+          });
+        });
+        return result;
+      },
+      sendCampaignOutreachDrafts: async (input = {}, runId = selectedDiscoveryRunIdState) => {
+        let result: CampaignMessageBatchResult | null = null;
+        await mutate(async () => {
+          if (!runId) return;
+          result = await api.sendCampaignDrafts(runId, {
+            message_ids: input.message_ids ?? [],
+          });
+        });
+        return result;
+      },
       createOutreachDraft: async (leadId) => {
         let created: Message | null = null;
         await mutate(async () => {
@@ -587,6 +631,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     [
       api,
       apiHealthy,
+      approverLabel,
       discoveryRuns,
       error,
       loading,

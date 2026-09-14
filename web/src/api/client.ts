@@ -10,6 +10,10 @@ import type {
   DiscoveryTrace,
   DiscoveryCandidate,
   DiscoveryResult,
+  CampaignMessageApprovalInput,
+  CampaignMessageBatchResult,
+  CampaignMessageSendInput,
+  CampaignOutreachDraftInput,
   LeadContactPolicyInput,
   LeadUpdateInput,
   Message,
@@ -188,6 +192,27 @@ export class ApiClient {
 
   draftShortlist(runId: string) {
     return this.request<Message[]>(`/discovery-runs/${runId}/draft-shortlist`, { method: "POST" });
+  }
+
+  createCampaignDrafts(runId: string, input: CampaignOutreachDraftInput) {
+    return this.request<CampaignMessageBatchResult>(`/discovery-runs/${runId}/campaign-drafts`, {
+      method: "POST",
+      body: input,
+    });
+  }
+
+  approveCampaignDrafts(runId: string, input: CampaignMessageApprovalInput) {
+    return this.request<CampaignMessageBatchResult>(`/discovery-runs/${runId}/campaign-drafts/approve`, {
+      method: "POST",
+      body: input,
+    });
+  }
+
+  sendCampaignDrafts(runId: string, input: CampaignMessageSendInput = {}) {
+    return this.request<CampaignMessageBatchResult>(`/discovery-runs/${runId}/campaign-drafts/send`, {
+      method: "POST",
+      body: input,
+    });
   }
 
   createLeadOutreachDraft(leadId: string) {

@@ -12,17 +12,22 @@ import {
   Phone,
   PlugZap,
   RotateCw,
+  Send,
   Trash2,
   User,
+  Users,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { OverviewScreen } from "./OverviewScreen";
 import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
+  CampaignMessageBatchResult,
+  CampaignOutreachDraftInput,
   ContactPolicyStatus,
   ContactVerificationStatus,
   DiscoveryResult,
@@ -30,6 +35,7 @@ import type {
   LeadReviewStatus,
   LeadUpdateInput,
   Message,
+  Product,
   SourceRequestSource,
 } from "../types/domain";
 import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
@@ -50,6 +56,27 @@ type ContactActivityItem = {
 type PendingContactsExport = {
   contacts: DiscoveryResult[];
   suggestedName: string;
+};
+const bulkOutreachDefaultSubject = "Quick question for {{business_name}}";
+const bulkOutreachDefaultBody = `Hello {{recipient_name}},
+
+I'm reaching out from {{product_name}}. We're building a tool for {{problem}}.
+
+Would something like this be useful for {{business_name}}?
+
+Best,
+Tedros`;
+const bulkOutreachTokens = [
+  "{{business_name}}",
+  "{{recipient_name}}",
+  "{{geography}}",
+  "{{fit_reason}}",
+  "{{product_name}}",
+  "{{problem}}",
+];
+type BulkEmailOverride = {
+  subject: string;
+  body: string;
 };
 
 export function ResultsScreen() {
@@ -74,6 +101,9 @@ export function ResultsScreen() {
     gmailConnectionStatus,
     markMessageReplied,
     sendApprovedShortlistWebhook,
+    createCampaignOutreachDrafts,
+    approveCampaignOutreachDrafts,
+    sendCampaignOutreachDrafts,
     snapshot,
     sourceProviders,
   } = useAppData();
@@ -90,12 +120,17 @@ export function ResultsScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
   const [exportFileName, setExportFileName] = useState("");
+  const [bulkPopoverStyle, setBulkPopoverStyle] = useState<CSSProperties>({});
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
+  const bulkOutreachRef = useRef<HTMLDivElement | null>(null);
+  const bulkOutreachButtonRef = useRef<HTMLButtonElement | null>(null);
+  const bulkOutreachPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const contacts = selectedDiscoveryRunId ? snapshot.results : [];
   const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
@@ -127,6 +162,8 @@ export function ResultsScreen() {
   const draftableShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
   );
+  const outreachReadyContacts = contacts.filter(isBulkOutreachReadyContact);
+  const outreachSkippedContacts = contacts.filter((contact) => !isBulkOutreachReadyContact(contact));
   const attributeFilterOptions: Array<{ id: ResultAttributeFilter; label: string; count: number }> = [
     { id: "good_fit", label: "Good fit", count: goodFitContacts },
     { id: "verified", label: "Verified", count: verifiedContacts },
@@ -173,6 +210,7 @@ export function ResultsScreen() {
     setStage("all");
     setAttributeFilter(null);
     setRerunPromptOpen(false);
+    setBulkOutreachOpen(false);
   }, [selectedDiscoveryRunId, runPrompt]);
 
   useEffect(() => {
@@ -182,7 +220,7 @@ export function ResultsScreen() {
   }, [selectedDiscoveryRunId]);
 
   useEffect(() => {
-    if (!runMenuOpen && !filterMenuOpen && !sortMenuOpen) return undefined;
+    if (!runMenuOpen && !filterMenuOpen && !sortMenuOpen && !bulkOutreachOpen) return undefined;
     const closeMenus = (event: MouseEvent) => {
       if (!runMenuRef.current?.contains(event.target as Node)) {
         setRunMenuOpen(false);
@@ -193,10 +231,48 @@ export function ResultsScreen() {
       if (!sortMenuRef.current?.contains(event.target as Node)) {
         setSortMenuOpen(false);
       }
+      if (
+        !bulkOutreachRef.current?.contains(event.target as Node)
+        && !bulkOutreachPopoverRef.current?.contains(event.target as Node)
+      ) {
+        setBulkOutreachOpen(false);
+      }
     };
     document.addEventListener("mousedown", closeMenus);
     return () => document.removeEventListener("mousedown", closeMenus);
-  }, [filterMenuOpen, runMenuOpen, sortMenuOpen]);
+  }, [bulkOutreachOpen, filterMenuOpen, runMenuOpen, sortMenuOpen]);
+
+  useEffect(() => {
+    // Freezes the underlying results list while the popup is open so it
+    // behaves like a centered modal layer instead of moving with the page.
+    if (!bulkOutreachOpen) return undefined;
+    const contentEl = document.querySelector(".content");
+    contentEl?.classList.add("scroll-locked");
+    return () => contentEl?.classList.remove("scroll-locked");
+  }, [bulkOutreachOpen]);
+
+  useLayoutEffect(() => {
+    if (!bulkOutreachOpen) return undefined;
+    const BULK_POPOVER_MAX_WIDTH = 1080;
+    const positionPopover = () => {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const gutter = viewportWidth <= 680 ? 10 : 18;
+      const verticalInset = 2;
+      const maxWidth = Math.max(0, viewportWidth - gutter * 2);
+      const width = Math.min(BULK_POPOVER_MAX_WIDTH, maxWidth);
+      const maxHeight = Math.min(820, Math.max(240, viewportHeight - verticalInset * 2));
+      setBulkPopoverStyle({
+        left: Math.round((viewportWidth - width) / 2),
+        maxHeight: Math.round(maxHeight),
+        top: Math.max(verticalInset, Math.round((viewportHeight - maxHeight) / 2)),
+        width: Math.round(width),
+      });
+    };
+    positionPopover();
+    window.addEventListener("resize", positionPopover);
+    return () => window.removeEventListener("resize", positionPopover);
+  }, [bulkOutreachOpen]);
 
   useEffect(() => {
     setSelectedSources((current) => {
@@ -379,12 +455,62 @@ export function ResultsScreen() {
         </div>
 
         <div className="results-control-actions">
+          <div className="bulk-outreach-control" ref={bulkOutreachRef}>
+            <button
+              aria-expanded={bulkOutreachOpen}
+              aria-haspopup="dialog"
+              className={bulkOutreachOpen ? "secondary outreach-toolbar-button active" : "secondary outreach-toolbar-button"}
+              ref={bulkOutreachButtonRef}
+              type="button"
+              disabled={!contacts.length}
+              onClick={() => {
+                setFilterMenuOpen(false);
+                setSortMenuOpen(false);
+                setRunMenuOpen(false);
+                setBulkOutreachOpen((open) => !open);
+              }}
+            >
+              <Users size={14} />
+              <span className="outreach-label">Prepare outreach</span>
+              <span className="outreach-count">{outreachReadyContacts.length}</span>
+            </button>
+            {bulkOutreachOpen
+              ? createPortal(
+                  <>
+                    <div
+                      className="bulk-outreach-backdrop"
+                      role="presentation"
+                      onMouseDown={() => setBulkOutreachOpen(false)}
+                    />
+                    <div className="bulk-outreach-popover" ref={bulkOutreachPopoverRef} style={bulkPopoverStyle}>
+                      <BulkOutreachPanel
+                        gmailConnected={gmailConnected}
+                        product={selectedProduct}
+                        readyContacts={outreachReadyContacts}
+                        skippedContacts={outreachSkippedContacts}
+                        onApproveDrafts={approveCampaignOutreachDrafts}
+                        onClose={() => setBulkOutreachOpen(false)}
+                        onCreateDrafts={createCampaignOutreachDrafts}
+                        onSendDrafts={sendCampaignOutreachDrafts}
+                        onUpdateMessage={updateMessage}
+                      />
+                    </div>
+                  </>,
+                  document.body,
+                )
+              : null}
+          </div>
           <div className="filter-menu-control" ref={filterMenuRef}>
             <button
               aria-expanded={filterMenuOpen}
               className={attributeFilter ? "filter-button active" : "filter-button"}
               type="button"
-              onClick={() => setFilterMenuOpen((open) => !open)}
+              onClick={() => {
+                setBulkOutreachOpen(false);
+                setSortMenuOpen(false);
+                setRunMenuOpen(false);
+                setFilterMenuOpen((open) => !open);
+              }}
             >
               <span className="control-label">Filter</span>
               <strong>{activeAttributeFilter?.label || "All"}</strong>
@@ -427,7 +553,12 @@ export function ResultsScreen() {
               aria-expanded={sortMenuOpen}
               className="sort-button"
               type="button"
-              onClick={() => setSortMenuOpen((open) => !open)}
+              onClick={() => {
+                setBulkOutreachOpen(false);
+                setFilterMenuOpen(false);
+                setRunMenuOpen(false);
+                setSortMenuOpen((open) => !open);
+              }}
             >
               <span className="control-label">Sort</span>
               <strong>{activeSort.label}</strong>
@@ -459,7 +590,12 @@ export function ResultsScreen() {
               aria-label="Run actions"
               className="menu-button"
               type="button"
-              onClick={() => setRunMenuOpen((open) => !open)}
+              onClick={() => {
+                setBulkOutreachOpen(false);
+                setFilterMenuOpen(false);
+                setSortMenuOpen(false);
+                setRunMenuOpen((open) => !open);
+              }}
             >
               <MoreVertical size={18} />
             </button>
@@ -649,6 +785,481 @@ function RerunSearchDialog({
   );
 }
 
+function BulkOutreachPanel({
+  gmailConnected,
+  product,
+  readyContacts,
+  skippedContacts,
+  onApproveDrafts,
+  onClose,
+  onCreateDrafts,
+  onSendDrafts,
+  onUpdateMessage,
+}: {
+  gmailConnected: boolean;
+  product: Product | undefined;
+  readyContacts: DiscoveryResult[];
+  skippedContacts: DiscoveryResult[];
+  onApproveDrafts: (input?: { message_ids?: string[]; notes?: string | null }) => Promise<CampaignMessageBatchResult | null>;
+  onClose: () => void;
+  onCreateDrafts: (input: CampaignOutreachDraftInput) => Promise<CampaignMessageBatchResult | null>;
+  onSendDrafts: (input?: { message_ids?: string[] }) => Promise<CampaignMessageBatchResult | null>;
+  onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
+}) {
+  const { showToast } = useToast();
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [previewLeadId, setPreviewLeadId] = useState("");
+  const [subject, setSubject] = useState(bulkOutreachDefaultSubject);
+  const [body, setBody] = useState(bulkOutreachDefaultBody);
+  const [emailOverrides, setEmailOverrides] = useState<Record<string, BulkEmailOverride>>({});
+  const [preparedResult, setPreparedResult] = useState<CampaignMessageBatchResult | null>(null);
+  const [approvalResult, setApprovalResult] = useState<CampaignMessageBatchResult | null>(null);
+  const [sendResult, setSendResult] = useState<CampaignMessageBatchResult | null>(null);
+  const [sending, setSending] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const selectableContacts = useMemo(() => [...readyContacts, ...skippedContacts], [readyContacts, skippedContacts]);
+  const selectableContactIds = useMemo(() => selectableContacts.map((contact) => contact.id), [selectableContacts]);
+  const selectableContactKey = selectableContactIds.join("|");
+  const readyContactIds = useMemo(() => readyContacts.map((contact) => contact.id), [readyContacts]);
+  const readyContactKey = readyContactIds.join("|");
+  // Ready contacts are checked by default; not-ready contacts stay visible
+  // and selectable so the API can either prepare them or return exact skip
+  // reasons after the user intentionally includes them.
+  const recipientContacts = selectableContacts.filter((contact) => selectedLeadIds.includes(contact.id));
+  const allSelected = selectableContacts.length > 0 && selectedLeadIds.length === selectableContacts.length;
+  const someSelected = selectedLeadIds.length > 0 && !allSelected;
+  // Preview can show any ready contact regardless of whether it's checked -
+  // it's just "what would this look like", independent of who's included.
+  // An empty previewLeadId keeps the right side on the editable template.
+  const previewContact = previewLeadId ? selectableContacts.find((contact) => contact.id === previewLeadId) : undefined;
+  const showingTemplate = !previewContact;
+  const renderedSubject = renderBulkTemplatePreview(subject, previewContact, product);
+  const renderedBody = renderBulkTemplatePreview(body, previewContact, product);
+  const previewOverride = previewContact ? emailOverrides[previewContact.id] : undefined;
+  const previewSubject = previewOverride?.subject ?? renderedSubject;
+  const previewBody = previewOverride?.body ?? renderedBody;
+  const selectedOverridesValid = selectedLeadIds.every((leadId) => {
+    const override = emailOverrides[leadId];
+    return !override || Boolean(override.subject.trim() && override.body.trim());
+  });
+  const canSendSelected = Boolean(subject.trim() && body.trim() && recipientContacts.length && selectedOverridesValid && !sending);
+
+  useEffect(() => {
+    setSelectedLeadIds((current) => {
+      const validCurrent = current.filter((leadId) => selectableContactIds.includes(leadId));
+      return validCurrent.length ? validCurrent : readyContactIds;
+    });
+  }, [readyContactKey, selectableContactKey]);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
+
+  const toggleSelectedLead = (leadId: string) => {
+    setPreparedResult(null);
+    setApprovalResult(null);
+    setSendResult(null);
+    setSelectedLeadIds((current) =>
+      current.includes(leadId) ? current.filter((id) => id !== leadId) : [...current, leadId],
+    );
+  };
+
+  const toggleSelectAll = () => {
+    setPreparedResult(null);
+    setApprovalResult(null);
+    setSendResult(null);
+    setSelectedLeadIds(allSelected ? [] : selectableContactIds);
+  };
+
+  const resetBatchState = () => {
+    setPreparedResult(null);
+    setApprovalResult(null);
+    setSendResult(null);
+  };
+
+  const updatePreviewEmail = (field: keyof BulkEmailOverride, value: string) => {
+    if (!previewContact) return;
+    resetBatchState();
+    setEmailOverrides((current) => {
+      const currentOverride = current[previewContact.id] || {
+        subject: previewSubject,
+        body: previewBody,
+      };
+      return {
+        ...current,
+        [previewContact.id]: {
+          ...currentOverride,
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const sendSelectedEmails = async () => {
+    if (!canSendSelected) return;
+    if (!gmailConnected) {
+      showToast({
+        title: "Connect Gmail first",
+        message: "Selected outreach sends from the connected Gmail account.",
+        tone: "amber",
+      });
+      return;
+    }
+    setSending(true);
+    setPreparedResult(null);
+    setApprovalResult(null);
+    setSendResult(null);
+    try {
+      const preparedAggregate = emptyCampaignMessageBatchResult();
+      const approvalAggregate = emptyCampaignMessageBatchResult();
+      const sendAggregate = emptyCampaignMessageBatchResult();
+      const editedIds = selectedLeadIds.filter((leadId) => Boolean(emailOverrides[leadId]));
+      const defaultTemplateIds = selectedLeadIds.filter((leadId) => !emailOverrides[leadId]);
+
+      if (defaultTemplateIds.length) {
+        await prepareApproveAndSend({
+          leadIds: defaultTemplateIds,
+          subject: subject.trim(),
+          body: body.trim(),
+          onCreateDrafts,
+          onApproveDrafts,
+          onSendDrafts,
+          onUpdateMessage,
+          preparedAggregate,
+          approvalAggregate,
+          sendAggregate,
+        });
+      }
+
+      for (const leadId of editedIds) {
+        const override = emailOverrides[leadId];
+        if (!override) continue;
+        await prepareApproveAndSend({
+          leadIds: [leadId],
+          subject: override.subject.trim(),
+          body: override.body.trim(),
+          onCreateDrafts,
+          onApproveDrafts,
+          onSendDrafts,
+          onUpdateMessage,
+          preparedAggregate,
+          approvalAggregate,
+          sendAggregate,
+        });
+      }
+
+      setPreparedResult(preparedAggregate);
+      setApprovalResult(approvalAggregate);
+      setSendResult(sendAggregate);
+
+      const skippedCount = preparedAggregate.skipped.length + approvalAggregate.skipped.length + sendAggregate.skipped.length;
+      const failedCount = sendAggregate.failed_count;
+      const sentCount = sendAggregate.sent_count;
+      showToast({
+        title: sentCount ? "Emails sent" : "No emails sent",
+        message: `${sentCount} sent · ${skippedCount} skipped${failedCount ? ` · ${failedCount} failed` : ""}`,
+        tone: sentCount ? "green" : "amber",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast({ title: "Sending failed", message, tone: "red" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <section className="bulk-outreach-panel">
+      <header className="bulk-outreach-header">
+        <div>
+          <strong>Send outreach</strong>
+          <p>
+            Select contacts, review the email, then send from your connected Gmail.
+          </p>
+        </div>
+        <button className="link-button" type="button" aria-label="Close outreach batch" onClick={onClose}>
+          <X size={17} />
+        </button>
+      </header>
+
+      <div className="bulk-outreach-workspace">
+        <section className="bulk-outreach-section bulk-recipients-section" aria-label="Recipients">
+          <div className="bulk-section-heading">
+            <span>Batch</span>
+            <strong>{selectedLeadIds.length} selected</strong>
+          </div>
+          <div className="bulk-draft-category">
+            <button
+              className={`bulk-draft-row${showingTemplate ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setPreviewLeadId("")}
+            >
+              <Mail size={13} />
+              <span>
+                <strong>Draft template</strong>
+                <em>Subject and body</em>
+              </span>
+            </button>
+          </div>
+          <div className="bulk-recipient-list">
+            {selectableContacts.length ? (
+              <>
+                <div className="bulk-recipient-list-head">
+                  <label>
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      aria-label="Select all contacts"
+                      onChange={toggleSelectAll}
+                    />
+                    <strong>All contacts</strong>
+                  </label>
+                  <span>{selectedLeadIds.length} of {selectableContacts.length}</span>
+                </div>
+                {readyContacts.map((contact) => (
+                  <div
+                    className={`bulk-recipient-row${contact.id === previewContact?.id ? " is-active" : ""}`}
+                    key={contact.id}
+                  >
+                    <input
+                      aria-label={`Include ${contact.company_name}`}
+                      type="checkbox"
+                      checked={selectedLeadIds.includes(contact.id)}
+                      onChange={() => toggleSelectedLead(contact.id)}
+                    />
+                    <button
+                      className="bulk-recipient-select"
+                      type="button"
+                      onClick={() => setPreviewLeadId(contact.id)}
+                    >
+                      <strong>{contact.company_name}</strong>
+                      <em>{bulkOutreachEmail(contact)}</em>
+                    </button>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <p className="bulk-empty-note">No contacts in this run yet.</p>
+            )}
+            {skippedContacts.length ? (
+              <>
+                <div className="bulk-recipient-list-divider">
+                  <span>{skippedContacts.length} need review</span>
+                </div>
+                {skippedContacts.map((contact) => (
+                  <div
+                    className={`bulk-recipient-row is-warning${contact.id === previewContact?.id ? " is-active" : ""}`}
+                    key={contact.id}
+                  >
+                    <input
+                      aria-label={`Include ${contact.company_name}`}
+                      type="checkbox"
+                      checked={selectedLeadIds.includes(contact.id)}
+                      onChange={() => toggleSelectedLead(contact.id)}
+                    />
+                    <button
+                      className="bulk-recipient-select"
+                      type="button"
+                      onClick={() => setPreviewLeadId(contact.id)}
+                    >
+                      <strong>{contact.company_name}</strong>
+                      <em>{bulkOutreachEmail(contact) || bulkOutreachSkipReason(contact)}</em>
+                    </button>
+                  </div>
+                ))}
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="bulk-outreach-section bulk-message-section">
+          <div className="bulk-message-heading">
+            <div>
+              <span>{showingTemplate ? "Template" : "Preview"}</span>
+              <strong>{showingTemplate ? "Draft content" : "Selected email"}</strong>
+            </div>
+          </div>
+          {showingTemplate ? (
+            <div className="bulk-compose-fields">
+              <label className="bulk-field">
+                <span>Subject</span>
+                <input
+                  value={subject}
+                  onChange={(event) => {
+                    resetBatchState();
+                    setSubject(event.target.value);
+                  }}
+                />
+              </label>
+              <label className="bulk-field">
+                <span>Body</span>
+                <textarea
+                  value={body}
+                  onChange={(event) => {
+                    resetBatchState();
+                    setBody(event.target.value);
+                  }}
+                />
+              </label>
+              <div className="bulk-token-row" aria-label="Supported template tokens">
+                {bulkOutreachTokens.map((token) => (
+                  <code key={token}>{token}</code>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="bulk-message-preview">
+              <label className="bulk-field">
+                <span>Subject</span>
+                <input
+                  value={previewSubject}
+                  onChange={(event) => updatePreviewEmail("subject", event.target.value)}
+                />
+              </label>
+              <label className="bulk-field">
+                <span>Body</span>
+                <textarea
+                  value={previewBody}
+                  onChange={(event) => updatePreviewEmail("body", event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <footer className="bulk-outreach-footer">
+        <div className="bulk-send-summary">
+          <strong>{recipientContacts.length} selected</strong>
+          <span>
+            {gmailConnected
+              ? "Unavailable contacts will be skipped."
+              : "Connect Gmail before sending. Unavailable contacts will be skipped."}
+          </span>
+        </div>
+        <button
+          className="runbtn bulk-send-selected"
+          type="button"
+          disabled={!canSendSelected}
+          onClick={() => void sendSelectedEmails()}
+        >
+          <Send size={14} />
+          {sending ? "Sending..." : "Send"}
+        </button>
+        {!gmailConnected ? (
+          <p className="bulk-warning">Connect Gmail before sending selected emails.</p>
+        ) : null}
+        {preparedResult?.skipped.length || approvalResult?.skipped.length || sendResult?.skipped.length ? (
+          <details className="bulk-skipped-list">
+            <summary>Batch notes</summary>
+            <ul>
+              {[...(preparedResult?.skipped || []), ...(approvalResult?.skipped || []), ...(sendResult?.skipped || [])]
+                .slice(0, 8)
+                .map((skip, index) => (
+                  <li key={`${skip.lead_id || skip.message_id || index}`}>
+                    <strong>{skip.company_name || "Message"}</strong>
+                    <span>{skip.reason}</span>
+                  </li>
+                ))}
+            </ul>
+          </details>
+        ) : null}
+      </footer>
+    </section>
+  );
+}
+
+function emptyCampaignMessageBatchResult(): CampaignMessageBatchResult {
+  return {
+    messages: [],
+    skipped: [],
+    created_count: 0,
+    reused_count: 0,
+    approved_count: 0,
+    sent_count: 0,
+    failed_count: 0,
+  };
+}
+
+function appendCampaignMessageBatchResult(
+  target: CampaignMessageBatchResult,
+  source: CampaignMessageBatchResult,
+) {
+  target.messages = mergeBatchMessages(target.messages, source.messages);
+  target.skipped.push(...source.skipped);
+  target.created_count += source.created_count;
+  target.reused_count += source.reused_count;
+  target.approved_count += source.approved_count;
+  target.sent_count += source.sent_count;
+  target.failed_count += source.failed_count;
+}
+
+async function prepareApproveAndSend({
+  approvalAggregate,
+  body,
+  leadIds,
+  onApproveDrafts,
+  onCreateDrafts,
+  onSendDrafts,
+  onUpdateMessage,
+  preparedAggregate,
+  sendAggregate,
+  subject,
+}: {
+  approvalAggregate: CampaignMessageBatchResult;
+  body: string;
+  leadIds: string[];
+  onApproveDrafts: (input?: { message_ids?: string[]; notes?: string | null }) => Promise<CampaignMessageBatchResult | null>;
+  onCreateDrafts: (input: CampaignOutreachDraftInput) => Promise<CampaignMessageBatchResult | null>;
+  onSendDrafts: (input?: { message_ids?: string[] }) => Promise<CampaignMessageBatchResult | null>;
+  onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
+  preparedAggregate: CampaignMessageBatchResult;
+  sendAggregate: CampaignMessageBatchResult;
+  subject: string;
+}) {
+  const prepared = await onCreateDrafts({
+    audience: "selected",
+    lead_ids: leadIds,
+    subject,
+    body,
+    approach_tag: "bulk_outreach",
+  });
+  if (!prepared) return;
+  appendCampaignMessageBatchResult(preparedAggregate, prepared);
+
+  let currentMessages = prepared.messages;
+  const editableMessages = currentMessages.filter((message) => (
+    message.status === "pending_approval" || message.status === "draft"
+  ));
+  if (leadIds.length === 1 && editableMessages.length) {
+    await Promise.all(
+      editableMessages.map((message) => onUpdateMessage(message.id, { subject, body })),
+    );
+  }
+
+  const draftIds = editableMessages.map((message) => message.id);
+  if (draftIds.length) {
+    const approved = await onApproveDrafts({ message_ids: draftIds });
+    if (approved) {
+      appendCampaignMessageBatchResult(approvalAggregate, approved);
+      currentMessages = mergeBatchMessages(currentMessages, approved.messages);
+    }
+  }
+
+  const approvedIds = currentMessages
+    .filter((message) => message.status === "approved")
+    .map((message) => message.id);
+  if (approvedIds.length) {
+    const sent = await onSendDrafts({ message_ids: approvedIds });
+    if (sent) {
+      appendCampaignMessageBatchResult(sendAggregate, sent);
+    }
+  }
+}
+
 function ContactCard({
   contact,
   onOpen,
@@ -658,11 +1269,12 @@ function ContactCard({
   onOpen: () => void;
   selected?: boolean;
 }) {
-  const score = contactScore(contact);
+  const score = contactFitScore(contact);
   const fitStatus = displayFitStatus(contact);
-  const evidence = contactEvidenceLine(contact);
+  const evidence = contactListEvidenceLine(contact);
+  const category = contactListCategoryLabel(contact);
+  const geography = contact.geography || contact.research?.geography || "";
   const missing = contactMissingEvidenceLine(contact);
-  const verification = verificationStatus(contact);
   const policy = contactPolicyStatus(contact);
   const blocked = isContactBlocked(contact);
   const cardClass = [
@@ -688,7 +1300,7 @@ function ContactCard({
         }}
       >
         <div className="contact-main">
-          <span className={`score-ring ${scoreClass(score)}`}>
+          <span className={`score-ring ${scoreClass(score)}`} title="Fit score">
             <strong>{score}</strong>
           </span>
           <span className="contact-identity">
@@ -696,16 +1308,16 @@ function ContactCard({
               <strong>{contact.company_name}</strong>
               <em className={`fit-badge ${fitStatus.className}`}>{fitStatus.label}</em>
             </span>
-            <small>
-              {contact.research?.business_type || contact.description || "Business"}
-              {contact.geography || contact.research?.geography ? (
+            <small className="contact-meta-line">
+              <span>{category}</span>
+              {geography ? (
                 <>
                   <MapPin size={12} />
-                  {contact.geography || contact.research?.geography}
+                  <span>{geography}</span>
                 </>
               ) : null}
             </small>
-            <span className="contact-evidence-line">{evidence}</span>
+            {evidence ? <span className="contact-evidence-line">{evidence}</span> : null}
             {missing ? <span className="contact-missing-line">{missing}</span> : null}
           </span>
         </div>
@@ -715,33 +1327,12 @@ function ContactCard({
               {contactPolicyStatusLabel(policy)}
             </span>
           ) : null}
-          <span className={`verification-label verification-${verification}`}>
-            {verificationStatusLabel(verification)}
+          <span className={`quality-pill ${contactReachabilityClass(contact)}`}>
+            {contactReadinessLabel(contact)}
           </span>
-          {contact.contact_email || contact.research?.contact_email ? (
-            <span className="contact-icon has" title="Email found">
-              <Mail size={15} />
-            </span>
-          ) : (
-            <span className="contact-icon missing" title="No email found">
-              <Mail size={15} />
-            </span>
-          )}
-          {getPhone(contact) ? (
-            <span className="contact-icon has" title="Phone found">
-              <Phone size={15} />
-            </span>
-          ) : (
-            <span className="contact-icon missing" title="No phone found">
-              <Phone size={15} />
-            </span>
-          )}
-          {!isReachableContact(contact) ? (
-            <span className="no-contact-pill">
-              <AlertTriangle size={13} />
-              No contact
-            </span>
-          ) : null}
+          <span className={`quality-pill ${contactSourceQualityClass(contact)}`}>
+            {contactSourceQualityLabel(contact)}
+          </span>
         </div>
       </article>
     </li>
@@ -776,7 +1367,6 @@ function ContactDrawer({
   onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
 }) {
   const { showToast } = useToast();
-  const score = contactScore(contact);
   const currentReviewStatus = reviewStatus(contact);
   const agentAssessment = getAgentAssessment(contact);
   const policyStatus = contactPolicyStatus(contact);
@@ -824,8 +1414,13 @@ function ContactDrawer({
     ...(contact.research?.disqualifiers || []),
     ...(contact.qualification?.criteria || []).flatMap((criterion) => criterion.evidence || []),
   ].filter(Boolean);
+  const drawerCategory = contactListCategoryLabel(contact);
+  const drawerGeography = contact.geography || contact.research?.geography || "";
+  const drawerSummary = contactDrawerSummary(contact);
   const fitStatus = displayFitStatus(contact);
-  const fitScore = agentAssessment?.score ?? score;
+  const fitScore = contactFitScore(contact);
+  const reachabilityScore = contactReachabilityScore(contact);
+  const sourceQualityScore = contactSourceQualityScore(contact);
   const verification = verificationStatus(contact);
   const verificationDetails = verificationDetailChips(contact.verification_details);
   const activityItems = contactActivityItems(contact, message);
@@ -1034,14 +1629,19 @@ function ContactDrawer({
       <aside className="contact-drawer-panel" aria-label="Contact details">
         <header className="contact-drawer-header">
           <div className="drawer-title-row">
-            <span className={`score-ring large ${scoreClass(score)}`}>
-              <strong>{score}</strong>
+            <span className={`score-ring large ${scoreClass(fitScore)}`} title="Fit score">
+              <strong>{fitScore}</strong>
             </span>
             <div className="drawer-title-copy">
               <h2>{contact.company_name}</h2>
-              <p>
-                {contact.research?.business_type || contact.description || "Business"}
-                {contact.geography || contact.research?.geography ? ` · ${contact.geography || contact.research?.geography}` : ""}
+              <p className="drawer-subtitle">
+                <span>{drawerCategory}</span>
+                {drawerGeography ? (
+                  <>
+                    <MapPin size={12} />
+                    <span>{drawerGeography}</span>
+                  </>
+                ) : null}
               </p>
             </div>
           </div>
@@ -1059,11 +1659,11 @@ function ContactDrawer({
               <div className="drawer-availability-row">
                 <span className={`availability-pill verification-${verification}`}>
                   <Mail size={13} />
-                  Email · {email ? emailAvailabilityLabel(contact) : "missing"}
+                  Contact · {contactReadinessLabel(contact)} · {reachabilityScore}
                 </span>
-                <span className={phone ? "availability-pill has-contact" : "availability-pill is-muted"}>
-                  <Phone size={13} />
-                  {phone ? "Phone" : "No phone"}
+                <span className={`availability-pill ${contactSourceQualityClass(contact)}`}>
+                  <Globe size={13} />
+                  Source · {sourceQualityTierLabel(contact)} · {sourceQualityScore}
                 </span>
                 {blocked ? (
                   <span className={`availability-pill policy-${policyStatus}`}>
@@ -1095,7 +1695,7 @@ function ContactDrawer({
             <div className="drawer-body">
               {activeTab === "overview" ? (
                 <>
-                  <p className="drawer-summary">{contact.research?.summary || contact.description || "No research captured yet."}</p>
+                  <p className="drawer-summary">{drawerSummary}</p>
 
                   <dl className="drawer-detail-list drawer-info-card">
                     <DrawerRow icon={<MapPin size={16} />} label="Address">
@@ -1221,7 +1821,7 @@ function ContactDrawer({
                       <h3>Agent assessment</h3>
                       <span>
                         {agentAssessment
-                          ? `${agentFitStatusLabel(agentAssessment.fitStatus)} · ${agentAssessment.score}`
+                          ? `${agentFitStatusLabel(agentAssessment.fitStatus)} · fit ${fitScore}`
                           : "Not assessed"}
                       </span>
                     </div>
@@ -1507,6 +2107,27 @@ function isReachableContact(contact: DiscoveryResult) {
   );
 }
 
+function isBulkOutreachReadyContact(contact: DiscoveryResult) {
+  return Boolean(
+    !isContactBlocked(contact)
+      && canShortlistContact(contact)
+      && isVerifiedContact(contact)
+      && bulkOutreachEmail(contact),
+  );
+}
+
+function bulkOutreachEmail(contact: DiscoveryResult) {
+  return contact.contact_email || contact.research?.contact_email || "";
+}
+
+function bulkOutreachSkipReason(contact: DiscoveryResult) {
+  if (isContactBlocked(contact)) return contactPolicyDescription(contact);
+  if (!canShortlistContact(contact)) return "Needs a Good fit or Maybe decision.";
+  if (!bulkOutreachEmail(contact)) return "Missing email.";
+  if (!isVerifiedContact(contact)) return "Email is not verified.";
+  return "Not ready for outreach.";
+}
+
 function contactStatusLabel(contact: DiscoveryResult) {
   if (contact.qualification?.qualified) return "Qualified";
   if (contact.status === "disqualified") return "Disqualified";
@@ -1638,9 +2259,11 @@ function getAgentAssessment(contact: DiscoveryResult) {
   const fitStatus = qualification.fit_status || deriveAgentFitStatus(qualification.qualified, qualification.score, qualification.recommended_next_step);
   const criteriaEvidence = (qualification.criteria || []).flatMap((criterion) => criterion.evidence || []);
   const criteriaMissing = (qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || []);
+  const scoreBreakdown = getScoreBreakdown(contact);
   return {
     fitStatus,
-    score: Math.max(0, Math.min(100, Math.round(qualification.score))),
+    score: clampScore(qualification.score),
+    scoreBreakdown,
     rationale: qualification.rationale || "No rationale captured.",
     positiveSignals: [...new Set([...(qualification.positive_signals || []), ...criteriaEvidence])],
     missingEvidence: [...new Set([...(qualification.missing_evidence || []), ...criteriaMissing])],
@@ -1664,14 +2287,90 @@ function canShortlistContact(contact: DiscoveryResult) {
 
 function displayFitStatus(contact: DiscoveryResult): { label: string; className: string } {
   const status = reviewStatus(contact);
-  if (status === "good_fit") return { label: "Good fit", className: "fit-good" };
-  if (status === "maybe") return { label: "Maybe", className: "fit-maybe" };
+  if (status === "good_fit") return { label: "Reviewed fit", className: "fit-good" };
+  if (status === "maybe") return { label: "Review maybe", className: "fit-maybe" };
   if (status === "not_fit") return { label: "Not fit", className: "fit-bad" };
   const assessment = getAgentAssessment(contact);
-  if (assessment?.fitStatus === "good_fit") return { label: "Agent good fit", className: "fit-good" };
-  if (assessment?.fitStatus === "maybe") return { label: "Agent maybe", className: "fit-maybe" };
-  if (assessment?.fitStatus === "not_fit") return { label: "Agent not fit", className: "fit-bad" };
+  if (assessment?.fitStatus === "good_fit") return { label: "Strong fit", className: "fit-good" };
+  if (assessment?.fitStatus === "maybe") return { label: "Possible fit", className: "fit-maybe" };
+  if (assessment?.fitStatus === "not_fit") return { label: "Weak fit", className: "fit-bad" };
   return { label: "Needs review", className: "fit-neutral" };
+}
+
+function getScoreBreakdown(contact: DiscoveryResult) {
+  const breakdown = contact.qualification?.score_breakdown;
+  return {
+    fitScore: clampScore(breakdown?.fit_score ?? contact.qualification?.score ?? contact.research?.confidence ?? 0),
+    reachabilityScore: clampScore(breakdown?.reachability_score ?? derivedReachabilityScore(contact)),
+    sourceQualityScore: clampScore(breakdown?.source_quality_score ?? contact.research?.confidence ?? 0),
+    notes: breakdown?.scoring_notes || [],
+  };
+}
+
+function clampScore(value: number | null | undefined) {
+  return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
+}
+
+function contactFitScore(contact: DiscoveryResult) {
+  return getScoreBreakdown(contact).fitScore;
+}
+
+function contactReachabilityScore(contact: DiscoveryResult) {
+  return getScoreBreakdown(contact).reachabilityScore;
+}
+
+function contactSourceQualityScore(contact: DiscoveryResult) {
+  return getScoreBreakdown(contact).sourceQualityScore;
+}
+
+function derivedReachabilityScore(contact: DiscoveryResult) {
+  let score = 0;
+  if (bulkOutreachEmail(contact)) score += 40;
+  if (getPhone(contact)) score += 25;
+  const verification = verificationStatus(contact);
+  if (verification === "valid") score += 20;
+  if (verification === "risky") score -= 10;
+  if (verification === "invalid") score -= 35;
+  return score;
+}
+
+function contactReadinessLabel(contact: DiscoveryResult) {
+  const score = contactReachabilityScore(contact);
+  const email = bulkOutreachEmail(contact);
+  if (verificationStatus(contact) === "invalid") return "Contact invalid";
+  if (score >= 75 && email && isVerifiedContact(contact)) return "Email verified";
+  if (score >= 65) return "Reachable";
+  if (email) return "Email found";
+  if (getPhone(contact)) return "Phone only";
+  return "No contact";
+}
+
+function contactReachabilityClass(contact: DiscoveryResult) {
+  const score = contactReachabilityScore(contact);
+  if (verificationStatus(contact) === "invalid") return "quality-bad";
+  if (score >= 65) return "quality-good";
+  if (score >= 25) return "quality-warn";
+  return "quality-muted";
+}
+
+function sourceQualityTierLabel(contact: DiscoveryResult) {
+  const score = contactSourceQualityScore(contact);
+  if (score >= 80) return "Strong";
+  if (score >= 65) return "OK";
+  if (score >= 45) return "Weak";
+  return "Unclear";
+}
+
+function contactSourceQualityLabel(contact: DiscoveryResult) {
+  return `${sourceQualityTierLabel(contact)} source`;
+}
+
+function contactSourceQualityClass(contact: DiscoveryResult) {
+  const score = contactSourceQualityScore(contact);
+  if (score >= 80) return "quality-good";
+  if (score >= 65) return "quality-neutral";
+  if (score >= 45) return "quality-warn";
+  return "quality-muted";
 }
 
 function contactEvidenceLine(contact: DiscoveryResult) {
@@ -1685,12 +2384,117 @@ function contactEvidenceLine(contact: DiscoveryResult) {
   return truncateText(evidence, 128);
 }
 
+function contactListCategoryLabel(contact: DiscoveryResult) {
+  const explicitType = cleanContactListText(contact.research?.business_type || "");
+  if (explicitType && !isNoisyEnrichmentText(explicitType)) {
+    return truncateText(explicitType, 42);
+  }
+
+  const combined = [
+    contact.company_name,
+    contact.description,
+    contact.research?.summary,
+    ...(contact.research?.signals || []),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (/paint|stain|wallpaper|drywall|coating/i.test(combined)) return "Painting provider";
+  if (/contract|renovation|repair|install/i.test(combined)) return "Service contractor";
+  if (/landscap|roof|plumb|hvac|electric|clean/i.test(combined)) return "Local service provider";
+  return "Local business";
+}
+
+function contactListEvidenceLine(contact: DiscoveryResult) {
+  const assessment = getAgentAssessment(contact);
+  const candidates = [
+    assessment?.positiveSignals[0],
+    contact.research?.signals?.[0],
+    assessment?.rationale,
+    contact.research?.summary,
+    contact.description,
+  ];
+  for (const candidate of candidates) {
+    const cleaned = cleanContactListText(candidate || "");
+    if (cleaned && !isNoisyEnrichmentText(cleaned) && !isLowValueContactListText(cleaned)) {
+      return truncateText(cleaned, 88);
+    }
+  }
+  if (bulkOutreachEmail(contact) && isVerifiedContact(contact)) return "Verified email available";
+  if (bulkOutreachEmail(contact)) return "Email available";
+  if (getPhone(contact)) return "Phone available";
+  return "";
+}
+
+function contactDrawerSummary(contact: DiscoveryResult) {
+  const summary = cleanContactListText(contact.research?.summary || "");
+  if (summary && !isNoisyEnrichmentText(summary) && summary.length <= 260) {
+    return summary;
+  }
+
+  const assessment = getAgentAssessment(contact);
+  const rationale = cleanContactListText(assessment?.rationale || "");
+  if (rationale && !isNoisyEnrichmentText(rationale)) {
+    return truncateText(rationale, 260);
+  }
+
+  const signals = [
+    ...(assessment?.positiveSignals || []),
+    ...(contact.research?.signals || []),
+  ]
+    .map(cleanContactListText)
+    .filter((signal) => signal && !isNoisyEnrichmentText(signal) && !isLowValueContactListText(signal))
+    .slice(0, 2);
+  const geography = contact.geography || contact.research?.geography || "";
+  const website = contact.website_url || contact.research?.website_url || "";
+  const contactSignal = bulkOutreachEmail(contact)
+    ? isVerifiedContact(contact)
+      ? "a verified email"
+      : "an email"
+    : getPhone(contact)
+      ? "a phone number"
+      : "";
+  const description = [
+    `${contact.company_name} is listed as a ${contactListCategoryLabel(contact).toLowerCase()}${geography ? ` in ${geography}` : ""}.`,
+    website ? `Public website evidence is available from ${displayUrl(website)}.` : "",
+    contactSignal ? `ScoutLead found ${contactSignal} for outreach review.` : "",
+    signals.length ? `Signals: ${signals.join("; ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return description || "No research summary captured yet.";
+}
+
+function cleanContactListText(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/\bfrom\s+\d+\s+inspected\s+pages?\b/gi, "")
+    .replace(/\bcontact\s+us\b/gi, "")
+    .trim()
+    .replace(/[|,;\s]+$/g, "")
+    .trim();
+}
+
+function isNoisyEnrichmentText(value: string) {
+  return /website enrichment found|inspected pages|skip to content|home kitchen cabinet|call us or fill out/i.test(value);
+}
+
+function isLowValueContactListText(value: string) {
+  return /^(public email|email found|phone found|verified|unknown)$/i.test(value.trim());
+}
+
 function contactMissingEvidenceLine(contact: DiscoveryResult) {
-  const missing = getAgentAssessment(contact)?.missingEvidence[0];
+  const missing = getAgentAssessment(contact)?.missingEvidence.find((item) => {
+    const cleaned = cleanContactListText(item || "");
+    return cleaned && !isNoisyMissingEvidence(cleaned);
+  });
   if (missing) return `Missing: ${truncateText(missing, 110)}`;
   if (!contact.contact_email && !contact.research?.contact_email) return `Missing: email`;
   if (!isVerifiedContact(contact)) return `Missing: verified contact`;
   return "";
+}
+
+function isNoisyMissingEvidence(value: string) {
+  return /solo|owner[-\s]?operated|company size|number of employees|employee count|crew size|owner name not found/i.test(value);
 }
 
 function messageStatusLabel(status: string) {
@@ -1791,6 +2595,47 @@ function contactActivityItems(contact: DiscoveryResult, message: Message | undef
   }
 
   return items;
+}
+
+function renderBulkTemplatePreview(
+  template: string,
+  contact: DiscoveryResult | undefined,
+  product: Product | undefined,
+) {
+  if (!contact) return template.trim();
+  const geography = contact.geography || contact.research?.geography || product?.target_geography || "";
+  const fitReason =
+    contact.qualification?.rationale ||
+    contact.research?.summary ||
+    contact.description ||
+    "";
+  const contactName = getContactName(contact);
+  const tokens: Record<string, string> = {
+    business_name: contact.company_name,
+    company_name: contact.company_name,
+    contact_name: contactName || `${contact.company_name} team`,
+    recipient_name: contactName || `${contact.company_name} team`,
+    geography,
+    service_area: geography,
+    fit_reason: fitReason,
+    website_url: contact.website_url || contact.research?.website_url || "",
+    product_name: product?.product_name || "our product",
+    product_description: product?.product_description || "",
+    value_proposition: product?.value_proposition || "",
+    problem: product?.problem_being_solved || "field-service quoting",
+    outreach_objective: product?.outreach_objective || "",
+  };
+  return template
+    .replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_match, key: string) => tokens[key.toLowerCase()] || "")
+    .trim();
+}
+
+function mergeBatchMessages(current: Message[], updates: Message[]) {
+  const merged = new Map(current.map((message) => [message.id, message]));
+  for (const message of updates) {
+    merged.set(message.id, message);
+  }
+  return Array.from(merged.values());
 }
 
 function activityToneForVerification(status: ContactVerificationStatus): ContactActivityTone {
