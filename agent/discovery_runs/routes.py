@@ -25,7 +25,13 @@ from insights.service import CampaignInsightService
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 from messages.repository import MessageRepository
-from messages.schemas import MessageRead
+from messages.schemas import (
+    CampaignMessageApproval,
+    CampaignMessageBatchResult,
+    CampaignMessageSend,
+    CampaignOutreachDraftCreate,
+    MessageRead,
+)
 from messages.service import MessageService
 from products.repository import ProductRepository
 from shared.errors import ConflictError
@@ -339,6 +345,54 @@ def draft_discovery_shortlist(
         llm=services.llm,
         workspace_id=auth.workspace_id,
     ).create_outreach_drafts_for_run(run_id)
+
+
+@router.post("/{run_id}/campaign-drafts", response_model=CampaignMessageBatchResult)
+def create_discovery_campaign_drafts(
+    run_id: str,
+    draft: CampaignOutreachDraftCreate,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
+    return MessageService(
+        session=session,
+        email=services.email,
+        workspace_id=auth.workspace_id,
+    ).create_campaign_outreach_drafts(run_id, draft)
+
+
+@router.post("/{run_id}/campaign-drafts/approve", response_model=CampaignMessageBatchResult)
+def approve_discovery_campaign_drafts(
+    run_id: str,
+    approval: CampaignMessageApproval,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
+    return MessageService(
+        session=session,
+        email=services.email,
+        workspace_id=auth.workspace_id,
+    ).approve_campaign_messages(run_id, approval)
+
+
+@router.post("/{run_id}/campaign-drafts/send", response_model=CampaignMessageBatchResult)
+def send_discovery_campaign_drafts(
+    run_id: str,
+    send: CampaignMessageSend,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
+    return MessageService(
+        session=session,
+        email=services.email,
+        workspace_id=auth.workspace_id,
+    ).send_campaign_messages(run_id, send)
 
 
 @router.get("/{run_id}/agent-runs", response_model=list[AgentRunRead])

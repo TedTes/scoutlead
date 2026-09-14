@@ -18,7 +18,16 @@ from leads.schemas import (
     QualificationResult,
     SuppressionScope,
 )
-from messages.schemas import MessageApproval, MessageReplyMark, MessageStatus, OutreachDraft
+from messages.schemas import (
+    CampaignMessageApproval,
+    CampaignMessageSend,
+    CampaignOutreachAudience,
+    CampaignOutreachDraftCreate,
+    MessageApproval,
+    MessageReplyMark,
+    MessageStatus,
+    OutreachDraft,
+)
 from messages.service import MessageService
 from products.repository import ProductRepository
 from shared.errors import ConfigurationError, ConflictError
@@ -55,6 +64,63 @@ class FailingEmail:
 
     def send(self, *, product, lead, message):
         raise self.exc
+
+
+def _create_campaign_fixture(session):
+    product = ProductRepository(session).create(product_input())
+    campaign = CampaignRepository(session).create(
+        CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
+    )
+    return product, campaign, LeadRepository(session)
+
+
+def _create_fit_lead(
+    lead_repo: LeadRepository,
+    *,
+    campaign_id: str,
+    product_id: str,
+    company_name: str,
+    email: str | None,
+    verified: bool = True,
+    shortlisted: bool = False,
+):
+    lead = lead_repo.create_from_seed(
+        campaign_id,
+        product_id,
+        LeadSeedInput(
+            company_name=company_name,
+            website_url=f"https://{company_name.lower().replace(' ', '-')}.example",
+            contact_email=email,
+            geography="Toronto, ON",
+            description="Residential painting company",
+        ),
+    )
+    lead_repo.attach_qualification(
+        lead.id,
+        QualificationResult(
+            qualified=True,
+            fit_status=AgentFitStatus.GOOD_FIT,
+            score=90,
+            rationale="Residential painting business with contact info.",
+            positive_signals=["Residential painting business"],
+            missing_evidence=[],
+            risks=[],
+            recommended_next_step="Draft outreach.",
+        ),
+    )
+    if shortlisted:
+        lead_repo.update(lead.id, LeadUpdate(shortlisted=True))
+    if verified and email:
+        lead_repo.attach_verification(
+            lead.id,
+            LeadVerification(
+                status=ContactVerificationStatus.VALID,
+                provider="syntax",
+                reason="Email syntax is valid.",
+                score=80,
+            ),
+        )
+    return lead_repo.get(lead.id)
 
 
 def test_shortlisted_lead_can_generate_one_pending_outreach_draft() -> None:
@@ -332,6 +398,161 @@ def test_draft_shortlist_skips_unverified_and_not_fit_leads() -> None:
         )
 
         assert [message.lead_id for message in messages] == [verified.id]
+
+
+def test_campaign_template_drafts_selected_contacts_and_reuses_existing() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product, campaign, lead_repo = _create_campaign_fixture(session)
+        selected = _create_fit_lead(
+            lead_repo,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            company_name="Cedar Sons Painting",
+            email="owner@cedar.example",
+        )
+        _create_fit_lead(
+            lead_repo,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            company_name="Maple Ridge Painting",
+            email="owner@maple.example",
+        )
+
+        service = MessageService(session=session, email=EmailTool())
+        result = service.create_campaign_outreach_drafts(
+            campaign.id,
+            CampaignOutreachDraftCreate(
+                audience=CampaignOutreachAudience.SELECTED,
+                lead_ids=[selected.id],
+                subject="Question for {{business_name}}",
+                body=(
+                    "Hello {{recipient_name}}, {{fit_reason}} "
+                    "Would {{product_name}} help your quoting workflow?"
+                ),
+            ),
+        )
+        second_result = service.create_campaign_outreach_drafts(
+            campaign.id,
+            CampaignOutreachDraftCreate(
+                audience=CampaignOutreachAudience.SELECTED,
+                lead_ids=[selected.id],
+                subject="Question for {{business_name}}",
+                body="Hello {{recipient_name}}",
+            ),
+        )
+
+        assert result.created_count == 1
+        assert result.reused_count == 0
+        assert result.skipped == []
+        assert result.messages[0].subject == "Question for Cedar Sons Painting"
+        assert "Hello Cedar Sons Painting team" in result.messages[0].body
+        assert "Residential painting business with contact info." in result.messages[0].body
+        assert lead_repo.get(selected.id).shortlisted_at is not None
+        assert lead_repo.get(selected.id).status == LeadStatus.AWAITING_APPROVAL.value
+        assert second_result.created_count == 0
+        assert second_result.reused_count == 1
+        assert second_result.messages[0].id == result.messages[0].id
+        assert len(service.messages.list_by_campaign(campaign.id)) == 1
+
+
+def test_campaign_template_drafts_skips_unready_contacts() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product, campaign, lead_repo = _create_campaign_fixture(session)
+        eligible = _create_fit_lead(
+            lead_repo,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            company_name="Verified Painter",
+            email="owner@verified.example",
+        )
+        _create_fit_lead(
+            lead_repo,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            company_name="No Email Painter",
+            email=None,
+            verified=False,
+        )
+        _create_fit_lead(
+            lead_repo,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            company_name="Unverified Painter",
+            email="owner@unverified.example",
+            verified=False,
+        )
+
+        result = MessageService(session=session, email=EmailTool()).create_campaign_outreach_drafts(
+            campaign.id,
+            CampaignOutreachDraftCreate(
+                audience=CampaignOutreachAudience.READY_CONTACTS,
+                subject="Quote question for {{business_name}}",
+                body="Hello {{recipient_name}}, would {{product_name}} help?",
+            ),
+        )
+
+        assert result.created_count == 1
+        assert [message.lead_id for message in result.messages] == [eligible.id]
+        skipped = {skip.company_name: skip.reason for skip in result.skipped}
+        assert skipped["No Email Painter"] == "Find a reachable email before preparing outreach."
+        assert skipped["Unverified Painter"] == "Verify the email before preparing outreach."
+
+
+def test_campaign_bulk_send_requires_batch_approval_first() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product, campaign, lead_repo = _create_campaign_fixture(session)
+        lead = _create_fit_lead(
+            lead_repo,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            company_name="Verified Painter",
+            email="owner@verified.example",
+        )
+
+        service = MessageService(session=session, email=EmailTool())
+        draft_result = service.create_campaign_outreach_drafts(
+            campaign.id,
+            CampaignOutreachDraftCreate(
+                audience=CampaignOutreachAudience.SELECTED,
+                lead_ids=[lead.id],
+                subject="Quote question for {{business_name}}",
+                body="Hello {{recipient_name}}, would {{product_name}} help?",
+            ),
+        )
+        message = draft_result.messages[0]
+
+        blocked_send = service.send_campaign_messages(
+            campaign.id,
+            CampaignMessageSend(message_ids=[message.id]),
+        )
+        approved = service.approve_campaign_messages(
+            campaign.id,
+            CampaignMessageApproval(message_ids=[message.id], approved_by="operator"),
+        )
+        sent = service.send_campaign_messages(
+            campaign.id,
+            CampaignMessageSend(message_ids=[message.id]),
+        )
+
+        assert blocked_send.sent_count == 0
+        assert blocked_send.skipped[0].reason == "Approve this draft before sending."
+        assert service.messages.get(message.id).status == MessageStatus.SENT.value
+        assert approved.approved_count == 1
+        assert sent.sent_count == 1
+        assert sent.messages[0].status == MessageStatus.SENT
+        assert lead_repo.get(lead.id).status == LeadStatus.SENT.value
 
 
 def test_not_fit_review_clears_shortlist_and_blocks_sending() -> None:
