@@ -30,17 +30,13 @@ from discovery.repository import DiscoveryCandidateRepository
 from discovery.classifier import assess_discovery_candidate
 from discovery.schemas import DiscoveryCandidateCreate
 from evaluation.campaign_metrics import calculate_campaign_metrics
+from evaluation.lead_scoring import build_cached_lead_research, score_cached_lead
 from evaluation.schemas import CampaignMetrics
 from icp.service import ICPPresetService
 from leads.repository import LeadRepository
 from leads.schemas import (
-    AgentFitStatus,
     ContactVerificationStatus,
-    CriterionScore,
-    LeadFitType,
     LeadRead,
-    LeadResearch,
-    QualificationResult,
 )
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
@@ -689,7 +685,7 @@ class CampaignService:
             self.discovery_candidates.mark_promoted(candidate.id, lead.id)
             lead = self.leads.attach_research(
                 lead.id,
-                _cached_lead_research(
+                build_cached_lead_research(
                     product=product,
                     lead=LeadRead.model_validate(lead),
                     row=row,
@@ -698,7 +694,7 @@ class CampaignService:
             )
             lead = self.leads.attach_qualification(
                 lead.id,
-                _cached_qualification(
+                score_cached_lead(
                     product=product,
                     lead=LeadRead.model_validate(lead),
                     row=row,
@@ -1121,162 +1117,6 @@ class CampaignService:
         if value is None or isinstance(value, str | int | float | bool):
             return value
         return str(value)
-
-
-def _cached_lead_research(
-    *,
-    product: ProductRead,
-    lead: LeadRead,
-    row: dict[str, Any],
-    confidence: int,
-) -> LeadResearch:
-    signals = _cached_signals(row=row, lead=lead)
-    summary = truncate(
-        lead.description
-        or f"{lead.company_name} matched cached business-pool evidence for {product.product_name}.",
-        700,
-    )
-    return LeadResearch(
-        summary=summary,
-        lead_type=LeadFitType.TARGET_CUSTOMER,
-        business_type=_cached_business_type(product=product, row=row, lead=lead),
-        geography=lead.geography,
-        website_url=lead.website_url,
-        contact_email=lead.contact_email,
-        contact_candidates=[lead.contact_email] if lead.contact_email else [],
-        signals=signals,
-        pain_indicators=[],
-        disqualifiers=[],
-        sources=_cached_sources(row=row, lead=lead),
-        confidence=max(0, min(100, confidence)),
-    )
-
-
-def _cached_qualification(
-    *,
-    product: ProductRead,
-    lead: LeadRead,
-    row: dict[str, Any],
-    confidence: int,
-) -> QualificationResult:
-    signals = _cached_signals(row=row, lead=lead)
-    missing = _cached_missing_evidence(row=row, lead=lead)
-    score = _cached_fit_score(row=row, lead=lead, confidence=confidence)
-    qualified = score >= 65
-    fit_status = (
-        AgentFitStatus.GOOD_FIT
-        if score >= 80
-        else AgentFitStatus.MAYBE
-        if qualified
-        else AgentFitStatus.NOT_FIT
-    )
-    return QualificationResult(
-        qualified=qualified,
-        fit_status=fit_status,
-        score=score,
-        rationale=(
-            f"{lead.company_name} matched cached public business evidence for "
-            f"{product.product_name}."
-        ),
-        positive_signals=signals[:6],
-        missing_evidence=missing,
-        risks=[],
-        criteria=[
-            CriterionScore(
-                criterion_id=criterion.id or criterion.label,
-                label=criterion.label,
-                score=score,
-                evidence=signals[:3],
-                missing_evidence=missing[:2],
-            )
-            for criterion in product.qualification_criteria
-        ],
-        recommended_next_step=(
-            "Review the contact and shortlist manually before outreach."
-            if qualified
-            else "Review manually before taking action."
-        ),
-    )
-
-
-def _cached_fit_score(*, row: dict[str, Any], lead: LeadRead, confidence: int) -> int:
-    score = max(65, min(90, confidence))
-    if lead.contact_email:
-        score += 5
-    if _cached_phone(row):
-        score += 3
-    if _cached_has_quote_signal(row):
-        score += 4
-    if lead.verification_status == ContactVerificationStatus.VALID:
-        score += 3
-    return max(0, min(95, score))
-
-
-def _cached_missing_evidence(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
-    missing: list[str] = []
-    if not lead.contact_email:
-        missing.append("Direct email not found.")
-    elif lead.verification_status == ContactVerificationStatus.UNVERIFIED:
-        missing.append("Email deliverability not verified.")
-    if not _cached_has_quote_signal(row):
-        missing.append("Explicit quote or estimate signal not found.")
-    return missing
-
-
-def _cached_signals(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
-    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
-    signals: list[str] = []
-    signals.extend(signal for signal in raw.get("signals", []) if isinstance(signal, str))
-    signals.extend(signal for signal in enrichment.get("service_signals", []) if isinstance(signal, str))
-    signals.extend(signal for signal in enrichment.get("quote_signals", []) if isinstance(signal, str))
-    if enrichment.get("has_quote_form"):
-        signals.append("quote or estimate form")
-    if enrichment.get("has_contact_form"):
-        signals.append("contact form")
-    if lead.contact_email:
-        signals.append("public email")
-    if _cached_phone(row):
-        signals.append("public phone")
-    if not signals and lead.description:
-        signals.append(truncate(lead.description, 120))
-    return list(dict.fromkeys(signals))[:8]
-
-
-def _cached_has_quote_signal(row: dict[str, Any]) -> bool:
-    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
-    return bool(enrichment.get("has_quote_form") or enrichment.get("quote_signals"))
-
-
-def _cached_phone(row: dict[str, Any]) -> str | None:
-    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-    for source in (row, raw):
-        for key in ("phone", "contact_phone", "nationalPhoneNumber", "internationalPhoneNumber"):
-            value = source.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
-
-
-def _cached_sources(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
-    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
-    sources = []
-    if lead.website_url:
-        sources.append(lead.website_url)
-    if isinstance(enrichment.get("inspected_urls"), list):
-        sources.extend(url for url in enrichment["inspected_urls"] if isinstance(url, str))
-    return list(dict.fromkeys(sources))[:5]
-
-
-def _cached_business_type(*, product: ProductRead, row: dict[str, Any], lead: LeadRead) -> str:
-    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-    enrichment = raw.get("website_enrichment") if isinstance(raw.get("website_enrichment"), dict) else {}
-    service_signals = enrichment.get("service_signals")
-    if isinstance(service_signals, list) and service_signals:
-        return ", ".join(str(signal) for signal in service_signals[:3])
-    return lead.description or product.target_customer
 
 
 def email_provider_setup_hint(provider: str) -> str:

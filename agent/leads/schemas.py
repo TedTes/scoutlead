@@ -85,10 +85,30 @@ class CriterionScore(BaseModel):
     missing_evidence: list[str] = Field(default_factory=list)
 
 
+class QualificationScoreBreakdown(BaseModel):
+    fit_score: int = Field(
+        ge=0,
+        le=100,
+        description="ICP and problem fit only; does not include contactability.",
+    )
+    reachability_score: int = Field(
+        ge=0,
+        le=100,
+        description="Contact channel quality only; does not include ICP fit.",
+    )
+    source_quality_score: int = Field(
+        ge=0,
+        le=100,
+        description="Confidence that the source represents a real, relevant business entity.",
+    )
+    scoring_notes: list[str] = Field(default_factory=list)
+
+
 class QualificationResult(BaseModel):
     qualified: bool
     fit_status: AgentFitStatus | None = None
     score: int = Field(ge=0, le=100)
+    score_breakdown: QualificationScoreBreakdown | None = None
     rationale: str
     positive_signals: list[str] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)

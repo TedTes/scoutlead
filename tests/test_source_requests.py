@@ -300,6 +300,9 @@ def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None
     assert leads[0].contact_email == "info@allpainting.ca"
     assert leads[0].research is not None
     assert leads[0].qualification is not None
+    assert leads[0].qualification["score_breakdown"]["fit_score"] >= 65
+    assert leads[0].qualification["score_breakdown"]["reachability_score"] > 0
+    assert leads[0].qualification["score_breakdown"]["source_quality_score"] >= 65
     assert leads[0].raw_sources[0]["from_semantic_cache"] is True
 
 

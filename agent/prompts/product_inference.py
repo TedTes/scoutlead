@@ -35,6 +35,9 @@ Rules:
 - If evidence is weak, keep fields conservative and generic.
 - Discovery sources must search for likely customers, not for the product itself.
 - Qualification criteria must be public signals that can be verified by web research.
+- Mark criteria as required only when missing public evidence should block outreach.
+- Treat hard-to-verify preferences such as exact company size, solo status, or owner-operated
+  status as optional unless the operator explicitly makes them mandatory.
 """.strip()
 
 PRODUCT_CONFIG_PROMPT = """
@@ -74,6 +77,9 @@ The output should make the product immediately usable for a validation campaign:
 - value_proposition: concrete promised outcome.
 - validation_goal: default to booking discovery interviews with the target customer.
 - qualification_criteria: 3-5 concrete public signals, weighted by importance.
+- qualification_criteria should separate hard requirements from preferences:
+  required=true only for evidence that must be present to consider a business a fit.
+  Use required=false for useful but hard-to-confirm preferences.
 - preferred_discovery_sources: 3-6 web_search queries that find potential customers
   matching the target customer and geography.
 - outreach_objective: ask for a short customer discovery conversation.
@@ -94,6 +100,8 @@ Rules:
 - Do not propose competitors, software vendors, directories, blogs, or review sites as customers.
 - Keep each segment narrow enough to test with one campaign.
 - Qualification signals must be public facts a workflow can verify.
+- Mark only true blockers as required. Keep preferences optional when public evidence is
+  often unavailable, such as exact size, owner-led status, or solo-operator status.
 - Discovery query should be only the concise business category/search intent, without city,
   state, province, or country.
 - Suggested locations should be specific test markets inside the target geography, such as
