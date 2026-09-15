@@ -86,10 +86,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists);
-  const savedRunMatchingDraft = draftRunName
-    ? productRunLabels.find((item) => sameListName(draftRunName, item.title))
-    : undefined;
-  const shouldShowDraftRun = draftRunName !== null && !savedRunMatchingDraft;
+  const shouldShowDraftRun = draftRunName !== null;
 
   const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
     setDraftRunNameState((current) => {
@@ -245,17 +242,6 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     }
     setDraftRunNameState(readDraftRunName(selectedProductId));
   }, [selectedProductId]);
-
-  useEffect(() => {
-    if (!selectedProductId || draftRunName === null) return;
-    const draftName = draftRunName.trim();
-    if (!draftName) return;
-    const matchingRun = productRunLabels.find((item) => sameListName(draftName, item.title))?.run;
-    if (!matchingRun) return;
-    writeDraftRunName(selectedProductId, null);
-    setDraftRunNameState(null);
-    if (!selectedDiscoveryRunId) setSelectedDiscoveryRunId(matchingRun.id);
-  }, [draftRunName, productRunLabels, selectedDiscoveryRunId, selectedProductId, setSelectedDiscoveryRunId]);
 
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
@@ -990,10 +976,6 @@ function uniqueListName(requestedName: string, existingNames: string[]) {
     if (!existing.has(nameKey(candidate))) return candidate;
     suffix += 1;
   }
-}
-
-function sameListName(left: string, right: string) {
-  return Boolean(left && right && nameKey(left) === nameKey(right));
 }
 
 function nameKey(value: string) {
