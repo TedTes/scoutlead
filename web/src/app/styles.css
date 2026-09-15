@@ -5435,6 +5435,10 @@ button.bulk-recipient-select:hover {
   white-space: nowrap;
 }
 
+.review-badge {
+  border-style: dashed;
+}
+
 .fit-good {
   background: var(--green-bg);
   border-color: var(--green-line);
@@ -5952,6 +5956,10 @@ button.bulk-recipient-select:hover {
   background: var(--panel-muted);
   border-color: var(--line);
   color: var(--muted);
+}
+
+.drawer-fit-verdict.review-verdict {
+  border-style: dashed;
 }
 
 .drawer-availability-row {

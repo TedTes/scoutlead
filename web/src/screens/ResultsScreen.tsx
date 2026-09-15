@@ -1269,8 +1269,9 @@ function ContactCard({
   onOpen: () => void;
   selected?: boolean;
 }) {
-  const score = contactFitScore(contact);
-  const fitStatus = displayFitStatus(contact);
+  const fitStatus = displayAgentFitStatus(contact);
+  const reviewDecision = displayReviewDecision(contact);
+  const primaryStatus = reviewDecision ?? fitStatus;
   const evidence = contactListEvidenceLine(contact);
   const category = contactListCategoryLabel(contact);
   const geography = contact.geography || contact.research?.geography || "";
@@ -1300,13 +1301,15 @@ function ContactCard({
         }}
       >
         <div className="contact-main">
-          <span className={`score-ring ${scoreClass(score)}`} title="Fit score">
-            <strong>{score}</strong>
-          </span>
           <span className="contact-identity">
             <span className="contact-title-line">
               <strong>{contact.company_name}</strong>
-              <em className={`fit-badge ${fitStatus.className}`}>{fitStatus.label}</em>
+              <em
+                className={`fit-badge ${reviewDecision ? "review-badge" : ""} ${primaryStatus.className}`}
+                title={reviewDecision ? "Human review decision" : "Agent fit assessment"}
+              >
+                {primaryStatus.label}
+              </em>
             </span>
             <small className="contact-meta-line">
               <span>{category}</span>
@@ -1417,7 +1420,9 @@ function ContactDrawer({
   const drawerCategory = contactListCategoryLabel(contact);
   const drawerGeography = contact.geography || contact.research?.geography || "";
   const drawerSummary = contactDrawerSummary(contact);
-  const fitStatus = displayFitStatus(contact);
+  const agentFitStatus = displayAgentFitStatus(contact);
+  const reviewDecision = displayReviewDecision(contact);
+  const qualificationScore = contactScore(contact);
   const fitScore = contactFitScore(contact);
   const reachabilityScore = contactReachabilityScore(contact);
   const sourceQualityScore = contactSourceQualityScore(contact);
@@ -1629,8 +1634,8 @@ function ContactDrawer({
       <aside className="contact-drawer-panel" aria-label="Contact details">
         <header className="contact-drawer-header">
           <div className="drawer-title-row">
-            <span className={`score-ring large ${scoreClass(fitScore)}`} title="Fit score">
-              <strong>{fitScore}</strong>
+            <span className={`score-ring large ${scoreClass(qualificationScore)}`} title="Qualification score">
+              <strong>{qualificationScore}</strong>
             </span>
             <div className="drawer-title-copy">
               <h2>{contact.company_name}</h2>
@@ -1651,11 +1656,17 @@ function ContactDrawer({
         </header>
 
             <section className="drawer-signal-summary" aria-label="Contact summary">
-              <div className={`drawer-fit-verdict ${fitStatus.className}`}>
+              <div className={`drawer-fit-verdict ${agentFitStatus.className}`}>
                 <Check size={22} />
-                <span>{fitStatus.label}</span>
+                <span>Agent {agentFitStatus.label}</span>
                 <strong>{fitScore}</strong>
               </div>
+              {reviewDecision ? (
+                <div className={`drawer-fit-verdict review-verdict ${reviewDecision.className}`}>
+                  <User size={22} />
+                  <span>Review {reviewDecision.label}</span>
+                </div>
+              ) : null}
               <div className="drawer-availability-row">
                 <span className={`availability-pill verification-${verification}`}>
                   <Mail size={13} />
@@ -2141,9 +2152,9 @@ function reviewStatus(contact: DiscoveryResult): LeadReviewStatus {
 function reviewStatusLabel(status: LeadReviewStatus) {
   const labels: Record<LeadReviewStatus, string> = {
     unreviewed: "Needs review",
-    good_fit: "Good fit",
+    good_fit: "Accepted",
     maybe: "Maybe",
-    not_fit: "Not fit",
+    not_fit: "Rejected",
   };
   return labels[status];
 }
@@ -2288,15 +2299,19 @@ function canShortlistContact(contact: DiscoveryResult) {
   return assessment?.fitStatus === "good_fit" || assessment?.fitStatus === "maybe";
 }
 
-function displayFitStatus(contact: DiscoveryResult): { label: string; className: string } {
+function displayReviewDecision(contact: DiscoveryResult): { label: string; className: string } | null {
   const status = reviewStatus(contact);
-  if (status === "good_fit") return { label: "Reviewed fit", className: "fit-good" };
-  if (status === "maybe") return { label: "Review maybe", className: "fit-maybe" };
-  if (status === "not_fit") return { label: "Not fit", className: "fit-bad" };
+  if (status === "unreviewed") return null;
+  if (status === "good_fit") return { label: "Accepted", className: "fit-good" };
+  if (status === "maybe") return { label: "Maybe", className: "fit-maybe" };
+  return { label: "Rejected", className: "fit-bad" };
+}
+
+function displayAgentFitStatus(contact: DiscoveryResult): { label: string; className: string } {
   const assessment = getAgentAssessment(contact);
   if (assessment?.fitStatus === "good_fit") return { label: "Strong fit", className: "fit-good" };
   if (assessment?.fitStatus === "maybe") return { label: "Possible fit", className: "fit-maybe" };
-  if (assessment?.fitStatus === "not_fit") return { label: "Weak fit", className: "fit-bad" };
+  if (assessment?.fitStatus === "not_fit") return { label: "Low evidence", className: "fit-neutral" };
   return { label: "Needs review", className: "fit-neutral" };
 }
 
@@ -2353,7 +2368,7 @@ function legacyMissingProblemEvidence(contact: DiscoveryResult) {
     ...(qualification.missing_evidence || []),
     ...((qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || [])),
   ];
-  return missing.some((item) => /quote|estimate|product\/problem|problem signal|problem fit/i.test(item || ""));
+  return missing.some((item) => /quote|quoting|estimate|estimating|pricing|workflow|software usage|product\/problem|problem signal|problem fit/i.test(item || ""));
 }
 
 function derivedReachabilityScore(contact: DiscoveryResult) {
@@ -2414,12 +2429,12 @@ function contactEvidenceLine(contact: DiscoveryResult) {
     contact.research?.summary ||
     contact.description ||
     "Open details to review public evidence.";
-  return truncateText(evidence, 128);
+  return truncateText(cleanContactEvidenceText(evidence) || evidence, 128);
 }
 
 function contactListCategoryLabel(contact: DiscoveryResult) {
   const explicitType = cleanContactListText(contact.research?.business_type || "");
-  if (explicitType && !isNoisyEnrichmentText(explicitType)) {
+  if (explicitType && !isNoisyEnrichmentText(explicitType) && !isContactMetadataText(explicitType)) {
     return truncateText(explicitType, 42);
   }
 
@@ -2447,8 +2462,13 @@ function contactListEvidenceLine(contact: DiscoveryResult) {
     contact.description,
   ];
   for (const candidate of candidates) {
-    const cleaned = cleanContactListText(candidate || "");
-    if (cleaned && !isNoisyEnrichmentText(cleaned) && !isLowValueContactListText(cleaned)) {
+    const cleaned = cleanContactEvidenceText(candidate || "");
+    if (
+      cleaned &&
+      !isNoisyEnrichmentText(cleaned) &&
+      !isInternalQualificationText(cleaned) &&
+      !isLowValueContactListText(cleaned)
+    ) {
       return truncateText(cleaned, 88);
     }
   }
@@ -2466,7 +2486,7 @@ function contactDrawerSummary(contact: DiscoveryResult) {
 
   const assessment = getAgentAssessment(contact);
   const rationale = cleanContactListText(assessment?.rationale || "");
-  if (rationale && !isNoisyEnrichmentText(rationale)) {
+  if (rationale && !isNoisyEnrichmentText(rationale) && !isInternalQualificationText(rationale)) {
     return truncateText(rationale, 260);
   }
 
@@ -2474,7 +2494,7 @@ function contactDrawerSummary(contact: DiscoveryResult) {
     ...(assessment?.positiveSignals || []),
     ...(contact.research?.signals || []),
   ]
-    .map(cleanContactListText)
+    .map(cleanContactEvidenceText)
     .filter((signal) => signal && !isNoisyEnrichmentText(signal) && !isLowValueContactListText(signal))
     .slice(0, 2);
   const geography = contact.geography || contact.research?.geography || "";
@@ -2507,12 +2527,40 @@ function cleanContactListText(value: string) {
     .trim();
 }
 
+function cleanContactEvidenceText(value: string) {
+  const cleaned = cleanContactListText(value);
+  const parts = cleaned
+    .split(/\s+\|\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part && !isContactMetadataText(part));
+  return parts.join(" ").trim();
+}
+
 function isNoisyEnrichmentText(value: string) {
   return /website enrichment found|inspected pages|skip to content|home kitchen cabinet|call us or fill out/i.test(value);
 }
 
+function isInternalQualificationText(value: string) {
+  return /matched cached business evidence|fit \d+|source quality \d+|reachability \d+/i.test(value);
+}
+
 function isLowValueContactListText(value: string) {
-  return /^(public email|email found|phone found|verified|unknown)$/i.test(value.trim());
+  return /^(public email|email found|phone found|verified|unknown)$/i.test(value.trim()) || isContactMetadataText(value);
+}
+
+function isContactMetadataText(value: string) {
+  const text = value.trim();
+  return (
+    isAddressLikeText(text) ||
+    /^(phone|rating|reviews?):/i.test(text) ||
+    /^reviews?\s+\d+/i.test(text)
+  );
+}
+
+function isAddressLikeText(value: string) {
+  return /\b\d{1,6}\s+[^|,;]*(?:\bst(?:reet)?\b|\brd\b|\broad\b|\bave(?:nue)?\b|\bdr(?:ive)?\b|\bblvd\b|\bboulevard\b|\bunit\b|\bsuite\b|\bste\b|#)/i.test(
+    value,
+  );
 }
 
 function contactMissingEvidenceLine(contact: DiscoveryResult) {
@@ -2527,7 +2575,9 @@ function contactMissingEvidenceLine(contact: DiscoveryResult) {
 }
 
 function isNoisyMissingEvidence(value: string) {
-  return /solo|owner[-\s]?operated|company size|number of employees|employee count|crew size|owner name not found/i.test(value);
+  return /solo|owner[-\s]?operated|company size|number of employees|employee count|crew size|owner name not found|specific product\/problem (fit evidence is (weak|limited)|signal not found)|explicit quote or estimate workflow signal not found/i.test(
+    value,
+  );
 }
 
 function messageStatusLabel(status: string) {
@@ -2698,7 +2748,8 @@ function formatActivityDate(value?: string | null) {
 }
 
 function contactScore(contact: DiscoveryResult) {
-  return contactFitScore(contact);
+  if (contact.qualification?.score_breakdown) return clampScore(contact.qualification.score);
+  return legacyFitScore(contact);
 }
 
 function scoreClass(score: number) {
@@ -2933,7 +2984,8 @@ function exportContactsCsv(contacts: DiscoveryResult[], fileName: string, messag
     verification_details: formatVerificationDetails(contact.verification_details),
     score: String(contactScore(contact)),
     status: contactStatusLabel(contact),
-    fit_verdict: displayFitStatus(contact).label,
+    fit_verdict: displayAgentFitStatus(contact).label,
+    review_decision: displayReviewDecision(contact)?.label || "",
     review_note: contact.review_note || "",
     evidence: contactEvidenceLine(contact),
     missing_evidence: contactMissingEvidenceLine(contact).replace(/^Missing:\s*/, ""),
