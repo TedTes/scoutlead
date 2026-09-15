@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 
-from leads.schemas import CriterionScore, LeadFitType, LeadRead, LeadResearch, LeadStatus, QualificationResult
+from leads.schemas import AgentFitStatus, CriterionScore, LeadFitType, LeadRead, LeadResearch, LeadStatus, QualificationResult
 from products.schemas import DiscoverySource, DiscoverySourceType, ProductRead, QualificationCriterion
-from workflows.qualification import MIN_QUALIFICATION_SCORE, enforce_qualification_boundary
+from workflows.qualification import MIN_QUALIFICATION_SCORE, NOT_FIT_MAX_SCORE, enforce_qualification_boundary
 
 
 def test_low_score_cannot_be_qualified_for_outreach() -> None:
@@ -58,6 +58,25 @@ def test_competitor_or_vendor_classification_cannot_be_qualified_for_outreach() 
     assert guarded.score == 25
     assert "not a target customer" in guarded.rationale
     assert guarded.recommended_next_step == "Do not send outreach."
+
+
+def test_not_fit_qualification_cannot_keep_high_score() -> None:
+    result = QualificationResult(
+        qualified=False,
+        fit_status=AgentFitStatus.NOT_FIT,
+        score=90,
+        rationale="Public evidence is not enough for outreach.",
+        criteria=[],
+        recommended_next_step="Do not send outreach.",
+    )
+
+    guarded = enforce_qualification_boundary(product(), lead(), result)
+
+    assert guarded.qualified is False
+    assert guarded.fit_status == AgentFitStatus.NOT_FIT
+    assert guarded.score == NOT_FIT_MAX_SCORE
+    assert guarded.score < MIN_QUALIFICATION_SCORE
+    assert "marked not fit" in guarded.rationale
 
 
 def product() -> ProductRead:

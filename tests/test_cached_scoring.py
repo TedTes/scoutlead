@@ -51,7 +51,7 @@ def test_cached_directory_result_with_email_is_not_good_fit() -> None:
     assert any("Directory" in risk for risk in result.risks)
 
 
-def test_cached_category_match_without_problem_signal_is_not_strong_fit() -> None:
+def test_cached_category_match_without_quote_workflow_is_not_penalized_as_missing() -> None:
     row = _cached_row()
     row["raw"] = {
         **row["raw"],
@@ -69,9 +69,8 @@ def test_cached_category_match_without_problem_signal_is_not_strong_fit() -> Non
     )
 
     assert result.score_breakdown is not None
-    assert result.score_breakdown.fit_score <= 74
-    assert result.fit_status != AgentFitStatus.GOOD_FIT
-    assert "Explicit quote or estimate workflow signal not found." in result.missing_evidence
+    assert result.score_breakdown.fit_score > 74
+    assert all("quote or estimate workflow" not in item.lower() for item in result.missing_evidence)
 
 
 def test_cached_invalid_email_lowers_reachability_not_fit() -> None:

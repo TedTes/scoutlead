@@ -15,6 +15,7 @@ from prompts.qualification import (
 
 
 MIN_QUALIFICATION_SCORE = 65
+NOT_FIT_MAX_SCORE = 49
 
 
 class QualificationWorkflow:
@@ -96,4 +97,17 @@ def enforce_qualification_boundary(
             }
         )
 
-    return normalize_qualification_result(result)
+    normalized = normalize_qualification_result(result)
+    if normalized.fit_status == AgentFitStatus.NOT_FIT and normalized.score >= MIN_QUALIFICATION_SCORE:
+        return normalized.model_copy(
+            update={
+                "qualified": False,
+                "score": NOT_FIT_MAX_SCORE,
+                "rationale": (
+                    f"{normalized.rationale} Score was capped because the lead was marked not fit."
+                ),
+                "recommended_next_step": "Do not send outreach.",
+            }
+        )
+
+    return normalized

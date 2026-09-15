@@ -123,13 +123,12 @@ def qualification_rationale(
 ) -> str:
     if disqualifiers:
         return (
-            f"{lead.company_name} was not treated as a fit for {product.product_name} "
+            f"{lead.company_name} needs review "
             f"because cached evidence raised: {', '.join(disqualifiers[:2])}."
         )
     return (
-        f"{lead.company_name} matched cached business evidence for {product.product_name}; "
-        f"fit {score_breakdown.fit_score}, source quality {score_breakdown.source_quality_score}, "
-        f"reachability {score_breakdown.reachability_score}."
+        f"{lead.company_name} matched cached public business evidence. "
+        "Review the listed signals before outreach."
     )
 
 
@@ -237,7 +236,7 @@ def missing_evidence(
 ) -> list[str]:
     missing: list[str] = []
     if score_breakdown.fit_score < 65:
-        missing.append("Specific product/problem fit evidence is weak.")
+        missing.append("Specific product/problem fit evidence is limited.")
     if score_breakdown.source_quality_score < 65:
         missing.append("Source needs stronger business-entity evidence.")
     if not lead.contact_email:
@@ -366,15 +365,13 @@ def wrong_geography(*, product: ProductRead, lead: LeadRead, text: str) -> bool:
 
 
 def product_problem_signal_required(product: ProductRead) -> bool:
-    return bool(product_problem_terms(product))
+    return bool(required_product_problem_terms(product))
 
 
 def has_product_problem_signal(*, product: ProductRead, row: dict[str, Any], lead: LeadRead) -> bool:
-    terms = product_problem_terms(product)
+    terms = required_product_problem_terms(product)
     if not terms:
         return True
-    if terms & QUOTE_PROBLEM_TERMS:
-        return has_quote_signal(row)
     text = evidence_text(row=row, lead=lead, extra=enrichment_signals(row))
     return any(term in text for term in terms)
 
@@ -386,6 +383,10 @@ def product_problem_terms(product: ProductRead) -> set[str]:
         if any(term in text for term in group):
             terms.update(group)
     return terms
+
+
+def required_product_problem_terms(product: ProductRead) -> set[str]:
+    return product_problem_terms(product) - QUOTE_PROBLEM_TERMS
 
 
 def product_problem_text(product: ProductRead) -> str:
@@ -404,9 +405,7 @@ def product_problem_text(product: ProductRead) -> str:
 
 
 def problem_missing_evidence_label(product: ProductRead) -> str:
-    terms = product_problem_terms(product)
-    if terms & QUOTE_PROBLEM_TERMS:
-        return "Explicit quote or estimate workflow signal not found."
+    del product
     return "Specific product/problem signal not found."
 
 
