@@ -168,6 +168,100 @@ class BusinessModel(TimestampMixin, Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     contacts: Mapped[list["ContactModel"]] = relationship(back_populates="business")
+    niche_memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
+        back_populates="business"
+    )
+
+
+class NicheModel(TimestampMixin, Base):
+    __tablename__ = "niches"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    default_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
+        back_populates="niche"
+    )
+    seed_batches: Mapped[list["SeedBatchModel"]] = relationship(back_populates="niche")
+
+
+class SeedBatchModel(TimestampMixin, Base):
+    __tablename__ = "seed_batches"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    niche_id: Mapped[str | None] = mapped_column(ForeignKey("niches.id"), nullable=True, index=True)
+    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="manual_seed",
+        index=True,
+    )
+    query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    found_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inserted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_observation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    niche: Mapped[NicheModel | None] = relationship(back_populates="seed_batches")
+    memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
+        back_populates="seed_batch"
+    )
+
+
+class BusinessNicheMembershipModel(TimestampMixin, Base):
+    __tablename__ = "business_niche_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "niche_id",
+            "market_key",
+            name="uq_business_niche_memberships_business_niche_market",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"),
+        nullable=False,
+        index=True,
+    )
+    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
+    market_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="unknown",
+        index=True,
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    source_observation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_observations.id"),
+        nullable=True,
+        index=True,
+    )
+    seed_batch_id: Mapped[str | None] = mapped_column(
+        ForeignKey("seed_batches.id"),
+        nullable=True,
+        index=True,
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    business: Mapped[BusinessModel] = relationship(back_populates="niche_memberships")
+    niche: Mapped[NicheModel] = relationship(back_populates="memberships")
+    source_observation: Mapped["SourceObservationModel | None"] = relationship(
+        "SourceObservationModel"
+    )
+    seed_batch: Mapped[SeedBatchModel | None] = relationship(back_populates="memberships")
 
 
 class ContactModel(TimestampMixin, Base):

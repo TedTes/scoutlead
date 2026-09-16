@@ -50,10 +50,16 @@ class BusinessSeedService:
             self.session.rollback()
             return summary
 
-        self.session.commit()
         summary.source_observations_created = max(
             0,
             self.repository.source_observation_count() - before_observation_count,
         )
+        self.repository.complete_seed_batch(
+            batch_id=batch_id,
+            found_count=summary.rows_valid,
+            inserted_count=summary.businesses_created,
+            updated_count=summary.businesses_updated,
+            source_observation_count=summary.source_observations_created,
+        )
+        self.session.commit()
         return summary
-

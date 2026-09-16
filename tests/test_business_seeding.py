@@ -2,7 +2,16 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from canonical.repository import CanonicalRepository
-from db.models import BusinessModel, CampaignModel, ContactModel, LeadModel, SourceObservationModel
+from db.models import (
+    BusinessModel,
+    BusinessNicheMembershipModel,
+    CampaignModel,
+    ContactModel,
+    LeadModel,
+    NicheModel,
+    SeedBatchModel,
+    SourceObservationModel,
+)
 from db.session import create_database
 from seeding.schemas import BusinessSeedInput
 from seeding.service import BusinessSeedService
@@ -24,7 +33,7 @@ class FakeEmbeddingClient:
         ]
 
 
-def test_business_seed_import_populates_canonical_tables_only() -> None:
+def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
     session_factory = _session_factory()
 
     with session_factory() as session:
@@ -39,6 +48,9 @@ def test_business_seed_import_populates_canonical_tables_only() -> None:
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
         assert _count(session, SourceObservationModel) == 1
+        assert _count(session, NicheModel) == 1
+        assert _count(session, SeedBatchModel) == 1
+        assert _count(session, BusinessNicheMembershipModel) == 1
         assert _count(session, LeadModel) == 0
         assert _count(session, CampaignModel) == 0
 
@@ -67,6 +79,34 @@ def test_business_seed_import_populates_canonical_tables_only() -> None:
         assert observation.raw_payload["seed_niche"] == "home_service_painting"
         assert observation.raw_payload["operator_type"] == "solo"
 
+        niche = session.scalar(select(NicheModel))
+        assert niche is not None
+        assert niche.slug == "home_service_painting"
+        assert niche.label == "Home Service Painting"
+        assert niche.default_query == "solo residential painters in Toronto with estimate forms"
+
+        seed_batch = session.scalar(select(SeedBatchModel))
+        assert seed_batch is not None
+        assert seed_batch.id == "painting-toronto-v1"
+        assert seed_batch.niche_id == niche.id
+        assert seed_batch.market_key == "toronto gta"
+        assert seed_batch.status == "completed"
+        assert seed_batch.found_count == 1
+        assert seed_batch.inserted_count == 1
+        assert seed_batch.updated_count == 0
+        assert seed_batch.source_observation_count == 1
+
+        membership = session.scalar(select(BusinessNicheMembershipModel))
+        assert membership is not None
+        assert membership.business_id == business.id
+        assert membership.niche_id == niche.id
+        assert membership.seed_batch_id == seed_batch.id
+        assert membership.source_observation_id == observation.id
+        assert membership.market_key == "toronto gta"
+        assert membership.confidence == 1.0
+        assert membership.evidence[0]["type"] == "seed_import"
+        assert membership.evidence[0]["batch_id"] == "painting-toronto-v1"
+
 
 def test_business_seed_import_is_idempotent() -> None:
     session_factory = _session_factory()
@@ -84,6 +124,9 @@ def test_business_seed_import_is_idempotent() -> None:
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
         assert _count(session, SourceObservationModel) == 1
+        assert _count(session, NicheModel) == 1
+        assert _count(session, SeedBatchModel) == 1
+        assert _count(session, BusinessNicheMembershipModel) == 1
 
 
 def test_business_seed_import_dedupes_by_phone_without_domain() -> None:
@@ -172,4 +215,3 @@ def _session_factory():
 
 def _count(session, model) -> int:
     return int(session.scalar(select(func.count()).select_from(model)) or 0)
-

@@ -38,6 +38,7 @@ from shared.utils import new_id, normalize_text, normalize_url, utcnow
 class CanonicalLeadLink:
     business_id: str | None
     contact_id: str | None
+    source_observation_id: str | None = None
 
 
 class CanonicalRepository:
@@ -71,7 +72,7 @@ class CanonicalRepository:
             email=contact_email,
             raw=raw_payload,
         )
-        self._record_source_observation(
+        observation = self._record_source_observation(
             business=business,
             source=source_name,
             query=_query_from_raw(raw_payload),
@@ -89,6 +90,7 @@ class CanonicalRepository:
         return CanonicalLeadLink(
             business_id=business.id,
             contact_id=contact.id if contact else None,
+            source_observation_id=observation.id,
         )
 
     def list_cached_discovery_results(
