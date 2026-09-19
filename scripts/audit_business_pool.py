@@ -2,8 +2,8 @@
 
 Examples:
     python scripts/audit_business_pool.py
-    python scripts/audit_business_pool.py --category painting --market toronto
-    python scripts/audit_business_pool.py --category painting --market toronto --json
+    python scripts/audit_business_pool.py --niche home_service_painting --market toronto
+    python scripts/audit_business_pool.py --niche home_service_painting --market toronto --json
 """
 
 from __future__ import annotations
@@ -25,7 +25,14 @@ if str(AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_ROOT))
 
 from app.config import get_settings  # noqa: E402
-from db.models import BusinessModel, ContactModel, LeadModel, SourceObservationModel  # noqa: E402
+from db.models import (  # noqa: E402
+    BusinessModel,
+    BusinessNicheMembershipModel,
+    ContactModel,
+    LeadModel,
+    NicheModel,
+    SourceObservationModel,
+)
 from db.session import Database  # noqa: E402
 
 
@@ -37,7 +44,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         audit = build_audit(
             session,
-            category=args.category,
+            niche=args.niche,
             market=args.market,
             source=args.source,
             stale_days=args.stale_days,
@@ -54,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit canonical ScoutLead business-pool quality.")
-    parser.add_argument("--category", help="Case-insensitive category/semantic text filter.")
+    parser.add_argument("--niche", help="Case-insensitive niche slug or label filter.")
     parser.add_argument("--market", help="Case-insensitive market/geography/address filter.")
     parser.add_argument("--source", help="Case-insensitive source-observation filter.")
     parser.add_argument("--stale-days", type=int, default=90, help="Rows older than this are stale.")
@@ -66,7 +73,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_audit(
     session: Session,
     *,
-    category: str | None = None,
+    niche: str | None = None,
     market: str | None = None,
     source: str | None = None,
     stale_days: int = 90,
@@ -74,15 +81,39 @@ def build_audit(
 ) -> dict[str, Any]:
     businesses = list(
         session.scalars(
-            _business_statement(category=category, market=market, source=source).order_by(
+            _business_statement(niche=niche, market=market, source=source).order_by(
                 BusinessModel.display_name
             )
         )
     )
     business_ids = [business.id for business in businesses]
     contacts = _contacts_for_businesses(session, business_ids)
-    observations = _observations_for_businesses(session, business_ids)
+    all_observations = _observations_for_businesses(session, business_ids)
     leads = _leads_for_businesses(session, business_ids)
+    memberships = _memberships_for_businesses(
+        session,
+        business_ids,
+        niche=niche,
+        market=market,
+    )
+    membership_observation_ids = {
+        membership.source_observation_id
+        for membership in memberships
+        if membership.source_observation_id
+    }
+    observations = [
+        observation
+        for observation in all_observations
+        if observation.id in membership_observation_ids
+    ]
+    niche_labels = {
+        row.id: row.slug
+        for row in session.scalars(
+            select(NicheModel).where(
+                NicheModel.id.in_({membership.niche_id for membership in memberships})
+            )
+        )
+    }
     now = datetime.now(timezone.utc)
     stale_before = now - timedelta(days=max(1, stale_days))
 
@@ -96,7 +127,7 @@ def build_audit(
     quote_signal_business_ids = {
         business.id
         for business in businesses
-        if _has_quote_signal(business, observations_by_business=observations)
+        if _has_quote_signal(business, observations_by_business=all_observations)
     }
     stale_business_ids = {
         business.id
@@ -106,7 +137,7 @@ def build_audit(
 
     return {
         "filters": {
-            "category": category or "",
+            "niche": niche or "",
             "market": market or "",
             "source": source or "",
             "stale_days": stale_days,
@@ -145,8 +176,11 @@ def build_audit(
             ),
         },
         "taxonomy": {
-            "by_category": _top_counts(businesses, lambda row: row.category_key or ""),
-            "by_market": _top_counts(businesses, lambda row: row.market_key or ""),
+            "by_niche": _top_counts(
+                memberships,
+                lambda row: niche_labels.get(row.niche_id, ""),
+            ),
+            "by_market": _top_counts(memberships, lambda row: row.market_key or ""),
         },
         "history": {
             "businesses_in_leads": len({lead.business_id for lead in leads if lead.business_id}),
@@ -177,7 +211,7 @@ def build_audit(
             ),
             "by_name_market": _duplicate_groups(
                 businesses,
-                lambda row: f"{row.normalized_name}|{row.market_key or row.geography or ''}",
+                lambda row: f"{row.normalized_name}|{_business_market(row.id, memberships)}",
                 duplicate_limit,
             ),
         },
@@ -215,7 +249,7 @@ def print_audit(audit: dict[str, Any]) -> None:
     _print_counts("sources", sources["by_source"])
     _print_counts("seed batches", sources["by_seed_batch"])
     print()
-    _print_counts("categories", taxonomy["by_category"])
+    _print_counts("niches", taxonomy["by_niche"])
     _print_counts("markets", taxonomy["by_market"])
     print()
     print("History")
@@ -230,25 +264,25 @@ def print_audit(audit: dict[str, Any]) -> None:
     _print_duplicate_summary("name + market", audit["duplicate_candidates"]["by_name_market"])
 
 
-def _business_statement(*, category: str | None, market: str | None, source: str | None):
+def _business_statement(*, niche: str | None, market: str | None, source: str | None):
     statement = select(BusinessModel)
-    if category:
-        pattern = _like_pattern(category)
+    if niche or market:
+        statement = statement.join(
+            BusinessNicheMembershipModel,
+            BusinessNicheMembershipModel.business_id == BusinessModel.id,
+        ).join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
+    if niche:
+        pattern = _like_pattern(niche)
         statement = statement.where(
             or_(
-                func.lower(BusinessModel.category_key).like(pattern),
-                func.lower(BusinessModel.semantic_text).like(pattern),
-                func.lower(BusinessModel.display_name).like(pattern),
+                func.lower(NicheModel.slug).like(pattern),
+                func.lower(NicheModel.label).like(pattern),
+                func.lower(NicheModel.category).like(pattern),
             )
         )
     if market:
-        pattern = _like_pattern(market)
         statement = statement.where(
-            or_(
-                func.lower(BusinessModel.market_key).like(pattern),
-                func.lower(BusinessModel.geography).like(pattern),
-                func.lower(BusinessModel.address).like(pattern),
-            )
+            func.lower(BusinessNicheMembershipModel.market_key).like(_like_pattern(market))
         )
     if source:
         pattern = _like_pattern(source)
@@ -256,7 +290,47 @@ def _business_statement(*, category: str | None, market: str | None, source: str
             func.lower(SourceObservationModel.source).like(pattern)
         )
         statement = statement.where(BusinessModel.id.in_(source_business_ids))
-    return statement
+    return statement.distinct()
+
+
+def _memberships_for_businesses(
+    session: Session,
+    business_ids: list[str],
+    *,
+    niche: str | None,
+    market: str | None,
+) -> list[BusinessNicheMembershipModel]:
+    if not business_ids:
+        return []
+    statement = select(BusinessNicheMembershipModel).where(
+        BusinessNicheMembershipModel.business_id.in_(business_ids)
+    )
+    if niche:
+        statement = statement.join(
+            NicheModel,
+            NicheModel.id == BusinessNicheMembershipModel.niche_id,
+        ).where(
+            or_(
+                func.lower(NicheModel.slug).like(_like_pattern(niche)),
+                func.lower(NicheModel.label).like(_like_pattern(niche)),
+                func.lower(NicheModel.category).like(_like_pattern(niche)),
+            )
+        )
+    if market:
+        statement = statement.where(
+            func.lower(BusinessNicheMembershipModel.market_key).like(_like_pattern(market))
+        )
+    return list(session.scalars(statement))
+
+
+def _business_market(
+    business_id: str,
+    memberships: list[BusinessNicheMembershipModel],
+) -> str:
+    return next(
+        (membership.market_key for membership in memberships if membership.business_id == business_id),
+        "",
+    )
 
 
 def _contacts_for_businesses(session: Session, business_ids: list[str]) -> list[ContactModel]:

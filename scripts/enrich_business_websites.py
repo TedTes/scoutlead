@@ -38,7 +38,13 @@ if str(AGENT_ROOT) not in sys.path:
 from app.config import get_settings  # noqa: E402
 from canonical.normalization import normalize_domain  # noqa: E402
 from canonical.repository import CanonicalRepository  # noqa: E402
-from db.models import BusinessModel, ContactModel, SourceObservationModel  # noqa: E402
+from db.models import (  # noqa: E402
+    BusinessModel,
+    BusinessNicheMembershipModel,
+    ContactModel,
+    NicheModel,
+    SourceObservationModel,
+)
 from db.session import Database  # noqa: E402
 from shared.utils import normalize_text, normalize_url, truncate, utcnow  # noqa: E402
 from tools.verify import EmailVerificationTool  # noqa: E402
@@ -154,8 +160,6 @@ class BusinessTarget:
     phone: str | None
     address: str | None
     geography: str | None
-    category_key: str | None
-    market_key: str | None
     semantic_text: str | None
 
 
@@ -393,6 +397,7 @@ def enrich_business_pool(
                     session=session,
                     canonical=canonical,
                     business=business,
+                    category=category,
                     enrichment=enrichment,
                     summary=summary,
                     dry_run=dry_run,
@@ -410,6 +415,7 @@ def enrich_business_pool(
                 session=session,
                 canonical=canonical,
                 business=business,
+                category=category,
                 enrichment=enrichment,
                 summary=summary,
                 dry_run=dry_run,
@@ -433,6 +439,7 @@ def _process_enrichment(
     session: Session,
     canonical: CanonicalRepository,
     business: BusinessModel,
+    category: str | None,
     enrichment: BusinessWebsiteEnrichment,
     summary: EnrichmentSummary,
     dry_run: bool,
@@ -471,6 +478,11 @@ def _process_enrichment(
     if dry_run or not (enrichment.found_signal or mark_attempted):
         return writes_since_commit
 
+    niche_slug, niche_label, market_key = _niche_context(
+        session,
+        business_id=business.id,
+        category=category,
+    )
     link = canonical.upsert_from_discovery_result(
         company_name=business.display_name,
         website_url=business.website_url,
@@ -478,7 +490,13 @@ def _process_enrichment(
         geography=business.geography,
         description=enrichment.description,
         source=SOURCE_NAME,
-        raw=_raw_payload(business, enrichment),
+        raw=_raw_payload(
+            business,
+            enrichment,
+            niche_slug=niche_slug,
+            niche_label=niche_label,
+            market_key=market_key,
+        ),
     )
     if verify and enrichment.best_email and link.contact_id:
         _verify_contact(
@@ -508,21 +526,30 @@ def select_businesses(
     include_with_email: bool,
     refresh: bool,
 ) -> list[BusinessModel]:
-    statement = select(BusinessModel).where(BusinessModel.website_url.is_not(None))
+    statement = (
+        select(BusinessModel)
+        .join(
+            BusinessNicheMembershipModel,
+            BusinessNicheMembershipModel.business_id == BusinessModel.id,
+        )
+        .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
+        .where(BusinessModel.website_url.is_not(None), NicheModel.active.is_(True))
+        .distinct()
+    )
     if category:
         pattern = _like_pattern(category)
         statement = statement.where(
             or_(
-                func.lower(BusinessModel.category_key).like(pattern),
-                func.lower(BusinessModel.semantic_text).like(pattern),
-                func.lower(BusinessModel.display_name).like(pattern),
+                func.lower(NicheModel.slug).like(pattern),
+                func.lower(NicheModel.label).like(pattern),
+                func.lower(NicheModel.category).like(pattern),
             )
         )
     if market:
         pattern = _like_pattern(market)
         statement = statement.where(
             or_(
-                func.lower(BusinessModel.market_key).like(pattern),
+                func.lower(BusinessNicheMembershipModel.market_key).like(pattern),
                 func.lower(BusinessModel.geography).like(pattern),
                 func.lower(BusinessModel.address).like(pattern),
             )
@@ -563,8 +590,6 @@ def _target_from_business(business: BusinessModel) -> BusinessTarget:
         phone=business.phone,
         address=business.address,
         geography=business.geography,
-        category_key=business.category_key,
-        market_key=business.market_key,
         semantic_text=business.semantic_text,
     )
 
@@ -615,8 +640,15 @@ def _enrichment_from_pages(
     )
 
 
-def _raw_payload(business: BusinessModel, enrichment: BusinessWebsiteEnrichment) -> dict[str, Any]:
-    query = f"website enrichment for {business.category_key or 'business'} {business.market_key or business.geography or ''}"
+def _raw_payload(
+    business: BusinessModel,
+    enrichment: BusinessWebsiteEnrichment,
+    *,
+    niche_slug: str,
+    niche_label: str,
+    market_key: str,
+) -> dict[str, Any]:
+    query = f"website enrichment for {niche_label} {market_key}"
     signals = ["public website inspected"]
     if enrichment.best_email:
         signals.append("email found")
@@ -647,18 +679,19 @@ def _raw_payload(business: BusinessModel, enrichment: BusinessWebsiteEnrichment)
         "source_input": {
             "query": query,
             "geography": business.geography,
+            "niche_slug": niche_slug,
             "source_type": "website_enrichment",
             "source_request_prompt": query,
             "source_request_intent": {
-                "business_category": business.category_key or "public business",
-                "location": business.market_key or business.geography or "",
+                "business_category": niche_label,
+                "location": market_key,
                 "required_signals": signals,
                 "search_query": query,
             },
         },
         "source_request_intent": {
-            "business_category": business.category_key or "public business",
-            "location": business.market_key or business.geography or "",
+            "business_category": niche_label,
+            "location": market_key,
             "required_signals": signals,
             "search_query": query,
         },
@@ -675,6 +708,40 @@ def _raw_payload(business: BusinessModel, enrichment: BusinessWebsiteEnrichment)
             "errors": enrichment.errors[:5],
         },
     }
+
+
+def _niche_context(
+    session: Session,
+    *,
+    business_id: str,
+    category: str | None,
+) -> tuple[str, str, str]:
+    statement = (
+        select(NicheModel, BusinessNicheMembershipModel)
+        .join(
+            BusinessNicheMembershipModel,
+            BusinessNicheMembershipModel.niche_id == NicheModel.id,
+        )
+        .where(
+            BusinessNicheMembershipModel.business_id == business_id,
+            NicheModel.active.is_(True),
+        )
+        .order_by(BusinessNicheMembershipModel.last_seen_at.desc())
+    )
+    if category:
+        pattern = _like_pattern(category)
+        statement = statement.where(
+            or_(
+                func.lower(NicheModel.slug).like(pattern),
+                func.lower(NicheModel.label).like(pattern),
+                func.lower(NicheModel.category).like(pattern),
+            )
+        )
+    row = session.execute(statement).first()
+    if row is None:
+        raise RuntimeError(f"Business {business_id} has no active niche membership")
+    niche, membership = row
+    return niche.slug, niche.label, membership.market_key
 
 
 def _verify_contact(

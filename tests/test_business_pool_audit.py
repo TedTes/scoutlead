@@ -29,7 +29,7 @@ def test_business_pool_audit_reports_filtered_readiness() -> None:
             batch_id="painting-toronto-v1",
         )
 
-        audit = build_audit(session, category="painting", market="toronto")
+        audit = build_audit(session, niche="painting", market="toronto")
 
     assert audit["businesses"]["total"] == 2
     assert audit["businesses"]["with_website"] == 2
@@ -40,7 +40,7 @@ def test_business_pool_audit_reports_filtered_readiness() -> None:
     assert audit["contacts"]["businesses_with_phone_or_email"] == 2
     assert audit["sources"]["by_source"] == {"manual_seed": 2}
     assert audit["sources"]["by_seed_batch"] == {"painting-toronto-v1": 2}
-    assert audit["taxonomy"]["by_category"] == {"home service painting providers": 2}
+    assert audit["taxonomy"]["by_niche"] == {"home_service_painting": 2}
     assert audit["taxonomy"]["by_market"] == {"toronto gta": 2}
 
 
@@ -48,7 +48,7 @@ def test_business_pool_audit_handles_empty_pool() -> None:
     session_factory = _session_factory()
 
     with session_factory() as session:
-        audit = build_audit(session, category="painting", market="toronto")
+        audit = build_audit(session, niche="painting", market="toronto")
 
     assert audit["businesses"]["total"] == 0
     assert audit["contacts"]["total"] == 0
@@ -100,7 +100,7 @@ def test_business_pool_audit_does_not_count_website_quote_urls_as_quote_signal()
         )
         session.commit()
 
-        audit = build_audit(session, category="painting", market="toronto")
+        audit = build_audit(session, niche="painting", market="toronto")
 
     assert audit["businesses"]["with_quote_or_estimate_signal"] == 0
 
