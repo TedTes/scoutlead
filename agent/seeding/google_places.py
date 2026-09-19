@@ -40,6 +40,38 @@ PAINTING_SERVICE_QUERIES = [
     "cabinet painters {city}",
 ]
 
+NICHE_QUERY_TEMPLATES = {
+    "home_service_painting": PAINTING_SERVICE_QUERIES,
+    "home_service_roofing": [
+        "roofing contractors {city}",
+        "residential roofers {city}",
+        "roof repair companies {city}",
+    ],
+    "home_service_hvac": [
+        "HVAC contractors {city}",
+        "heating and cooling companies {city}",
+        "furnace and air conditioning service {city}",
+    ],
+    "home_service_landscaping": [
+        "landscaping companies {city}",
+        "residential landscapers {city}",
+        "lawn care services {city}",
+    ],
+    "home_service_cleaning": [
+        "house cleaning companies {city}",
+        "residential cleaning services {city}",
+        "home cleaners {city}",
+    ],
+}
+
+NICHE_INCLUDED_TYPES = {
+    "home_service_painting": "painter",
+    "home_service_roofing": "roofing_contractor",
+    "home_service_hvac": "hvac_contractor",
+    "home_service_landscaping": "landscaper",
+    "home_service_cleaning": "cleaning_service",
+}
+
 
 TORONTO_GTA_SEED_CITIES = [
     "Toronto ON",
@@ -185,14 +217,38 @@ def build_home_service_painting_queries(
     cities: Iterable[str] = TORONTO_GTA_SEED_CITIES,
     query_templates: Iterable[str] = PAINTING_SERVICE_QUERIES,
 ) -> list[GooglePlacesSeedQuery]:
+    return build_niche_queries(
+        seed_niche="home_service_painting",
+        seed_market=seed_market,
+        region_code=region_code,
+        cities=cities,
+        query_templates=query_templates,
+    )
+
+
+def build_niche_queries(
+    *,
+    seed_niche: str,
+    seed_market: str = "Toronto/GTA",
+    region_code: str | None = "CA",
+    cities: Iterable[str] = TORONTO_GTA_SEED_CITIES,
+    query_templates: Iterable[str] | None = None,
+    included_type: str | None = None,
+) -> list[GooglePlacesSeedQuery]:
+    templates = list(query_templates or NICHE_QUERY_TEMPLATES.get(seed_niche, ()))
+    if not templates:
+        raise ValueError(f"No Google Places query templates configured for niche: {seed_niche}")
+    place_type = included_type if included_type is not None else NICHE_INCLUDED_TYPES.get(seed_niche)
     return [
         GooglePlacesSeedQuery(
             text_query=template.format(city=city),
             seed_market=seed_market,
             region_code=region_code,
+            included_type=place_type,
+            seed_niche=seed_niche,
         )
         for city in cities
-        for template in query_templates
+        for template in templates
     ]
 
 
@@ -216,22 +272,23 @@ def seed_from_place(
     rating = place.get("rating")
     review_count = place.get("userRatingCount")
 
-    signals = ["google places result", "painting service query"]
+    niche_label = query.seed_niche.replace("_", " ").strip()
+    signals = ["google places result", f"{niche_label} query"]
     if website_url:
         signals.append("public website")
     if phone:
         signals.append("public phone")
     if place.get("businessStatus") == "OPERATIONAL":
         signals.append("operational")
-    if "painter" in types:
-        signals.append("painter category")
+    if query.included_type and query.included_type in types:
+        signals.append(f"{query.included_type.replace('_', ' ')} category")
     if rating is not None:
         signals.append(f"rating {rating}")
     if review_count is not None:
         signals.append(f"{review_count} reviews")
 
     description_parts = [
-        "Painting provider found through Google Places",
+        f"{niche_label.title()} provider found through Google Places",
         f"for {query.text_query}",
         f"with rating {rating}" if rating is not None else None,
         f"and {review_count} reviews" if review_count is not None else None,

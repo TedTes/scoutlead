@@ -18,7 +18,6 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_ROOT = ROOT / "agent"
@@ -31,7 +30,7 @@ from app.config import get_settings  # noqa: E402
 from seeding.google_places import (  # noqa: E402
     GooglePlacesSeedCollector,
     GooglePlacesSeedQuery,
-    build_home_service_painting_queries,
+    build_niche_queries,
     seed_dedupe_key,
 )
 from seeding.schemas import BusinessSeedInput  # noqa: E402
@@ -91,6 +90,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Maximum paginated Text Search pages to request for each query.",
     )
     parser.add_argument("--market", default="Toronto/GTA", help="Seed market label.")
+    parser.add_argument(
+        "--niche",
+        default="home_service_painting",
+        help="Niche slug attached to every collected business.",
+    )
+    parser.add_argument(
+        "--included-type",
+        help="Optional Google Places includedType override for this niche.",
+    )
     parser.add_argument("--region-code", default="CA", help="Google Places region code.")
     parser.add_argument(
         "--city",
@@ -132,19 +140,25 @@ def build_queries(args: argparse.Namespace) -> list[GooglePlacesSeedQuery]:
                 text_query=query,
                 seed_market=args.market,
                 region_code=args.region_code,
+                included_type=args.included_type,
+                seed_niche=args.niche,
             )
             for query in exact_queries
             if query.strip()
         ]
     if args.city:
-        return build_home_service_painting_queries(
+        return build_niche_queries(
+            seed_niche=args.niche,
             seed_market=args.market,
             region_code=args.region_code,
             cities=args.city,
+            included_type=args.included_type,
         )
-    return build_home_service_painting_queries(
+    return build_niche_queries(
+        seed_niche=args.niche,
         seed_market=args.market,
         region_code=args.region_code,
+        included_type=args.included_type,
     )
 
 

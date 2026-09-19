@@ -6,6 +6,7 @@ from seeding.google_places import (
     GooglePlacesSeedCollector,
     GooglePlacesSeedQuery,
     build_home_service_painting_queries,
+    build_niche_queries,
     seed_dedupe_key,
 )
 from scripts.collect_google_places_seed import read_existing_seeds, write_jsonl
@@ -154,6 +155,17 @@ def test_home_service_painting_query_plan_can_cover_large_seed() -> None:
     assert len(queries) > 100
     assert queries[0].text_query == "residential painters Toronto ON"
     assert queries[0].region_code == "CA"
+
+
+def test_query_plan_keeps_each_niche_taxonomy() -> None:
+    queries = build_niche_queries(
+        seed_niche="home_service_roofing",
+        cities=["Toronto ON"],
+    )
+
+    assert queries[0].text_query == "roofing contractors Toronto ON"
+    assert queries[0].seed_niche == "home_service_roofing"
+    assert queries[0].included_type == "roofing_contractor"
 
 
 def test_seed_jsonl_round_trips_with_dedupe(tmp_path) -> None:
