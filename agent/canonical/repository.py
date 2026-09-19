@@ -15,7 +15,6 @@ from canonical.normalization import (
     normalize_business_name,
     normalize_domain,
     normalize_email,
-    normalize_phone,
     phone_from_raw,
     query_from_source_input,
     query_signature,
@@ -30,7 +29,13 @@ from canonical.semantics import (
     request_semantic_profile,
     semantic_key,
 )
-from db.models import BusinessModel, ContactModel, SourceObservationModel
+from db.models import (
+    BusinessModel,
+    BusinessNicheMembershipModel,
+    ContactModel,
+    SourceObservationModel,
+)
+from niches.resolver import resolve_niche, source_inputs_from_raw
 from shared.utils import new_id, normalize_text, normalize_url, utcnow
 
 
@@ -39,6 +44,13 @@ class CanonicalLeadLink:
     business_id: str | None
     contact_id: str | None
     source_observation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class NicheBusinessMatch:
+    similarity: float | None
+    business: BusinessModel
+    membership: BusinessNicheMembershipModel
 
 
 class CanonicalRepository:
@@ -86,6 +98,12 @@ class CanonicalRepository:
                 "source": source_name,
             },
         )
+        self._record_discovered_membership(
+            business=business,
+            observation=observation,
+            source=source_name,
+            raw=raw_payload,
+        )
         self.session.flush()
         return CanonicalLeadLink(
             business_id=business.id,
@@ -100,26 +118,62 @@ class CanonicalRepository:
         source_input: dict[str, Any],
         limit: int,
     ) -> list[dict[str, Any]]:
+        resolution = resolve_niche(
+            self.session,
+            source_inputs=source_input,
+            source_input=query_from_source_input(source_input),
+        )
+        if resolution is None:
+            return []
         signature = source_input_signature(source=source, source_input=source_input)
         if not signature:
             return []
         statement = (
-            select(SourceObservationModel, BusinessModel)
+            select(
+                SourceObservationModel,
+                BusinessModel,
+                BusinessNicheMembershipModel,
+            )
             .join(BusinessModel, BusinessModel.id == SourceObservationModel.business_id)
+            .join(
+                BusinessNicheMembershipModel,
+                BusinessNicheMembershipModel.business_id == BusinessModel.id,
+            )
             .where(
                 SourceObservationModel.source == source,
                 SourceObservationModel.query_signature == signature,
+                BusinessNicheMembershipModel.niche_id == resolution.niche_id,
             )
             .order_by(SourceObservationModel.observed_at.desc())
-            .limit(limit)
         )
         rows: list[dict[str, Any]] = []
         seen_business_ids: set[str] = set()
-        for observation, business in self.session.execute(statement).all():
+        for observation, business, membership in self.session.execute(statement).all():
             if business.id in seen_business_ids:
                 continue
+            if not market_is_compatible(resolution.market_key, membership.market_key):
+                continue
             seen_business_ids.add(business.id)
-            rows.append(_observation_to_search_result(observation, business))
+            row = _observation_to_search_result(observation, business)
+            raw = dict(row.get("raw") or {})
+            raw["exact_cache_hit"] = True
+            raw["niche_membership"] = {
+                "id": membership.id,
+                "niche_id": resolution.niche_id,
+                "niche_slug": resolution.slug,
+                "niche_label": resolution.label,
+                "market_key": membership.market_key,
+                "confidence": membership.confidence,
+                "evidence": membership.evidence,
+                "source_observation_id": membership.source_observation_id,
+                "seed_batch_id": membership.seed_batch_id,
+                "resolution_type": resolution.match_type,
+                "resolution_score": resolution.score,
+            }
+            row["raw"] = raw
+            rows.append(row)
+            if len(rows) >= limit:
+                break
         return rows
 
     def list_semantic_discovery_results(
@@ -141,22 +195,32 @@ class CanonicalRepository:
         if not profile.text:
             return []
 
-        self._backfill_semantic_fields(
-            request_market_key=profile.market_key,
+        resolution = resolve_niche(
+            self.session,
+            source_inputs=source_inputs,
+            source_input=source_input,
+        )
+        if resolution is None:
+            return []
+
+        self._backfill_niche_semantic_fields(
+            niche_id=resolution.niche_id,
+            request_market_key=resolution.market_key,
             limit=max(limit * 20, 200),
         )
         query_embedding = self.embedding.embed_text(profile.text)
         if query_embedding:
-            matches = self._embedding_matches(
+            matches = self._niche_embedding_matches(
                 query_embedding=query_embedding,
-                market_key=profile.market_key,
+                niche_id=resolution.niche_id,
+                market_key=resolution.market_key,
                 limit=limit,
                 min_score=min_score,
             )
         else:
-            matches = self._structured_matches(
-                category_key=profile.category_key,
-                market_key=profile.market_key,
+            matches = self._niche_membership_matches(
+                niche_id=resolution.niche_id,
+                market_key=resolution.market_key,
                 limit=limit,
             )
 
@@ -164,8 +228,10 @@ class CanonicalRepository:
             return []
 
         rows: list[dict[str, Any]] = []
-        for score, business in matches[:limit]:
-            observation = self._latest_observation_for_business(business.id)
+        for match in matches[:limit]:
+            business = match.business
+            membership = match.membership
+            observation = self._membership_observation(membership)
             row = (
                 _observation_to_search_result(observation, business)
                 if observation is not None
@@ -173,11 +239,27 @@ class CanonicalRepository:
             )
             raw = dict(row.get("raw") or {})
             raw["semantic_cache_hit"] = True
-            raw["semantic_similarity"] = round(score, 4)
+            raw["semantic_similarity"] = (
+                round(match.similarity, 4) if match.similarity is not None else None
+            )
             raw["semantic_request"] = {
-                "category_key": profile.category_key,
-                "market_key": profile.market_key,
+                "niche_id": resolution.niche_id,
+                "niche_slug": resolution.slug,
+                "market_key": resolution.market_key,
                 "text": profile.text,
+            }
+            raw["niche_membership"] = {
+                "id": membership.id,
+                "niche_id": resolution.niche_id,
+                "niche_slug": resolution.slug,
+                "niche_label": resolution.label,
+                "market_key": membership.market_key,
+                "confidence": membership.confidence,
+                "evidence": membership.evidence,
+                "source_observation_id": membership.source_observation_id,
+                "seed_batch_id": membership.seed_batch_id,
+                "resolution_type": resolution.match_type,
+                "resolution_score": resolution.score,
             }
             row["raw"] = raw
             rows.append(row)
@@ -221,7 +303,9 @@ class CanonicalRepository:
         now = utcnow()
         display_name = normalize_text(company_name)
         normalized_name = normalize_business_name(display_name)
-        normalized_url = normalize_url(website_url) or source_url_from_raw(raw)
+        # A directory or map listing identifies the observation, not the business website.
+        # Falling back to it here merges unrelated businesses under the source's domain.
+        normalized_url = normalize_url(website_url)
         domain = normalize_domain(normalized_url)
         normalized_geography = normalize_text(geography) or None
         phone = phone_from_raw(raw)
@@ -470,46 +554,69 @@ class CanonicalRepository:
         self.session.flush()
         return observation
 
-    def _embedding_matches(
+    def _niche_embedding_matches(
         self,
         *,
         query_embedding: list[float],
+        niche_id: str,
         market_key: str | None,
         limit: int,
         min_score: float,
-    ) -> list[tuple[float, BusinessModel]]:
+    ) -> list[NicheBusinessMatch]:
         statement = (
-            select(BusinessModel)
+            select(BusinessModel, BusinessNicheMembershipModel)
+            .join(
+                BusinessNicheMembershipModel,
+                BusinessNicheMembershipModel.business_id == BusinessModel.id,
+            )
             .where(BusinessModel.embedding.is_not(None))
-            .order_by(BusinessModel.last_seen_at.desc())
+            .where(BusinessNicheMembershipModel.niche_id == niche_id)
+            .order_by(BusinessNicheMembershipModel.last_seen_at.desc())
             .limit(max(limit * 20, 200))
         )
-        matches: list[tuple[float, BusinessModel]] = []
-        for business in self.session.scalars(statement):
-            if not market_is_compatible(market_key, business.market_key):
+        matches: list[NicheBusinessMatch] = []
+        for business, membership in self.session.execute(statement).all():
+            if not market_is_compatible(market_key, membership.market_key):
                 continue
             score = cosine_similarity(query_embedding, business.embedding)
             if score >= min_score:
-                matches.append((score, business))
-        matches.sort(key=lambda item: (item[0], item[1].last_seen_at), reverse=True)
+                matches.append(NicheBusinessMatch(score, business, membership))
+        matches.sort(
+            key=lambda item: (
+                item.similarity or 0,
+                item.membership.confidence,
+                item.membership.last_seen_at,
+            ),
+            reverse=True,
+        )
         return matches[:limit]
 
-    def _structured_matches(
+    def _niche_membership_matches(
         self,
         *,
-        category_key: str | None,
+        niche_id: str,
         market_key: str | None,
         limit: int,
-    ) -> list[tuple[float, BusinessModel]]:
-        if not category_key and not market_key:
-            return []
-        statement = select(BusinessModel)
-        if category_key:
-            statement = statement.where(BusinessModel.category_key == category_key)
-        if market_key:
-            statement = statement.where(BusinessModel.market_key == market_key)
-        statement = statement.order_by(BusinessModel.last_seen_at.desc()).limit(limit)
-        return [(1.0, business) for business in self.session.scalars(statement)]
+    ) -> list[NicheBusinessMatch]:
+        statement = (
+            select(BusinessModel, BusinessNicheMembershipModel)
+            .join(
+                BusinessNicheMembershipModel,
+                BusinessNicheMembershipModel.business_id == BusinessModel.id,
+            )
+            .where(BusinessNicheMembershipModel.niche_id == niche_id)
+            .order_by(
+                BusinessNicheMembershipModel.confidence.desc(),
+                BusinessNicheMembershipModel.last_seen_at.desc(),
+            )
+            .limit(max(limit * 5, 50))
+        )
+        matches = [
+            NicheBusinessMatch(None, business, membership)
+            for business, membership in self.session.execute(statement).all()
+            if market_is_compatible(market_key, membership.market_key)
+        ]
+        return matches[:limit]
 
     def _latest_observation_for_business(self, business_id: str) -> SourceObservationModel | None:
         return self.session.scalar(
@@ -519,25 +626,30 @@ class CanonicalRepository:
             .limit(1)
         )
 
-    def _backfill_semantic_fields(
+    def _backfill_niche_semantic_fields(
         self,
         *,
+        niche_id: str,
         request_market_key: str | None,
         limit: int,
     ) -> None:
         statement = (
-            select(BusinessModel)
+            select(BusinessModel, BusinessNicheMembershipModel)
+            .join(
+                BusinessNicheMembershipModel,
+                BusinessNicheMembershipModel.business_id == BusinessModel.id,
+            )
+            .where(BusinessNicheMembershipModel.niche_id == niche_id)
             .where(or_(BusinessModel.semantic_text.is_(None), BusinessModel.embedding.is_(None)))
-            .order_by(BusinessModel.last_seen_at.desc())
+            .order_by(BusinessNicheMembershipModel.last_seen_at.desc())
             .limit(limit)
         )
         now = utcnow()
         changed = False
-        for business in self.session.scalars(statement):
-            business_market_key = business.market_key or semantic_key(business.geography)
-            if not market_is_compatible(request_market_key, business_market_key):
+        for business, membership in self.session.execute(statement).all():
+            if not market_is_compatible(request_market_key, membership.market_key):
                 continue
-            observation = self._latest_observation_for_business(business.id)
+            observation = self._membership_observation(membership)
             raw = observation.raw_payload if observation is not None else {}
             profile = business_semantic_profile(
                 company_name=business.display_name,
@@ -548,8 +660,6 @@ class CanonicalRepository:
                 raw=raw,
             )
             previous_semantic_text = business.semantic_text
-            business.category_key = business.category_key or profile.category_key
-            business.market_key = business.market_key or profile.market_key
             if profile.text:
                 business.semantic_text = profile.text
                 changed = True
@@ -561,6 +671,76 @@ class CanonicalRepository:
                     self._refresh_embedding_if_needed(business, profile.text, now=now)
         if changed:
             self.session.flush()
+
+    def _membership_observation(
+        self,
+        membership: BusinessNicheMembershipModel,
+    ) -> SourceObservationModel | None:
+        if membership.source_observation_id:
+            observation = self.session.get(SourceObservationModel, membership.source_observation_id)
+            if observation is not None:
+                return observation
+        return self._latest_observation_for_business(membership.business_id)
+
+    def _record_discovered_membership(
+        self,
+        *,
+        business: BusinessModel,
+        observation: SourceObservationModel,
+        source: str,
+        raw: dict[str, Any],
+    ) -> None:
+        source_inputs, source_input = source_inputs_from_raw(raw)
+        if not source_inputs:
+            return
+        resolution = resolve_niche(
+            self.session,
+            source_inputs=source_inputs,
+            source_input=source_input,
+        )
+        if resolution is None:
+            return
+        market_key = resolution.market_key or semantic_key(business.geography) or "unknown"
+        membership = self.session.scalar(
+            select(BusinessNicheMembershipModel)
+            .where(
+                BusinessNicheMembershipModel.business_id == business.id,
+                BusinessNicheMembershipModel.niche_id == resolution.niche_id,
+                BusinessNicheMembershipModel.market_key == market_key,
+            )
+            .limit(1)
+        )
+        evidence = {
+            "type": "discovery_association",
+            "source": source,
+            "query": source_input,
+            "source_observation_id": observation.id,
+            "resolution_type": resolution.match_type,
+            "resolution_score": resolution.score,
+        }
+        now = utcnow()
+        if membership is None:
+            self.session.add(
+                BusinessNicheMembershipModel(
+                    id=new_id("bizniche"),
+                    business_id=business.id,
+                    niche_id=resolution.niche_id,
+                    market_key=market_key,
+                    confidence=max(0.5, resolution.score),
+                    evidence=[evidence],
+                    source_observation_id=observation.id,
+                    seed_batch_id=None,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+            self.session.flush()
+            return
+        membership.confidence = max(membership.confidence, resolution.score)
+        membership.evidence = _append_unique_membership_evidence(membership.evidence, evidence)
+        membership.source_observation_id = observation.id
+        membership.last_seen_at = now
+        self.session.flush()
 
     def _refresh_embedding_if_needed(
         self,
@@ -715,3 +895,24 @@ def _first_cached_text(
             if isinstance(value, (int, float)):
                 return str(value)
     return None
+
+
+def _append_unique_membership_evidence(
+    existing: list[dict[str, Any]] | None,
+    evidence: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows = list(existing or [])
+    evidence_key = (
+        evidence.get("type"),
+        evidence.get("source"),
+        evidence.get("source_observation_id"),
+    )
+    for row in rows:
+        row_key = (
+            row.get("type"),
+            row.get("source"),
+            row.get("source_observation_id"),
+        )
+        if row_key == evidence_key:
+            return rows
+    return [*rows, evidence]

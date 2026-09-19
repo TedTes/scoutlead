@@ -5,7 +5,7 @@ from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceCreate, CampaignSourceMode, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, CampaignRead, LeadSeedInput
-from db.models import BusinessModel, ContactModel, SourceObservationModel
+from db.models import BusinessModel, ContactModel, NicheModel, SourceObservationModel
 from db.session import create_database
 from discovery.repository import DiscoveryCandidateRepository
 from leads.repository import LeadRepository
@@ -161,6 +161,17 @@ def test_repeat_discovery_source_can_reuse_cached_contacts_without_refetching() 
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory() as session:
+        session.add(
+            NicheModel(
+                id="niche_painting",
+                slug="home_service_painting",
+                label="Home Service Painting",
+                category="home service painting",
+                default_query="residential painters and house painting contractors",
+                active=True,
+            )
+        )
+        session.commit()
         product = ProductRead.model_validate(ProductRepository(session).create(product_input()))
         search_tool = CountingSearchTool()
         first_campaign = CampaignRead.model_validate(
@@ -208,6 +219,17 @@ def test_semantic_discovery_cache_reuses_existing_business_without_refetching() 
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory() as session:
+        session.add(
+            NicheModel(
+                id="niche_painting",
+                slug="home_service_painting",
+                label="Home Service Painting",
+                category="home service painting",
+                default_query="residential painters and house painting contractors",
+                active=True,
+            )
+        )
+        session.commit()
         product = ProductRead.model_validate(ProductRepository(session).create(product_input()))
         search_tool = CountingSearchTool()
         embedding = FakeEmbeddingClient()

@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient
+from canonical.semantics import semantic_key
 from seeding.repository import BusinessSeedRepository
 from seeding.schemas import BusinessSeedImportSummary, BusinessSeedInput
 
@@ -23,13 +24,15 @@ class BusinessSeedService:
         limit: int | None = None,
     ) -> BusinessSeedImportSummary:
         summary = BusinessSeedImportSummary(batch_id=batch_id, dry_run=dry_run)
+        seed_rows = list(seeds)
+        if limit is not None:
+            seed_rows = seed_rows[:limit]
+        _validate_batch_scope(seed_rows, batch_id=batch_id)
         known_business_ids = self.repository.business_ids()
         known_contact_ids = self.repository.contact_ids()
         before_observation_count = self.repository.source_observation_count()
 
-        for seed in seeds:
-            if limit is not None and summary.rows_read >= limit:
-                break
+        for seed in seed_rows:
             summary.rows_read += 1
             summary.rows_valid += 1
             if dry_run:
@@ -63,3 +66,12 @@ class BusinessSeedService:
         )
         self.session.commit()
         return summary
+
+
+def _validate_batch_scope(seeds: list[BusinessSeedInput], *, batch_id: str) -> None:
+    niches = {semantic_key(seed.seed_niche) for seed in seeds}
+    markets = {semantic_key(seed.seed_market or seed.geography) or "unknown" for seed in seeds}
+    if len(niches) > 1:
+        raise ValueError(f"seed batch {batch_id} cannot contain more than one niche")
+    if len(markets) > 1:
+        raise ValueError(f"seed batch {batch_id} cannot contain more than one market")

@@ -7,6 +7,7 @@ from campaign_sources.repository import CampaignSourceRepository
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
+from db.models import NicheModel
 from db.session import create_database
 from leads.repository import LeadRepository
 from products.repository import ProductRepository
@@ -238,6 +239,17 @@ def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory() as session:
+        session.add(
+            NicheModel(
+                id="niche_painting",
+                slug="home_service_painting",
+                label="Home Service Painting",
+                category="home service painting",
+                default_query="painting service contacts",
+                active=True,
+            )
+        )
+        session.commit()
         product = ProductRepository(session).create(_product())
         CanonicalRepository(session, embedding=FakeEmbeddingClient()).upsert_from_discovery_result(
             company_name="All Painting Toronto",

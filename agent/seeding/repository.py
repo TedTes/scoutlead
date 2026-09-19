@@ -146,8 +146,13 @@ class BusinessSeedRepository:
             self.session.add(seed_batch)
             self.session.flush()
             return seed_batch
-        seed_batch.niche_id = seed_batch.niche_id or niche_id
-        seed_batch.market_key = seed_batch.market_key or _seed_market_key(seed)
+        market_key = _seed_market_key(seed)
+        if seed_batch.niche_id and seed_batch.niche_id != niche_id:
+            raise ValueError(f"seed batch {batch_id} cannot contain more than one niche")
+        if seed_batch.market_key and seed_batch.market_key != market_key:
+            raise ValueError(f"seed batch {batch_id} cannot contain more than one market")
+        seed_batch.niche_id = niche_id
+        seed_batch.market_key = market_key
         seed_batch.source = seed_batch.source or seed.source
         seed_batch.query = seed_batch.query or seed.query
         if seed_batch.status != "completed":
@@ -214,7 +219,8 @@ def seed_raw_payload(seed: BusinessSeedInput, *, batch_id: str) -> dict:
         "source_type": "seed_import",
         "source_request_prompt": seed.query,
         "source_request_intent": {
-            "business_category": "home service painting providers",
+            "business_category": _niche_label(seed.seed_niche),
+            "niche_slug": _niche_slug(seed.seed_niche),
             "location": seed.seed_market or seed.geography,
             "required_signals": seed.signals,
             "search_query": seed.query,

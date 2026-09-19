@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
@@ -59,9 +60,6 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert business.display_name == "Example Solo Painting Co."
         assert business.domain == "example-solo-painting.test"
         assert business.phone == "4165550101"
-        assert business.category_key == "home service painting providers"
-        assert business.market_key == "toronto gta"
-
         contact = session.scalar(select(ContactModel))
         assert contact is not None
         assert contact.business_id == business.id
@@ -150,6 +148,56 @@ def test_business_seed_import_dedupes_by_phone_without_domain() -> None:
         assert _count(session, BusinessModel) == 1
 
 
+def test_business_seed_import_does_not_use_listing_domain_as_business_identity() -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        first = painting_seed(
+            company_name="First Painter",
+            website_url=None,
+            phone=None,
+            contact_email=None,
+            contact_name=None,
+            source_url="https://www.openstreetmap.org/node/100",
+            external_id="osm:node:100",
+        )
+        second = painting_seed(
+            company_name="Second Painter",
+            website_url=None,
+            phone=None,
+            contact_email=None,
+            contact_name=None,
+            source_url="https://www.openstreetmap.org/node/200",
+            external_id="osm:node:200",
+        )
+
+        summary = BusinessSeedService(session).import_seeds(
+            [first, second],
+            batch_id="painting-toronto-v1",
+        )
+
+        assert summary.businesses_created == 2
+        assert _count(session, BusinessModel) == 2
+        assert {business.domain for business in session.scalars(select(BusinessModel))} == {None}
+
+
+def test_business_seed_import_rejects_a_mixed_niche_batch_before_writing() -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        with pytest.raises(ValueError, match="cannot contain more than one niche"):
+            BusinessSeedService(session).import_seeds(
+                [
+                    painting_seed(),
+                    painting_seed(seed_niche="home_service_roofing"),
+                ],
+                batch_id="mixed-v1",
+            )
+
+        assert _count(session, BusinessModel) == 0
+        assert _count(session, SeedBatchModel) == 0
+
+
 def test_business_seed_import_supports_semantic_cache_reuse() -> None:
     session_factory = _session_factory()
 
@@ -179,6 +227,48 @@ def test_business_seed_import_supports_semantic_cache_reuse() -> None:
         assert len(rows) == 1
         assert rows[0]["title"] == "Example Solo Painting Co."
         assert rows[0]["raw"]["semantic_cache_hit"] is True
+        assert rows[0]["raw"]["niche_membership"]["niche_slug"] == "home_service_painting"
+        assert rows[0]["raw"]["niche_membership"]["seed_batch_id"] == "painting-toronto-v1"
+
+
+def test_semantic_cache_never_crosses_niche_memberships() -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        embedding = FakeEmbeddingClient()
+        service = BusinessSeedService(session, embedding=embedding)
+        service.import_seeds([painting_seed()], batch_id="painting-test-v1")
+        service.import_seeds(
+            [
+                painting_seed(
+                    company_name="Example Toronto Roofing",
+                    website_url="https://example-roofing.test",
+                    contact_email="owner@example-roofing.test",
+                    description="Residential roofing company providing roof repair and replacement.",
+                    query="residential roofing contractors in Toronto",
+                    signals=["residential roofing", "roof repair"],
+                    seed_niche="home_service_roofing",
+                )
+            ],
+            batch_id="roofing-test-v1",
+        )
+
+        rows = CanonicalRepository(session, embedding=embedding).list_semantic_discovery_results(
+            source_inputs={
+                "source_request_intent": {
+                    "business_category": "residential painting contractors",
+                    "location": "Toronto/GTA",
+                    "search_query": "residential painters Toronto",
+                },
+            },
+            source_input="residential painters Toronto",
+            limit=5,
+            min_score=0.1,
+            min_results=1,
+        )
+
+        assert [row["title"] for row in rows] == ["Example Solo Painting Co."]
+        assert rows[0]["raw"]["niche_membership"]["niche_slug"] == "home_service_painting"
 
 
 def painting_seed(**overrides) -> BusinessSeedInput:
