@@ -570,10 +570,10 @@ class ProductService:
         return ProductSourceEvidence(
             product_name_candidates=[product.product_name],
             headline=product.product_name,
-            claims=[product.product_description],
+            claims=[product.offer_summary or product.product_description or product.product_name],
             target_customer_clues=[product.target_customer],
-            problem_clues=[product.problem_being_solved],
-            value_clues=[product.value_proposition],
+            problem_clues=[product.problem_being_solved] if product.problem_being_solved else [],
+            value_clues=[product.value_proposition] if product.value_proposition else [],
             source_snippets=[
                 f"Existing saved product: {product.product_name}",
                 f"Source URL: {product.source_url}",
@@ -625,11 +625,11 @@ class ProductService:
         ).lower()
         generated = " ".join(
             [
-                inferred.product_description,
+                inferred.offer_summary or inferred.product_description or "",
                 inferred.target_customer,
-                inferred.problem_being_solved,
-                inferred.value_proposition,
-                inferred.validation_goal,
+                inferred.problem_being_solved or "",
+                inferred.value_proposition or "",
+                inferred.validation_goal or "",
                 " ".join(source.value for source in inferred.preferred_discovery_sources),
             ]
         ).lower()

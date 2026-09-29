@@ -2,7 +2,11 @@ from leads.schemas import AgentFitStatus, CriterionScore, LeadRead, LeadFitType,
 from products.schemas import ProductRead
 
 
-def qualification_prompt(product: ProductRead, lead: LeadRead) -> str:
+def qualification_prompt(
+    product: ProductRead,
+    lead: LeadRead,
+    signal_vocabulary: list[str] | None = None,
+) -> str:
     lead_snapshot = {
         "company_name": lead.company_name,
         "website_url": lead.website_url,
@@ -27,8 +31,15 @@ def qualification_prompt(product: ProductRead, lead: LeadRead) -> str:
             "Only put missing hard requirements or action-changing risks in missing_evidence.",
             "Do not repeat missing soft preferences, such as exact owner/solo/company-size evidence, when public evidence is usually unavailable.",
             "Populate positive_signals, missing_evidence, and risks with concise public-evidence bullets.",
+            (
+                "Populate signal_tags only with exact values from this controlled vocabulary: "
+                f"{signal_vocabulary or []}. Return an empty list when none apply."
+            ),
             f"Product: {product.product_name}",
+            f"Offer: {product.offer_summary or product.product_description or product.product_name}",
             f"Target customer: {product.target_customer}",
+            f"Ideal customer signals: {product.ideal_customer_signals}",
+            f"Exclusions: {product.exclusions}",
             f"Qualification criteria: {product.qualification_criteria}",
             f"Lead evidence: {lead_snapshot}",
         ]

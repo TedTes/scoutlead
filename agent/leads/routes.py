@@ -8,6 +8,7 @@ from campaigns.schemas import LeadSeedInput
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateRead
 from leads.repository import LeadRepository
+from leads.approach_service import LeadApproachService
 from leads.schemas import LeadContactPolicyUpdate, LeadRead, LeadUpdate
 from leads.service import LeadQualificationService
 
@@ -71,3 +72,17 @@ def qualify_lead(
         llm=services.llm,
         workspace_id=auth.workspace_id,
     ).qualify(lead_id)
+
+
+@router.post("/leads/{lead_id}/approach", response_model=LeadRead)
+def generate_lead_approach(
+    lead_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    return LeadApproachService(
+        session=session,
+        llm=services.llm,
+        workspace_id=auth.workspace_id,
+    ).generate(lead_id)

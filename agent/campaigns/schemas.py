@@ -52,6 +52,7 @@ class LeadSeedInput(BaseModel):
 
 class CampaignCreate(BaseModel):
     product_id: str = Field(min_length=1)
+    territory_id: str | None = None
     name: str = Field(min_length=1)
     goal_type: CampaignGoalType = CampaignGoalType.LEARN
     icp_preset_id: str | None = None

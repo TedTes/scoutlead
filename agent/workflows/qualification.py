@@ -44,7 +44,11 @@ class QualificationWorkflow:
             result = self.llm.generate_object(
                 task="lead_qualification",
                 system="Score the lead against explicit qualification criteria.",
-                prompt=qualification_prompt(product, lead),
+                prompt=qualification_prompt(
+                    product,
+                    lead,
+                    self.leads.signal_vocabulary_for_lead(lead.id),
+                ),
                 response_model=QualificationResult,
                 context={
                     "product": product.model_dump(mode="json"),

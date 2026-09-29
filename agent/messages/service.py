@@ -1,6 +1,7 @@
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
@@ -9,6 +10,7 @@ from campaigns.goal import goal_policy
 from campaigns.schemas import CampaignGoalType, CampaignRead, CampaignStatus, OutreachChannel
 from conversations.repository import ConversationRepository
 from conversations.schemas import FollowUpAction, ResponseClassification, ResponseIntent
+from db.models import MessageModel, ProductModel
 from leads.policy import (
     can_shortlist_lead,
     contact_block_reason,
@@ -37,6 +39,8 @@ from messages.schemas import (
     OutreachDraft,
 )
 from messages.state import assert_send_allowed
+from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel, OutcomeSource
+from outcomes.service import OutcomeService
 from prompts.outreach_learn import outreach_learn_prompt
 from prompts.outreach_sell import outreach_sell_prompt
 from products.repository import ProductRepository
@@ -296,6 +300,7 @@ class MessageService:
 
     def mark_replied(self, message_id: str, reply: MessageReplyMark) -> MessageRead:
         message = MessageRead.model_validate(self.messages.get(message_id))
+        product = ProductRead.model_validate(self.products.get(message.product_id))
         updated = self.messages.set_status(message_id, MessageStatus.REPLIED)
         self.leads.update_status(message.lead_id, LeadStatus.RESPONDED)
         conversation = self.conversations.get_or_create(
@@ -309,6 +314,22 @@ class MessageService:
                 confidence=100,
                 rationale="Marked as replied manually by the operator.",
                 follow_up_action=FollowUpAction.MANUAL_REVIEW,
+            ),
+        )
+        OutcomeService(
+            self.session,
+            workspace_id=product.workspace_id,
+        ).record(
+            message.lead_id,
+            LeadOutcomeCreate(
+                outcome=(
+                    LeadOutcome.REPLIED_POSITIVE
+                    if reply.positive
+                    else LeadOutcome.REPLIED_NEGATIVE
+                ),
+                channel=OutcomeChannel.EMAIL,
+                source=OutcomeSource.MANUAL,
+                note=reply.body,
             ),
         )
         return MessageRead.model_validate(updated)
@@ -355,6 +376,7 @@ class MessageService:
         email = lead_email(lead)
         if email and lead.contact_email != email:
             lead.contact_email = email
+        self._assert_daily_send_cap(product)
         try:
             result = self.email.send(product=product, lead=lead, message=message)
         except Exception as exc:
@@ -374,6 +396,18 @@ class MessageService:
         )
         self.leads.update_status(message.lead_id, LeadStatus.SENT)
         self.leads.mark_contacted(message.lead_id, sent_at)
+        OutcomeService(
+            self.session,
+            workspace_id=product.workspace_id,
+        ).record(
+            message.lead_id,
+            LeadOutcomeCreate(
+                outcome=LeadOutcome.CONTACTED,
+                channel=OutcomeChannel.EMAIL,
+                source=OutcomeSource.EMAIL_SEND,
+                occurred_at=sent_at,
+            ),
+        )
         conversation = self.conversations.get_or_create(
             message.campaign_id, message.product_id, message.lead_id
         )
@@ -384,6 +418,38 @@ class MessageService:
             self.campaigns.update_status(message.campaign_id, CampaignStatus.TRACKING)
 
         return MessageRead.model_validate(updated)
+
+    def _assert_daily_send_cap(self, product: ProductRead) -> None:
+        if not getattr(self.email, "compliance_enabled", False):
+            return
+        cap = int(getattr(self.email, "daily_send_cap", 50))
+        day_start = datetime.now(timezone.utc).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        statement = (
+            select(func.count(MessageModel.id))
+            .join(ProductModel, MessageModel.product_id == ProductModel.id)
+            .where(MessageModel.status == MessageStatus.SENT.value)
+            .where(MessageModel.sent_at >= day_start)
+        )
+        if product.workspace_id:
+            statement = statement.where(ProductModel.workspace_id == product.workspace_id)
+        else:
+            statement = statement.where(ProductModel.id == product.id)
+        sent_today = int(self.session.scalar(statement) or 0)
+        if sent_today >= cap:
+            raise ConflictError(
+                "daily send cap reached",
+                {
+                    "reason": "daily_cap_reached",
+                    "daily_send_cap": cap,
+                    "sent_today": sent_today,
+                    "user_message": "The daily send limit was reached. This draft remains ready for tomorrow.",
+                },
+            )
 
     def _campaign_outreach_candidates(
         self,
@@ -517,10 +583,10 @@ def _campaign_template_tokens(product: ProductRead, lead: LeadRead) -> dict[str,
         "fit_reason": fit_reason,
         "website_url": website_url,
         "product_name": product.product_name,
-        "product_description": product.product_description,
-        "value_proposition": product.value_proposition,
-        "problem": product.problem_being_solved,
-        "outreach_objective": product.outreach_objective,
+        "product_description": product.offer_summary or product.product_description or "",
+        "value_proposition": product.value_proposition or product.offer_summary or "",
+        "problem": product.problem_being_solved or "",
+        "outreach_objective": product.outreach_objective or "",
     }
 
 

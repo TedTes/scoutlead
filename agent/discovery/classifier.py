@@ -263,8 +263,9 @@ def _target_terms(product: ProductRead) -> set[str]:
     text = " ".join(
         [
             product.target_customer,
-            product.problem_being_solved,
+            product.problem_being_solved or product.offer_summary or "",
             " ".join(criterion.label for criterion in product.qualification_criteria),
+            " ".join(product.ideal_customer_signals),
         ]
     ).lower()
     stopwords = {

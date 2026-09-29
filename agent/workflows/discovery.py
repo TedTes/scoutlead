@@ -17,6 +17,7 @@ from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
 from tools.search import SearchResult, SearchTool
 from tools.source_registry import CampaignSourceTool, SourceAdapterRegistry
+from territories.dedupe import exclude_previously_delivered_rows
 
 
 class DiscoveryWorkflow:
@@ -107,8 +108,16 @@ class DiscoveryWorkflow:
             if semantic_rows:
                 break
         if semantic_rows:
-            cached_results.extend(_rows_with_semantic_context(semantic_rows))
-            sources = []
+            cached_results.extend(
+                exclude_previously_delivered_rows(
+                    self.leads.session,
+                    campaign_id=campaign.id,
+                    product_id=product.id,
+                    rows=_rows_with_semantic_context(semantic_rows),
+                )
+            )
+            if not campaign.territory_id or len(cached_results) >= campaign.max_leads:
+                sources = []
         else:
             for source in sources:
                 limit = int(source.config.get("limit") or campaign.max_leads)
@@ -119,13 +128,19 @@ class DiscoveryWorkflow:
                 )
                 if cached_rows:
                     cached_results.extend(
-                        _rows_with_source_context(
-                            rows=cached_rows,
-                            source=source,
-                            from_cache=True,
+                        exclude_previously_delivered_rows(
+                            self.leads.session,
+                            campaign_id=campaign.id,
+                            product_id=product.id,
+                            rows=_rows_with_source_context(
+                                rows=cached_rows,
+                                source=source,
+                                from_cache=True,
+                            ),
                         )
                     )
-                    continue
+                    if not campaign.territory_id or len(cached_results) >= campaign.max_leads:
+                        continue
                 sources_to_run.append(source)
             sources = sources_to_run
         source_tool = CampaignSourceTool(
@@ -175,6 +190,12 @@ class DiscoveryWorkflow:
                         from_cache=False,
                     )
                 )
+            enriched_rows = exclude_previously_delivered_rows(
+                self.leads.session,
+                campaign_id=campaign.id,
+                product_id=product.id,
+                rows=enriched_rows,
+            )
             return {
                 "source_index": state["source_index"] + 1,
                 "results": [*state["results"], *enriched_rows],

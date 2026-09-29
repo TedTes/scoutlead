@@ -1,10 +1,12 @@
 import pytest
+from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, LeadSeedInput
 from db.session import create_database
+from db.models import MessageModel
 from leads.repository import LeadRepository
 from leads.schemas import (
     AgentFitStatus,
@@ -72,6 +74,41 @@ def _create_campaign_fixture(session):
         CampaignCreate(product_id=product.id, name="Painters Toronto", max_leads=5)
     )
     return product, campaign, LeadRepository(session)
+
+
+def test_daily_send_cap_blocks_at_boundary_without_changing_draft() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product, campaign, _ = _create_campaign_fixture(session)
+        session.add(
+            MessageModel(
+                id="message:sent",
+                campaign_id=campaign.id,
+                product_id=product.id,
+                lead_id="lead:historical",
+                channel="email",
+                subject="Already sent",
+                body="Sent earlier today.",
+                personalization_notes=[],
+                approach_tag="test",
+                status=MessageStatus.SENT.value,
+                sent_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+        service = MessageService(
+            session=session,
+            email=EmailTool(compliance_enabled=True, daily_send_cap=1),
+        )
+
+        with pytest.raises(ConflictError) as exc_info:
+            service._assert_daily_send_cap(product)
+
+        assert exc_info.value.details["reason"] == "daily_cap_reached"
+        assert exc_info.value.details["sent_today"] == 1
 
 
 def _create_fit_lead(

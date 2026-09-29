@@ -12,12 +12,14 @@ from sqlalchemy.orm import Session
 from email_connections.crypto import TokenCipher
 from email_connections.repository import EmailConnectionRepository
 from email_connections.schemas import EmailProvider
+from db.models import WorkspaceModel
 from leads.schemas import LeadRead
 from messages.schemas import MessageRead
 from messages.state import assert_send_allowed
 from products.schemas import ProductRead
 from shared.errors import ConfigurationError, ValidationError
 from shared.utils import utcnow
+from unsubscribe.tokens import UnsubscribeClaims, sign_unsubscribe_token
 
 
 class SendEmailResult(BaseModel):
@@ -48,6 +50,10 @@ class EmailTool:
         gmail_api_base_url: str = "https://gmail.googleapis.com/gmail/v1",
         timeout_seconds: float = 20.0,
         allow_console: bool = True,
+        compliance_enabled: bool = False,
+        unsubscribe_signing_secret: str | None = None,
+        public_api_base: str | None = None,
+        daily_send_cap: int = 50,
         session: Session | None = None,
     ) -> None:
         self.provider = provider
@@ -64,6 +70,10 @@ class EmailTool:
         self.gmail_api_base_url = gmail_api_base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.allow_console = allow_console
+        self.compliance_enabled = compliance_enabled
+        self.unsubscribe_signing_secret = unsubscribe_signing_secret
+        self.public_api_base = (public_api_base or "").rstrip("/")
+        self.daily_send_cap = daily_send_cap
         self.session = session
 
     def bind_session(self, session: Session) -> EmailTool:
@@ -82,6 +92,10 @@ class EmailTool:
             gmail_api_base_url=self.gmail_api_base_url,
             timeout_seconds=self.timeout_seconds,
             allow_console=self.allow_console,
+            compliance_enabled=self.compliance_enabled,
+            unsubscribe_signing_secret=self.unsubscribe_signing_secret,
+            public_api_base=self.public_api_base,
+            daily_send_cap=self.daily_send_cap,
             session=session,
         )
 
@@ -105,6 +119,7 @@ class EmailTool:
         assert_send_allowed(message.status)
         if not lead.contact_email:
             raise ValidationError("lead must have a contact email before outbound sending", {"lead_id": lead.id})
+        body, unsubscribe_url = self._delivery_content(product=product, lead=lead, message=message)
 
         if self.provider == "console":
             if not self.allow_console:
@@ -115,10 +130,22 @@ class EmailTool:
             )
 
         if self.provider == "resend":
-            return self._send_resend(product=product, lead=lead, message=message)
+            return self._send_resend(
+                product=product,
+                lead=lead,
+                message=message,
+                body=body,
+                unsubscribe_url=unsubscribe_url,
+            )
 
         if self.provider == "gmail":
-            return self._send_gmail(product=product, lead=lead, message=message)
+            return self._send_gmail(
+                product=product,
+                lead=lead,
+                message=message,
+                body=body,
+                unsubscribe_url=unsubscribe_url,
+            )
 
         if self.provider != "http":
             raise ConfigurationError("unknown email provider", {"provider": self.provider})
@@ -136,7 +163,7 @@ class EmailTool:
             json={
                 "product": product.model_dump(mode="json"),
                 "lead": lead.model_dump(mode="json"),
-                "message": message.model_dump(mode="json"),
+                "message": message.model_copy(update={"body": body}).model_dump(mode="json"),
             },
         )
         response.raise_for_status()
@@ -148,6 +175,8 @@ class EmailTool:
         product: ProductRead,
         lead: LeadRead,
         message: MessageRead,
+        body: str,
+        unsubscribe_url: str | None,
     ) -> SendEmailResult:
         if not self.resend_api_key or not self.from_address:
             raise ConfigurationError(
@@ -158,7 +187,7 @@ class EmailTool:
             "from": f"{self.from_name} <{self.from_address}>",
             "to": [lead.contact_email],
             "subject": message.subject or f"{product.product_name} question for {lead.company_name}",
-            "text": message.body,
+            "text": body,
             "tags": [
                 {"name": "product_id", "value": product.id},
                 {"name": "campaign_id", "value": message.campaign_id},
@@ -168,6 +197,11 @@ class EmailTool:
         }
         if self.reply_to:
             payload["reply_to"] = self.reply_to
+        if unsubscribe_url:
+            payload["headers"] = {
+                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            }
 
         response = httpx.post(
             str(self.endpoint or "https://api.resend.com/emails"),
@@ -193,6 +227,8 @@ class EmailTool:
         product: ProductRead,
         lead: LeadRead,
         message: MessageRead,
+        body: str,
+        unsubscribe_url: str | None,
     ) -> SendEmailResult:
         if not self.google_oauth_client_id or not self.google_oauth_client_secret:
             raise ConfigurationError(
@@ -233,8 +269,9 @@ class EmailTool:
             from_address=connection.email_address,
             to_address=lead.contact_email,
             subject=message.subject or f"{product.product_name} question for {lead.company_name}",
-            body=message.body,
+            body=body,
             message_id=message.id,
+            unsubscribe_url=unsubscribe_url,
         )
         raw_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode("ascii")
         try:
@@ -326,6 +363,7 @@ class EmailTool:
         subject: str,
         body: str,
         message_id: str,
+        unsubscribe_url: str | None = None,
     ) -> EmailMessage:
         if not to_address:
             raise ValidationError("lead must have a contact email before outbound sending")
@@ -334,10 +372,64 @@ class EmailTool:
         email_message["From"] = formataddr((self.from_name, from_address))
         email_message["Subject"] = subject
         email_message["X-ScoutLead-Message-Id"] = message_id
+        if unsubscribe_url:
+            email_message["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+            email_message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
         if self.reply_to:
             email_message["Reply-To"] = self.reply_to
         email_message.set_content(body)
         return email_message
+
+    def _delivery_content(
+        self,
+        *,
+        product: ProductRead,
+        lead: LeadRead,
+        message: MessageRead,
+    ) -> tuple[str, str | None]:
+        if not self.compliance_enabled:
+            return message.body, None
+        if self.session is None:
+            raise ConfigurationError("compliant sending requires an active database session")
+        if not self.unsubscribe_signing_secret or not self.public_api_base:
+            raise ConfigurationError(
+                "unsubscribe configuration is incomplete",
+                {
+                    "user_message": (
+                        "Configure UNSUBSCRIBE_SIGNING_SECRET and PUBLIC_API_BASE before sending."
+                    )
+                },
+            )
+        if not product.workspace_id:
+            raise ConfigurationError("outreach offer is not assigned to a workspace")
+        workspace = self.session.get(WorkspaceModel, product.workspace_id)
+        fields = (
+            workspace.sender_legal_name if workspace else None,
+            workspace.sender_mailing_address if workspace else None,
+            workspace.sender_contact if workspace else None,
+        )
+        if not all(value and value.strip() for value in fields):
+            raise ConfigurationError(
+                "workspace sender profile is incomplete",
+                {
+                    "workspace_id": product.workspace_id,
+                    "user_message": "Complete the sender identity in Settings before sending.",
+                },
+            )
+        token = sign_unsubscribe_token(
+            UnsubscribeClaims(
+                workspace_id=product.workspace_id,
+                lead_id=lead.id,
+                email=lead.contact_email or "",
+            ),
+            self.unsubscribe_signing_secret,
+        )
+        unsubscribe_url = f"{self.public_api_base}/u/{token}"
+        footer = (
+            f"\n\n---\n{fields[0]}\n{fields[1]}\n{fields[2]}\n"
+            f"Unsubscribe: {unsubscribe_url}"
+        )
+        return f"{message.body.rstrip()}{footer}", unsubscribe_url
 
 
 def _provider_failure_reason(exc: ConfigurationError) -> str:

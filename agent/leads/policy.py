@@ -4,6 +4,7 @@ from typing import Any
 
 from leads.schemas import (
     AgentFitStatus,
+    BestChannel,
     ContactPolicyStatus,
     ContactVerificationStatus,
     LeadRead,
@@ -28,6 +29,19 @@ def normalize_agent_fit_status(result: QualificationResult) -> AgentFitStatus:
 
 def normalize_qualification_result(result: QualificationResult) -> QualificationResult:
     return result.model_copy(update={"fit_status": normalize_agent_fit_status(result)})
+
+
+def controlled_signal_tags(tags: list[str], vocabulary: list[str] | None) -> list[str]:
+    if not vocabulary:
+        return []
+    canonical = {tag.strip().casefold(): tag.strip() for tag in vocabulary if tag.strip()}
+    return list(
+        dict.fromkeys(
+            canonical[tag.strip().casefold()]
+            for tag in tags
+            if tag.strip().casefold() in canonical
+        )
+    )
 
 
 def can_shortlist_lead(
@@ -90,6 +104,48 @@ def contact_block_reason(lead: LeadRead) -> str:
     else:
         label = str(status or "blocked").replace("_", " ")
     return lead.contact_policy_reason or f"Contact policy is {label}."
+
+
+def best_contact_channel(lead: LeadRead) -> tuple[BestChannel, str]:
+    if lead.contact_email and lead.verification_status == ContactVerificationStatus.VALID:
+        return BestChannel.EMAIL, "A verified email is available."
+    if _raw_value(lead.raw_sources, {"phone", "contact_phone", "telephone"}):
+        return BestChannel.PHONE, "A public phone number is available."
+    signals = [*(lead.research.signals if lead.research else [])]
+    if any("contact form" in signal.casefold() for signal in signals) or _raw_truthy(
+        lead.raw_sources,
+        {"has_contact_form", "contact_form"},
+    ):
+        return BestChannel.CONTACT_FORM, "The business website has a contact form."
+    if _raw_value(lead.raw_sources, {"address", "street_address", "formatted_address"}):
+        return BestChannel.VISIT, "A public business address is available."
+    return BestChannel.NONE, "No verified outreach channel is available."
+
+
+def _raw_value(sources: list[dict], keys: set[str]) -> str | None:
+    for source in sources:
+        for key, value in _walk_items(source):
+            if key.casefold() in keys and isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _raw_truthy(sources: list[dict], keys: set[str]) -> bool:
+    return any(
+        key.casefold() in keys and bool(value)
+        for source in sources
+        for key, value in _walk_items(source)
+    )
+
+
+def _walk_items(value: Any):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key), item
+            yield from _walk_items(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_items(item)
 
 
 def _review_status(value: LeadReviewStatus | str | None) -> LeadReviewStatus:

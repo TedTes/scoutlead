@@ -64,12 +64,17 @@ def create_database(engine: Engine) -> None:
     _ensure_pgvector_extension(engine)
     Base.metadata.create_all(bind=engine)
     _ensure_product_source_columns(engine)
+    _ensure_offer_columns(engine)
     _ensure_campaign_runtime_columns(engine)
     _ensure_lead_review_columns(engine)
     _ensure_lead_verification_columns(engine)
+    _ensure_suppression_workspace_columns(engine)
     _ensure_canonical_contact_columns(engine)
     _ensure_business_semantic_columns(engine)
+    _ensure_outcome_columns(engine)
+    _ensure_qualified_contact_columns(engine)
     _ensure_product_workspace_columns(engine)
+    _ensure_workspace_sender_columns(engine)
     _ensure_email_connection_workspace_columns(engine)
 
 
@@ -110,12 +115,154 @@ def _ensure_product_source_columns(engine: Engine) -> None:
             )
 
 
+def _ensure_offer_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("products"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("products")}
+    json_type = "JSONB" if engine.dialect.name == "postgresql" else "JSON"
+    with engine.begin() as connection:
+        if "offer_summary" not in existing_columns:
+            connection.execute(text("ALTER TABLE products ADD COLUMN offer_summary TEXT"))
+        if "ideal_customer_signals" not in existing_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE products ADD COLUMN ideal_customer_signals "
+                    f"{json_type} NOT NULL DEFAULT '[]'"
+                )
+            )
+        if "exclusions" not in existing_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE products ADD COLUMN exclusions "
+                    f"{json_type} NOT NULL DEFAULT '[]'"
+                )
+            )
+        if "typical_deal_value" not in existing_columns:
+            connection.execute(text("ALTER TABLE products ADD COLUMN typical_deal_value TEXT"))
+        if engine.dialect.name == "postgresql":
+            for column_name in (
+                "product_description",
+                "problem_being_solved",
+                "value_proposition",
+                "validation_goal",
+                "outreach_objective",
+            ):
+                connection.execute(
+                    text(f"ALTER TABLE products ALTER COLUMN {column_name} DROP NOT NULL")
+                )
+
+
+def _ensure_workspace_sender_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("workspaces"):
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("workspaces")}
+    columns = {
+        "sender_legal_name": "VARCHAR(255)",
+        "sender_mailing_address": "TEXT",
+        "sender_contact": "VARCHAR(500)",
+    }
+    with engine.begin() as connection:
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    text(f"ALTER TABLE workspaces ADD COLUMN {column_name} {column_type}")
+                )
+
+
+def _ensure_suppression_workspace_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("contact_suppressions"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("contact_suppressions")}
+    indexes = {index["name"] for index in inspector.get_indexes("contact_suppressions")}
+    with engine.begin() as connection:
+        if "workspace_id" not in columns:
+            connection.execute(
+                text("ALTER TABLE contact_suppressions ADD COLUMN workspace_id VARCHAR(255)")
+            )
+        if "ix_contact_suppressions_workspace_id" not in indexes:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_contact_suppressions_workspace_id "
+                    "ON contact_suppressions (workspace_id)"
+                )
+            )
+
+
+def _ensure_outcome_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    dialect = engine.dialect.name
+    timestamp_type = "TIMESTAMP WITH TIME ZONE" if dialect == "postgresql" else "DATETIME"
+    with engine.begin() as connection:
+        if inspector.has_table("leads"):
+            columns = {column["name"] for column in inspector.get_columns("leads")}
+            indexes = {index["name"] for index in inspector.get_indexes("leads")}
+            if "latest_outcome" not in columns:
+                connection.execute(text("ALTER TABLE leads ADD COLUMN latest_outcome VARCHAR(32)"))
+            if "latest_outcome_at" not in columns:
+                connection.execute(
+                    text(f"ALTER TABLE leads ADD COLUMN latest_outcome_at {timestamp_type}")
+                )
+            if "ix_leads_latest_outcome" not in indexes:
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_leads_latest_outcome ON leads (latest_outcome)")
+                )
+        if inspector.has_table("businesses"):
+            columns = {column["name"] for column in inspector.get_columns("businesses")}
+            indexes = {index["name"] for index in inspector.get_indexes("businesses")}
+            if "status" not in columns:
+                connection.execute(
+                    text("ALTER TABLE businesses ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'active'")
+                )
+            if "ix_businesses_status" not in indexes:
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_businesses_status ON businesses (status)")
+                )
+
+
+def _ensure_qualified_contact_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    json_type = "JSONB" if engine.dialect.name == "postgresql" else "JSON"
+    with engine.begin() as connection:
+        if inspector.has_table("niches"):
+            columns = {column["name"] for column in inspector.get_columns("niches")}
+            if "signal_vocabulary" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE niches ADD COLUMN signal_vocabulary "
+                        f"{json_type} NOT NULL DEFAULT '[]'"
+                    )
+                )
+        if inspector.has_table("leads"):
+            columns = {column["name"] for column in inspector.get_columns("leads")}
+            indexes = {index["name"] for index in inspector.get_indexes("leads")}
+            if "approach" not in columns:
+                connection.execute(text(f"ALTER TABLE leads ADD COLUMN approach {json_type}"))
+            if "outcome_adjustment" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE leads ADD COLUMN outcome_adjustment "
+                        "FLOAT NOT NULL DEFAULT 0"
+                    )
+                )
+            if "rank_score" not in columns:
+                connection.execute(text("ALTER TABLE leads ADD COLUMN rank_score FLOAT"))
+            if "ix_leads_rank_score" not in indexes:
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_leads_rank_score ON leads (rank_score)")
+                )
+
+
 def _ensure_campaign_runtime_columns(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("campaigns"):
         return
 
     existing_columns = {column["name"] for column in inspector.get_columns("campaigns")}
+    existing_indexes = {index["name"] for index in inspector.get_indexes("campaigns")}
     with engine.begin() as connection:
         if "goal_type" not in existing_columns:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN goal_type VARCHAR(32)"))
@@ -124,6 +271,31 @@ def _ensure_campaign_runtime_columns(engine: Engine) -> None:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN icp_preset_id VARCHAR(255)"))
         if "source_preset_id" not in existing_columns:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN source_preset_id VARCHAR(255)"))
+        if "territory_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE campaigns ADD COLUMN territory_id VARCHAR(64)"))
+        if "ix_campaigns_territory_id" not in existing_indexes:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_campaigns_territory_id "
+                    "ON campaigns (territory_id)"
+                )
+            )
+        if inspector.has_table("leads"):
+            lead_columns = {column["name"] for column in inspector.get_columns("leads")}
+            lead_indexes = {index["name"] for index in inspector.get_indexes("leads")}
+            if "territory_id" not in lead_columns:
+                connection.execute(text("ALTER TABLE leads ADD COLUMN territory_id VARCHAR(64)"))
+                connection.execute(
+                    text(
+                        "UPDATE leads SET territory_id = ("
+                        "SELECT campaigns.territory_id FROM campaigns "
+                        "WHERE campaigns.id = leads.campaign_id)"
+                    )
+                )
+            if "ix_leads_territory_id" not in lead_indexes:
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_leads_territory_id ON leads (territory_id)")
+                )
 
 
 def _ensure_lead_review_columns(engine: Engine) -> None:

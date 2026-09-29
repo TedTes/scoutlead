@@ -43,6 +43,7 @@ class ContactPolicyStatus(StrEnum):
 
 class SuppressionScope(StrEnum):
     PRODUCT = "product"
+    WORKSPACE = "workspace"
     GLOBAL = "global"
 
 
@@ -50,6 +51,27 @@ class AgentFitStatus(StrEnum):
     GOOD_FIT = "good_fit"
     MAYBE = "maybe"
     NOT_FIT = "not_fit"
+
+
+class BestChannel(StrEnum):
+    EMAIL = "email"
+    PHONE = "phone"
+    CONTACT_FORM = "contact_form"
+    VISIT = "visit"
+    NONE = "none"
+
+
+class ApproachCopy(BaseModel):
+    opener: str = Field(min_length=1, max_length=500)
+    talk_track: list[str] = Field(default_factory=list, max_length=3)
+    evidence_refs: list[str] = Field(default_factory=list, min_length=1, max_length=5)
+
+
+class LeadApproach(ApproachCopy):
+    best_channel: BestChannel
+    channel_reason: str
+    generated_at: datetime
+    offer_updated_at: datetime
 
 
 class LeadFitType(StrEnum):
@@ -111,6 +133,7 @@ class QualificationResult(BaseModel):
     score_breakdown: QualificationScoreBreakdown | None = None
     rationale: str
     positive_signals: list[str] = Field(default_factory=list)
+    signal_tags: list[str] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     criteria: list[CriterionScore] = Field(default_factory=list)
@@ -153,6 +176,7 @@ class LeadRead(LeadCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    territory_id: str | None = None
     business_id: str | None = None
     contact_id: str | None = None
     status: LeadStatus
@@ -172,5 +196,10 @@ class LeadRead(LeadCreate):
     verification_details: dict[str, Any] | None = None
     research: LeadResearch | None = None
     qualification: QualificationResult | None = None
+    latest_outcome: str | None = None
+    latest_outcome_at: datetime | None = None
+    approach: LeadApproach | None = None
+    outcome_adjustment: float = 0.0
+    rank_score: float | None = None
     created_at: datetime
     updated_at: datetime

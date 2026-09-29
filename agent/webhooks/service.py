@@ -181,6 +181,7 @@ def _contact_payload(lead: LeadRead, message: MessageRead) -> dict[str, Any]:
             "body": message.body,
             "sent_at": message.sent_at.isoformat() if message.sent_at else None,
         },
+        "approach": lead.approach.model_dump(mode="json") if lead.approach else None,
     }
 
 

@@ -396,10 +396,12 @@ def product_problem_text(product: ProductRead) -> str:
     )
     return " ".join(
         [
-            product.product_description,
-            product.problem_being_solved,
-            product.value_proposition,
+            product.offer_summary or product.product_description or "",
+            product.problem_being_solved or "",
+            product.value_proposition or "",
             criteria_text,
+            " ".join(product.ideal_customer_signals),
+            " ".join(product.exclusions),
         ]
     ).lower()
 

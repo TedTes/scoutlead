@@ -44,6 +44,7 @@ PRODUCT_CONFIG_PROMPT = """
 Create a ProductCreate JSON object for the product described by the evidence.
 
 The output will be used to run customer discovery:
+- offer_summary should concisely explain what the seller offers.
 - product_description should say what the product appears to do.
 - target_customer should describe likely buyers/users only when evidence supports it.
 - problem_being_solved should be grounded in evidence.
@@ -51,6 +52,8 @@ The output will be used to run customer discovery:
 - preferred_discovery_sources should contain 3-6 web_search queries that find likely
   customers matching the target customer and geography.
 - constraints should include human approval before outbound messages are sent.
+- ideal_customer_signals should contain observable public signs of a good-fit buyer.
+- exclusions should contain business types that should never be included.
 """.strip()
 
 PRODUCT_DESCRIPTION_CONFIG_SYSTEM = """

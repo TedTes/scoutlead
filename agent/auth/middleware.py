@@ -10,7 +10,7 @@ from auth.context import AuthContext
 
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/email/gmail/callback"}
-EXEMPT_PREFIXES = ("/docs", "/redoc")
+EXEMPT_PREFIXES = ("/docs", "/redoc", "/u/")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

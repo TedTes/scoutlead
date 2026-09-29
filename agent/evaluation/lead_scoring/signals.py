@@ -97,12 +97,31 @@ def enrichment_signals(row: dict[str, Any]) -> list[str]:
     return signals
 
 
+def controlled_signal_tags(
+    *,
+    vocabulary: list[str] | None,
+    row: dict[str, Any],
+    lead: LeadRead,
+) -> list[str]:
+    if not vocabulary:
+        return []
+    evidence = evidence_text(row=row, lead=lead, extra=enrichment_signals(row))
+    normalized_evidence = " ".join(re.findall(r"[a-z0-9]+", evidence.casefold()))
+    matched: list[str] = []
+    for tag in vocabulary:
+        normalized_tag = " ".join(re.findall(r"[a-z0-9]+", tag.casefold()))
+        if normalized_tag and normalized_tag in normalized_evidence:
+            matched.append(tag)
+    return list(dict.fromkeys(matched))
+
+
 def target_terms(product: ProductRead) -> set[str]:
     text = " ".join(
         [
             product.target_customer,
-            product.problem_being_solved,
+            product.problem_being_solved or product.offer_summary or "",
             " ".join(criterion.label for criterion in product.qualification_criteria),
+            " ".join(product.ideal_customer_signals),
         ]
     ).lower()
     stopwords = {

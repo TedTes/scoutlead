@@ -9,8 +9,21 @@ from agents.embeddings import EmbeddingClient
 from campaigns.schemas import LeadSeedInput
 from canonical.repository import CanonicalRepository
 from canonical.normalization import normalize_email
-from db.models import BusinessModel, ContactModel, DiscoveryCandidateModel, LeadModel, ProductModel
-from leads.policy import can_shortlist_lead, normalize_qualification_result
+from db.models import (
+    BusinessModel,
+    CampaignModel,
+    ContactModel,
+    DiscoveryCandidateModel,
+    LeadModel,
+    NicheModel,
+    ProductModel,
+    TerritoryModel,
+)
+from leads.policy import (
+    can_shortlist_lead,
+    controlled_signal_tags,
+    normalize_qualification_result,
+)
 from leads.schemas import (
     ContactPolicyStatus,
     ContactVerificationStatus,
@@ -60,6 +73,7 @@ class LeadRepository:
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=campaign_id,
+            territory_id=self._territory_id_for_campaign(campaign_id),
             product_id=product_id,
             business_id=canonical.business_id,
             contact_id=canonical.contact_id,
@@ -106,6 +120,7 @@ class LeadRepository:
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=campaign_id,
+            territory_id=self._territory_id_for_campaign(campaign_id),
             product_id=product_id,
             business_id=canonical.business_id,
             contact_id=canonical.contact_id,
@@ -158,6 +173,7 @@ class LeadRepository:
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=campaign_id,
+            territory_id=self._territory_id_for_campaign(campaign_id),
             product_id=product_id,
             business_id=business.id,
             contact_id=contact.id if contact else None,
@@ -217,6 +233,7 @@ class LeadRepository:
         model = LeadModel(
             id=new_id("lead"),
             campaign_id=candidate.campaign_id,
+            territory_id=self._territory_id_for_campaign(candidate.campaign_id),
             product_id=candidate.product_id,
             business_id=canonical.business_id,
             contact_id=canonical.contact_id,
@@ -243,6 +260,11 @@ class LeadRepository:
         )
         statement = self._scope(statement)
         return list(self.session.scalars(statement))
+
+    def _territory_id_for_campaign(self, campaign_id: str) -> str | None:
+        return self.session.scalar(
+            select(CampaignModel.territory_id).where(CampaignModel.id == campaign_id)
+        )
 
     def get(self, lead_id: str) -> LeadModel:
         model = self.session.scalar(self._scope(select(LeadModel).where(LeadModel.id == lead_id)))
@@ -330,11 +352,29 @@ class LeadRepository:
     def attach_qualification(self, lead_id: str, result: QualificationResult) -> LeadModel:
         model = self.get(lead_id)
         normalized = normalize_qualification_result(result)
+        normalized = normalized.model_copy(
+            update={
+                "signal_tags": controlled_signal_tags(
+                    normalized.signal_tags,
+                    self.signal_vocabulary_for_lead(lead_id),
+                )
+            }
+        )
         model.qualification = normalized.model_dump(mode="json")
         model.status = LeadStatus.QUALIFIED.value if normalized.qualified else LeadStatus.DISQUALIFIED.value
         self.session.commit()
         self.session.refresh(model)
         return model
+
+    def signal_vocabulary_for_lead(self, lead_id: str) -> list[str]:
+        model = self.get(lead_id)
+        vocabulary = self.session.scalar(
+            select(NicheModel.signal_vocabulary)
+            .join(TerritoryModel, TerritoryModel.niche_id == NicheModel.id)
+            .join(CampaignModel, CampaignModel.territory_id == TerritoryModel.id)
+            .where(CampaignModel.id == model.campaign_id)
+        )
+        return list(vocabulary or [])
 
     def attach_verification(self, lead_id: str, result: LeadVerification) -> LeadModel:
         model = self.get(lead_id)

@@ -14,6 +14,7 @@ from evaluation.lead_scoring.signals import (
     cached_business_type,
     cached_signals,
     cached_sources,
+    controlled_signal_tags,
 )
 from leads.schemas import AgentFitStatus, CriterionScore, LeadFitType, LeadRead, LeadResearch, QualificationResult
 from products.schemas import ProductRead
@@ -55,6 +56,7 @@ def score_cached_lead(
     lead: LeadRead,
     row: dict[str, Any],
     confidence: int,
+    signal_vocabulary: list[str] | None = None,
 ) -> QualificationResult:
     del confidence
     signals = cached_signals(row=row, lead=lead)
@@ -76,6 +78,11 @@ def score_cached_lead(
             disqualifiers=risks,
         ),
         positive_signals=signals[:6],
+        signal_tags=controlled_signal_tags(
+            vocabulary=signal_vocabulary,
+            row=row,
+            lead=lead,
+        ),
         missing_evidence=missing,
         risks=risks,
         criteria=[

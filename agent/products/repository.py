@@ -23,10 +23,14 @@ from db.models import (
     QueueJobModel,
     ToolCallModel,
     WebhookDeliveryModel,
+    WorkspaceModel,
 )
 from products.schemas import ProductCreate, ProductUpdate
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
+
+
+DEFAULT_WORKSPACE_ID = "workspace_default"
 
 
 class ProductRepository:
@@ -36,6 +40,8 @@ class ProductRepository:
 
     def create(self, product: ProductCreate) -> ProductModel:
         data = product.model_dump(mode="python")
+        workspace_id = self.workspace_id or DEFAULT_WORKSPACE_ID
+        self._ensure_workspace(workspace_id)
         self._ensure_criterion_ids(data)
         existing_name_match = self.find_any_active_by_product_name(data["product_name"])
         if existing_name_match is not None:
@@ -58,11 +64,20 @@ class ProductRepository:
                         "source_url": existing.source_url,
                     },
                 )
-        model = ProductModel(id=new_id("product"), workspace_id=self.workspace_id, **data)
+        model = ProductModel(
+            id=new_id("product"),
+            workspace_id=workspace_id,
+            **data,
+        )
         self.session.add(model)
         self.session.commit()
         self.session.refresh(model)
         return model
+
+    def _ensure_workspace(self, workspace_id: str) -> None:
+        if self.session.get(WorkspaceModel, workspace_id) is None:
+            self.session.add(WorkspaceModel(id=workspace_id, name="Personal workspace"))
+            self.session.flush()
 
     def list(self) -> list[ProductModel]:
         statement = self._scope(select(ProductModel).order_by(ProductModel.created_at.desc()))

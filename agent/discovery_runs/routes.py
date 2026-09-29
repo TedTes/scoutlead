@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Response, status
 from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead, CampaignTrace
 from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
+from app.service_factory import campaign_service
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.repository import CampaignRepository
@@ -23,6 +24,7 @@ from evaluation.schemas import CampaignMetrics
 from insights.schemas import CampaignInsightRead
 from insights.service import CampaignInsightService
 from leads.repository import LeadRepository
+from leads.export import leads_csv
 from leads.schemas import LeadRead
 from messages.repository import MessageRepository
 from messages.schemas import (
@@ -52,33 +54,9 @@ def _service(
     services: Annotated[AppServices, Depends(get_services)],
     auth: CurrentAuth,
 ) -> CampaignService:
-    return CampaignService(
+    return campaign_service(
         session=session,
-        llm=services.llm,
-        search_tool=services.search,
-        browser=services.browser,
-        email=services.email,
-        google_places_api_key=services.settings.google_places_api_key,
-        google_places_api_endpoint=services.settings.google_places_api_endpoint,
-        apify_api_token=services.settings.apify_api_token,
-        apify_api_base_url=services.settings.apify_api_base_url,
-        apify_source_provider_id=services.settings.apify_source_provider_id,
-        apify_actor_id=services.settings.apify_actor_id,
-        apify_actor_input_template=services.settings.apify_actor_input_template,
-        apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
-        apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
-        apify_sources=services.settings.apify_source_configs,
-        contact_verification_provider=services.settings.contact_verification_provider,
-        email_verification_endpoint=services.settings.email_verification_endpoint,
-        email_verification_api_key=services.settings.email_verification_api_key,
-        bouncer_api_key=services.settings.bouncer_api_key,
-        bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
-        zerobounce_api_key=services.settings.zerobounce_api_key,
-        zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
-        embedding=services.embedding,
-        semantic_cache_min_score=services.settings.semantic_cache_min_score,
-        semantic_cache_min_results=services.settings.semantic_cache_min_results,
-        timeout_seconds=services.settings.request_timeout_seconds,
+        services=services,
         workspace_id=auth.workspace_id,
     )
 
@@ -185,6 +163,27 @@ def get_discovery_run(
     auth: CurrentAuth,
 ):
     return _service(session, services, auth).get(run_id)
+
+
+@router.get("/{run_id}/export.csv")
+def export_discovery_run(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    _service(session, services, auth).get(run_id)
+    leads = [
+        LeadRead.model_validate(lead)
+        for lead in LeadRepository(session, workspace_id=auth.workspace_id).list_by_campaign(
+            run_id
+        )
+    ]
+    return Response(
+        content=leads_csv(leads, scoutlead_path=f"/discovery-runs/{run_id}"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{run_id}-contacts.csv"'},
+    )
 
 
 @router.patch("/{run_id}", response_model=CampaignRead)

@@ -16,7 +16,12 @@ class QueueRepository:
         self.session = session
 
     def enqueue(
-        self, job_type: JobType, payload: dict, *, delay_seconds: int = 0
+        self,
+        job_type: JobType,
+        payload: dict,
+        *,
+        delay_seconds: int = 0,
+        max_attempts: int = 3,
     ) -> QueueJobModel:
         model = QueueJobModel(
             id=new_id("job"),
@@ -24,13 +29,38 @@ class QueueRepository:
             payload=payload,
             status=JobStatus.QUEUED.value,
             attempts=0,
-            max_attempts=3,
+            max_attempts=max_attempts,
             run_after=utcnow() + timedelta(seconds=delay_seconds),
         )
         self.session.add(model)
         self.session.commit()
         self.session.refresh(model)
         return model
+
+    def enqueue_once(
+        self,
+        job_type: JobType,
+        payload: dict,
+        *,
+        dedupe_key: str,
+        max_attempts: int = 3,
+    ) -> QueueJobModel:
+        active = list(
+            self.session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type == job_type.value,
+                    QueueJobModel.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
+                )
+            )
+        )
+        for job in active:
+            if job.payload.get("dedupe_key") == dedupe_key:
+                return job
+        return self.enqueue(
+            job_type,
+            {**payload, "dedupe_key": dedupe_key},
+            max_attempts=max_attempts,
+        )
 
     def claim_next(self) -> QueueJobModel | None:
         statement = (
@@ -57,14 +87,21 @@ class QueueRepository:
         self.session.refresh(job)
         return job
 
-    def fail(self, job_id: str, error: str) -> QueueJobModel:
+    def fail(
+        self,
+        job_id: str,
+        error: str,
+        *,
+        retry_delay_seconds: int | None = None,
+    ) -> QueueJobModel:
         job = self._get(job_id)
         if job.status != JobStatus.RUNNING.value:
             raise ConflictError("only running jobs can fail", {"job_id": job_id, "status": job.status})
         job.last_error = error
         if job.attempts < job.max_attempts:
             job.status = JobStatus.QUEUED.value
-            job.run_after = utcnow() + timedelta(seconds=30 * job.attempts)
+            delay = retry_delay_seconds if retry_delay_seconds is not None else 30 * job.attempts
+            job.run_after = utcnow() + timedelta(seconds=delay)
         else:
             job.status = JobStatus.FAILED.value
         self.session.commit()

@@ -27,9 +27,13 @@ class WorkspaceModel(TimestampMixin, Base):
     clerk_organization_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, unique=True, index=True
     )
+    sender_legal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sender_mailing_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sender_contact: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     memberships: Mapped[list["WorkspaceMemberModel"]] = relationship(back_populates="workspace")
     products: Mapped[list["ProductModel"]] = relationship(back_populates="workspace")
+    territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="workspace")
 
 
 class WorkspaceMemberModel(TimestampMixin, Base):
@@ -62,16 +66,20 @@ class ProductModel(TimestampMixin, Base):
         ForeignKey("workspaces.id"), nullable=True, index=True
     )
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    product_description: Mapped[str] = mapped_column(Text, nullable=False)
+    product_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_customer: Mapped[str] = mapped_column(String(500), nullable=False)
-    problem_being_solved: Mapped[str] = mapped_column(Text, nullable=False)
-    value_proposition: Mapped[str] = mapped_column(Text, nullable=False)
+    problem_being_solved: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_proposition: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_geography: Mapped[str] = mapped_column(String(255), nullable=False)
-    validation_goal: Mapped[str] = mapped_column(Text, nullable=False)
+    validation_goal: Mapped[str | None] = mapped_column(Text, nullable=True)
     qualification_criteria: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     preferred_discovery_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
-    outreach_objective: Mapped[str] = mapped_column(Text, nullable=False)
+    outreach_objective: Mapped[str | None] = mapped_column(Text, nullable=True)
     constraints: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    offer_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ideal_customer_signals: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    exclusions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    typical_deal_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     source_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     source_last_checked_at: Mapped[datetime | None] = mapped_column(
@@ -83,6 +91,7 @@ class ProductModel(TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     workspace: Mapped[WorkspaceModel | None] = relationship(back_populates="products")
+    territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="product")
 
 
 class ProductSourceDraftModel(TimestampMixin, Base):
@@ -110,6 +119,9 @@ class CampaignModel(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    territory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("territories.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     goal_type: Mapped[str] = mapped_column(String(32), nullable=False, default="learn")
     icp_preset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -124,6 +136,7 @@ class CampaignModel(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     product: Mapped[ProductModel] = relationship()
+    territory: Mapped["TerritoryModel | None"] = relationship(back_populates="campaigns")
 
 
 class CampaignSourceModel(TimestampMixin, Base):
@@ -158,6 +171,7 @@ class BusinessModel(TimestampMixin, Base):
     category_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     semantic_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
     embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector(1536), nullable=True)
     embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     embedding_updated_at: Mapped[datetime | None] = mapped_column(
@@ -182,11 +196,82 @@ class NicheModel(TimestampMixin, Base):
     category: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     default_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    signal_vocabulary: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
     memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
         back_populates="niche"
     )
     seed_batches: Mapped[list["SeedBatchModel"]] = relationship(back_populates="niche")
+    territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="niche")
+
+
+class TerritoryModel(TimestampMixin, Base):
+    __tablename__ = "territories"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "product_id",
+            "niche_id",
+            "market_key",
+            name="uq_territories_workspace_offer_niche_market",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
+    market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    cadence: Mapped[str] = mapped_column(String(32), nullable=False, default="weekly")
+    batch_size: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    min_fit: Mapped[str] = mapped_column(String(32), nullable=False, default="maybe")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workspace: Mapped[WorkspaceModel] = relationship(back_populates="territories")
+    product: Mapped[ProductModel] = relationship(back_populates="territories")
+    niche: Mapped[NicheModel] = relationship(back_populates="territories")
+    campaigns: Mapped[list[CampaignModel]] = relationship(back_populates="territory")
+    deliveries: Mapped[list["TerritoryDeliveryModel"]] = relationship(
+        back_populates="territory"
+    )
+
+
+class TerritoryDeliveryModel(TimestampMixin, Base):
+    __tablename__ = "territory_deliveries"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", name="uq_territory_deliveries_campaign_id"),
+        UniqueConstraint(
+            "territory_id",
+            "scheduled_for",
+            name="uq_territory_deliveries_territory_schedule",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    territory_id: Mapped[str] = mapped_column(
+        ForeignKey("territories.id"), nullable=False, index=True
+    )
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id"), nullable=False, index=True
+    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    new_contact_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="scheduled", index=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    territory: Mapped[TerritoryModel] = relationship(back_populates="deliveries")
+    campaign: Mapped[CampaignModel] = relationship()
 
 
 class SeedBatchModel(TimestampMixin, Base):
@@ -312,6 +397,9 @@ class LeadModel(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    territory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("territories.id"), nullable=True, index=True
+    )
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     business_id: Mapped[str | None] = mapped_column(ForeignKey("businesses.id"), nullable=True, index=True)
     contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"), nullable=True, index=True)
@@ -339,6 +427,61 @@ class LeadModel(TimestampMixin, Base):
     raw_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     research: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     qualification: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    latest_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    latest_outcome_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    approach: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    outcome_adjustment: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rank_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+
+
+class LeadOutcomeModel(TimestampMixin, Base):
+    __tablename__ = "lead_outcomes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id"), nullable=False, index=True)
+    business_id: Mapped[str | None] = mapped_column(
+        ForeignKey("businesses.id"), nullable=True, index=True
+    )
+    territory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("territories.id"), nullable=True, index=True
+    )
+    niche_id: Mapped[str | None] = mapped_column(ForeignKey("niches.id"), nullable=True, index=True)
+    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    recorded_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class OutcomeModel(TimestampMixin, Base):
+    __tablename__ = "outcome_models"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "product_id",
+            "niche_id",
+            name="uq_outcome_models_workspace_product_niche",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    n_contacted: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_positive: Mapped[int] = mapped_column(Integer, nullable=False)
+    weights: Mapped[dict[str, float]] = mapped_column(JSON, nullable=False)
 
 
 class ContactSuppressionModel(TimestampMixin, Base):
@@ -346,14 +489,18 @@ class ContactSuppressionModel(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint(
             "scope",
+            "workspace_id",
             "product_id",
             "kind",
             "value",
-            name="uq_contact_suppressions_scope_product_kind_value",
+            name="uq_contact_suppressions_scope_workspace_product_kind_value",
         ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=True, index=True
+    )
     product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True, index=True)
     lead_id: Mapped[str | None] = mapped_column(ForeignKey("leads.id"), nullable=True, index=True)
     scope: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
@@ -365,6 +512,7 @@ class ContactSuppressionModel(TimestampMixin, Base):
 
     product: Mapped[ProductModel | None] = relationship()
     lead: Mapped[LeadModel | None] = relationship()
+    workspace: Mapped[WorkspaceModel | None] = relationship()
 
 
 class WebhookDeliveryModel(TimestampMixin, Base):

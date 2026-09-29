@@ -62,6 +62,8 @@ from workflows.research import ResearchWorkflow
 from workflows.signal import SignalWorkflow
 from workflows.verify import VerifyWorkflow
 from tools.base import ToolSlot
+from territories.dedupe import exclude_previously_delivered_rows
+from workspaces.repository import WorkspaceRepository
 
 
 class RecordingBrowserTool:
@@ -615,7 +617,15 @@ class CampaignService:
                 min_results=min_results,
             )
             if semantic_rows:
-                return _rows_with_semantic_context(semantic_rows)
+                rows = exclude_previously_delivered_rows(
+                    self.session,
+                    campaign_id=campaign.id,
+                    product_id=product.id,
+                    rows=_rows_with_semantic_context(semantic_rows),
+                )
+                if campaign.territory_id and len(rows) < campaign.max_leads:
+                    return []
+                return rows
 
         cached_results: list[dict[str, Any]] = []
         for source in sources:
@@ -633,7 +643,15 @@ class CampaignService:
                         from_cache=True,
                     )
                 )
+        cached_results = exclude_previously_delivered_rows(
+            self.session,
+            campaign_id=campaign.id,
+            product_id=product.id,
+            rows=cached_results,
+        )
         if len(cached_results) < min_results:
+            return []
+        if campaign.territory_id and len(cached_results) < campaign.max_leads:
             return []
         return cached_results[: campaign.max_leads]
 
@@ -699,6 +717,7 @@ class CampaignService:
                     lead=LeadRead.model_validate(lead),
                     row=row,
                     confidence=assessment.confidence,
+                    signal_vocabulary=self.leads.signal_vocabulary_for_lead(lead.id),
                 ),
             )
             discovered.append(LeadRead.model_validate(lead))
@@ -793,7 +812,6 @@ class CampaignService:
     def _preflight_checks(
         self, campaign: CampaignRead, product: ProductRead
     ) -> list[CampaignPreflightCheck]:
-        del product
         sources = [
             CampaignSourceRead.model_validate(source)
             for source in self.campaign_sources.list_by_campaign(
@@ -880,6 +898,29 @@ class CampaignService:
                 required=False,
             )
         )
+
+        if self.email.compliance_enabled:
+            profile = WorkspaceRepository(
+                self.session,
+                workspace_id=product.workspace_id,
+            ).sender_profile()
+            compliance_ready = bool(
+                profile.complete
+                and self.email.unsubscribe_signing_secret
+                and self.email.public_api_base
+            )
+            checks.append(
+                CampaignPreflightCheck(
+                    name="Sender compliance",
+                    status="ok" if compliance_ready else "failed",
+                    detail=(
+                        "Sender identity and unsubscribe handling are configured."
+                        if compliance_ready
+                        else "Complete sender identity and unsubscribe configuration before outreach."
+                    ),
+                    required=True,
+                )
+            )
 
         verification_status, verification_detail, verification_required = self._contact_verification_check()
         checks.append(

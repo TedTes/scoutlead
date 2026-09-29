@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from db.models import ContactSuppressionModel, LeadModel
+from db.models import ContactSuppressionModel, LeadModel, ProductModel
 from leads.schemas import ContactPolicyStatus, SuppressionScope
 from shared.utils import new_id, utcnow
 
@@ -24,11 +24,18 @@ class ContactSuppressionRepository:
         self.session = session
 
     def list_by_product(self, product_id: str) -> list[ContactSuppressionModel]:
+        workspace_id = self.session.scalar(
+            select(ProductModel.workspace_id).where(ProductModel.id == product_id)
+        )
         statement = (
             select(ContactSuppressionModel)
             .where(
                 or_(
                     ContactSuppressionModel.product_id == product_id,
+                    (
+                        (ContactSuppressionModel.scope == SuppressionScope.WORKSPACE.value)
+                        & (ContactSuppressionModel.workspace_id == workspace_id)
+                    ),
                     ContactSuppressionModel.scope == SuppressionScope.GLOBAL.value,
                 )
             )
@@ -43,6 +50,7 @@ class ContactSuppressionRepository:
         status: ContactPolicyStatus,
         reason: str | None = None,
         scope: SuppressionScope = SuppressionScope.PRODUCT,
+        source: str = "manual",
     ) -> LeadModel:
         normalized_reason = " ".join((reason or "").split()) or None
         lead.contact_policy_status = status.value
@@ -50,8 +58,12 @@ class ContactSuppressionRepository:
         lead.contact_policy_checked_at = utcnow()
         if status in SUPPRESSED_STATUSES:
             lead.shortlisted_at = None
+            workspace_id = self._workspace_id_for_lead(lead)
             for kind, value in lead_suppression_identifiers(lead):
                 self._upsert(
+                    workspace_id=(
+                        workspace_id if scope == SuppressionScope.WORKSPACE else None
+                    ),
                     product_id=lead.product_id if scope == SuppressionScope.PRODUCT else None,
                     lead_id=lead.id,
                     scope=scope.value,
@@ -59,7 +71,7 @@ class ContactSuppressionRepository:
                     value=value,
                     status=status.value,
                     reason=normalized_reason,
-                    source="manual",
+                    source=source,
                 )
         self.session.commit()
         self.session.refresh(lead)
@@ -99,12 +111,17 @@ class ContactSuppressionRepository:
             (ContactSuppressionModel.kind == kind) & (ContactSuppressionModel.value == value)
             for kind, value in identifiers
         ]
+        workspace_id = self._workspace_id_for_lead(lead)
         statement = (
             select(ContactSuppressionModel)
             .where(or_(*conditions))
             .where(
                 or_(
                     ContactSuppressionModel.scope == SuppressionScope.GLOBAL.value,
+                    (
+                        (ContactSuppressionModel.scope == SuppressionScope.WORKSPACE.value)
+                        & (ContactSuppressionModel.workspace_id == workspace_id)
+                    ),
                     ContactSuppressionModel.product_id == lead.product_id,
                 )
             )
@@ -116,6 +133,7 @@ class ContactSuppressionRepository:
     def _upsert(
         self,
         *,
+        workspace_id: str | None,
         product_id: str | None,
         lead_id: str,
         scope: str,
@@ -131,6 +149,10 @@ class ContactSuppressionRepository:
             .where(ContactSuppressionModel.kind == kind)
             .where(ContactSuppressionModel.value == value)
         )
+        if workspace_id is None:
+            statement = statement.where(ContactSuppressionModel.workspace_id.is_(None))
+        else:
+            statement = statement.where(ContactSuppressionModel.workspace_id == workspace_id)
         if product_id is None:
             statement = statement.where(ContactSuppressionModel.product_id.is_(None))
         else:
@@ -139,6 +161,7 @@ class ContactSuppressionRepository:
         if model is None:
             model = ContactSuppressionModel(
                 id=new_id("suppression"),
+                workspace_id=workspace_id,
                 product_id=product_id,
                 lead_id=lead_id,
                 scope=scope,
@@ -156,6 +179,11 @@ class ContactSuppressionRepository:
             model.source = source
             model.updated_at = utcnow()
         return model
+
+    def _workspace_id_for_lead(self, lead: LeadModel) -> str | None:
+        return self.session.scalar(
+            select(ProductModel.workspace_id).where(ProductModel.id == lead.product_id)
+        )
 
 
 def is_blocked_contact_policy(status: ContactPolicyStatus | str | None) -> bool:

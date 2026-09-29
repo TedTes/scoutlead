@@ -31,16 +31,20 @@ class QualificationCriterion(BaseModel):
 
 class ProductBase(BaseModel):
     product_name: str = Field(min_length=1)
-    product_description: str = Field(min_length=1)
+    product_description: str | None = Field(default=None, min_length=1)
     target_customer: str = Field(min_length=1)
-    problem_being_solved: str = Field(min_length=1)
-    value_proposition: str = Field(min_length=1)
+    problem_being_solved: str | None = Field(default=None, min_length=1)
+    value_proposition: str | None = Field(default=None, min_length=1)
     target_geography: str = Field(min_length=1)
-    validation_goal: str = Field(min_length=1)
+    validation_goal: str | None = Field(default=None, min_length=1)
     qualification_criteria: list[QualificationCriterion] = Field(min_length=1)
     preferred_discovery_sources: list[DiscoverySource] = Field(default_factory=list)
-    outreach_objective: str = Field(min_length=1)
+    outreach_objective: str | None = Field(default=None, min_length=1)
     constraints: list[str] = Field(default_factory=list)
+    offer_summary: str | None = Field(default=None, min_length=1)
+    ideal_customer_signals: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+    typical_deal_value: str | None = Field(default=None, min_length=1)
     source_url: str | None = None
     source_fingerprint: str | None = None
     source_last_checked_at: datetime | None = None
@@ -48,7 +52,7 @@ class ProductBase(BaseModel):
     webhook_url: str | None = None
     webhook_enabled: bool = False
 
-    @field_validator("constraints")
+    @field_validator("constraints", "ideal_customer_signals", "exclusions")
     @classmethod
     def non_empty_constraints(cls, values: list[str]) -> list[str]:
         return [value.strip() for value in values if value.strip()]
@@ -140,6 +144,10 @@ class ProductUpdate(BaseModel):
     preferred_discovery_sources: list[DiscoverySource] | None = None
     outreach_objective: str | None = Field(default=None, min_length=1)
     constraints: list[str] | None = None
+    offer_summary: str | None = Field(default=None, min_length=1)
+    ideal_customer_signals: list[str] | None = None
+    exclusions: list[str] | None = None
+    typical_deal_value: str | None = Field(default=None, min_length=1)
     source_url: str | None = None
     source_fingerprint: str | None = None
     source_last_checked_at: datetime | None = None

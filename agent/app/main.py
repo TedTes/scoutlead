@@ -14,10 +14,14 @@ from email_connections.routes import router as email_connections_router
 from insights.routes import router as insights_router
 from leads.routes import router as leads_router
 from messages.routes import router as messages_router
+from outcomes.routes import router as outcomes_router
 from products.routes import router as products_router
 from shared.errors import SoutleadError
 from shared.logger import configure_logging
+from territories.routes import router as territories_router
+from unsubscribe.routes import router as unsubscribe_router
 from webhooks.routes import router as webhooks_router
+from workspaces.routes import router as workspaces_router
 
 
 def create_app() -> FastAPI:
@@ -58,7 +62,12 @@ def create_app() -> FastAPI:
     app.include_router(insights_router)
     app.include_router(leads_router)
     app.include_router(messages_router)
+    app.include_router(outcomes_router)
+    if settings.territories_enabled:
+        app.include_router(territories_router)
     app.include_router(webhooks_router)
+    app.include_router(workspaces_router)
+    app.include_router(unsubscribe_router)
     return app
 
 

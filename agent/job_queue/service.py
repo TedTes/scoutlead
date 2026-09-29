@@ -13,3 +13,12 @@ class QueueService:
 
     def enqueue_message_send(self, message_id: str):
         return self.queue.enqueue(JobType.MESSAGE_SEND, {"message_id": message_id})
+
+    def enqueue_territory_refresh(self, territory_id: str, scheduled_date: str):
+        key = f"{territory_id}:{scheduled_date}"
+        return self.queue.enqueue_once(
+            JobType.TERRITORY_REFRESH,
+            {"territory_id": territory_id, "scheduled_date": scheduled_date},
+            dedupe_key=key,
+            max_attempts=2,
+        )

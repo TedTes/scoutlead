@@ -91,6 +91,10 @@ def create_app_services(settings: Settings) -> AppServices:
             gmail_api_base_url=settings.gmail_api_base_url,
             timeout_seconds=settings.request_timeout_seconds,
             allow_console=not (settings.require_real_email or settings.strict_external_providers),
+            compliance_enabled=settings.territories_enabled,
+            unsubscribe_signing_secret=settings.unsubscribe_signing_secret,
+            public_api_base=settings.public_api_base,
+            daily_send_cap=settings.daily_send_cap_per_connection,
         ),
     )
 

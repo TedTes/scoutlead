@@ -78,6 +78,34 @@ def test_campaign_lead_and_message_reads_are_scoped_by_product_workspace() -> No
             other_messages.get(message.id)
 
 
+def test_minimal_offer_can_be_created_without_founder_validation_fields() -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        offer = ProductRepository(session, workspace_id="user:first").create(
+            ProductCreate(
+                product_name="Contractor Coverage",
+                offer_summary="Commercial insurance for independent home-service contractors.",
+                target_customer="Independent HVAC contractors",
+                target_geography="Toronto/GTA",
+                qualification_criteria=[
+                    QualificationCriterion(
+                        label="Operates an HVAC service business",
+                        required=True,
+                        evidence_required=True,
+                    )
+                ],
+                ideal_customer_signals=["service fleet", "commercial projects"],
+                exclusions=["directories", "equipment suppliers"],
+            )
+        )
+
+        assert offer.offer_summary.startswith("Commercial insurance")
+        assert offer.problem_being_solved is None
+        assert offer.validation_goal is None
+        assert offer.ideal_customer_signals == ["service fleet", "commercial projects"]
+
+
 def _session_factory():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

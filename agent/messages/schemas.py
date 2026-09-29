@@ -62,6 +62,7 @@ class MessageUpdate(BaseModel):
 
 class MessageReplyMark(BaseModel):
     body: str | None = None
+    positive: bool = True
 
 
 class MessageRead(OutreachDraft):
