@@ -26,6 +26,7 @@ import type {
 import { normalizeActiveSourceIds } from "../utils/source-providers";
 
 type AppDataContextValue = {
+  territoryApi: ApiClient;
   apiHealthy: boolean;
   loading: boolean;
   error: string;
@@ -375,6 +376,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
 
   const value = useMemo<AppDataContextValue>(
     () => ({
+      territoryApi: api,
       apiHealthy,
       loading,
       error,

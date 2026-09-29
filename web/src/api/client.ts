@@ -26,6 +26,12 @@ import type {
   GmailAuthorizationUrl,
   GmailConnectionStatus,
   WebhookDelivery,
+  Territory,
+  TerritoryDelivery,
+  TerritoryMetrics,
+  TerritoryResolution,
+  LeadOutcomeValue,
+  SenderProfile,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -69,6 +75,17 @@ export class ApiClient {
     return this.request<GmailAuthorizationUrl>(`/products/${productId}/email/gmail/connect`);
   }
 
+  getSenderProfile() {
+    return this.request<SenderProfile>("/workspace/sender-profile");
+  }
+
+  updateSenderProfile(update: Partial<Omit<SenderProfile, "workspace_id" | "complete">>) {
+    return this.request<SenderProfile>("/workspace/sender-profile", {
+      method: "PATCH",
+      body: update,
+    });
+  }
+
   disconnectGmail(productId: string) {
     return this.request<GmailConnectionStatus>(`/products/${productId}/email/gmail`, { method: "DELETE" });
   }
@@ -82,6 +99,65 @@ export class ApiClient {
 
   getDiscoveryRuns() {
     return this.request<DiscoveryRun[]>("/discovery-runs");
+  }
+
+  getTerritories() {
+    return this.request<Territory[]>("/territories");
+  }
+
+  resolveTerritory(productId: string, request: string) {
+    return this.request<TerritoryResolution>("/territories/resolve", {
+      method: "POST",
+      body: { product_id: productId, request },
+    });
+  }
+
+  createTerritory(resolution: TerritoryResolution) {
+    return this.request<Territory>("/territories", {
+      method: "POST",
+      body: { ...resolution, confirmed: true },
+    });
+  }
+
+  updateTerritory(id: string, update: Partial<Pick<Territory, "status" | "batch_size" | "min_fit">>) {
+    return this.request<Territory>(`/territories/${id}`, { method: "PATCH", body: update });
+  }
+
+  refreshTerritory(id: string) {
+    return this.request<TerritoryDelivery>(`/territories/${id}/refresh`, { method: "POST" });
+  }
+
+  getTerritoryDeliveries(id: string) {
+    return this.request<TerritoryDelivery[]>(`/territories/${id}/deliveries`);
+  }
+
+  getTerritoryDeliveryContacts(territoryId: string, deliveryId: string) {
+    return this.request<DiscoveryResult[]>(`/territories/${territoryId}/deliveries/${deliveryId}/contacts`);
+  }
+
+  async downloadTerritoryDeliveryCsv(territoryId: string, deliveryId: string) {
+    const authToken = (await this.options.getToken?.()) || this.options.token;
+    const path = `/territories/${territoryId}/deliveries/${deliveryId}/export.csv`;
+    const response = await fetch(`${this.options.baseUrl.replace(/\/$/, "")}${path}`, {
+      headers: authToken ? { authorization: `Bearer ${authToken}` } : {},
+    });
+    if (!response.ok) throw new Error(`Export failed with ${response.status}`);
+    return response.blob();
+  }
+
+  getTerritoryMetrics(id: string, weeks = 8) {
+    return this.request<TerritoryMetrics>(`/territories/${id}/metrics?weeks=${weeks}`);
+  }
+
+  recordLeadOutcome(leadId: string, outcome: LeadOutcomeValue, channel = "other") {
+    return this.request(`/leads/${leadId}/outcomes`, {
+      method: "POST",
+      body: { outcome, channel },
+    });
+  }
+
+  generateLeadApproach(leadId: string) {
+    return this.request<DiscoveryResult>(`/leads/${leadId}/approach`, { method: "POST" });
   }
 
   createDiscoveryRun(input: DiscoveryRunCreateInput) {

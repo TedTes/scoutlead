@@ -36,6 +36,7 @@ import type {
   LeadUpdateInput,
   Message,
   Product,
+  SenderProfile,
   SourceRequestSource,
 } from "../types/domain";
 import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
@@ -807,6 +808,7 @@ function BulkOutreachPanel({
   onUpdateMessage: (messageId: string, update: Partial<Message>) => Promise<void>;
 }) {
   const { showToast } = useToast();
+  const { territoryApi } = useAppData();
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [previewLeadId, setPreviewLeadId] = useState("");
   const [subject, setSubject] = useState(bulkOutreachDefaultSubject);
@@ -816,6 +818,7 @@ function BulkOutreachPanel({
   const [approvalResult, setApprovalResult] = useState<CampaignMessageBatchResult | null>(null);
   const [sendResult, setSendResult] = useState<CampaignMessageBatchResult | null>(null);
   const [sending, setSending] = useState(false);
+  const [senderProfile, setSenderProfile] = useState<SenderProfile | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const selectableContacts = useMemo(() => [...readyContacts, ...skippedContacts], [readyContacts, skippedContacts]);
   const selectableContactIds = useMemo(() => selectableContacts.map((contact) => contact.id), [selectableContacts]);
@@ -856,6 +859,10 @@ function BulkOutreachPanel({
       selectAllRef.current.indeterminate = someSelected;
     }
   }, [someSelected]);
+
+  useEffect(() => {
+    void territoryApi.getSenderProfile().then(setSenderProfile).catch(() => setSenderProfile(null));
+  }, [territoryApi]);
 
   const toggleSelectedLead = (leadId: string) => {
     setPreparedResult(null);
@@ -1104,6 +1111,7 @@ function BulkOutreachPanel({
                   }}
                 />
               </label>
+              <ComplianceFooterPreview profile={senderProfile} />
               <div className="bulk-token-row" aria-label="Supported template tokens">
                 {bulkOutreachTokens.map((token) => (
                   <code key={token}>{token}</code>
@@ -1126,6 +1134,7 @@ function BulkOutreachPanel({
                   onChange={(event) => updatePreviewEmail("body", event.target.value)}
                 />
               </label>
+              <ComplianceFooterPreview profile={senderProfile} />
             </div>
           )}
         </section>
@@ -1169,6 +1178,18 @@ function BulkOutreachPanel({
         ) : null}
       </footer>
     </section>
+  );
+}
+
+function ComplianceFooterPreview({ profile }: { profile: SenderProfile | null }) {
+  if (!profile?.complete) return null;
+  return (
+    <div className="bulk-compliance-preview">
+      <span>{profile.sender_legal_name}</span>
+      <span>{profile.sender_mailing_address}</span>
+      <span>{profile.sender_contact}</span>
+      <span>Unsubscribe</span>
+    </div>
   );
 }
 

@@ -14,7 +14,7 @@ export const navSections: Array<{ title: string; items: NavItem[] }> = [
   {
     title: "Manage",
     items: [
-      { id: "product", label: "Products", icon: Box },
+      { id: "product", label: "Offers", icon: Box },
     ],
   },
 ];

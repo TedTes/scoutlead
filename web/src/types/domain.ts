@@ -1,16 +1,20 @@
 export type Product = {
   id: string;
   product_name: string;
-  product_description: string;
+  product_description?: string | null;
   target_customer: string;
-  problem_being_solved: string;
-  value_proposition: string;
+  problem_being_solved?: string | null;
+  value_proposition?: string | null;
   target_geography: string;
-  validation_goal: string;
+  validation_goal?: string | null;
   qualification_criteria: QualificationCriterion[];
   preferred_discovery_sources: DiscoverySource[];
-  outreach_objective: string;
+  outreach_objective?: string | null;
   constraints: string[];
+  offer_summary?: string | null;
+  ideal_customer_signals: string[];
+  exclusions: string[];
+  typical_deal_value?: string | null;
   source_url?: string | null;
   source_fingerprint?: string | null;
   source_last_checked_at?: string | null;
@@ -117,6 +121,14 @@ export type GmailAuthorizationUrl = {
   authorization_url: string;
 };
 
+export type SenderProfile = {
+  workspace_id: string;
+  sender_legal_name?: string | null;
+  sender_mailing_address?: string | null;
+  sender_contact?: string | null;
+  complete: boolean;
+};
+
 export type SourceRequestInput = {
   product_id: string;
   source: SourceRequestSource;
@@ -153,7 +165,7 @@ export type LeadReviewStatus = "unreviewed" | "good_fit" | "maybe" | "not_fit";
 export type AgentFitStatus = "good_fit" | "maybe" | "not_fit";
 export type ContactVerificationStatus = "unverified" | "valid" | "risky" | "invalid" | "unknown";
 export type ContactPolicyStatus = "allowed" | "suppressed" | "unsubscribed" | "bounced";
-export type SuppressionScope = "product" | "global";
+export type SuppressionScope = "product" | "workspace" | "global";
 
 export type LeadUpdateInput = {
   review_status?: LeadReviewStatus;
@@ -170,6 +182,7 @@ export type LeadContactPolicyInput = {
 export type DiscoveryResult = {
   id: string;
   campaign_id: string;
+  territory_id?: string | null;
   product_id: string;
   business_id?: string | null;
   contact_id?: string | null;
@@ -189,6 +202,18 @@ export type DiscoveryResult = {
   contact_policy_reason?: string | null;
   contact_policy_checked_at?: string | null;
   last_contacted_at?: string | null;
+  latest_outcome?: string | null;
+  latest_outcome_at?: string | null;
+  approach?: {
+    best_channel: "email" | "phone" | "contact_form" | "visit" | "none";
+    channel_reason: string;
+    opener?: string | null;
+    talk_track?: string[];
+    evidence_refs?: string[];
+    generated_at?: string | null;
+  } | null;
+  outcome_adjustment?: number;
+  rank_score?: number | null;
   verification_status?: ContactVerificationStatus;
   verification_provider?: string | null;
   verification_checked_at?: string | null;
@@ -222,6 +247,7 @@ export type DiscoveryResult = {
     } | null;
     rationale: string;
     positive_signals?: string[];
+    signal_tags?: string[];
     missing_evidence?: string[];
     risks?: string[];
     recommended_next_step?: string;
@@ -234,6 +260,85 @@ export type DiscoveryResult = {
     }>;
   };
 };
+
+export type Territory = {
+  id: string;
+  workspace_id: string;
+  product_id: string;
+  niche_id: string;
+  market_key: string;
+  label: string;
+  status: "active" | "paused";
+  cadence: "weekly";
+  batch_size: number;
+  min_fit: "good_fit" | "maybe";
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_delivery_count: number;
+  unviewed_delivery_count: number;
+  positive_outcome_rate: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TerritoryResolution = {
+  product_id: string;
+  request: string;
+  niche_id?: string | null;
+  niche_slug: string;
+  niche_label: string;
+  niche_category: string;
+  market_key: string;
+  market_label: string;
+  confidence: number;
+  existing_niche: boolean;
+  requires_confirmation: boolean;
+};
+
+export type TerritoryDelivery = {
+  id: string;
+  territory_id: string;
+  campaign_id: string;
+  scheduled_for?: string | null;
+  delivered_at?: string | null;
+  viewed_at?: string | null;
+  new_contact_count: number;
+  status: "scheduled" | "running" | "ready" | "partial" | "failed";
+  failure_reason?: string | null;
+};
+
+export type TerritoryWeekMetrics = {
+  week_start: string;
+  delivered: number;
+  contacted: number;
+  replied: number;
+  positive_reply_rate: number;
+  meetings: number;
+  won: number;
+  not_a_fit_rate: number;
+  data_quality_issue_rate: number;
+  outcome_coverage: number;
+};
+
+export type TerritoryMetrics = {
+  territory_id: string;
+  weeks: number;
+  totals: TerritoryWeekMetrics;
+  by_week: TerritoryWeekMetrics[];
+};
+
+export type LeadOutcomeValue =
+  | "contacted"
+  | "no_response"
+  | "replied_positive"
+  | "replied_negative"
+  | "meeting_booked"
+  | "won"
+  | "not_a_fit"
+  | "wrong_contact"
+  | "business_closed"
+  | "bounced"
+  | "unsubscribed";
 
 export type DiscoveryCandidate = {
   id: string;

@@ -6,6 +6,7 @@ import {
   Pencil,
   Plug,
   Plus,
+  Search,
   Settings,
   Trash2,
   User,
@@ -25,7 +26,7 @@ type AppProps = {
   approverLabel?: string;
 };
 
-type AppViewMode = "auto" | "new-search" | "product" | "integrations";
+type AppViewMode = "auto" | Screen;
 
 export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {}) {
   return (
@@ -86,6 +87,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists);
+  const selectorRunLabel = activeScreen === "results" ? selectedRunLabel : "";
   const shouldShowDraftRun = draftRunName !== null;
 
   const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
@@ -116,16 +118,21 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setOpenContextMenu(null);
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
-    setViewMode("new-search");
+    setViewMode("overview");
     const existingNames = productRunLabels.map((item) => item.title);
     const savedDraftName = readDraftRunName(selectedProductId);
-    setDraftRunName((current) => current ?? savedDraftName ?? uniqueListName("Page name", existingNames));
+    setDraftRunName((current) => {
+      const reusableName = [current, savedDraftName].find(
+        (name): name is string => Boolean(name && !isPlaceholderRunName(name)),
+      );
+      return reusableName ?? uniqueListName("New search", existingNames);
+    });
     setSelectedDiscoveryRunId("");
   };
 
   const selectScreen = (screen: Screen) => {
     if (isTraceRoute) returnToApp();
-    setViewMode(screen === "product" || screen === "integrations" ? screen : "auto");
+    setViewMode(screen);
     setMobileRailOpen(false);
   };
 
@@ -134,7 +141,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setIsCreatingProduct(false);
     setSelectedProductId(productId);
     setSelectedDiscoveryRunId("");
-    setViewMode("new-search");
+    setViewMode("overview");
     setDraftRunNameState(null);
     setMobileRailOpen(false);
   };
@@ -146,7 +153,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     writeDraftRunName(selectedProduct.id, null);
     setDraftRunNameState(null);
     setSelectedDiscoveryRunId("");
-    setViewMode("new-search");
+    setViewMode("overview");
     showToast({ title: "Product deleted", message: `${selectedProductName} was removed.`, tone: "green" });
   };
 
@@ -162,7 +169,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     await deleteDiscoveryRuns([run.id]);
     if (selectedDiscoveryRunId === run.id) {
       setSelectedDiscoveryRunId("");
-      setViewMode("new-search");
+      setViewMode("overview");
     }
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
@@ -170,7 +177,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const handleDeleteDraftRun = () => {
     setDraftRunName(null);
     setSelectedDiscoveryRunId("");
-    setViewMode("new-search");
+    setViewMode("overview");
   };
 
   const handleExportProductContacts = () => {
@@ -260,7 +267,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             products={products}
             selectedProductId={selectedProductId}
             selectedProductName={selectedProductName}
-            selectedRunLabel={selectedRunLabel}
+            selectedRunLabel={selectorRunLabel}
             onAddProduct={startNewProduct}
             onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
             onSelectProduct={selectProduct}
@@ -296,11 +303,18 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           </div>
         </div>
 
-        <nav className="list-nav" aria-label="Contact lists">
+        <nav className="list-nav" aria-label="Searches">
           <div className="list-nav-header">
-            <p>Run history</p>
             <button
-              aria-label="New contact search"
+              className={activeScreen === "overview" ? "list-nav-title active" : "list-nav-title"}
+              type="button"
+              onClick={() => selectScreen("overview")}
+            >
+              <Search size={14} />
+              <span>Searches</span>
+            </button>
+            <button
+              aria-label="New search"
               className={!isTraceRoute && activeScreen === "overview" && draftRunName ? "rail-add-list active" : "rail-add-list"}
               type="button"
               onClick={startNewList}
@@ -322,7 +336,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             ) : null}
             {!shouldShowDraftRun && productDiscoveryRuns.length === 0 ? (
               <div className="nav-empty">
-                <div className="t">No runs yet</div>
+                <div className="t">No searches yet</div>
                 <div className="s">Start a search to create the first saved list.</div>
               </div>
             ) : null}
@@ -368,7 +382,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
               products={products}
               selectedProductId={selectedProductId}
               selectedProductName={selectedProductName}
-              selectedRunLabel={selectedRunLabel}
+              selectedRunLabel={selectorRunLabel}
               onAddProduct={startNewProduct}
               onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
               onSelectProduct={selectProduct}
@@ -419,7 +433,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             if (created) {
               setSelectedProductId(created.id);
               setSelectedDiscoveryRunId("");
-              setViewMode("new-search");
+              setViewMode("overview");
             }
             return created;
           }}
@@ -494,7 +508,7 @@ function ProductSelector({
           onClick={() => onOpenChange(!isOpen)}
         >
           <span className={selectedRunLabel ? "top-product-primary has-run" : "top-product-primary"}>
-            <span className="selector-label">Product</span>
+            <span className="selector-label">Sales profile</span>
             <strong title={selectedProductName}>{selectedProductName}</strong>
             {selectedRunLabel ? (
               <span className="top-product-run" title={selectedRunLabel}>
@@ -597,9 +611,12 @@ function manageItemClass(enabled: boolean, active: boolean) {
   return [enabled ? "mng-item" : "mng-item is-disabled", active ? "is-active" : ""].filter(Boolean).join(" ");
 }
 
-function resolveActiveScreen(viewMode: AppViewMode, hasSelectedRun: boolean): Screen {
+function resolveActiveScreen(
+  viewMode: AppViewMode,
+  hasSelectedRun: boolean,
+): Screen {
   if (viewMode === "product" || viewMode === "integrations") return viewMode;
-  if (viewMode === "new-search") return "overview";
+  if (viewMode !== "auto") return viewMode;
   return hasSelectedRun ? "results" : "overview";
 }
 
@@ -618,17 +635,13 @@ function RunHistoryDraft({
   onSelect: () => void;
   onDelete: () => void;
 }) {
-  const [editing, setEditing] = useState(active);
+  const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const displayName = value.trim() || "Page name";
+  const displayName = value.trim() || "New search";
 
   useEffect(() => {
-    if (!active) {
-      setEditing(false);
-      return;
-    }
-    if (displayName === "Page name") setEditing(true);
-  }, [active, displayName]);
+    if (!active) setEditing(false);
+  }, [active]);
 
   const commitName = () => {
     onChange(uniqueListName(displayName, existingNames));
@@ -919,7 +932,7 @@ function AddProductDialog({
             Cancel
           </button>
           <button className="runbtn" disabled={!canCreateProduct} type="submit">
-            {creating ? "Creating..." : "Create product"}
+            {creating ? "Creating..." : "Create offer"}
           </button>
         </div>
       </form>
@@ -930,7 +943,7 @@ function AddProductDialog({
 function displayProductName(product: Product) {
   const savedName = product.product_name.trim();
   if (savedName && !/^(new product|untitled product|product)$/i.test(savedName)) return savedName;
-  const text = product.product_description.trim();
+  const text = (product.offer_summary || product.product_description || "").trim();
   const labeledName = text.match(
     /(?:one-liner|short(?:\s*\([^)]*\))?|headline)\s*:\s*([A-Z][A-Za-z0-9._-]{1,60})\b/i,
   );
@@ -942,7 +955,7 @@ function displayProductName(product: Product) {
 }
 
 function listLabel(run: DiscoveryRun) {
-  if (run.name && !isGeneratedRunName(run.name)) return run.name;
+  if (run.name && !isGeneratedRunName(run.name) && !isPlaceholderRunName(run.name)) return run.name;
   const intent = run.source_inputs?.source_request_intent;
   if (isRecord(intent)) {
     const category = typeof intent.business_category === "string" ? intent.business_category.trim() : "";
@@ -952,8 +965,8 @@ function listLabel(run: DiscoveryRun) {
   }
   const prompt = getRunPrompt(run);
   if (prompt) return titleFromQuery(prompt) || prompt;
-  if (run.name) return run.name;
-  return "Untitled list";
+  if (run.name && !isPlaceholderRunName(run.name)) return run.name;
+  return "Untitled search";
 }
 
 function uniqueRunLabels(runs: DiscoveryRun[]) {
@@ -988,6 +1001,10 @@ function collapseListName(value: string) {
 
 function isGeneratedRunName(value: string) {
   return /\b(source request|discovery|validation)\b.*\d{4}-\d{2}-\d{2}/i.test(value);
+}
+
+function isPlaceholderRunName(value: string) {
+  return /^(?:page name|test|new test\s*\d*|new search(?:\s+\d+)?)$/i.test(collapseListName(value));
 }
 
 function listMeta(run: DiscoveryRun) {
@@ -1026,7 +1043,8 @@ function draftRunStorageKey(productId: string) {
 
 function readDraftRunName(productId: string) {
   if (!productId) return null;
-  return localStorage.getItem(draftRunStorageKey(productId));
+  const savedName = localStorage.getItem(draftRunStorageKey(productId));
+  return savedName && isPlaceholderRunName(savedName) ? "New search" : savedName;
 }
 
 function writeDraftRunName(productId: string, value: string | null) {

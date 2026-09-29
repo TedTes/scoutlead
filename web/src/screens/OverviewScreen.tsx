@@ -74,7 +74,7 @@ export function OverviewScreen({
       const result = await runSourceRequest({
         product_id: selectedProductId,
         source: selectedSource,
-        name: requestedName && requestedName.toLowerCase() !== "page name" ? requestedName : undefined,
+        name: requestedName && !isDraftPlaceholder(requestedName) ? requestedName : undefined,
         prompt: request,
         max_results: 25,
         run_immediately: true,
@@ -181,6 +181,10 @@ function getRunPrompt(run: { source_input?: string | null; source_inputs?: Recor
   }
   if (run?.source_input?.trim() && !run.source_input.trim().startsWith("http")) return run.source_input.trim();
   return "";
+}
+
+function isDraftPlaceholder(value: string) {
+  return /^(?:page name|test|new test\s*\d*|new search(?:\s+\d+)?)$/i.test(value.trim().replace(/\s+/g, " "));
 }
 
 function parsePromptTags(prompt: string) {

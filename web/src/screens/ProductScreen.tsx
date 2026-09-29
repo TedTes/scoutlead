@@ -56,7 +56,7 @@ export function ProductScreen({
 
   useEffect(() => {
     setName(selectedProduct?.product_name || "");
-    setDescription(selectedProduct?.product_description || "");
+    setDescription(selectedProduct?.offer_summary || selectedProduct?.product_description || "");
     setTargetGeography(selectedProduct?.target_geography || DEFAULT_TARGET_GEOGRAPHY);
     setConstraints(editableConstraints(selectedProduct));
     setAddingHint(false);
@@ -79,7 +79,7 @@ export function ProductScreen({
   const hasChanges = Boolean(
     selectedProduct &&
       (name.trim() !== selectedProduct.product_name.trim() ||
-        description.trim() !== selectedProduct.product_description.trim() ||
+        description.trim() !== (selectedProduct.offer_summary || selectedProduct.product_description || "").trim() ||
         targetGeography.trim() !== selectedProduct.target_geography.trim() ||
         !sameList(normalizedConstraints, originalEditableConstraints)),
   );
@@ -130,7 +130,7 @@ export function ProductScreen({
     try {
       await autoSaveProduct(selectedProduct.id, {
         product_name: name.trim(),
-        product_description: description.trim(),
+        offer_summary: description.trim(),
         target_geography: targetGeography.trim(),
         constraints: normalizeList([...hiddenConstraints, ...normalizedConstraints]),
       });
@@ -167,10 +167,10 @@ export function ProductScreen({
     return (
       <div className="product-page product-settings-page">
         <section className="product-settings-empty">
-          <h1>No product selected</h1>
-          <p>Create a product from the top bar before changing product settings.</p>
+          <h1>No offer selected</h1>
+          <p>Create an offer from the top bar before changing offer settings.</p>
           <button className="runbtn" type="button" onClick={() => onCreatingProductChange(true)}>
-            Add product
+            Add offer
           </button>
         </section>
       </div>
@@ -181,7 +181,7 @@ export function ProductScreen({
     <div className="product-page product-settings-page">
       <section className="product-settings-shell">
         <header className="product-settings-heading">
-          <div className="product-settings-meta-line" aria-label="Product summary">
+          <div className="product-settings-meta-line" aria-label="Offer summary">
             <span>
               <strong>{productDiscoveryRuns.length}</strong> {pluralize(productDiscoveryRuns.length, "run")}
             </span>
@@ -206,18 +206,18 @@ export function ProductScreen({
           }}
         >
           <label className="product-settings-field">
-            <span className="product-settings-label">Product name</span>
+            <span className="product-settings-label">Offer name</span>
             <input
               className="product-settings-input"
               value={name}
               onChange={(event) => setName(event.target.value)}
               onBlur={() => void saveProduct()}
             />
-            {duplicateName ? <em>A product with this name already exists.</em> : null}
+            {duplicateName ? <em>An offer with this name already exists.</em> : null}
           </label>
 
           <label className="product-settings-field">
-            <span className="product-settings-label">Product description</span>
+            <span className="product-settings-label">Offer summary</span>
             <textarea
               className="product-settings-textarea"
               rows={7}

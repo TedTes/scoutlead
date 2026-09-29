@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
+import type { SenderProfile } from "../types/domain";
 
 export function IntegrationsScreen() {
   const {
@@ -21,6 +22,7 @@ export function IntegrationsScreen() {
     refreshGmailConnection,
     disconnectGmail,
     updateProduct,
+    territoryApi,
   } = useAppData();
   const { showToast } = useToast();
   const [connectingGmail, setConnectingGmail] = useState(false);
@@ -29,6 +31,12 @@ export function IntegrationsScreen() {
   const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
+  const [senderProfile, setSenderProfile] = useState<SenderProfile | null>(null);
+  const [editingSender, setEditingSender] = useState(false);
+  const [savingSender, setSavingSender] = useState(false);
+  const [senderLegalName, setSenderLegalName] = useState("");
+  const [senderMailingAddress, setSenderMailingAddress] = useState("");
+  const [senderContact, setSenderContact] = useState("");
 
   const gmailConnected = Boolean(gmailConnectionStatus?.connected);
   const gmailEmail = gmailConnectionStatus?.email_address || "Connected account";
@@ -40,6 +48,15 @@ export function IntegrationsScreen() {
     setWebhookEnabled(Boolean(selectedProduct?.webhook_enabled));
     setEditingWebhook(false);
   }, [selectedProduct?.id, selectedProduct?.webhook_enabled, selectedProduct?.webhook_url]);
+
+  useEffect(() => {
+    void territoryApi.getSenderProfile().then((profile) => {
+      setSenderProfile(profile);
+      setSenderLegalName(profile.sender_legal_name || "");
+      setSenderMailingAddress(profile.sender_mailing_address || "");
+      setSenderContact(profile.sender_contact || "");
+    }).catch(() => setSenderProfile(null));
+  }, [territoryApi]);
 
   useEffect(() => {
     const handleGmailMessage = (event: MessageEvent) => {
@@ -141,6 +158,35 @@ export function IntegrationsScreen() {
     }
   };
 
+  const saveSenderProfile = async () => {
+    if (savingSender) return;
+    setSavingSender(true);
+    try {
+      const profile = await territoryApi.updateSenderProfile({
+        sender_legal_name: senderLegalName.trim() || null,
+        sender_mailing_address: senderMailingAddress.trim() || null,
+        sender_contact: senderContact.trim() || null,
+      });
+      setSenderProfile(profile);
+      setEditingSender(false);
+      showToast({
+        title: profile.complete ? "Sender identity saved" : "Sender identity incomplete",
+        message: profile.complete
+          ? "Compliance details will be added to sent outreach."
+          : "Complete all fields before sending outreach.",
+        tone: profile.complete ? "green" : "amber",
+      });
+    } catch (error) {
+      showToast({
+        title: "Sender identity was not saved",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
+      });
+    } finally {
+      setSavingSender(false);
+    }
+  };
+
   if (!selectedProduct) {
     return (
       <div className="integrations-page">
@@ -183,6 +229,55 @@ export function IntegrationsScreen() {
             {gmailConnected ? "Reconnect Gmail" : "Account connections"} <ArrowRight size={14} />
           </strong>
         </button>
+
+        <IntegrationGroup title="Sender identity" />
+        <IntegrationRow
+          active={Boolean(senderProfile?.complete)}
+          logo="S"
+          logoTone="sender"
+          title="Business details"
+          status={senderProfile?.complete ? "Ready" : "Required"}
+          statusTone={senderProfile?.complete ? "on" : "off"}
+          description={
+            senderProfile?.complete
+              ? `${senderProfile.sender_legal_name} - included with mailing address and contact in every email`
+              : "Required sender name, mailing address, and contact for compliant outreach"
+          }
+          action={
+            <button className="integration-button" type="button" onClick={() => setEditingSender((open) => !open)}>
+              {senderProfile?.complete ? "Edit" : "Set up"}
+            </button>
+          }
+        />
+        {editingSender ? (
+          <form
+            className="integration-sender-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveSenderProfile();
+            }}
+          >
+            <label className="field">
+              <span>Legal sender name</span>
+              <input value={senderLegalName} onChange={(event) => setSenderLegalName(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Mailing address</span>
+              <textarea rows={2} value={senderMailingAddress} onChange={(event) => setSenderMailingAddress(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Contact email, phone, or URL</span>
+              <input value={senderContact} onChange={(event) => setSenderContact(event.target.value)} />
+            </label>
+            <button
+              className="integration-button primary"
+              disabled={savingSender || !senderLegalName.trim() || !senderMailingAddress.trim() || !senderContact.trim()}
+              type="submit"
+            >
+              <Save size={14} /> {savingSender ? "Saving..." : "Save identity"}
+            </button>
+          </form>
+        ) : null}
 
         <IntegrationGroup title="Sending" />
         <IntegrationRow
@@ -368,7 +463,7 @@ function IntegrationRow({
   action: ReactNode;
   description: ReactNode;
   logo: string;
-  logoTone: "gmail" | "hubspot" | "resend" | "sheets" | "webhook";
+  logoTone: "gmail" | "hubspot" | "resend" | "sender" | "sheets" | "webhook";
   status?: string;
   statusTone?: "later" | "off" | "on";
   title: string;

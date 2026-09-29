@@ -144,10 +144,10 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
 
         <section className="landing-hero">
           <div className="landing-copy">
-            <h1 className="landing-eyebrow landing-hero-eyebrow">Lead qualification workspace</h1>
+            <h1 className="landing-eyebrow landing-hero-eyebrow">Weekly qualified local businesses for your territory</h1>
             <p className="landing-lede">
-              Find local businesses, score why they fit your product, and build a reviewed outreach pipeline that
-              remembers every contact you've already seen.
+              Define what you sell, the niche, and the city. ScoutLead delivers new businesses with fit evidence,
+              the best way to reach them, and an approach grounded in what was actually found.
             </p>
             <div className="landing-actions">
               <LandingSignInAction authEnabled={authEnabled} className="landing-primary">
@@ -162,13 +162,13 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
                 <ShieldCheck size={16} /> Verified contacts
               </span>
               <span>
-                <CheckCircle2 size={16} /> Approval before send
+                <CheckCircle2 size={16} /> Evidence-backed ranking
               </span>
             </div>
             <div className="landing-fit-row" aria-label="Best fit">
-              <span>Founder-led validation</span>
-              <span>Early outbound</span>
-              <span>Local service SaaS</span>
+              <span>Local suppliers</span>
+              <span>Service firms</span>
+              <span>Agencies and software</span>
             </div>
           </div>
 
@@ -182,25 +182,25 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
             <div className="landing-section-heading landing-story-heading">
               <div className="landing-story-title">
                 <p className="landing-eyebrow">How it works</p>
-                <h2>How a search becomes a reviewed shortlist</h2>
+                <h2>How a territory becomes a weekly contact list</h2>
               </div>
               <p className="landing-lede">
-                ScoutLead follows one loop: ask for a niche, reuse what is already known, score each business against
-                the product, then review the contact before outreach.
+                ScoutLead checks the known business pool first, fills gaps from public sources, qualifies each contact,
+                and avoids businesses already delivered for the offer.
               </p>
             </div>
             <div className="landing-story-steps">
-              <LandingStep number="01" icon={<Search size={16} />} title="Describe the niche">
-                Start with the kind of business, location, and signals that matter for this product.
+              <LandingStep number="01" icon={<Search size={16} />} title="Define the territory">
+                Choose the business niche, city, and observable signals that matter for the offer.
               </LandingStep>
               <LandingStep number="02" icon={<ListChecks size={16} />} title="Gather and dedupe">
                 Known businesses are checked first, then public sources fill the gaps without repeating contacts.
               </LandingStep>
-              <LandingStep number="03" icon={<Target size={16} />} title="Score the fit">
-                Each candidate gets product-fit judgment, supporting evidence, and missing proof made visible.
+              <LandingStep number="03" icon={<Target size={16} />} title="Qualify with evidence">
+                Each business gets a fit verdict, supporting evidence, contact channel, and practical approach.
               </LandingStep>
-              <LandingStep number="04" icon={<UserCheck size={16} />} title="Review the action">
-                Shortlist, pass, export, draft, or send only after the business has been inspected.
+              <LandingStep number="04" icon={<UserCheck size={16} />} title="Log the outcome">
+                Record replies, meetings, wins, and data problems so future deliveries rank more usefully.
               </LandingStep>
             </div>
           </div>
@@ -210,10 +210,10 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
           <div className="landing-proof-inner">
             <div className="landing-section-heading landing-proof-heading">
               <p className="landing-eyebrow">Lead review</p>
-              <h2>Select a lead, then review the evidence</h2>
+              <h2>See why a contact belongs in the territory</h2>
               <p className="landing-lede">
-                ScoutLead keeps the list scannable where there is room, then focuses the selected business with fit,
-                contact readiness, supporting evidence, and approval controls before outreach.
+                Keep the weekly list scannable, then open one business to inspect fit, source evidence, contact
+                readiness, and the recommended channel before outreach.
               </p>
             </div>
             <WorkflowProofPreview />
@@ -225,11 +225,11 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
             <DraftSendPreview />
             <div>
               <div className="landing-section-heading">
-                <p className="landing-eyebrow">Draft, approved, sent</p>
-                <h2>Every draft is written from what ScoutLead actually found</h2>
+                <p className="landing-eyebrow">Prepare and send</p>
+                <h2>Outreach stays tied to public evidence</h2>
                 <p className="landing-lede">
-                  The message references real evidence — reviews, service area, what's missing — then waits for a
-                  person to approve it before anything reaches Gmail.
+                  Prepare outreach for selected contacts from one editable template, personalized with the business
+                  evidence ScoutLead found, then send through your connected Gmail.
                 </p>
               </div>
             </div>
@@ -243,8 +243,8 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
                 <p className="landing-eyebrow">Connect once, use everywhere</p>
                 <h2>Gmail and your workflow tools — wired to your account, not each product</h2>
                 <p className="landing-lede">
-                  Approved outreach sends from your own connected Gmail. Nothing sends or exports until a contact is
-                  approved.
+                  Outreach sends from your connected Gmail, exports carry fit and approach context, and outcomes stay
+                  attached to the territory that produced the contact.
                 </p>
               </div>
             </div>
@@ -255,9 +255,9 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
         <TrustSection />
 
         <section className="landing-cta" aria-label="Get started">
-          <h2>Build a shortlist that gets smarter every run</h2>
+          <h2>Build a territory that improves with real outcomes</h2>
           <p className="landing-lede">
-            Describe your target customer and turn public business data into a private, reviewed pipeline.
+            Turn public local-business data into a recurring, evidence-backed prospecting workflow.
           </p>
           <div className="landing-proof-row landing-cta-proof" aria-label="Included with every account">
             <span>
@@ -918,7 +918,7 @@ function PreviewRail({ activeManage, activeRun }: { activeManage: string; active
       </div>
       <div className="preview-manage">
         <span>Manage</span>
-        <PreviewManageRow icon={<Settings size={13} />} active={activeManage === "Product settings"} label="Product settings" />
+        <PreviewManageRow icon={<Settings size={13} />} active={activeManage === "Offer settings"} label="Offer settings" />
         <PreviewManageRow icon={<Plug size={13} />} active={activeManage === "Integrations"} label="Integrations" />
         <PreviewManageRow icon={<Download size={13} />} active={false} label="Export all contacts" />
       </div>
