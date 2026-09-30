@@ -26,7 +26,12 @@ import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-
 import { AppDataProvider, useAppData } from "../state/app-data";
 import type { DiscoveryResult, DiscoveryRun, Product, Territory } from "../types/domain";
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
-import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
+import {
+  baseExportFileName,
+  defaultExportFileName,
+  exportContactEmail,
+  normalizeExportFileName,
+} from "../utils/export-file";
 
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
@@ -1212,14 +1217,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function exportProductContactsCsv(contacts: DiscoveryResult[], fileName: string) {
   const rows = contacts.map((contact) => ({
     company: contact.company_name,
-    email: contact.contact_email || contact.research?.contact_email || "",
     contact_name: contact.research?.contact_name || "",
+    email: exportContactEmail(contact.contact_email || contact.research?.contact_email),
     phone: rawContactValue(contact, ["phone", "telephone", "contact_phone", "phoneNumber"]),
     website: contact.website_url || contact.research?.website_url || "",
     geography: contact.geography || contact.research?.geography || "",
-    score: String(Math.round(contact.qualification?.score ?? contact.research?.confidence ?? 0)),
-    status: contact.status,
-    summary: contact.research?.summary || contact.description || "",
   }));
   const headers = Object.keys(rows[0] || { company: "" });
   const csv = [

@@ -51,7 +51,12 @@ import type {
   TerritoryMetrics,
   TerritoryResolution,
 } from "../types/domain";
-import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
+import {
+  baseExportFileName,
+  defaultExportFileName,
+  exportContactEmail,
+  normalizeExportFileName,
+} from "../utils/export-file";
 import { formatDate } from "../utils/format";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
@@ -723,7 +728,7 @@ export function ResultsScreen({
       return;
     }
     const downloadName = normalizeExportFileName(exportFileName);
-    exportContactsCsv(pendingExport.contacts, downloadName, activeMessages);
+    exportContactsCsv(pendingExport.contacts, downloadName);
     setPendingExport(null);
     showToast({
       title: "Contacts exported",
@@ -3841,40 +3846,14 @@ function rawValueToString(value: unknown): string {
   return "";
 }
 
-function exportContactsCsv(contacts: DiscoveryResult[], fileName: string, messages: Message[] = []) {
-  const messageByLeadId = new Map(messages.map((message) => [message.lead_id, message]));
+function exportContactsCsv(contacts: DiscoveryResult[], fileName: string) {
   const rows = contacts.map((contact) => ({
-    shortlisted: contact.shortlisted_at ? "yes" : "no",
     company: contact.company_name,
-    email: contact.contact_email || contact.research?.contact_email || "",
     contact_name: getContactName(contact) || contact.research?.contact_name || "",
+    email: exportContactEmail(contact.contact_email || contact.research?.contact_email),
     phone: getPhone(contact),
-    price: getPrice(contact),
-    posted: getPostedDate(contact),
     website: contact.website_url || contact.research?.website_url || "",
     geography: contact.geography || contact.research?.geography || "",
-    contact_policy_status: contactPolicyStatusLabel(contactPolicyStatus(contact)),
-    contact_policy_reason: contact.contact_policy_reason || "",
-    last_contacted_at: contact.last_contacted_at || "",
-    verification_status: verificationStatusLabel(verificationStatus(contact)),
-    verification_score: contact.verification_score ?? "",
-    verification_reason: contact.verification_reason || "",
-    verification_details: formatVerificationDetails(contact.verification_details),
-    opportunity_level: contactOpportunityAssessment(contact).level,
-    opportunity_score: contactOpportunityAssessment(contact).score,
-    opportunity_evidence: contactOpportunityAssessment(contact).signals.join("; "),
-    score: String(contactScore(contact)),
-    status: contactStatusLabel(contact),
-    fit_verdict: displayAgentFitStatus(contact).label,
-    review_decision: displayReviewDecision(contact)?.label || "",
-    review_note: contact.review_note || "",
-    evidence: contactEvidenceLine(contact),
-    missing_evidence: contactMissingEvidenceLine(contact).replace(/^Missing:\s*/, ""),
-    signals: contactSignals(contact).join("; "),
-    rationale: contact.qualification?.rationale || "",
-    draft_status: messageByLeadId.get(contact.id)?.status || "",
-    draft_subject: messageByLeadId.get(contact.id)?.subject || "",
-    draft_body: messageByLeadId.get(contact.id)?.body || "",
   }));
   const headers = Object.keys(rows[0] || { company: "" });
   const csv = [
