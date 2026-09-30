@@ -37,14 +37,16 @@ def create_app_services(settings: Settings) -> AppServices:
         llm = OpenAIStructuredLLMClient(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
-            timeout_seconds=settings.request_timeout_seconds,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_attempts=settings.llm_max_attempts,
         )
     elif settings.llm_json_endpoint:
         llm = RemoteJsonLLMClient(
             endpoint=settings.llm_json_endpoint,
             api_key=settings.llm_api_key,
             model=settings.llm_model,
-            timeout_seconds=settings.request_timeout_seconds,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_attempts=settings.llm_max_attempts,
         )
     else:
         llm = MissingLLMClient()

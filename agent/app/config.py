@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     zerobounce_api_endpoint: str | None = None
 
     request_timeout_seconds: float = Field(default=20.0, gt=0)
+    llm_timeout_seconds: float = Field(default=60.0, gt=0)
+    llm_max_attempts: int = Field(default=3, ge=1, le=6)
 
     @property
     def strict_external_providers(self) -> bool:
