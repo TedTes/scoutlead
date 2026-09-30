@@ -96,6 +96,27 @@ def test_not_fit_qualification_cannot_keep_high_score() -> None:
     assert "marked not fit" in guarded.rationale
 
 
+def test_unknown_email_verification_does_not_disqualify_business_fit() -> None:
+    result = QualificationResult(
+        qualified=True,
+        fit_status=AgentFitStatus.GOOD_FIT,
+        score=82,
+        rationale="The business matches the target customer.",
+        criteria=[],
+        recommended_next_step="Review for outreach.",
+    )
+    candidate = lead()
+    candidate.research = candidate.research.model_copy(
+        update={"disqualifiers": ["email_verification_unknown"]}
+    )
+
+    guarded = enforce_qualification_boundary(product(), candidate, result)
+
+    assert guarded.qualified is True
+    assert guarded.fit_status == AgentFitStatus.GOOD_FIT
+    assert guarded.score == 82
+
+
 def product() -> ProductRead:
     now = datetime.now(UTC)
     return ProductRead(

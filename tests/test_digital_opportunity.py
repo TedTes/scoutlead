@@ -4,6 +4,7 @@ from evaluation.digital_opportunity import (
     opportunity_evidence_from_sources,
     opportunity_score_from_sources,
     product_requires_digital_opportunity,
+    source_inputs_require_digital_opportunity,
 )
 from products.schemas import ProductRead, QualificationCriterion
 from datetime import UTC, datetime
@@ -121,3 +122,14 @@ def test_web_growth_product_requires_digital_opportunity() -> None:
     )
 
     assert product_requires_digital_opportunity(product) is True
+
+
+def test_saved_search_prompt_can_require_digital_opportunity() -> None:
+    assert source_inputs_require_digital_opportunity(
+        {
+            "source_request_prompt": (
+                "Independent painters in Toronto with weak or outdated websites "
+                "or no visible quote form."
+            )
+        }
+    ) is True

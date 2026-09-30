@@ -6,6 +6,7 @@ from campaigns.schemas import CampaignRead
 from evaluation.digital_opportunity import (
     has_minimum_opportunity,
     opportunity_score_from_sources,
+    source_inputs_require_digital_opportunity,
 )
 from leads.schemas import ContactVerificationStatus, LeadRead
 
@@ -16,7 +17,7 @@ def select_campaign_results(
 ) -> list[LeadRead]:
     """Apply a run's delivery policy without deleting its underlying evidence."""
     source_inputs = campaign.source_inputs or {}
-    if not source_inputs.get("requires_digital_opportunity"):
+    if not source_inputs_require_digital_opportunity(source_inputs):
         return leads
 
     eligible = [

@@ -10,7 +10,10 @@ from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
 from prompts.research import research_prompt
 from evaluation.lead_scoring import build_cached_lead_research
-from evaluation.digital_opportunity import has_minimum_opportunity
+from evaluation.digital_opportunity import (
+    has_minimum_opportunity,
+    source_inputs_require_digital_opportunity,
+)
 from shared.logger import get_logger
 from tools.browser import DirectHttpBrowserTool
 
@@ -44,7 +47,7 @@ class ResearchWorkflow:
             if lead.status not in {LeadStatus.DISCOVERED, LeadStatus.RESEARCHING}:
                 continue
             if (
-                (campaign.source_inputs or {}).get("requires_digital_opportunity")
+                source_inputs_require_digital_opportunity(campaign.source_inputs)
                 and not has_minimum_opportunity(lead.raw_sources, minimum="moderate")
             ):
                 continue

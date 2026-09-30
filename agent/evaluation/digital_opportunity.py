@@ -196,7 +196,36 @@ def product_requires_digital_opportunity(product: ProductRead) -> bool:
         ]
         if value
     ).lower()
-    return any(phrase in text for phrase in OPPORTUNITY_PROBLEM_PHRASES)
+    return text_requires_digital_opportunity(text)
+
+
+def text_requires_digital_opportunity(text: str | None) -> bool:
+    normalized = (text or "").lower()
+    return any(phrase in normalized for phrase in OPPORTUNITY_PROBLEM_PHRASES)
+
+
+def source_inputs_require_digital_opportunity(source_inputs: dict[str, Any] | None) -> bool:
+    values = source_inputs or {}
+    if values.get("requires_digital_opportunity") is True:
+        return True
+    request_text = " ".join(
+        str(value)
+        for value in (
+            values.get("source_request_prompt"),
+            values.get("compiled_query"),
+        )
+        if value
+    )
+    intent = values.get("source_request_intent")
+    if isinstance(intent, dict):
+        request_text = " ".join(
+            [
+                request_text,
+                str(intent.get("search_query") or ""),
+                " ".join(str(item) for item in intent.get("required_signals") or []),
+            ]
+        )
+    return text_requires_digital_opportunity(request_text)
 
 
 def _walk_items(value: Any):

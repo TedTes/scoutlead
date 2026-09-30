@@ -48,7 +48,7 @@ class BusinessOpportunityAuditor:
             market=market,
             limit=len(business_ids),
             include_with_email=True,
-            refresh=False,
+            refresh=True,
             verify=self.verifier is not None,
             timeout_seconds=self.timeout_seconds,
             max_pages_per_business=5,

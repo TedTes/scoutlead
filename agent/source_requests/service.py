@@ -8,7 +8,10 @@ from agents.llm import LLMClient
 from campaign_sources.schemas import CampaignSourceSlot
 from campaigns.schemas import CampaignCreate, CampaignGoalType, CampaignRead
 from campaigns.service import CampaignService
-from evaluation.digital_opportunity import product_requires_digital_opportunity
+from evaluation.digital_opportunity import (
+    product_requires_digital_opportunity,
+    text_requires_digital_opportunity,
+)
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from shared.errors import ValidationError
@@ -67,7 +70,10 @@ class SourceRequestService:
     def create(self, request: SourceRequestCreate) -> SourceRequestRun:
         plan = self.plan(request)
         product = ProductRead.model_validate(self.products.get(request.product_id))
-        requires_digital_opportunity = product_requires_digital_opportunity(product)
+        requires_digital_opportunity = (
+            product_requires_digital_opportunity(product)
+            or text_requires_digital_opportunity(request.prompt)
+        )
         candidate_pool_size = _candidate_pool_size(
             requested_count=plan.max_results,
             over_source=requires_digital_opportunity,

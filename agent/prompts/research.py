@@ -9,6 +9,7 @@ def research_prompt(product: ProductRead, lead: LeadRead, inspection: WebsiteIns
             "Classify this search result as a potential customer only if it appears to be an organization that could buy or use the product for itself.",
             "Do not treat product vendors, competitor/alternative products, software/tool category pages, blogs, articles, directories, or review pages as potential customers.",
             "If the result is not a target customer, set lead_type accordingly and add a clear disqualifier explaining why.",
+            "Missing, unverified, or invalid email/phone details are contact-readiness issues, not business-fit disqualifiers.",
             "lead_type must be one of: target_customer, competitor_or_alternative, vendor_to_target_customer, content_or_directory, irrelevant, unknown.",
             "Use public evidence only. Do not infer buyer fit from matching keywords alone.",
             f"Product: {product.product_name}",

@@ -79,7 +79,17 @@ class DirectHttpBrowserTool:
         if meta and meta.get("content"):
             description = normalize_text(str(meta["content"]))
         text = truncate(normalize_text(soup.get_text(" ")), 5000)
-        emails = sorted(set(re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", response.text, re.I)))
+        emails = sorted(
+            {
+                email.lower()
+                for email in re.findall(
+                    r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+                    response.text,
+                    re.I,
+                )
+                if _email_is_usable(email)
+            }
+        )
         links = []
         for link in soup.find_all("a", href=True):
             links.append(urljoin(str(response.url), str(link["href"])))
@@ -107,6 +117,20 @@ def _candidate_evidence_links(links: list[str], base_url: str) -> list[str]:
         seen.add(link)
         ranked.append((_link_priority(link), link))
     return [link for _, link in sorted(ranked, key=lambda item: (item[0], item[1]))]
+
+
+def _email_is_usable(email: str) -> bool:
+    normalized = email.casefold().strip(".,;:()[]{}<>\"'")
+    if "@" not in normalized:
+        return False
+    local, domain = normalized.split("@", 1)
+    if not local or not domain or "." not in domain:
+        return False
+    if domain.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
+        return False
+    if local in {"example", "email", "your-email", "youremail"}:
+        return False
+    return not any(term in local for term in ("noreply", "no-reply"))
 
 
 def _link_priority(link: str) -> int:

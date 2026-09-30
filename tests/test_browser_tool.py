@@ -54,3 +54,18 @@ def test_direct_http_browser_merges_same_domain_evidence_pages(monkeypatch) -> N
     assert "Residential painting in Toronto" in result.text
     assert "Request a quote form" in result.text
     assert "https://directory.example/contact" not in calls
+
+
+def test_direct_http_browser_rejects_asset_names_that_look_like_emails(monkeypatch) -> None:
+    class Response:
+        url = "https://paint.example/"
+        text = '<html><body>chosen-sprite@2x.png <a href="mailto:owner@paint.example">Email</a></body></html>'
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr("tools.browser.httpx.get", lambda *args, **kwargs: Response())
+
+    result = DirectHttpBrowserTool(timeout_seconds=0.1).inspect("https://paint.example/")
+
+    assert result.emails == ["owner@paint.example"]

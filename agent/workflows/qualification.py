@@ -76,8 +76,20 @@ def enforce_qualification_boundary(
     lead: LeadRead,
     result: QualificationResult,
 ) -> QualificationResult:
-    if lead.research and lead.research.disqualifiers:
-        return disqualified_by_research(product, lead)
+    fit_disqualifiers = [
+        reason
+        for reason in (lead.research.disqualifiers if lead.research else [])
+        if not _is_contact_readiness_issue(reason)
+    ]
+    if fit_disqualifiers:
+        return disqualified_by_research(
+            product,
+            lead,
+            reason=(
+                "Lead was disqualified before outreach because public research identified: "
+                + ", ".join(fit_disqualifiers)
+            ),
+        )
 
     if lead.research and lead.research.lead_type in DISQUALIFYING_LEAD_TYPES:
         lead_type = lead.research.lead_type.value.replace("_", " ")
@@ -115,3 +127,22 @@ def enforce_qualification_boundary(
         )
 
     return normalized
+
+
+def _is_contact_readiness_issue(reason: str) -> bool:
+    normalized = reason.casefold().replace("_", " ")
+    contact_term = any(term in normalized for term in ("email", "phone", "contact"))
+    readiness_term = any(
+        term in normalized
+        for term in (
+            "invalid",
+            "missing",
+            "no direct",
+            "not found",
+            "unreachable",
+            "unverified",
+            "unknown",
+            "verification",
+        )
+    )
+    return contact_term and readiness_term

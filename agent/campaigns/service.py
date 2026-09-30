@@ -31,6 +31,7 @@ from discovery.classifier import assess_discovery_candidate
 from discovery.schemas import DiscoveryCandidateCreate
 from evaluation.campaign_metrics import calculate_campaign_metrics
 from evaluation.lead_scoring import build_cached_lead_research, score_cached_lead
+from evaluation.digital_opportunity import source_inputs_require_digital_opportunity
 from evaluation.schemas import CampaignMetrics
 from icp.service import ICPPresetService
 from leads.repository import LeadRepository
@@ -630,7 +631,7 @@ class CampaignService:
 
     @staticmethod
     def _requires_digital_opportunity(campaign: CampaignRead) -> bool:
-        return bool((campaign.source_inputs or {}).get("requires_digital_opportunity"))
+        return source_inputs_require_digital_opportunity(campaign.source_inputs)
 
     def _audit_digital_opportunity(self, campaign: CampaignRead):
         if self.opportunity_auditor is None:
