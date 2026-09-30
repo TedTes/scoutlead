@@ -51,6 +51,7 @@ export type DiscoverySource = {
 export type DiscoveryRun = {
   id: string;
   product_id: string;
+  territory_id?: string | null;
   name?: string | null;
   goal_type: "learn" | "sell";
   icp_preset_id?: string | null;
@@ -300,6 +301,7 @@ export type TerritoryDelivery = {
   territory_id: string;
   campaign_id: string;
   scheduled_for?: string | null;
+  started_at?: string | null;
   delivered_at?: string | null;
   viewed_at?: string | null;
   new_contact_count: number;

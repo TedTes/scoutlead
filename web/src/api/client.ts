@@ -112,15 +112,22 @@ export class ApiClient {
     });
   }
 
-  createTerritory(resolution: TerritoryResolution) {
+  createTerritory(
+    resolution: TerritoryResolution,
+    settings: Partial<Pick<Territory, "label" | "batch_size" | "min_fit">> = {},
+  ) {
     return this.request<Territory>("/territories", {
       method: "POST",
-      body: { ...resolution, confirmed: true },
+      body: { ...resolution, ...settings, confirmed: true },
     });
   }
 
-  updateTerritory(id: string, update: Partial<Pick<Territory, "status" | "batch_size" | "min_fit">>) {
+  updateTerritory(id: string, update: Partial<Pick<Territory, "label" | "status" | "batch_size" | "min_fit">>) {
     return this.request<Territory>(`/territories/${id}`, { method: "PATCH", body: update });
+  }
+
+  deleteTerritory(id: string) {
+    return this.request<void>(`/territories/${id}`, { method: "DELETE" });
   }
 
   refreshTerritory(id: string) {
@@ -180,7 +187,7 @@ export class ApiClient {
     return this.request<DiscoveryRun>(`/discovery-runs/${id}`);
   }
 
-  updateDiscoveryRun(id: string, body: Partial<Pick<DiscoveryRun, "name">>) {
+  updateDiscoveryRun(id: string, body: Partial<Pick<DiscoveryRun, "name" | "territory_id">>) {
     return this.request<DiscoveryRun>(`/discovery-runs/${id}`, { method: "PATCH", body });
   }
 

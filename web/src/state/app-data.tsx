@@ -22,6 +22,7 @@ import type {
   SourceRequestRun,
   SourceProvider,
   SourceRequestSource,
+  Territory,
 } from "../types/domain";
 import { normalizeActiveSourceIds } from "../utils/source-providers";
 
@@ -38,6 +39,7 @@ type AppDataContextValue = {
   selectedDiscoveryRun?: DiscoveryRun;
   productDiscoveryRuns: DiscoveryRun[];
   productContacts: DiscoveryResult[];
+  territories: Territory[];
   snapshot: DiscoverySnapshot;
   sourceProviders: SourceProvider[];
   gmailConnectionStatus: GmailConnectionStatus | null;
@@ -164,6 +166,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   const selectedDiscoveryRunIdRef = useRef(selectedDiscoveryRunIdState);
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
+  const [territories, setTerritories] = useState<Territory[]>([]);
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
   const [gmailConnectionStatus, setGmailConnectionStatus] = useState<GmailConnectionStatus | null>(null);
   const [activeSourceIds, setActiveSourceIdsState] = useState<SourceRequestSource[]>(readStoredActiveSourceIds);
@@ -302,7 +305,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     if (showLoading) setLoading(true);
     setError("");
     try {
-      const [health, nextProducts, nextRuns, nextSourceProviders] = await Promise.all([
+      const [health, nextProducts, nextRuns, nextSourceProviders, nextTerritories] = await Promise.all([
         api.getHealth().then(
           () => true,
           () => false,
@@ -310,11 +313,13 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         api.getProducts(),
         api.getDiscoveryRuns(),
         api.getSourceProviders().catch(() => []),
+        api.getTerritories().catch(() => []),
       ]);
       setApiHealthy(health);
       setProducts(nextProducts);
       setDiscoveryRuns(nextRuns);
       setSourceProviders(nextSourceProviders);
+      setTerritories(nextTerritories);
       const nextActiveSourceIds = normalizeActiveSourceIds(readStoredActiveSourceIds(), nextSourceProviders);
       localStorage.setItem(activeSourcesStorageKey, JSON.stringify(nextActiveSourceIds));
       setActiveSourceIdsState(nextActiveSourceIds);
@@ -388,6 +393,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectedDiscoveryRun,
       productDiscoveryRuns,
       productContacts,
+      territories,
       snapshot,
       activeSourceIds,
       sourceProviders,
@@ -643,6 +649,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       persistActiveSourceIds,
       productDiscoveryRuns,
       productContacts,
+      territories,
       products,
       refreshAll,
       refreshGmailConnection,

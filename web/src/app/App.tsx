@@ -1,23 +1,28 @@
 import {
-  Check,
-  ChevronDown,
+  CalendarClock,
+  CircleX,
   Download,
+  FilePlus2,
+  Folder,
+  Inbox,
+  List,
   Menu,
   Pencil,
   Plug,
   Plus,
-  Search,
+  Send,
   Settings,
+  Star,
   Trash2,
   User,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
-import type { DiscoveryResult, DiscoveryRun, Product } from "../types/domain";
-import type { Screen } from "../types/navigation";
+import type { DiscoveryResult, DiscoveryRun, Product, Territory } from "../types/domain";
+import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
 
 type AppProps = {
@@ -40,15 +45,15 @@ export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {})
 
 function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [viewMode, setViewMode] = useState<AppViewMode>("auto");
+  const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("this_week");
+  const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
-  const [openContextMenu, setOpenContextMenu] = useState<"product" | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
-  const desktopContextMenuRef = useRef<HTMLDivElement | null>(null);
-  const mobileContextMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
   const {
     loading,
@@ -58,9 +63,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setSelectedProductId,
     selectedDiscoveryRunId,
     setSelectedDiscoveryRunId,
-    selectedDiscoveryRun,
     productDiscoveryRuns,
     productContacts,
+    territories,
     gmailConnectionStatus,
     createProductFromDescription,
     deleteProduct,
@@ -70,14 +75,10 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   } = useAppData();
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
-  const productRunLabels = useMemo(() => uniqueRunLabels(productDiscoveryRuns), [productDiscoveryRuns]);
-  const selectedRunDisplay = selectedDiscoveryRunId
-    ? productRunLabels.find((item) => item.run.id === selectedDiscoveryRunId)
-    : undefined;
-  const selectedRunLabel =
-    selectedDiscoveryRunId && selectedDiscoveryRun
-      ? selectedRunDisplay?.title || listLabel(selectedDiscoveryRun)
-      : draftRunName?.trim() || "";
+  const productRunLabels = useMemo(
+    () => groupedRunLabels(productDiscoveryRuns, territories.filter((territory) => territory.product_id === selectedProductId)),
+    [productDiscoveryRuns, selectedProductId, territories],
+  );
   const isTraceRoute =
     routePath === "/trace" ||
     routePath === "/debug/trace" ||
@@ -87,8 +88,65 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists);
-  const selectorRunLabel = activeScreen === "results" ? selectedRunLabel : "";
   const shouldShowDraftRun = draftRunName !== null;
+  const currentRunContacts = selectedDiscoveryRunId
+    ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
+    : productContacts;
+  const recentRunContacts = currentRunContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
+  const fallbackWorkflowCounts: LeadWorkflowCounts = {
+    inbox: currentRunContacts.filter((contact) => (contact.review_status || "unreviewed") === "unreviewed").length,
+    this_week: recentRunContacts.length,
+    shortlisted: currentRunContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
+    contacted: currentRunContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
+    dismissed: currentRunContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
+    all: currentRunContacts.length,
+  };
+  const workflowCounts = workflowSummary?.runId === selectedDiscoveryRunId
+    ? workflowSummary.counts
+    : fallbackWorkflowCounts;
+  const leadWorkflowItems: Array<{ id: LeadWorkflowView; label: string; count: number; icon: ReactNode }> = [
+    {
+      id: "inbox",
+      label: "Inbox",
+      count: workflowCounts.inbox,
+      icon: <Inbox size={17} />,
+    },
+    { id: "this_week", label: "This week", count: workflowCounts.this_week, icon: <CalendarClock size={17} /> },
+    {
+      id: "shortlisted",
+      label: "Shortlisted",
+      count: workflowCounts.shortlisted,
+      icon: <Star size={17} />,
+    },
+    {
+      id: "contacted",
+      label: "Contacted",
+      count: workflowCounts.contacted,
+      icon: <Send size={17} />,
+    },
+    {
+      id: "dismissed",
+      label: "Dismissed",
+      count: workflowCounts.dismissed,
+      icon: <CircleX size={17} />,
+    },
+    { id: "all", label: "All leads", count: workflowCounts.all, icon: <List size={17} /> },
+  ];
+  const visibleWorkspaceLabels = useMemo(() => {
+    if (workspaceExpanded || productRunLabels.length <= 5) return productRunLabels;
+    const recent = productRunLabels.slice(0, 5);
+    const selected = productRunLabels.find((item) => item.runIds.includes(selectedDiscoveryRunId));
+    if (!selected || recent.some((item) => item === selected)) return recent;
+    return [...recent.slice(0, 4), selected];
+  }, [productRunLabels, selectedDiscoveryRunId, workspaceExpanded]);
+  const handleWorkflowCountsChange = useCallback((runId: string, counts: LeadWorkflowCounts) => {
+    setWorkflowSummary((current) => {
+      if (current?.runId === runId && Object.keys(counts).every((key) => current.counts[key as LeadWorkflowView] === counts[key as LeadWorkflowView])) {
+        return current;
+      }
+      return { runId, counts };
+    });
+  }, []);
 
   const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
     setDraftRunNameState((current) => {
@@ -106,16 +164,8 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setRoutePath("/app");
   };
 
-  const startNewProduct = () => {
-    if (isTraceRoute) returnToApp();
-    setOpenContextMenu(null);
-    setMobileRailOpen(false);
-    setIsCreatingProduct(true);
-  };
-
   const startNewList = () => {
     if (isTraceRoute) returnToApp();
-    setOpenContextMenu(null);
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
     setViewMode("overview");
@@ -136,19 +186,8 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setMobileRailOpen(false);
   };
 
-  const selectProduct = (productId: string) => {
-    setOpenContextMenu(null);
-    setIsCreatingProduct(false);
-    setSelectedProductId(productId);
-    setSelectedDiscoveryRunId("");
-    setViewMode("overview");
-    setDraftRunNameState(null);
-    setMobileRailOpen(false);
-  };
-
   const handleDeleteSelectedProduct = async () => {
     if (!selectedProduct) return;
-    setOpenContextMenu(null);
     await deleteProduct(selectedProduct.id);
     writeDraftRunName(selectedProduct.id, null);
     setDraftRunNameState(null);
@@ -223,20 +262,6 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, [error, showToast]);
 
   useEffect(() => {
-    const closeMenu = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (
-        !desktopContextMenuRef.current?.contains(target) &&
-        !mobileContextMenuRef.current?.contains(target)
-      ) {
-        setOpenContextMenu(null);
-      }
-    };
-    document.addEventListener("mousedown", closeMenu);
-    return () => document.removeEventListener("mousedown", closeMenu);
-  }, []);
-
-  useEffect(() => {
     const handlePopState = () => setRoutePath(window.location.pathname);
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -261,17 +286,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         >
           <Menu size={18} />
         </button>
-        <div className="mobile-product-area" ref={mobileContextMenuRef}>
-          <ProductSelector
-            isOpen={openContextMenu === "product"}
-            products={products}
-            selectedProductId={selectedProductId}
-            selectedProductName={selectedProductName}
-            selectedRunLabel={selectorRunLabel}
-            onAddProduct={startNewProduct}
-            onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
-            onSelectProduct={selectProduct}
-          />
+        <div className="mobile-brand">
+          <span className="brand-mark">S</span>
+          <strong>ScoutLead</strong>
         </div>
         <AccountControl accountSlot={accountSlot} placement="mobile" />
       </header>
@@ -297,67 +314,84 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       <aside className="rail">
         <div className="brand">
           <span className="brand-mark">S</span>
-          <div>
+          <div className="brand-copy">
             <strong>ScoutLead</strong>
             <span>Discovery Console</span>
           </div>
         </div>
 
-        <nav className="list-nav" aria-label="Searches">
-          <div className="list-nav-header">
-            <button
-              className={activeScreen === "overview" ? "list-nav-title active" : "list-nav-title"}
-              type="button"
-              onClick={() => selectScreen("overview")}
-            >
-              <Search size={14} />
-              <span>Searches</span>
-            </button>
-            <button
-              aria-label="New search"
-              className={!isTraceRoute && activeScreen === "overview" && draftRunName ? "rail-add-list active" : "rail-add-list"}
-              type="button"
-              onClick={startNewList}
-            >
-              <Plus size={16} />
+        <nav className="lead-workflow-nav" aria-label="Lead workflow">
+          <div className="lead-workflow-links">
+            {leadWorkflowItems.map((item) => (
+              <button
+                className={activeScreen === "results" && leadWorkflowView === item.id ? "active" : ""}
+                key={item.id}
+                aria-label={`${item.label}, ${item.count}`}
+                title={`${item.label} (${item.count})`}
+                type="button"
+                onClick={() => {
+                  setLeadWorkflowView(item.id);
+                  if (selectedDiscoveryRunId) selectScreen("results");
+                  else startNewList();
+                  setMobileRailOpen(false);
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+                <em>{item.count}</em>
+              </button>
+            ))}
+          </div>
+          <div className="lead-workspace-heading">
+            <span>Workspaces</span>
+            <button type="button" aria-label="New search" title="New search" onClick={startNewList}>
+              <Plus size={15} />
             </button>
           </div>
-
-          <div className="list-nav-section">
+          <div className="lead-workspace-list">
             {shouldShowDraftRun ? (
-              <RunHistoryDraft
-                active={!isTraceRoute && activeScreen === "overview" && !selectedDiscoveryRunId}
-                existingNames={productRunLabels.map((item) => item.title)}
-                value={draftRunName}
-                onChange={setDraftRunName}
-                onSelect={startNewList}
-                onDelete={handleDeleteDraftRun}
-              />
+              <button
+                className={activeScreen === "overview" && !selectedDiscoveryRunId ? "active is-draft" : "is-draft"}
+                aria-label={draftRunName || "New search"}
+                title={draftRunName || "New search"}
+                type="button"
+                onClick={startNewList}
+              >
+                <FilePlus2 className="lead-workspace-icon" size={15} />
+                <span>{draftRunName || "New search"}</span>
+              </button>
             ) : null}
-            {!shouldShowDraftRun && productDiscoveryRuns.length === 0 ? (
-              <div className="nav-empty">
-                <div className="t">No searches yet</div>
-                <div className="s">Start a search to create the first saved list.</div>
-              </div>
+            {visibleWorkspaceLabels.map(({ run, runIds, territory, title }) => (
+              <button
+                className={activeScreen === "results" && runIds.includes(selectedDiscoveryRunId) ? "active" : ""}
+                key={territory?.id || run.id}
+                aria-label={title}
+                title={title}
+                type="button"
+                onClick={() => {
+                  setSelectedDiscoveryRunId(run.id);
+                  setLeadWorkflowView("this_week");
+                  void refreshSnapshot(run.id);
+                  selectScreen("results");
+                  setMobileRailOpen(false);
+                }}
+              >
+                <Folder className="lead-workspace-icon" size={15} />
+                <span>{title}</span>
+              </button>
+            ))}
+            {productRunLabels.length > 5 ? (
+              <button
+                className="workspace-more"
+                type="button"
+                onClick={() => setWorkspaceExpanded((expanded) => !expanded)}
+              >
+                <span>{workspaceExpanded ? "Show recent" : `View all (${productRunLabels.length})`}</span>
+              </button>
             ) : null}
-            {productRunLabels.map(({ run, title }) => {
-              return (
-                <RunHistoryItem
-                  active={!isTraceRoute && activeScreen === "results" && selectedDiscoveryRunId === run.id}
-                  run={run}
-                  key={run.id}
-                  onSelect={() => {
-                    setSelectedDiscoveryRunId(run.id);
-                    void refreshSnapshot(run.id);
-                    selectScreen("results");
-                  }}
-                  onRename={handleRenameRun}
-                  onDelete={() => void handleDeleteRun(run)}
-                  contacts={productContacts}
-                  title={title}
-                />
-              );
-            })}
+            {!shouldShowDraftRun && !productRunLabels.length ? (
+              <p className="lead-workspace-empty">Create a search to start finding leads.</p>
+            ) : null}
           </div>
         </nav>
 
@@ -370,26 +404,15 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           onIntegrations={() => selectScreen("integrations")}
           onProductSettings={() => selectScreen("product")}
         />
+        <div className="rail-account-footer">
+          <AccountControl accountSlot={accountSlot} placement="desktop" />
+          <span className="rail-account-label">Account</span>
+        </div>
       </aside>
 
       <section
         className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
       >
-        <header className="app-topbar">
-          <div className="top-product-area" ref={desktopContextMenuRef}>
-            <ProductSelector
-              isOpen={openContextMenu === "product"}
-              products={products}
-              selectedProductId={selectedProductId}
-              selectedProductName={selectedProductName}
-              selectedRunLabel={selectorRunLabel}
-              onAddProduct={startNewProduct}
-              onOpenChange={(open) => setOpenContextMenu(open ? "product" : null)}
-              onSelectProduct={selectProduct}
-            />
-            <AccountControl accountSlot={accountSlot} placement="desktop" />
-          </div>
-        </header>
         {loading ? (
           <div className="loading-overlay" aria-live="polite">
             <div className="loading-indicator">
@@ -418,6 +441,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                   setSelectedDiscoveryRunId(run.id);
                   setViewMode("auto");
                 },
+              },
+              {
+                view: leadWorkflowView,
+                onViewChange: setLeadWorkflowView,
+                onCountsChange: handleWorkflowCountsChange,
               },
             )
           )}
@@ -476,79 +504,6 @@ function AccountControl({ accountSlot, placement }: { accountSlot?: ReactNode; p
   );
 }
 
-function ProductSelector({
-  isOpen,
-  products,
-  selectedProductId,
-  selectedProductName,
-  selectedRunLabel,
-  onAddProduct,
-  onOpenChange,
-  onSelectProduct,
-}: {
-  isOpen: boolean;
-  products: Product[];
-  selectedProductId: string;
-  selectedProductName: string;
-  selectedRunLabel: string;
-  onAddProduct: () => void;
-  onOpenChange: (isOpen: boolean) => void;
-  onSelectProduct: (productId: string) => void;
-}) {
-  const selectedLabel = selectedRunLabel ? `${selectedProductName} - ${selectedRunLabel}` : selectedProductName;
-
-  return (
-    <div className="top-product-cluster">
-      <div className={isOpen ? "top-product-control product-selector is-open" : "top-product-control product-selector"}>
-        <button
-          className="top-product-trigger"
-          type="button"
-          aria-expanded={isOpen}
-          title={selectedLabel}
-          onClick={() => onOpenChange(!isOpen)}
-        >
-          <span className={selectedRunLabel ? "top-product-primary has-run" : "top-product-primary"}>
-            <span className="selector-label">Sales profile</span>
-            <strong title={selectedProductName}>{selectedProductName}</strong>
-            {selectedRunLabel ? (
-              <span className="top-product-run" title={selectedRunLabel}>
-                - {selectedRunLabel}
-              </span>
-            ) : null}
-            <ChevronDown className="product-selector-caret" size={15} />
-          </span>
-        </button>
-        {isOpen ? (
-          <div className="context-menu-panel product-menu-panel top-product-menu">
-            {products.length ? (
-              products.map((product) => {
-                const productName = displayProductName(product);
-                return (
-                  <button
-                    className={product.id === selectedProductId ? "context-menu-option active" : "context-menu-option"}
-                    key={product.id}
-                    title={productName}
-                    type="button"
-                    onClick={() => onSelectProduct(product.id)}
-                  >
-                    <strong>{productName}</strong>
-                    <Check className="product-selector-check" size={14} />
-                  </button>
-                );
-              })
-            ) : (
-              <p className="context-menu-empty">No products yet</p>
-            )}
-          </div>
-        ) : null}
-      </div>
-      <button className="top-product-add" type="button" aria-label="Add product" onClick={onAddProduct}>
-        <Plus size={15} />
-      </button>
-    </div>
-  );
-}
-
 function ProductManagementSection({
   activeScreen,
   hasContacts,
@@ -572,6 +527,8 @@ function ProductManagementSection({
       <button
         className={manageItemClass(hasProduct, activeScreen === "product")}
         disabled={!hasProduct}
+        aria-label="Product settings"
+        title="Product settings"
         type="button"
         onClick={onProductSettings}
       >
@@ -583,6 +540,8 @@ function ProductManagementSection({
       <button
         className={manageItemClass(hasProduct, activeScreen === "integrations")}
         disabled={!hasProduct}
+        aria-label="Integrations"
+        title="Integrations"
         type="button"
         onClick={onIntegrations}
       >
@@ -595,6 +554,8 @@ function ProductManagementSection({
       <button
         className={hasContacts ? "mng-item" : "mng-item is-disabled"}
         disabled={!hasContacts}
+        aria-label="Export all contacts"
+        title="Export all contacts"
         type="button"
         onClick={onExport}
       >
@@ -731,6 +692,7 @@ function RunHistoryItem({
   run,
   title,
   contacts,
+  territory,
   onDelete,
   onRename,
   onSelect,
@@ -739,6 +701,7 @@ function RunHistoryItem({
   run: DiscoveryRun;
   title: string;
   contacts: DiscoveryResult[];
+  territory?: Territory;
   onDelete: () => void | Promise<void>;
   onRename: (runId: string, name: string) => Promise<void>;
   onSelect: () => void;
@@ -799,9 +762,22 @@ function RunHistoryItem({
           <span className="run-title">{title}</span>
           <span className="run-meta">
             <span className={`run-dot ${runDotClass(run)}`} />
-            <span className="run-yield">{runYield(run, contacts)}</span>
-            <span className="run-status">{listMeta(run)}</span>
-            <span className="run-when">{formatRunDate(run.created_at)}</span>
+            {territory?.unviewed_delivery_count ? (
+              <span className="run-new-badge">New {territory.unviewed_delivery_count}</span>
+            ) : null}
+            <span className="run-yield">
+              {territory?.last_run_at
+                ? `${territory.last_delivery_count} delivered`
+                : runYield(run, contacts)}
+            </span>
+            <span className={territory?.status === "paused" ? "run-status is-paused" : "run-status"}>
+              {territory ? (
+                <><CalendarClock size={10} /> {territory.status === "active" ? "weekly" : "paused"}</>
+              ) : listMeta(run)}
+            </span>
+            <span className="run-when">
+              {territory?.next_run_at ? formatScheduleDate(territory.next_run_at) : formatRunDate(run.created_at)}
+            </span>
           </span>
         </button>
       )}
@@ -816,7 +792,7 @@ function RunHistoryItem({
           </button>
         </div>
       ) : null}
-      <div className="list-row-actions run-actions">
+      {!territory ? <div className="list-row-actions run-actions">
         <button
           aria-label={`Rename ${title}`}
           className="list-row-action run-act"
@@ -841,7 +817,7 @@ function RunHistoryItem({
         >
           <Trash2 size={12} />
         </button>
-      </div>
+      </div> : null}
     </div>
   );
 }
@@ -969,13 +945,33 @@ function listLabel(run: DiscoveryRun) {
   return "Untitled search";
 }
 
-function uniqueRunLabels(runs: DiscoveryRun[]) {
+function groupedRunLabels(runs: DiscoveryRun[], territories: Territory[]) {
+  const territoryById = new Map(territories.map((territory) => [territory.id, territory]));
+  const groupedIds = new Set<string>();
+  const labels: Array<{
+    run: DiscoveryRun;
+    runIds: string[];
+    territory?: Territory;
+    title: string;
+  }> = [];
   const usedNames: string[] = [];
-  return runs.map((run) => {
+
+  for (const run of runs) {
+    const territory = run.territory_id ? territoryById.get(run.territory_id) : undefined;
+    if (territory) {
+      if (groupedIds.has(territory.id)) continue;
+      groupedIds.add(territory.id);
+      const territoryRuns = runs.filter((candidate) => candidate.territory_id === territory.id);
+      const title = uniqueListName(territory.label, usedNames);
+      usedNames.push(title);
+      labels.push({ run: territoryRuns[0] || run, runIds: territoryRuns.map((candidate) => candidate.id), territory, title });
+      continue;
+    }
     const title = uniqueListName(listLabel(run), usedNames);
     usedNames.push(title);
-    return { run, title };
-  });
+    labels.push({ run, runIds: [run.id], title });
+  }
+  return labels;
 }
 
 function uniqueListName(requestedName: string, existingNames: string[]) {
@@ -1035,6 +1031,12 @@ function formatRunDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatScheduleDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "weekly";
+  return `next ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
 function draftRunStorageKey(productId: string) {
@@ -1139,6 +1141,11 @@ function rawContactValue(contact: DiscoveryResult, keys: string[]) {
 
 function getEnabledIntegrationCount(product: Product | undefined, gmailConnected: boolean) {
   return Number(gmailConnected) + Number(Boolean(product?.webhook_enabled && product.webhook_url));
+}
+
+function isWithinLastSevenDays(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp >= Date.now() - 7 * 24 * 60 * 60 * 1000;
 }
 
 function csvCell(value: string | number | undefined) {

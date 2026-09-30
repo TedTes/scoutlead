@@ -1,18 +1,25 @@
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarClock,
   Check,
   ChevronDown,
   Copy,
   Download,
+  ExternalLink,
   Globe,
   Mail,
   MapPin,
   MoreVertical,
+  Pause,
   Phone,
+  Play,
   PlugZap,
   RotateCw,
+  Search,
   Send,
+  Sparkles,
+  Star,
   Trash2,
   User,
   Users,
@@ -34,16 +41,21 @@ import type {
   LeadContactPolicyInput,
   LeadReviewStatus,
   LeadUpdateInput,
+  LeadOutcomeValue,
   Message,
   Product,
   SenderProfile,
   SourceRequestSource,
+  Territory,
+  TerritoryDelivery,
+  TerritoryMetrics,
+  TerritoryResolution,
 } from "../types/domain";
 import { baseExportFileName, defaultExportFileName, normalizeExportFileName } from "../utils/export-file";
 import { formatDate } from "../utils/format";
 import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
+import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
 
-type ResultStage = "all" | "shortlisted" | "needs_review";
 type ResultAttributeFilter = "good_fit" | "verified" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
 type DrawerTab = "overview" | "evidence";
@@ -75,12 +87,33 @@ const bulkOutreachTokens = [
   "{{product_name}}",
   "{{problem}}",
 ];
+const leadOutcomeOptions: Array<{ value: LeadOutcomeValue; label: string }> = [
+  { value: "contacted", label: "Contacted" },
+  { value: "replied_positive", label: "Positive reply" },
+  { value: "replied_negative", label: "Negative reply" },
+  { value: "meeting_booked", label: "Meeting booked" },
+  { value: "won", label: "Won" },
+  { value: "no_response", label: "No response" },
+  { value: "not_a_fit", label: "Not a fit" },
+  { value: "wrong_contact", label: "Wrong contact" },
+  { value: "bounced", label: "Bounced" },
+  { value: "business_closed", label: "Business closed" },
+  { value: "unsubscribed", label: "Unsubscribed" },
+];
 type BulkEmailOverride = {
   subject: string;
   body: string;
 };
 
-export function ResultsScreen() {
+export function ResultsScreen({
+  onWorkflowViewChange,
+  onWorkflowCountsChange,
+  workflowView,
+}: {
+  onWorkflowViewChange: (view: LeadWorkflowView) => void;
+  onWorkflowCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
+  workflowView: LeadWorkflowView;
+}) {
   const {
     activeSourceIds,
     runSourceRequest,
@@ -107,13 +140,20 @@ export function ResultsScreen() {
     sendCampaignOutreachDrafts,
     snapshot,
     sourceProviders,
+    territories,
+    territoryApi,
+    refreshAll,
+    refreshSnapshot,
   } = useAppData();
   const { showToast } = useToast();
   const [selectedContactId, setSelectedContactId] = useState("");
+  const [leadSearch, setLeadSearch] = useState("");
+  const [desktopSplitView, setDesktopSplitView] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 1160px)").matches : false,
+  );
   const [draftPrompt, setDraftPrompt] = useState("");
-  const [stage, setStage] = useState<ResultStage>("all");
   const [attributeFilter, setAttributeFilter] = useState<ResultAttributeFilter | null>(null);
-  const [sort, setSort] = useState<ResultSort>("contact");
+  const [sort, setSort] = useState<ResultSort>("score");
   const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
@@ -121,19 +161,39 @@ export function ResultsScreen() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const [deliveryMenuOpen, setDeliveryMenuOpen] = useState(false);
   const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleResolution, setScheduleResolution] = useState<TerritoryResolution | null>(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [deliveries, setDeliveries] = useState<TerritoryDelivery[]>([]);
+  const [deliveryContacts, setDeliveryContacts] = useState<DiscoveryResult[] | null>(null);
+  const [territoryMetrics, setTerritoryMetrics] = useState<TerritoryMetrics | null>(null);
+  const [exportingDelivery, setExportingDelivery] = useState(false);
   const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const [bulkPopoverStyle, setBulkPopoverStyle] = useState<CSSProperties>({});
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
+  const deliveryMenuRef = useRef<HTMLDivElement | null>(null);
   const bulkOutreachRef = useRef<HTMLDivElement | null>(null);
   const bulkOutreachButtonRef = useRef<HTMLButtonElement | null>(null);
   const bulkOutreachPopoverRef = useRef<HTMLDivElement | null>(null);
 
-  const contacts = selectedDiscoveryRunId ? snapshot.results : [];
+  const selectedTerritory = selectedDiscoveryRun?.territory_id
+    ? territories.find((territory) => territory.id === selectedDiscoveryRun.territory_id)
+    : undefined;
+  const selectedDelivery = selectedTerritory
+    ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
+    : undefined;
+  const sourceContacts = selectedDiscoveryRunId
+    ? selectedDelivery && deliveryContacts ? deliveryContacts : snapshot.results
+    : [];
+  const contacts = useMemo(() => deduplicateContacts(sourceContacts), [sourceContacts]);
+  const isDeliveryScoped = Boolean(selectedDelivery && deliveryContacts);
+  const thisWeekCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
@@ -149,7 +209,6 @@ export function ResultsScreen() {
   const verifiedContacts = contacts.filter(isVerifiedContact).length;
   const goodFitContacts = contacts.filter(canShortlistContact).length;
   const shortlistedContacts = contacts.filter((contact) => contact.shortlisted_at).length;
-  const needsReviewContacts = contacts.filter((contact) => reviewStatus(contact) === "unreviewed").length;
   const notFitContacts = contacts.filter((contact) => reviewStatus(contact) === "not_fit").length;
   const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
   const draftedContacts = contacts.filter((contact) => draftedLeadIds.has(contact.id)).length;
@@ -173,16 +232,38 @@ export function ResultsScreen() {
   ];
   const sortOptions: Array<{ id: ResultSort; label: string }> = [
     { id: "contact", label: "Contact" },
-    { id: "score", label: "Score" },
+    { id: "score", label: "Recommended" },
     { id: "name", label: "Name" },
   ];
   const activeAttributeFilter = attributeFilterOptions.find((option) => option.id === attributeFilter);
   const activeSort = sortOptions.find((option) => option.id === sort) || sortOptions[0];
-  const visibleContacts = contacts
+  const workflowContext = { isDeliveryScoped, thisWeekCutoffMs };
+  const workflowCounts = useMemo<LeadWorkflowCounts>(() => ({
+    inbox: contacts.filter((contact) => matchesWorkflowView(contact, "inbox", workflowContext)).length,
+    this_week: contacts.filter((contact) => matchesWorkflowView(contact, "this_week", workflowContext)).length,
+    shortlisted: contacts.filter((contact) => matchesWorkflowView(contact, "shortlisted", workflowContext)).length,
+    contacted: contacts.filter((contact) => matchesWorkflowView(contact, "contacted", workflowContext)).length,
+    dismissed: contacts.filter((contact) => matchesWorkflowView(contact, "dismissed", workflowContext)).length,
+    all: contacts.length,
+  }), [contacts, isDeliveryScoped, thisWeekCutoffMs]);
+  const workflowContacts = contacts.filter((contact) =>
+    matchesWorkflowView(contact, workflowView, workflowContext),
+  );
+  const visibleContacts = workflowContacts
     .filter((contact) => {
-      if (stage === "shortlisted") return Boolean(contact.shortlisted_at);
-      if (stage === "needs_review") return reviewStatus(contact) === "unreviewed";
-      return true;
+      const needle = leadSearch.trim().toLowerCase();
+      if (!needle) return true;
+      return [
+        contact.company_name,
+        contactListCategoryLabel(contact),
+        contact.geography,
+        contact.research?.geography,
+        contactOpportunityReasons(contact).join(" "),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
     })
     .filter((contact) => {
       if (attributeFilter === "verified") return isVerifiedContact(contact);
@@ -193,12 +274,40 @@ export function ResultsScreen() {
     })
     .sort((a, b) => {
       if (sort === "name") return a.company_name.localeCompare(b.company_name);
-      if (sort === "score") return contactScore(b) - contactScore(a);
-      return Number(isReachableContact(b)) - Number(isReachableContact(a)) || contactScore(b) - contactScore(a);
+      if (sort === "score") {
+        return contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score || contactScore(b) - contactScore(a);
+      }
+      return Number(isReachableContact(b)) - Number(isReachableContact(a))
+        || contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score
+        || contactScore(b) - contactScore(a);
     });
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = contacts.find((contact) => contact.id === selectedContactId);
   const selectedMessage = selectedContact ? messageByLeadId.get(selectedContact.id) : undefined;
+
+  useEffect(() => {
+    if (!selectedDiscoveryRunId || !onWorkflowCountsChange) return;
+    onWorkflowCountsChange(selectedDiscoveryRunId, workflowCounts);
+  }, [onWorkflowCountsChange, selectedDiscoveryRunId, workflowCounts]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1160px)");
+    const update = () => setDesktopSplitView(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (!desktopSplitView) return;
+    if (!visibleContacts.length) {
+      setSelectedContactId("");
+      return;
+    }
+    if (!visibleContacts.some((contact) => contact.id === selectedContactId)) {
+      setSelectedContactId(visibleContacts[0].id);
+    }
+  }, [desktopSplitView, selectedContactId, visibleContacts.map((contact) => contact.id).join("|")]);
 
   useEffect(() => {
     document.body.classList.toggle("has-contact-detail", Boolean(selectedContact));
@@ -208,11 +317,44 @@ export function ResultsScreen() {
   useEffect(() => {
     setDraftPrompt(runPrompt);
     setSelectedContactId("");
-    setStage("all");
+    setLeadSearch("");
+    onWorkflowViewChange("this_week");
     setAttributeFilter(null);
     setRerunPromptOpen(false);
     setBulkOutreachOpen(false);
-  }, [selectedDiscoveryRunId, runPrompt]);
+    setDeliveryMenuOpen(false);
+  }, [onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
+
+  useEffect(() => {
+    if (!selectedTerritory) {
+      setDeliveries([]);
+      setDeliveryContacts(null);
+      setTerritoryMetrics(null);
+      return;
+    }
+    void Promise.all([
+      territoryApi.getTerritoryDeliveries(selectedTerritory.id),
+      territoryApi.getTerritoryMetrics(selectedTerritory.id),
+    ]).then(([nextDeliveries, nextMetrics]) => {
+      setDeliveries(nextDeliveries);
+      setTerritoryMetrics(nextMetrics);
+    }).catch(() => {
+      setDeliveries([]);
+      setTerritoryMetrics(null);
+    });
+  }, [selectedTerritory?.id, territoryApi]);
+
+  useEffect(() => {
+    setDeliveryContacts(null);
+    if (!selectedTerritory || !selectedDelivery) return;
+    void territoryApi
+      .getTerritoryDeliveryContacts(selectedTerritory.id, selectedDelivery.id)
+      .then((nextContacts) => {
+        setDeliveryContacts(nextContacts);
+        if (!selectedDelivery.viewed_at) void refreshAll({ showLoading: false });
+      })
+      .catch(() => setDeliveryContacts(null));
+  }, [refreshAll, selectedDelivery?.id, selectedTerritory?.id, territoryApi]);
 
   useEffect(() => {
     setRunMenuOpen(false);
@@ -221,10 +363,13 @@ export function ResultsScreen() {
   }, [selectedDiscoveryRunId]);
 
   useEffect(() => {
-    if (!runMenuOpen && !filterMenuOpen && !sortMenuOpen && !bulkOutreachOpen) return undefined;
+    if (!runMenuOpen && !deliveryMenuOpen && !filterMenuOpen && !sortMenuOpen && !bulkOutreachOpen) return undefined;
     const closeMenus = (event: MouseEvent) => {
       if (!runMenuRef.current?.contains(event.target as Node)) {
         setRunMenuOpen(false);
+      }
+      if (!deliveryMenuRef.current?.contains(event.target as Node)) {
+        setDeliveryMenuOpen(false);
       }
       if (!filterMenuRef.current?.contains(event.target as Node)) {
         setFilterMenuOpen(false);
@@ -241,7 +386,7 @@ export function ResultsScreen() {
     };
     document.addEventListener("mousedown", closeMenus);
     return () => document.removeEventListener("mousedown", closeMenus);
-  }, [bulkOutreachOpen, filterMenuOpen, runMenuOpen, sortMenuOpen]);
+  }, [bulkOutreachOpen, deliveryMenuOpen, filterMenuOpen, runMenuOpen, sortMenuOpen]);
 
   useEffect(() => {
     // Freezes the underlying results list while the popup is open so it
@@ -336,11 +481,19 @@ export function ResultsScreen() {
 
   const renameCurrentRun = async () => {
     if (!selectedDiscoveryRun) return;
-    const nextName = window.prompt("Rename run", selectedDiscoveryRun.name || runTitle("", query));
+    const nextName = window.prompt(
+      "Rename search",
+      selectedTerritory?.label || selectedDiscoveryRun.name || runTitle("", query),
+    );
     if (!nextName?.trim()) return;
-    await renameDiscoveryRun(selectedDiscoveryRun.id, nextName.trim());
+    if (selectedTerritory) {
+      await territoryApi.updateTerritory(selectedTerritory.id, { label: nextName.trim() });
+      await refreshAll({ showLoading: false });
+    } else {
+      await renameDiscoveryRun(selectedDiscoveryRun.id, nextName.trim());
+    }
     setRunMenuOpen(false);
-    showToast({ title: "Run renamed", tone: "green" });
+    showToast({ title: "Search renamed", tone: "green" });
   };
 
   const deleteCurrentRun = async () => {
@@ -358,6 +511,133 @@ export function ResultsScreen() {
     setRunMenuOpen(false);
     setDraftPrompt(runPrompt);
     setRerunPromptOpen(true);
+  };
+
+  const openScheduleDialog = async () => {
+    if (!selectedDiscoveryRun || !selectedProductId || scheduleBusy) return;
+    setRunMenuOpen(false);
+    if (selectedTerritory) {
+      setScheduleResolution(null);
+      setScheduleDialogOpen(true);
+      return;
+    }
+    if (!runPrompt.trim()) {
+      showToast({ title: "Search query unavailable", message: "Re-run this search with a business type and location first.", tone: "amber" });
+      return;
+    }
+    setScheduleBusy(true);
+    try {
+      const resolution = await territoryApi.resolveTerritory(selectedProductId, runPrompt);
+      setScheduleResolution(resolution);
+      setScheduleDialogOpen(true);
+    } catch (err) {
+      showToast({
+        title: "Could not schedule search",
+        message: err instanceof Error ? err.message : String(err),
+        tone: "red",
+      });
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const saveSchedule = async (settings: { batch_size: number; min_fit: Territory["min_fit"] }) => {
+    if (!selectedDiscoveryRun || scheduleBusy) return;
+    setScheduleBusy(true);
+    try {
+      if (selectedTerritory) {
+        await territoryApi.updateTerritory(selectedTerritory.id, settings);
+      } else if (scheduleResolution) {
+        const existing = territories.find((territory) => (
+          territory.product_id === selectedDiscoveryRun.product_id
+          && territory.niche_id === scheduleResolution.niche_id
+          && territory.market_key === scheduleResolution.market_key
+        ));
+        const scheduled = existing || await territoryApi.createTerritory(scheduleResolution, {
+          batch_size: settings.batch_size,
+          min_fit: settings.min_fit,
+        });
+        if (existing) await territoryApi.updateTerritory(existing.id, settings);
+        await territoryApi.updateDiscoveryRun(selectedDiscoveryRun.id, { territory_id: scheduled.id });
+      } else {
+        return;
+      }
+      await refreshAll({ showLoading: false });
+      setScheduleDialogOpen(false);
+      showToast({ title: selectedTerritory ? "Schedule updated" : "Weekly search scheduled", tone: "green" });
+    } catch (err) {
+      showToast({
+        title: "Schedule update failed",
+        message: err instanceof Error ? err.message : String(err),
+        tone: "red",
+      });
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const toggleSchedule = async () => {
+    if (!selectedTerritory || scheduleBusy) return;
+    setScheduleBusy(true);
+    try {
+      const status = selectedTerritory.status === "active" ? "paused" : "active";
+      await territoryApi.updateTerritory(selectedTerritory.id, { status });
+      await refreshAll({ showLoading: false });
+      setRunMenuOpen(false);
+      showToast({ title: status === "active" ? "Weekly search resumed" : "Weekly search paused", tone: "green" });
+    } catch (err) {
+      showToast({ title: "Schedule update failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const runScheduledSearchNow = async () => {
+    if (!selectedTerritory || selectedTerritory.status !== "active" || scheduleBusy) return;
+    setScheduleBusy(true);
+    try {
+      const delivery = await territoryApi.refreshTerritory(selectedTerritory.id);
+      await refreshAll({ showLoading: false });
+      setSelectedDiscoveryRunId(delivery.campaign_id);
+      await refreshSnapshot(delivery.campaign_id);
+      setRunMenuOpen(false);
+      showToast({
+        title: delivery.status === "ready" ? "New delivery ready" : "Scheduled search completed",
+        message: `${delivery.new_contact_count} new contact${delivery.new_contact_count === 1 ? "" : "s"}.`,
+        tone: delivery.status === "failed" ? "red" : "green",
+      });
+    } catch (err) {
+      showToast({ title: "Scheduled search failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const selectDelivery = async (delivery: TerritoryDelivery) => {
+    setDeliveryMenuOpen(false);
+    setSelectedDiscoveryRunId(delivery.campaign_id);
+    await refreshSnapshot(delivery.campaign_id);
+  };
+
+  const recordContactOutcome = async (leadId: string, outcome: LeadOutcomeValue) => {
+    await territoryApi.recordLeadOutcome(leadId, outcome, outcome === "contacted" ? "email" : "other");
+    await Promise.all([
+      refreshSnapshot(selectedDiscoveryRunId),
+      selectedTerritory && selectedDelivery
+        ? territoryApi.getTerritoryDeliveryContacts(selectedTerritory.id, selectedDelivery.id).then(setDeliveryContacts)
+        : Promise.resolve(),
+      selectedTerritory
+        ? territoryApi.getTerritoryMetrics(selectedTerritory.id).then(setTerritoryMetrics)
+        : Promise.resolve(),
+    ]);
+  };
+
+  const generateContactApproach = async (leadId: string) => {
+    const updated = await territoryApi.generateLeadApproach(leadId);
+    setDeliveryContacts((current) => (
+      current?.map((contact) => contact.id === updated.id ? updated : contact) || current
+    ));
+    await refreshSnapshot(selectedDiscoveryRunId);
   };
 
   const draftCurrentShortlist = async () => {
@@ -413,6 +693,25 @@ export function ResultsScreen() {
     setPendingExport({ contacts: contactsToExport, suggestedName });
   };
 
+  const exportCurrentContacts = async () => {
+    if (!selectedTerritory || !selectedDelivery) {
+      beginContactsExport(contacts, exportName);
+      return;
+    }
+    if (exportingDelivery) return;
+    setExportingDelivery(true);
+    setRunMenuOpen(false);
+    try {
+      const blob = await territoryApi.downloadTerritoryDeliveryCsv(selectedTerritory.id, selectedDelivery.id);
+      downloadBlob(blob, defaultExportFileName(selectedTerritory.label, "call-sheet"));
+      showToast({ title: "Call sheet exported", message: `${contacts.length} contacts downloaded.`, tone: "green" });
+    } catch (err) {
+      showToast({ title: "Export failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+    } finally {
+      setExportingDelivery(false);
+    }
+  };
+
   const confirmContactsExport = () => {
     if (!pendingExport) return;
     if (!baseExportFileName(exportFileName)) {
@@ -433,29 +732,51 @@ export function ResultsScreen() {
     return <OverviewScreen />;
   }
 
-  if (!contacts.length) {
+  if (!contacts.length && !selectedTerritory) {
     return <OverviewScreen emptyMessage="No contacts were returned for this run. Try a different business type, location, or wording." />;
   }
 
   return (
     <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
       <div className="results-controlbar">
-        <div className="workflow-tabs" aria-label="Workflow stage">
-          <button className={stage === "all" ? "active" : ""} type="button" onClick={() => setStage("all")}>
-            All
-            <span>{contacts.length}</span>
-          </button>
-          <button className={stage === "shortlisted" ? "active" : ""} type="button" onClick={() => setStage("shortlisted")}>
-            Shortlisted
-            <span>{shortlistedContacts}</span>
-          </button>
-          <button className={stage === "needs_review" ? "active" : ""} type="button" onClick={() => setStage("needs_review")}>
-            Needs review
-            <span>{needsReviewContacts}</span>
-          </button>
-        </div>
-
         <div className="results-control-actions">
+          {selectedTerritory && deliveries.length ? (
+            <div className="delivery-menu-control" ref={deliveryMenuRef}>
+              <button
+                aria-expanded={deliveryMenuOpen}
+                className="delivery-button"
+                type="button"
+                onClick={() => {
+                  setRunMenuOpen(false);
+                  setFilterMenuOpen(false);
+                  setSortMenuOpen(false);
+                  setDeliveryMenuOpen((open) => !open);
+                }}
+              >
+                <CalendarClock size={14} />
+                <strong>{selectedDelivery ? deliveryLabel(selectedDelivery) : "Deliveries"}</strong>
+                <ChevronDown size={14} />
+              </button>
+              {deliveryMenuOpen ? (
+                <div className="action-menu delivery-menu">
+                  {deliveries.map((delivery, index) => (
+                    <button
+                      className={delivery.campaign_id === selectedDiscoveryRunId ? "active" : ""}
+                      key={delivery.id}
+                      type="button"
+                      onClick={() => void selectDelivery(delivery)}
+                    >
+                      <span>
+                        <strong>{index === 0 ? "Latest" : deliveryDate(delivery)}</strong>
+                        <small>{delivery.new_contact_count} contacts · {delivery.status}</small>
+                      </span>
+                      {delivery.campaign_id === selectedDiscoveryRunId ? <Check size={12} /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="bulk-outreach-control" ref={bulkOutreachRef}>
             <button
               aria-expanded={bulkOutreachOpen}
@@ -465,6 +786,7 @@ export function ResultsScreen() {
               type="button"
               disabled={!contacts.length}
               onClick={() => {
+                setDeliveryMenuOpen(false);
                 setFilterMenuOpen(false);
                 setSortMenuOpen(false);
                 setRunMenuOpen(false);
@@ -508,6 +830,7 @@ export function ResultsScreen() {
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
+                setDeliveryMenuOpen(false);
                 setSortMenuOpen(false);
                 setRunMenuOpen(false);
                 setFilterMenuOpen((open) => !open);
@@ -556,6 +879,7 @@ export function ResultsScreen() {
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
+                setDeliveryMenuOpen(false);
                 setFilterMenuOpen(false);
                 setRunMenuOpen(false);
                 setSortMenuOpen((open) => !open);
@@ -593,6 +917,7 @@ export function ResultsScreen() {
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
+                setDeliveryMenuOpen(false);
                 setFilterMenuOpen(false);
                 setSortMenuOpen(false);
                 setRunMenuOpen((open) => !open);
@@ -605,10 +930,61 @@ export function ResultsScreen() {
                 <button
                   type="button"
                   disabled={!contacts.length}
-                  onClick={() => beginContactsExport(contacts, exportName)}
+                  onClick={() => {
+                    setRunMenuOpen(false);
+                    setBulkOutreachOpen(true);
+                  }}
+                >
+                  <Users size={14} />
+                  Prepare outreach
+                  <span>{outreachReadyContacts.length}</span>
+                </button>
+                <div className="action-menu-divider" />
+                {selectedTerritory ? (
+                  <div className="run-menu-summary">
+                    <strong>Weekly search · {selectedTerritory.status}</strong>
+                    <span>
+                      Next {formatCompactDate(selectedTerritory.next_run_at)}
+                      {territoryMetrics ? ` · ${territoryMetrics.totals.delivered} delivered · ${territoryMetrics.totals.meetings} meetings` : ""}
+                    </span>
+                  </div>
+                ) : null}
+                {selectedTerritory ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={scheduleBusy || selectedTerritory.status !== "active"}
+                      onClick={() => void runScheduledSearchNow()}
+                    >
+                      <Play size={14} />
+                      {scheduleBusy ? "Running..." : "Run weekly search now"}
+                    </button>
+                    <button type="button" disabled={scheduleBusy} onClick={() => void toggleSchedule()}>
+                      {selectedTerritory.status === "active" ? <Pause size={14} /> : <Play size={14} />}
+                      {selectedTerritory.status === "active" ? "Pause weekly search" : "Resume weekly search"}
+                    </button>
+                    <button type="button" disabled={scheduleBusy} onClick={() => void openScheduleDialog()}>
+                      <CalendarClock size={14} />
+                      Weekly settings
+                    </button>
+                    <div className="action-menu-divider" />
+                  </>
+                ) : (
+                  <>
+                    <button type="button" disabled={scheduleBusy || !runPrompt.trim()} onClick={() => void openScheduleDialog()}>
+                      <CalendarClock size={14} />
+                      {scheduleBusy ? "Checking search..." : "Schedule weekly"}
+                    </button>
+                    <div className="action-menu-divider" />
+                  </>
+                )}
+                <button
+                  type="button"
+                  disabled={!contacts.length || exportingDelivery}
+                  onClick={() => void exportCurrentContacts()}
                 >
                   <Download size={14} />
-                  Export all contacts
+                  {selectedDelivery ? "Export call sheet" : "Export all contacts"}
                 </button>
                 <button
                   type="button"
@@ -649,16 +1025,20 @@ export function ResultsScreen() {
                   Generate drafts for shortlist
                 </button>
                 <button type="button" onClick={() => void renameCurrentRun()}>
-                  Rename run
+                  Rename search
                 </button>
-                <button type="button" disabled={running} onClick={openRerunPrompt}>
-                  <RotateCw size={14} />
-                  Re-run search
-                </button>
-                <button className="danger-item" type="button" onClick={() => void deleteCurrentRun()}>
-                  <Trash2 size={14} />
-                  Delete this run
-                </button>
+                {!selectedTerritory ? (
+                  <button type="button" disabled={running} onClick={openRerunPrompt}>
+                    <RotateCw size={14} />
+                    Re-run search
+                  </button>
+                ) : null}
+                {!selectedTerritory ? (
+                  <button className="danger-item" type="button" onClick={() => void deleteCurrentRun()}>
+                    <Trash2 size={14} />
+                    Delete this search
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -666,31 +1046,64 @@ export function ResultsScreen() {
       </div>
 
       <div className={selectedContact ? "results-body has-detail" : "results-body"}>
-        {visibleContacts.length ? (
-          <ul className="contact-card-list">
-            {visibleContacts.map((contact) => (
-              <ContactCard
-                contact={contact}
-                key={contact.id}
-                selected={contact.id === selectedContactId}
-                onOpen={() => setSelectedContactId(contact.id)}
+        <section className="lead-feed-pane" aria-label="Lead list">
+          <header className="lead-feed-header">
+            <div className="lead-feed-title-row">
+              <div>
+                <strong>{workflowViewLabel(workflowView)}</strong>
+                <span>
+                  {visibleContacts.length === workflowContacts.length
+                    ? workflowContacts.length
+                    : `${visibleContacts.length} of ${workflowContacts.length}`}
+                </span>
+              </div>
+              <label className="lead-feed-sort">
+                <span>Sort:</span>
+                <select value={sort} onChange={(event) => setSort(event.target.value as ResultSort)}>
+                  {sortOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="lead-feed-search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                aria-label="Search leads"
+                placeholder="Search leads"
+                value={leadSearch}
+                onChange={(event) => setLeadSearch(event.target.value)}
               />
-            ))}
-          </ul>
-        ) : (
-          <section className="result-empty-card">
-            <strong>No contacts match this view.</strong>
-            <p>
-              {contacts.length
-                ? "Change the filter to inspect the contacts in this run."
-                : "This run has no contacts yet."}
-            </p>
-          </section>
-        )}
+            </label>
+          </header>
+          {visibleContacts.length ? (
+            <ul className="contact-card-list">
+              {visibleContacts.map((contact) => (
+                <ContactCard
+                  contact={contact}
+                  key={contact.id}
+                  selected={contact.id === selectedContactId}
+                  onOpen={() => setSelectedContactId(contact.id)}
+                  onToggleShortlist={() => void updateLead(contact.id, { shortlisted: !contact.shortlisted_at })}
+                />
+              ))}
+            </ul>
+          ) : (
+            <section className="result-empty-card">
+              <strong>No leads match this view.</strong>
+              <p>
+                {contacts.length
+                  ? "Change the search or filter to inspect the leads in this run."
+                  : "This run has no leads yet."}
+              </p>
+            </section>
+          )}
+        </section>
 
         {selectedContact ? (
           <ContactDrawer
             contact={selectedContact}
+            persistent={desktopSplitView}
             message={selectedMessage}
             gmailConnected={gmailConnected}
             onClose={() => setSelectedContactId("")}
@@ -698,6 +1111,8 @@ export function ResultsScreen() {
             onCreateDraft={createOutreachDraft}
             onQualifyLead={qualifyLead}
             onMarkMessageReplied={markMessageReplied}
+            onGenerateApproach={selectedTerritory ? generateContactApproach : undefined}
+            onRecordOutcome={recordContactOutcome}
             onSendMessage={sendMessage}
             onUpdateContactPolicy={updateLeadContactPolicy}
             onUpdateLead={updateLead}
@@ -727,6 +1142,15 @@ export function ResultsScreen() {
           onChange={setDraftPrompt}
           onClose={() => setRerunPromptOpen(false)}
           onSubmit={updateSearch}
+        />
+      ) : null}
+      {scheduleDialogOpen ? (
+        <ScheduleSearchDialog
+          busy={scheduleBusy}
+          resolution={scheduleResolution}
+          territory={selectedTerritory}
+          onClose={() => setScheduleDialogOpen(false)}
+          onSave={saveSchedule}
         />
       ) : null}
     </section>
@@ -779,6 +1203,71 @@ function RerunSearchDialog({
           <button className="runbtn" disabled={!ready || running} type="submit">
             {running ? "Running..." : "Run again"}
             <ArrowRight size={13} />
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ScheduleSearchDialog({
+  busy,
+  onClose,
+  onSave,
+  resolution,
+  territory,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onSave: (settings: { batch_size: number; min_fit: Territory["min_fit"] }) => Promise<void>;
+  resolution: TerritoryResolution | null;
+  territory?: Territory;
+}) {
+  const [batchSize, setBatchSize] = useState(territory?.batch_size || 25);
+  const [minFit, setMinFit] = useState<Territory["min_fit"]>(territory?.min_fit || "maybe");
+  const label = territory?.label || (
+    resolution ? `${resolution.niche_label} · ${resolution.market_label}` : "Weekly search"
+  );
+
+  return (
+    <Modal title={territory ? "Weekly settings" : "Schedule weekly"} onClose={onClose}>
+      <form
+        className="schedule-search-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSave({ batch_size: batchSize, min_fit: minFit });
+        }}
+      >
+        <div className="schedule-search-summary">
+          <CalendarClock size={17} />
+          <span>
+            <strong>{label}</strong>
+            <small>ScoutLead will find a new batch each week and exclude businesses already delivered.</small>
+          </span>
+        </div>
+        <div className="schedule-search-fields">
+          <label className="field">
+            <span>Contacts per delivery</span>
+            <input
+              max={100}
+              min={1}
+              type="number"
+              value={batchSize}
+              onChange={(event) => setBatchSize(Math.max(1, Math.min(100, Number(event.target.value) || 1)))}
+            />
+          </label>
+          <label className="field">
+            <span>Minimum fit</span>
+            <select value={minFit} onChange={(event) => setMinFit(event.target.value as Territory["min_fit"])}>
+              <option value="maybe">Good and possible fit</option>
+              <option value="good_fit">Good fit only</option>
+            </select>
+          </label>
+        </div>
+        <div className="dialog-actions">
+          <button className="secondary" disabled={busy} type="button" onClick={onClose}>Cancel</button>
+          <button className="runbtn" disabled={busy} type="submit">
+            {busy ? "Saving..." : territory ? "Save settings" : "Schedule weekly"}
           </button>
         </div>
       </form>
@@ -1284,21 +1773,18 @@ async function prepareApproveAndSend({
 function ContactCard({
   contact,
   onOpen,
+  onToggleShortlist,
   selected = false,
 }: {
   contact: DiscoveryResult;
   onOpen: () => void;
+  onToggleShortlist: () => void;
   selected?: boolean;
 }) {
-  const fitStatus = displayAgentFitStatus(contact);
-  const reviewDecision = displayReviewDecision(contact);
-  const primaryStatus = reviewDecision ?? fitStatus;
-  const evidence = contactListEvidenceLine(contact);
+  const opportunity = contactOpportunityAssessment(contact);
+  const opportunityReason = contactListPrimarySignal(contact);
   const category = contactListCategoryLabel(contact);
   const geography = contact.geography || contact.research?.geography || "";
-  const missing = contactMissingEvidenceLine(contact);
-  const policy = contactPolicyStatus(contact);
-  const blocked = isContactBlocked(contact);
   const cardClass = [
     "contact-card",
     isReachableContact(contact) ? "" : "no-contact",
@@ -1321,16 +1807,11 @@ function ContactCard({
           }
         }}
       >
+        <span className={`lead-opportunity-dot opportunity-${opportunity.level}`} aria-hidden="true" />
         <div className="contact-main">
           <span className="contact-identity">
             <span className="contact-title-line">
               <strong>{contact.company_name}</strong>
-              <em
-                className={`fit-badge ${reviewDecision ? "review-badge" : ""} ${primaryStatus.className}`}
-                title={reviewDecision ? "Human review decision" : "Agent fit assessment"}
-              >
-                {primaryStatus.label}
-              </em>
             </span>
             <small className="contact-meta-line">
               <span>{category}</span>
@@ -1341,22 +1822,22 @@ function ContactCard({
                 </>
               ) : null}
             </small>
-            {evidence ? <span className="contact-evidence-line">{evidence}</span> : null}
-            {missing ? <span className="contact-missing-line">{missing}</span> : null}
+            {opportunityReason ? <span className="contact-evidence-line">{opportunityReason}</span> : null}
           </span>
         </div>
         <div className="contact-actions" aria-label="Contact availability">
-          {blocked ? (
-            <span className={`contact-policy-pill policy-${policy}`}>
-              {contactPolicyStatusLabel(policy)}
-            </span>
-          ) : null}
-          <span className={`quality-pill ${contactReachabilityClass(contact)}`}>
-            {contactReadinessLabel(contact)}
-          </span>
-          <span className={`quality-pill ${contactSourceQualityClass(contact)}`}>
-            {contactSourceQualityLabel(contact)}
-          </span>
+          <time dateTime={contact.updated_at || contact.created_at}>{formatLeadAge(contact.updated_at || contact.created_at)}</time>
+          <button
+            aria-label={contact.shortlisted_at ? "Remove from shortlist" : "Add to shortlist"}
+            className={contact.shortlisted_at ? "lead-star active" : "lead-star"}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleShortlist();
+            }}
+          >
+            <Star size={14} fill={contact.shortlisted_at ? "currentColor" : "none"} />
+          </button>
         </div>
       </article>
     </li>
@@ -1368,10 +1849,13 @@ function ContactDrawer({
   gmailConnected,
   message,
   onClose,
+  persistent = false,
   onApproveMessage,
   onCreateDraft,
   onQualifyLead,
   onMarkMessageReplied,
+  onGenerateApproach,
+  onRecordOutcome,
   onSendMessage,
   onUpdateContactPolicy,
   onUpdateLead,
@@ -1381,10 +1865,13 @@ function ContactDrawer({
   gmailConnected: boolean;
   message: Message | undefined;
   onClose: () => void;
+  persistent?: boolean;
   onApproveMessage: (messageId: string) => Promise<void>;
   onCreateDraft: (leadId: string) => Promise<Message | null>;
   onQualifyLead: (leadId: string) => Promise<void>;
   onMarkMessageReplied: (messageId: string, body?: string) => Promise<void>;
+  onGenerateApproach?: (leadId: string) => Promise<void>;
+  onRecordOutcome?: (leadId: string, outcome: LeadOutcomeValue) => Promise<void>;
   onSendMessage: (messageId: string) => Promise<void>;
   onUpdateContactPolicy: (leadId: string, update: LeadContactPolicyInput) => Promise<void>;
   onUpdateLead: (leadId: string, update: LeadUpdateInput) => Promise<void>;
@@ -1405,8 +1892,12 @@ function ContactDrawer({
   const [savingDraft, setSavingDraft] = useState(false);
   const [activeTab, setActiveTab] = useState<DrawerTab>("overview");
   const [outreachOpen, setOutreachOpen] = useState(false);
+  const [selectedOutcome, setSelectedOutcome] = useState<LeadOutcomeValue | "">("");
+  const [savingOutcome, setSavingOutcome] = useState(false);
+  const [generatingApproach, setGeneratingApproach] = useState(false);
   const signals = contactSignals(contact);
   const website = contact.website_url || contact.research?.website_url || "";
+  const contactUrl = getContactUrl(contact);
   const email = contact.contact_email || contact.research?.contact_email || "";
   const verified = isVerifiedContact(contact);
   const canDraft = Boolean(!blocked && shortlisted && canShortlist && verified && email);
@@ -1442,14 +1933,13 @@ function ContactDrawer({
   const drawerGeography = contact.geography || contact.research?.geography || "";
   const drawerSummary = contactDrawerSummary(contact);
   const agentFitStatus = displayAgentFitStatus(contact);
-  const reviewDecision = displayReviewDecision(contact);
-  const qualificationScore = contactScore(contact);
   const fitScore = contactFitScore(contact);
-  const reachabilityScore = contactReachabilityScore(contact);
-  const sourceQualityScore = contactSourceQualityScore(contact);
   const verification = verificationStatus(contact);
   const verificationDetails = verificationDetailChips(contact.verification_details);
   const activityItems = contactActivityItems(contact, message);
+  const opportunity = contactOpportunityAssessment(contact);
+  const opportunityReasons = opportunity.level === "unknown" ? [] : opportunity.signals;
+  const contacted = Boolean(contact.last_contacted_at || contact.latest_outcome === "contacted");
   const evidenceCount = new Set([
     ...signals,
     ...evidenceNotes,
@@ -1459,12 +1949,13 @@ function ContactDrawer({
   ].filter(Boolean)).size;
 
   useEffect(() => {
+    if (persistent) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, persistent]);
 
   useEffect(() => {
     setReviewNote(contact.review_note || "");
@@ -1478,7 +1969,48 @@ function ContactDrawer({
   useEffect(() => {
     setActiveTab("overview");
     setOutreachOpen(false);
+    setSelectedOutcome("");
   }, [contact.id]);
+
+  const recordOutcome = async () => {
+    if (!onRecordOutcome || !selectedOutcome || savingOutcome) return;
+    setSavingOutcome(true);
+    try {
+      await onRecordOutcome(contact.id, selectedOutcome);
+      showToast({ title: "Outcome recorded", tone: "green" });
+      setSelectedOutcome("");
+    } catch (err) {
+      showToast({ title: "Outcome update failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+    } finally {
+      setSavingOutcome(false);
+    }
+  };
+
+  const markContacted = async () => {
+    if (!onRecordOutcome || savingOutcome) return;
+    setSavingOutcome(true);
+    try {
+      await onRecordOutcome(contact.id, "contacted");
+      showToast({ title: "Marked contacted", tone: "green" });
+    } catch (err) {
+      showToast({ title: "Outcome update failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+    } finally {
+      setSavingOutcome(false);
+    }
+  };
+
+  const generateApproach = async () => {
+    if (!onGenerateApproach || generatingApproach) return;
+    setGeneratingApproach(true);
+    try {
+      await onGenerateApproach(contact.id);
+      showToast({ title: "Approach generated", tone: "green" });
+    } catch (err) {
+      showToast({ title: "Approach generation failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+    } finally {
+      setGeneratingApproach(false);
+    }
+  };
 
   const saveLeadUpdate = async (update: LeadUpdateInput, successTitle: string) => {
     if (savingReview) return;
@@ -1650,16 +2182,19 @@ function ContactDrawer({
   };
 
   return (
-    <div className="contact-drawer-overlay open">
-      <button className="contact-drawer-backdrop" type="button" aria-label="Close details" onClick={onClose} />
+    <div className={persistent ? "contact-drawer-overlay open is-persistent" : "contact-drawer-overlay open"}>
+      {persistent ? null : (
+        <button className="contact-drawer-backdrop" type="button" aria-label="Close details" onClick={onClose} />
+      )}
       <aside className="contact-drawer-panel" aria-label="Contact details">
         <header className="contact-drawer-header">
           <div className="drawer-title-row">
-            <span className={`score-ring large ${scoreClass(qualificationScore)}`} title="Qualification score">
-              <strong>{qualificationScore}</strong>
-            </span>
             <div className="drawer-title-copy">
               <h2>{contact.company_name}</h2>
+              <span className="drawer-ready-status">
+                <span />
+                {shortlisted ? "Shortlisted" : canShortlist ? "Ready to shortlist" : "Needs review"}
+              </span>
               <p className="drawer-subtitle">
                 <span>{drawerCategory}</span>
                 {drawerGeography ? (
@@ -1671,31 +2206,61 @@ function ContactDrawer({
               </p>
             </div>
           </div>
-          <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
+          <div className="drawer-header-actions">
+            {website ? (
+              <a aria-label="Open website" href={website} target="_blank" rel="noreferrer" title="Open website">
+                <ExternalLink size={17} />
+              </a>
+            ) : null}
+            <button
+              aria-label={shortlisted ? "Remove from shortlist" : "Add to shortlist"}
+              className={shortlisted ? "active" : ""}
+              disabled={savingReview || !canShortlist}
+              type="button"
+              title={shortlisted ? "Remove from shortlist" : "Add to shortlist"}
+              onClick={toggleShortlist}
+            >
+              <Star size={17} fill={shortlisted ? "currentColor" : "none"} />
+            </button>
+            {persistent ? null : (
+              <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">
+                <X size={18} />
+              </button>
+            )}
+          </div>
         </header>
+
+            <section className="drawer-location-banner">
+              <MapPin size={20} />
+              <div>
+                <strong>{contact.company_name}</strong>
+                <span>{address || drawerGeography || "Location unavailable"}</span>
+              </div>
+              {address ? (
+                <a
+                  aria-label="Open location"
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink size={15} />
+                </a>
+              ) : null}
+            </section>
 
             <section className="drawer-signal-summary" aria-label="Contact summary">
               <div className={`drawer-fit-verdict ${agentFitStatus.className}`}>
-                <Check size={22} />
-                <span>Agent {agentFitStatus.label}</span>
-                <strong>{fitScore}</strong>
+                <Check size={14} />
+                <span>Fit · {agentFitStatus.label}</span>
               </div>
-              {reviewDecision ? (
-                <div className={`drawer-fit-verdict review-verdict ${reviewDecision.className}`}>
-                  <User size={22} />
-                  <span>Review {reviewDecision.label}</span>
-                </div>
-              ) : null}
               <div className="drawer-availability-row">
+                <span className={`availability-pill opportunity-${opportunity.level}`}>
+                  <Sparkles size={13} />
+                  Opportunity · {opportunity.label}
+                </span>
                 <span className={`availability-pill verification-${verification}`}>
                   <Mail size={13} />
-                  Contact · {contactReadinessLabel(contact)} · {reachabilityScore}
-                </span>
-                <span className={`availability-pill ${contactSourceQualityClass(contact)}`}>
-                  <Globe size={13} />
-                  Source · {sourceQualityTierLabel(contact)} · {sourceQualityScore}
+                  Contact · {contactReadinessLabel(contact)}
                 </span>
                 {blocked ? (
                   <span className={`availability-pill policy-${policyStatus}`}>
@@ -1727,11 +2292,60 @@ function ContactDrawer({
             <div className="drawer-body">
               {activeTab === "overview" ? (
                 <>
+                  <section className="drawer-opportunity-panel">
+                    <div className="drawer-section-heading">
+                      <h3>Why this lead?</h3>
+                      <span>{opportunity.label}</span>
+                    </div>
+                    {opportunityReasons.length ? (
+                      <ul>
+                        {opportunityReasons.slice(0, 4).map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>
+                        {opportunity.level === "unknown"
+                          ? "This business has not been audited for a digital opportunity yet."
+                          : "No specific digital opportunity was confirmed by the audit."}
+                      </p>
+                    )}
+                  </section>
+
                   <p className="drawer-summary">{drawerSummary}</p>
 
-                  <dl className="drawer-detail-list drawer-info-card">
-                    <DrawerRow icon={<MapPin size={16} />} label="Address">
-                      {address || contact.geography || contact.research?.geography || "No address found"}
+                  {contact.approach ? (
+                    <section className="drawer-approach-panel">
+                      <div className="drawer-section-heading">
+                        <h3>Suggested approach</h3>
+                        <span>{contact.approach.best_channel.replace(/_/g, " ")}</span>
+                      </div>
+                      <p>{contact.approach.channel_reason}</p>
+                      {contact.approach.opener ? <strong>{contact.approach.opener}</strong> : null}
+                      {contact.approach.talk_track?.length ? (
+                        <ul>
+                          {contact.approach.talk_track.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      ) : null}
+                    </section>
+                  ) : onGenerateApproach ? (
+                    <section className="drawer-approach-panel is-empty">
+                      <div className="drawer-section-heading">
+                        <h3>Suggested approach</h3>
+                        <button disabled={generatingApproach} type="button" onClick={() => void generateApproach()}>
+                          <Sparkles size={13} />
+                          {generatingApproach ? "Generating..." : "Generate"}
+                        </button>
+                      </div>
+                      <p>Generate an evidence-grounded opener and talk track for this contact.</p>
+                    </section>
+                  ) : null}
+
+                  <section className="drawer-structured-section">
+                    <h3>Evidence</h3>
+                    <dl className="drawer-detail-list drawer-info-card">
+                    <DrawerRow icon={<Sparkles size={16} />} label="Source">
+                      {contact.source || "Public business source"}
                     </DrawerRow>
                     <DrawerRow icon={<Globe size={16} />} label="Website">
                       {website ? (
@@ -1742,9 +2356,12 @@ function ContactDrawer({
                         <span>No website found</span>
                       )}
                     </DrawerRow>
-                    <DrawerRow icon={<User size={16} />} label="Contact">
-                      {contactName || contact?.research?.contact_name || "No contact name found"}
-                    </DrawerRow>
+                    </dl>
+                  </section>
+
+                  <section className="drawer-structured-section">
+                    <h3>Contact</h3>
+                    <dl className="drawer-detail-list drawer-info-card">
                     <DrawerRow icon={<Mail size={16} />} label="Email">
                       {email ? (
                         <button type="button" onClick={() => copy(email, "Email")}>
@@ -1759,10 +2376,18 @@ function ContactDrawer({
                         <span>No email found</span>
                       )}
                     </DrawerRow>
+                    <DrawerRow icon={<ExternalLink size={16} />} label="Form / Contact URL">
+                      {contactUrl ? (
+                        <a href={contactUrl} target="_blank" rel="noreferrer">Open contact page</a>
+                      ) : (
+                        <span>No contact page found</span>
+                      )}
+                    </DrawerRow>
                     <DrawerRow icon={<Phone size={16} />} label="Phone">
                       {phone || "No phone found"}
                     </DrawerRow>
                   </dl>
+                  </section>
 
                   <div className="drawer-mini-grid">
                     <Mini label="Rating" value={rating || "—"} />
@@ -1773,6 +2398,30 @@ function ContactDrawer({
                   </div>
 
                   <ContactActivityTrail items={activityItems} />
+
+                  {onRecordOutcome ? (
+                    <section className="drawer-outcome-panel">
+                      <div className="drawer-section-heading">
+                        <h3>Sales outcome</h3>
+                        <span>{contact.latest_outcome ? outcomeLabel(contact.latest_outcome) : "Not recorded"}</span>
+                      </div>
+                      <div className="drawer-outcome-control">
+                        <select
+                          aria-label="Sales outcome"
+                          value={selectedOutcome}
+                          onChange={(event) => setSelectedOutcome(event.target.value as LeadOutcomeValue | "")}
+                        >
+                          <option value="">Choose outcome</option>
+                          {leadOutcomeOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        <button disabled={!selectedOutcome || savingOutcome} type="button" onClick={() => void recordOutcome()}>
+                          {savingOutcome ? "Saving..." : "Record"}
+                        </button>
+                      </div>
+                    </section>
+                  ) : null}
                 </>
               ) : null}
 
@@ -1941,26 +2590,32 @@ function ContactDrawer({
 
             <footer className="drawer-footer drawer-action-footer">
               <div className="drawer-footer-secondary">
-                <button
-                  className={shortlisted ? "active" : ""}
-                  type="button"
-                  disabled={savingReview || !canShortlist}
-                  onClick={toggleShortlist}
-                >
-                  {shortlisted ? "Shortlisted" : "Shortlist"}
-                </button>
+                {shortlisted ? (
+                  <button
+                    type="button"
+                    disabled={savingReview || !canShortlist}
+                    onClick={toggleShortlist}
+                  >
+                    Remove shortlist
+                  </button>
+                ) : null}
                 <button
                   className={currentReviewStatus === "not_fit" ? "active" : ""}
                   type="button"
                   disabled={savingReview || blocked}
                   onClick={() => chooseReviewStatus("not_fit")}
                 >
-                  Pass
+                  Dismiss
                 </button>
               </div>
-              <button className="drawer-primary-action" type="button" onClick={() => setOutreachOpen(true)}>
-                Review outreach
-                <ArrowRight size={14} />
+              <button
+                className="drawer-primary-action"
+                type="button"
+                disabled={shortlisted ? savingOutcome || contacted : savingReview || !canShortlist}
+                onClick={shortlisted ? () => void markContacted() : toggleShortlist}
+              >
+                {shortlisted ? <Check size={14} /> : <Star size={14} />}
+                {shortlisted ? (contacted ? "Contacted" : "Mark contacted") : "Shortlist"}
               </button>
             </footer>
       </aside>
@@ -2499,6 +3154,22 @@ function contactListEvidenceLine(contact: DiscoveryResult) {
   return "";
 }
 
+function contactListPrimarySignal(contact: DiscoveryResult) {
+  const opportunity = contactOpportunityAssessment(contact);
+  if (opportunity.level !== "unknown" && opportunity.signals[0]) {
+    return truncateText(opportunity.signals[0], 88);
+  }
+
+  const rating = getRating(contact);
+  const reviews = getReviewCount(contact);
+  if (rating && reviews) return `${rating} stars · ${reviews} reviews`;
+  if (isVerifiedContact(contact) && bulkOutreachEmail(contact)) return "Verified email available";
+  if (contact.website_url || contact.research?.website_url) return "Public website available";
+  if (bulkOutreachEmail(contact)) return "Public email available";
+  if (getPhone(contact)) return "Public phone available";
+  return "Public business listing available";
+}
+
 function contactDrawerSummary(contact: DiscoveryResult) {
   const summary = cleanContactListText(contact.research?.summary || "");
   if (summary && !isNoisyEnrichmentText(summary) && summary.length <= 260) {
@@ -2768,16 +3439,170 @@ function formatActivityDate(value?: string | null) {
   return formatDate(date.toISOString());
 }
 
+function deliveryDate(delivery: TerritoryDelivery) {
+  return formatCompactDate(delivery.delivered_at || delivery.scheduled_for || delivery.started_at);
+}
+
+function deliveryLabel(delivery: TerritoryDelivery) {
+  const date = deliveryDate(delivery);
+  return date ? `${date} · ${delivery.new_contact_count}` : `${delivery.new_contact_count} contacts`;
+}
+
+function formatCompactDate(value?: string | null) {
+  if (!value) return "not scheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "not scheduled";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function outcomeLabel(value: string) {
+  return leadOutcomeOptions.find((option) => option.value === value)?.label || value.replace(/_/g, " ");
+}
+
+function workflowViewLabel(view: LeadWorkflowView) {
+  if (view === "inbox") return "Inbox";
+  if (view === "this_week") return "This week";
+  if (view === "shortlisted") return "Shortlisted";
+  if (view === "contacted") return "Contacted";
+  if (view === "dismissed") return "Dismissed";
+  return "All leads";
+}
+
+function matchesWorkflowView(
+  contact: DiscoveryResult,
+  view: LeadWorkflowView,
+  context: { isDeliveryScoped: boolean; thisWeekCutoffMs: number },
+) {
+  if (view === "inbox") return reviewStatus(contact) === "unreviewed";
+  if (view === "this_week") {
+    if (context.isDeliveryScoped) return true;
+    const createdAt = new Date(contact.created_at).getTime();
+    return Number.isFinite(createdAt) && createdAt >= context.thisWeekCutoffMs;
+  }
+  if (view === "shortlisted") return Boolean(contact.shortlisted_at);
+  if (view === "contacted") return Boolean(contact.last_contacted_at || contact.latest_outcome);
+  if (view === "dismissed") return reviewStatus(contact) === "not_fit" || isContactBlocked(contact);
+  return true;
+}
+
+function deduplicateContacts(contacts: DiscoveryResult[]) {
+  const unique = new Map<string, DiscoveryResult>();
+  const order: string[] = [];
+
+  for (const contact of contacts) {
+    const key = contactBusinessKey(contact);
+    const existing = unique.get(key);
+    if (!existing) {
+      unique.set(key, contact);
+      order.push(key);
+      continue;
+    }
+    if (contactRecordPriority(contact) > contactRecordPriority(existing)) {
+      unique.set(key, contact);
+    }
+  }
+
+  return order.map((key) => unique.get(key)).filter((contact): contact is DiscoveryResult => Boolean(contact));
+}
+
+function contactBusinessKey(contact: DiscoveryResult) {
+  const name = contact.company_name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const geography = (contact.geography || contact.research?.geography || "")
+    .toLowerCase()
+    .split(",")
+    .slice(0, 2)
+    .join(" ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (name) return `${name}|${geography}`;
+
+  const website = contact.website_url || contact.research?.website_url || "";
+  try {
+    return new URL(website).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return contact.id;
+  }
+}
+
+function contactRecordPriority(contact: DiscoveryResult) {
+  return (
+    Number(Boolean(contact.shortlisted_at)) * 1_000
+    + Number(reviewStatus(contact) !== "unreviewed") * 400
+    + Number(isVerifiedContact(contact)) * 200
+    + Number(Boolean(bulkOutreachEmail(contact))) * 100
+    + Number(Boolean(contact.research)) * 25
+    + contactOpportunityAssessment(contact).score
+  );
+}
+
+function formatLeadAge(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const elapsed = Date.now() - date.getTime();
+  const hours = Math.max(0, Math.floor(elapsed / 3_600_000));
+  if (hours < 1) return "Now";
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+type ContactOpportunity = {
+  label: string;
+  level: "high" | "moderate" | "low" | "none" | "unknown";
+  score: number;
+  signals: string[];
+};
+
+function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportunity {
+  for (const raw of getRawObjects(contact)) {
+    const value = getRawValue(raw, "digital_opportunity")
+      ?? getRawValue(raw, "raw_payload.digital_opportunity")
+      ?? getRawValue(raw, "evidence.digital_opportunity");
+    if (!isRecord(value)) continue;
+    const levelValue = typeof value.level === "string" ? value.level.toLowerCase() : "unknown";
+    const level = (["high", "moderate", "low", "none"] as const).find((item) => item === levelValue) || "unknown";
+    const score = typeof value.score === "number" && Number.isFinite(value.score) ? value.score : 0;
+    const signals = Array.isArray(value.signals)
+      ? value.signals
+          .map((signal) => (isRecord(signal) && typeof signal.message === "string" ? signal.message.trim() : ""))
+          .filter(Boolean)
+      : [];
+    return { label: opportunityLabel(level), level, score, signals };
+  }
+  return { label: "Not audited", level: "unknown", score: 0, signals: [] };
+}
+
+function opportunityLabel(level: ContactOpportunity["level"]) {
+  if (level === "high") return "High";
+  if (level === "moderate") return "Moderate";
+  if (level === "low") return "Low";
+  if (level === "none") return "No clear signal";
+  return "Not audited";
+}
+
+function contactOpportunityReasons(contact: DiscoveryResult) {
+  const assessment = contactOpportunityAssessment(contact);
+  if (assessment.signals.length) return assessment.signals;
+
+  const painSignals = (contact.research?.pain_indicators || [])
+    .map((signal) => signal.trim())
+    .filter(Boolean);
+  if (painSignals.length) return [...new Set(painSignals)];
+
+  const missing = contactMissingEvidenceLine(contact)
+    .replace(/^Missing:\s*/i, "")
+    .trim();
+  if (missing && !/specific product\/problem fit evidence is weak/i.test(missing)) return [missing];
+
+  const evidence = contactListEvidenceLine(contact).trim();
+  return evidence ? [evidence] : [];
+}
+
 function contactScore(contact: DiscoveryResult) {
   if (contact.qualification?.score_breakdown) return clampScore(contact.qualification.score);
   return legacyFitScore(contact);
-}
-
-function scoreClass(score: number) {
-  if (score >= 90) return "score-great";
-  if (score >= 80) return "score-good";
-  if (score >= 70) return "score-warn";
-  return "score-low";
 }
 
 function contactSignals(contact: DiscoveryResult) {
@@ -2890,6 +3715,20 @@ function getPhone(contact: DiscoveryResult) {
     "seller.phone",
     "contact.phone",
     "data.phone",
+  ]);
+}
+
+function getContactUrl(contact: DiscoveryResult) {
+  return getRawString(contact, [
+    "contact_url",
+    "contactUrl",
+    "contactPageUrl",
+    "contact_page_url",
+    "quote_url",
+    "quoteUrl",
+    "booking_url",
+    "bookingUrl",
+    "website_enrichment.contact_url",
   ]);
 }
 
@@ -3035,6 +3874,17 @@ function exportContactsCsv(contacts: DiscoveryResult[], fileName: string, messag
 function csvCell(value: string | number | undefined) {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = normalizeExportFileName(fileName);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function formatVerificationDetails(details: Record<string, unknown> | null | undefined) {

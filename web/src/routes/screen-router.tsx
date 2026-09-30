@@ -2,9 +2,8 @@ import { OverviewScreen } from "../screens/OverviewScreen";
 import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
-import { TerritoriesScreen } from "../screens/TerritoriesScreen";
 import type { DiscoveryRun } from "../types/domain";
-import type { Screen } from "../types/navigation";
+import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 
 export function renderScreen(
   screen: Screen,
@@ -21,16 +20,28 @@ export function renderScreen(
     draftRunName?: string;
     onRunCreated?: (run: DiscoveryRun) => void;
   } = {},
+  resultsNavigation: {
+    view: LeadWorkflowView;
+    onViewChange: (view: LeadWorkflowView) => void;
+    onCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
+  } = {
+    view: "this_week",
+    onViewChange: () => undefined,
+  },
 ) {
   switch (screen) {
-    case "territories":
-      return <TerritoriesScreen />;
     case "integrations":
       return <IntegrationsScreen />;
     case "product":
       return <ProductScreen {...productEditor} onNavigate={setActiveScreen} />;
     case "results":
-      return <ResultsScreen />;
+      return (
+        <ResultsScreen
+          workflowView={resultsNavigation.view}
+          onWorkflowViewChange={resultsNavigation.onViewChange}
+          onWorkflowCountsChange={resultsNavigation.onCountsChange}
+        />
+      );
     default:
       return <OverviewScreen {...discoveryDraft} />;
   }
