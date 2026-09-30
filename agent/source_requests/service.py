@@ -8,6 +8,7 @@ from agents.llm import LLMClient
 from campaign_sources.schemas import CampaignSourceSlot
 from campaigns.schemas import CampaignCreate, CampaignGoalType, CampaignRead
 from campaigns.service import CampaignService
+from evaluation.digital_opportunity import product_requires_digital_opportunity
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from shared.errors import ValidationError
@@ -66,6 +67,11 @@ class SourceRequestService:
     def create(self, request: SourceRequestCreate) -> SourceRequestRun:
         plan = self.plan(request)
         product = ProductRead.model_validate(self.products.get(request.product_id))
+        requires_digital_opportunity = product_requires_digital_opportunity(product)
+        candidate_pool_size = _candidate_pool_size(
+            requested_count=plan.max_results,
+            over_source=requires_digital_opportunity,
+        )
         source_selection = (
             "google_places_local_business"
             if plan.source == GOOGLE_PLACES_PROVIDER_ID
@@ -88,9 +94,12 @@ class SourceRequestService:
                     "source_request_intent": (
                         plan.intent.model_dump(mode="json") if plan.intent else None
                     ),
+                    "requested_result_count": plan.max_results,
+                    "candidate_pool_size": candidate_pool_size,
+                    "requires_digital_opportunity": requires_digital_opportunity,
                     **plan.source_inputs,
                 },
-                max_leads=plan.max_results,
+                max_leads=candidate_pool_size,
                 channels=["manual"],
             )
         )
@@ -99,6 +108,25 @@ class SourceRequestService:
 
         agent_run = self.agent_runs.create(AgentRunCreate(campaign_id=run.id))
         summary = self.campaigns.run_contact_listing(run.id, agent_run_id=agent_run.id)
+        if requires_digital_opportunity:
+            results = self.campaigns.results(run.id)
+            summary = summary.model_copy(
+                update={
+                    "discovered_lead_count": len(results),
+                    "researched_lead_count": sum(1 for lead in results if lead.research),
+                    "contacted_lead_count": sum(1 for lead in results if lead.contact_email),
+                    "verified_lead_count": sum(
+                        1
+                        for lead in results
+                        if lead.verification_status.value != "unverified"
+                    ),
+                    "qualified_lead_count": sum(
+                        1
+                        for lead in results
+                        if lead.qualification and lead.qualification.qualified
+                    ),
+                }
+            )
         return SourceRequestRun(plan=plan, run=summary.campaign, summary=summary)
 
     def rerun(self, run_id: str, *, run_immediately: bool = True) -> SourceRequestRun:
@@ -150,7 +178,10 @@ class SourceRequestService:
             source=source,
             prompt=prompt,
             name=run.name,
-            max_results=run.max_leads,
+            max_results=(
+                _positive_int(source_inputs.get("requested_result_count"))
+                or run.max_leads
+            ),
             run_immediately=run_immediately,
         )
 
@@ -213,3 +244,17 @@ def _truncate_name(value: str, max_length: int = 64) -> str:
     if len(cleaned) <= max_length:
         return cleaned
     return f"{cleaned[: max_length - 1].rstrip()}…"
+
+
+def _candidate_pool_size(*, requested_count: int, over_source: bool) -> int:
+    if not over_source:
+        return requested_count
+    return min(60, max(requested_count + 15, requested_count * 2))
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None

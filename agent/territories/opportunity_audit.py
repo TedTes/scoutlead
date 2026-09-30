@@ -11,8 +11,8 @@ from db.models import ContactModel, LeadModel, SourceObservationModel
 from tools.verify import EmailVerificationTool
 
 
-class TerritoryOpportunityAuditor:
-    """Audit the exact businesses selected for a territory delivery."""
+class BusinessOpportunityAuditor:
+    """Audit the exact businesses selected for a search or recurring delivery."""
 
     def __init__(
         self,
@@ -146,3 +146,7 @@ def _has_observation(lead: LeadModel, observation_id: str) -> bool:
         and source.get("source_observation_id") == observation_id
         for source in lead.raw_sources or []
     )
+
+
+# Backward-compatible name for callers predating ordinary-search audits.
+TerritoryOpportunityAuditor = BusinessOpportunityAuditor

@@ -32,6 +32,44 @@ def test_cached_fit_score_does_not_increase_for_email() -> None:
     assert email_result.score_breakdown.reachability_score > no_email_result.score_breakdown.reachability_score
 
 
+def test_quote_form_does_not_raise_fit_for_digital_opportunity_product() -> None:
+    product = _product().model_copy(
+        update={
+            "product_name": "Local Service Website Growth",
+            "product_description": "Website and conversion improvements for local businesses.",
+            "problem_being_solved": "Weak websites and missing quote or booking flows.",
+            "ideal_customer_signals": ["Missing quote form"],
+        }
+    )
+    with_quote = _cached_row()
+    without_quote = _cached_row()
+    without_quote["raw"] = {
+        **without_quote["raw"],
+        "website_enrichment": {
+            **without_quote["raw"]["website_enrichment"],
+            "quote_signals": [],
+            "has_quote_form": False,
+        },
+    }
+
+    with_quote_result = score_cached_lead(
+        product=product,
+        lead=_lead(contact_email="info@cedarpainting.example"),
+        row=with_quote,
+        confidence=92,
+    )
+    without_quote_result = score_cached_lead(
+        product=product,
+        lead=_lead(contact_email="info@cedarpainting.example"),
+        row=without_quote,
+        confidence=92,
+    )
+
+    assert with_quote_result.score_breakdown is not None
+    assert without_quote_result.score_breakdown is not None
+    assert with_quote_result.score_breakdown.fit_score == without_quote_result.score_breakdown.fit_score
+
+
 def test_cached_directory_result_with_email_is_not_good_fit() -> None:
     result = score_cached_lead(
         product=_product(),

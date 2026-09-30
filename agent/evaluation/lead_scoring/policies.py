@@ -14,6 +14,7 @@ from evaluation.lead_scoring.signals import (
     target_terms,
     website_enrichment,
 )
+from evaluation.digital_opportunity import product_requires_digital_opportunity
 from leads.schemas import AgentFitStatus, ContactVerificationStatus, LeadRead, QualificationScoreBreakdown
 from products.schemas import ProductRead
 
@@ -77,7 +78,7 @@ def score_breakdown(
         notes.append("Reachability includes a public email signal.")
     if cached_phone(row):
         notes.append("Reachability includes a public phone signal.")
-    if has_quote_signal(row):
+    if has_quote_signal(row) and not product_requires_digital_opportunity(product):
         notes.append("Problem evidence includes a public quote or estimate signal.")
     return QualificationScoreBreakdown(
         fit_score=fit_score,
@@ -141,7 +142,7 @@ def problem_fit_score(*, product: ProductRead, row: dict[str, Any], lead: LeadRe
     score = 30
     score += min(matched_target_terms * 7, 30)
     score += min(len(service_signals) * 6, 18)
-    if has_quote_signal(row):
+    if has_quote_signal(row) and not product_requires_digital_opportunity(product):
         score += 15
     if product.target_geography.lower() and product.target_geography.lower() in text:
         score += 5

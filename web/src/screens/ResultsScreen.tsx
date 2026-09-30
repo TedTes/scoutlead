@@ -463,7 +463,7 @@ export function ResultsScreen({
         source: selectedSource,
         name: selectedDiscoveryRun?.name || undefined,
         prompt: request,
-        max_results: selectedDiscoveryRun?.max_leads || 25,
+        max_results: requestedResultCount(selectedDiscoveryRun),
         run_immediately: true,
       });
       if (result) {
@@ -2796,6 +2796,14 @@ function getRunSource(run: { source_inputs?: Record<string, unknown> } | undefin
   return typeof source === "string" && source.trim() ? source.trim() : "";
 }
 
+function requestedResultCount(
+  run: { max_leads?: number; source_inputs?: Record<string, unknown> } | undefined,
+) {
+  const value = run?.source_inputs?.requested_result_count;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  return run?.max_leads || 25;
+}
+
 function isReachableContact(contact: DiscoveryResult) {
   return Boolean(
     !isContactBlocked(contact)
@@ -3566,7 +3574,7 @@ type ContactOpportunity = {
 };
 
 function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportunity {
-  for (const raw of getRawObjects(contact)) {
+  for (const raw of getRawObjects(contact).reverse()) {
     const value = getRawValue(raw, "digital_opportunity")
       ?? getRawValue(raw, "raw_payload.digital_opportunity")
       ?? getRawValue(raw, "evidence.digital_opportunity");
@@ -3852,6 +3860,9 @@ function exportContactsCsv(contacts: DiscoveryResult[], fileName: string, messag
     verification_score: contact.verification_score ?? "",
     verification_reason: contact.verification_reason || "",
     verification_details: formatVerificationDetails(contact.verification_details),
+    opportunity_level: contactOpportunityAssessment(contact).level,
+    opportunity_score: contactOpportunityAssessment(contact).score,
+    opportunity_evidence: contactOpportunityAssessment(contact).signals.join("; "),
     score: String(contactScore(contact)),
     status: contactStatusLabel(contact),
     fit_verdict: displayAgentFitStatus(contact).label,

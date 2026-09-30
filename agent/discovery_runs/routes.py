@@ -25,6 +25,7 @@ from insights.schemas import CampaignInsightRead
 from insights.service import CampaignInsightService
 from leads.repository import LeadRepository
 from leads.export import leads_csv
+from leads.selection import select_campaign_results
 from leads.schemas import LeadRead
 from messages.repository import MessageRepository
 from messages.schemas import (
@@ -172,13 +173,14 @@ def export_discovery_run(
     services: Annotated[AppServices, Depends(get_services)],
     auth: CurrentAuth,
 ):
-    _service(session, services, auth).get(run_id)
+    run = CampaignRead.model_validate(_service(session, services, auth).get(run_id))
     leads = [
         LeadRead.model_validate(lead)
         for lead in LeadRepository(session, workspace_id=auth.workspace_id).list_by_campaign(
             run_id
         )
     ]
+    leads = select_campaign_results(run, leads)
     return Response(
         content=leads_csv(leads, scoutlead_path=f"/discovery-runs/{run_id}"),
         media_type="text/csv",
@@ -291,8 +293,7 @@ def list_discovery_results(
     services: Annotated[AppServices, Depends(get_services)],
     auth: CurrentAuth,
 ):
-    _service(session, services, auth).get(run_id)
-    return LeadRepository(session, workspace_id=auth.workspace_id).list_by_campaign(run_id)
+    return _service(session, services, auth).results(run_id)
 
 
 @router.post("/{run_id}/results/seeds", response_model=list[LeadRead])

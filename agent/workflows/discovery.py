@@ -96,6 +96,7 @@ class DiscoveryWorkflow:
         sources_to_run: list[CampaignSourceRead] = []
         canonical = CanonicalRepository(self.leads.session, embedding=self.embedding)
         semantic_rows: list[dict[str, Any]] = []
+        over_source = bool((campaign.source_inputs or {}).get("requires_digital_opportunity"))
         for source in sources:
             source_query = str(source.input.get("query") or campaign.source_input or "").strip()
             semantic_rows = canonical.list_semantic_discovery_results(
@@ -116,7 +117,7 @@ class DiscoveryWorkflow:
                     rows=_rows_with_semantic_context(semantic_rows),
                 )
             )
-            if not campaign.territory_id or len(cached_results) >= campaign.max_leads:
+            if not over_source or len(cached_results) >= campaign.max_leads:
                 sources = []
         else:
             for source in sources:
@@ -139,7 +140,7 @@ class DiscoveryWorkflow:
                             ),
                         )
                     )
-                    if not campaign.territory_id or len(cached_results) >= campaign.max_leads:
+                    if not over_source or len(cached_results) >= campaign.max_leads:
                         continue
                 sources_to_run.append(source)
             sources = sources_to_run

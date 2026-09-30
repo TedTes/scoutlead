@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import AppServices
 from campaigns.service import CampaignService
-from territories.opportunity_audit import TerritoryOpportunityAuditor
+from territories.opportunity_audit import BusinessOpportunityAuditor
 from territories.refresh import TerritoryRefreshService
 from tools.verify import EmailVerificationTool
 
@@ -42,6 +42,11 @@ def campaign_service(
         semantic_cache_min_results=settings.semantic_cache_min_results,
         timeout_seconds=settings.request_timeout_seconds,
         workspace_id=workspace_id,
+        opportunity_auditor=BusinessOpportunityAuditor(
+            session=session,
+            verifier=_verification_tool(services),
+            timeout_seconds=settings.request_timeout_seconds,
+        ),
     )
 
 
@@ -52,16 +57,6 @@ def territory_refresh_service(
     workspace_id: str,
 ) -> TerritoryRefreshService:
     settings = services.settings
-    verifier = EmailVerificationTool(
-        provider=settings.contact_verification_provider,
-        endpoint=settings.email_verification_endpoint,
-        api_key=settings.email_verification_api_key,
-        bouncer_api_key=settings.bouncer_api_key,
-        bouncer_api_endpoint=settings.bouncer_api_endpoint,
-        zerobounce_api_key=settings.zerobounce_api_key,
-        zerobounce_api_endpoint=settings.zerobounce_api_endpoint,
-        timeout_seconds=settings.request_timeout_seconds,
-    )
     return TerritoryRefreshService(
         session=session,
         campaigns=campaign_service(
@@ -71,9 +66,23 @@ def territory_refresh_service(
         ),
         workspace_id=workspace_id,
         llm=services.llm,
-        opportunity_auditor=TerritoryOpportunityAuditor(
+        opportunity_auditor=BusinessOpportunityAuditor(
             session=session,
-            verifier=verifier,
+            verifier=_verification_tool(services),
             timeout_seconds=settings.request_timeout_seconds,
         ),
+    )
+
+
+def _verification_tool(services: AppServices) -> EmailVerificationTool:
+    settings = services.settings
+    return EmailVerificationTool(
+        provider=settings.contact_verification_provider,
+        endpoint=settings.email_verification_endpoint,
+        api_key=settings.email_verification_api_key,
+        bouncer_api_key=settings.bouncer_api_key,
+        bouncer_api_endpoint=settings.bouncer_api_endpoint,
+        zerobounce_api_key=settings.zerobounce_api_key,
+        zerobounce_api_endpoint=settings.zerobounce_api_endpoint,
+        timeout_seconds=settings.request_timeout_seconds,
     )

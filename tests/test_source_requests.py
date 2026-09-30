@@ -65,6 +65,48 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert sources[0].input["source_request_action"] == "list_contacts"
 
 
+def test_opportunity_source_request_over_sources_but_preserves_requested_limit() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            _product().model_copy(
+                update={
+                    "product_name": "Local Service Website Growth",
+                    "product_description": "Website and conversion improvements for local businesses.",
+                    "problem_being_solved": "Weak websites and missing quote or booking flows.",
+                    "ideal_customer_signals": ["Low review count"],
+                }
+            )
+        )
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source=GOOGLE_PLACES_PROVIDER_ID,
+                prompt="Independent painters in Toronto",
+                max_results=25,
+                run_immediately=False,
+            )
+        )
+
+        assert result.run.max_leads == 50
+        assert result.run.source_inputs["requested_result_count"] == 25
+        assert result.run.source_inputs["candidate_pool_size"] == 50
+        assert result.run.source_inputs["requires_digital_opportunity"] is True
+
+
 def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

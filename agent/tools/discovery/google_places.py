@@ -15,6 +15,7 @@ from tools.search import SearchResult
 DEFAULT_GOOGLE_PLACES_ENDPOINT = "https://places.googleapis.com/v1/places:searchText"
 GOOGLE_PLACES_FIELD_MASK = ",".join(
     [
+        "nextPageToken",
         "places.id",
         "places.displayName",
         "places.formattedAddress",
@@ -77,20 +78,33 @@ class GooglePlacesDiscoveryAdapter:
             request_body["regionCode"] = str(region_code)
 
         def action() -> list[dict[str, Any]]:
-            response = httpx.post(
-                self.endpoint,
-                timeout=self.timeout_seconds,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Goog-Api-Key": self.api_key or "",
-                    "X-Goog-FieldMask": str(
-                        source.config.get("field_mask") or GOOGLE_PLACES_FIELD_MASK
-                    ),
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            places = response.json().get("places", [])
+            places: list[dict[str, Any]] = []
+            next_page_token: str | None = None
+            seen_tokens: set[str] = set()
+            while len(places) < limit:
+                page_body = dict(request_body)
+                page_body["pageSize"] = min(20, limit - len(places))
+                if next_page_token:
+                    page_body["pageToken"] = next_page_token
+                response = httpx.post(
+                    self.endpoint,
+                    timeout=self.timeout_seconds,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Goog-Api-Key": self.api_key or "",
+                        "X-Goog-FieldMask": str(
+                            source.config.get("field_mask") or GOOGLE_PLACES_FIELD_MASK
+                        ),
+                    },
+                    json=page_body,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                places.extend(payload.get("places", []))
+                next_page_token = payload.get("nextPageToken")
+                if not next_page_token or next_page_token in seen_tokens:
+                    break
+                seen_tokens.add(next_page_token)
             return [
                 self._to_search_result(place=place, query=query).model_dump(mode="json")
                 for place in places[:limit]

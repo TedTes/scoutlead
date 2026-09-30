@@ -34,6 +34,7 @@ from evaluation.lead_scoring import build_cached_lead_research, score_cached_lea
 from evaluation.schemas import CampaignMetrics
 from icp.service import ICPPresetService
 from leads.repository import LeadRepository
+from leads.selection import select_campaign_results
 from leads.schemas import (
     ContactVerificationStatus,
     LeadRead,
@@ -63,6 +64,7 @@ from workflows.signal import SignalWorkflow
 from workflows.verify import VerifyWorkflow
 from tools.base import ToolSlot
 from territories.dedupe import exclude_previously_delivered_rows
+from territories.opportunity_audit import BusinessOpportunityAuditor
 from workspaces.repository import WorkspaceRepository
 
 
@@ -185,6 +187,7 @@ class CampaignService:
         semantic_cache_min_results: int = 5,
         timeout_seconds: float = 20.0,
         workspace_id: str | None = None,
+        opportunity_auditor: BusinessOpportunityAuditor | None = None,
     ) -> None:
         self.session = session
         self.llm = llm
@@ -212,6 +215,7 @@ class CampaignService:
         self.zerobounce_api_key = zerobounce_api_key
         self.zerobounce_api_endpoint = zerobounce_api_endpoint
         self.timeout_seconds = timeout_seconds
+        self.opportunity_auditor = opportunity_auditor
         self.products = ProductRepository(session, workspace_id=workspace_id)
         self.campaigns = CampaignRepository(session, workspace_id=workspace_id)
         self.campaign_sources = CampaignSourceRepository(session)
@@ -262,6 +266,14 @@ class CampaignService:
 
     def get(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.get(campaign_id)
+
+    def results(self, campaign_id: str) -> list[LeadRead]:
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        leads = [
+            LeadRead.model_validate(lead)
+            for lead in self.leads.list_by_campaign(campaign_id)
+        ]
+        return select_campaign_results(campaign, leads)
 
     def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
         return self.campaigns.update(campaign_id, update)
@@ -351,11 +363,23 @@ class CampaignService:
             )
 
             campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+            if self._requires_digital_opportunity(campaign_read):
+                self._run_agent_step(
+                    agent_run_id=agent_run_id,
+                    campaign_id=campaign_id,
+                    phase="opportunity_audit",
+                    sequence=2,
+                    objective="Audit candidate websites for observable digital opportunities.",
+                    input_snapshot=self._campaign_step_input(product, campaign_read),
+                    action=lambda _step_id: self._audit_digital_opportunity(campaign_read),
+                )
+
+            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
             researched = self._run_agent_step(
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=CampaignStage.RESEARCH.value,
-                sequence=2,
+                sequence=3,
                 objective="Research discovered leads with available public information.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: ResearchWorkflow(
@@ -372,7 +396,7 @@ class CampaignService:
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=ToolSlot.CONTACT.value,
-                sequence=3,
+                sequence=4,
                 objective="Find the first good reachable contact point for each researched lead.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: ContactWorkflow(
@@ -393,7 +417,7 @@ class CampaignService:
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=ToolSlot.VERIFY.value,
-                sequence=4,
+                sequence=5,
                 objective="Verify contact points before qualification and outreach drafting.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: VerifyWorkflow(
@@ -415,7 +439,7 @@ class CampaignService:
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=ToolSlot.SIGNAL.value,
-                sequence=5,
+                sequence=6,
                 objective="Accumulate public signals used by qualification and campaign insights.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: SignalWorkflow(
@@ -436,7 +460,7 @@ class CampaignService:
                 agent_run_id=agent_run_id,
                 campaign_id=campaign_id,
                 phase=CampaignStage.QUALIFICATION.value,
-                sequence=6,
+                sequence=7,
                 objective="Score researched leads against the product qualification criteria.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
                 action=lambda _step_id: QualificationWorkflow(
@@ -453,7 +477,7 @@ class CampaignService:
                     agent_run_id=agent_run_id,
                     campaign_id=campaign_id,
                     phase=CampaignStage.OUTREACH.value,
-                    sequence=7,
+                    sequence=8,
                     objective="Draft personalized outreach and queue messages for human approval.",
                     input_snapshot=self._campaign_step_input(product, campaign_read),
                     action=lambda _step_id: OutreachWorkflow(
@@ -503,9 +527,11 @@ class CampaignService:
         *,
         agent_run_id: str | None = None,
     ) -> CampaignRunSummary:
-        cached_summary = self._run_cached_contact_listing(campaign_id, agent_run_id=agent_run_id)
-        if cached_summary is not None:
-            return cached_summary
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        if not self._requires_digital_opportunity(campaign):
+            cached_summary = self._run_cached_contact_listing(campaign_id, agent_run_id=agent_run_id)
+            if cached_summary is not None:
+                return cached_summary
         return self.run_campaign(
             campaign_id,
             agent_run_id=agent_run_id,
@@ -554,6 +580,17 @@ class CampaignService:
                 ),
             )
 
+            if self._requires_digital_opportunity(campaign_read):
+                self._run_agent_step(
+                    agent_run_id=agent_run_id,
+                    campaign_id=campaign_id,
+                    phase="opportunity_audit",
+                    sequence=2,
+                    objective="Audit candidate websites for observable digital opportunities.",
+                    input_snapshot=self._campaign_step_input(product, campaign_read),
+                    action=lambda _step_id: self._audit_digital_opportunity(campaign_read),
+                )
+
             self.campaigns.update_status(
                 campaign_id,
                 CampaignStatus.RESEARCHING,
@@ -590,6 +627,21 @@ class CampaignService:
             if agent_run_id:
                 self.agent_runs.fail(agent_run_id, str(exc))
             raise
+
+    @staticmethod
+    def _requires_digital_opportunity(campaign: CampaignRead) -> bool:
+        return bool((campaign.source_inputs or {}).get("requires_digital_opportunity"))
+
+    def _audit_digital_opportunity(self, campaign: CampaignRead):
+        if self.opportunity_auditor is None:
+            raise RuntimeError("digital opportunity auditor is not configured")
+        intent = (campaign.source_inputs or {}).get("source_request_intent")
+        intent = intent if isinstance(intent, dict) else {}
+        return self.opportunity_auditor.audit_campaign(
+            campaign.id,
+            category=_optional_text(intent.get("business_category")),
+            market=_optional_text(intent.get("location") or intent.get("country")),
+        )
 
     def _cached_discovery_rows(
         self,
@@ -1171,3 +1223,8 @@ def email_provider_setup_hint(provider: str) -> str:
     if provider == "http":
         return "Configure EMAIL_PROVIDER=http with EMAIL_PROVIDER_ENDPOINT."
     return "Configure EMAIL_PROVIDER with a real sender before outreach."
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None

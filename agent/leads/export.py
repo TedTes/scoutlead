@@ -3,6 +3,7 @@ from io import StringIO
 
 from leads.schemas import LeadRead
 from leads.policy import best_contact_channel
+from evaluation.digital_opportunity import opportunity_evidence_from_sources
 
 
 EXPORT_COLUMNS = [
@@ -15,6 +16,9 @@ EXPORT_COLUMNS = [
     "website",
     "fit_status",
     "fit_score",
+    "opportunity_level",
+    "opportunity_score",
+    "opportunity_evidence",
     "evidence_1",
     "evidence_2",
     "evidence_3",
@@ -40,6 +44,10 @@ def _row(lead: LeadRead, *, scoutlead_path: str) -> dict[str, object]:
     evidence.extend([""] * (3 - len(evidence)))
     channel, _ = best_contact_channel(lead)
     approach = lead.approach
+    opportunity = opportunity_evidence_from_sources(lead.raw_sources) or {}
+    opportunity_signals = opportunity.get("signals")
+    if not isinstance(opportunity_signals, list):
+        opportunity_signals = []
     return {
         "business": lead.company_name,
         "category": lead.research.business_type if lead.research else "",
@@ -50,6 +58,13 @@ def _row(lead: LeadRead, *, scoutlead_path: str) -> dict[str, object]:
         "website": lead.website_url or "",
         "fit_status": qualification.fit_status.value if qualification and qualification.fit_status else "",
         "fit_score": qualification.score if qualification else "",
+        "opportunity_level": opportunity.get("level") or "",
+        "opportunity_score": opportunity.get("score") if opportunity else "",
+        "opportunity_evidence": " | ".join(
+            str(signal.get("message") or signal.get("key") or "").strip()
+            for signal in opportunity_signals
+            if isinstance(signal, dict) and (signal.get("message") or signal.get("key"))
+        ),
         "evidence_1": evidence[0],
         "evidence_2": evidence[1],
         "evidence_3": evidence[2],

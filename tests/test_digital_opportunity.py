@@ -3,7 +3,10 @@ from evaluation.digital_opportunity import (
     has_minimum_opportunity,
     opportunity_evidence_from_sources,
     opportunity_score_from_sources,
+    product_requires_digital_opportunity,
 )
+from products.schemas import ProductRead, QualificationCriterion
+from datetime import UTC, datetime
 
 
 def test_assessment_scores_only_observed_opportunities() -> None:
@@ -98,3 +101,23 @@ def test_latest_assessment_replaces_stale_stronger_assessment() -> None:
 
     assert opportunity_score_from_sources(sources) == 15
     assert has_minimum_opportunity(sources, minimum="moderate") is False
+
+
+def test_web_growth_product_requires_digital_opportunity() -> None:
+    now = datetime.now(UTC)
+    product = ProductRead(
+        id="product_web_growth",
+        product_name="Local Service Website Growth",
+        product_description="Website and conversion improvements for local businesses.",
+        target_customer="Independent home-service businesses",
+        problem_being_solved="Weak websites and missing quote or booking flows.",
+        value_proposition="Generate more qualified inquiries.",
+        target_geography="Toronto",
+        validation_goal="Find sales opportunities.",
+        qualification_criteria=[QualificationCriterion(label="Local service business")],
+        ideal_customer_signals=["Low review count"],
+        created_at=now,
+        updated_at=now,
+    )
+
+    assert product_requires_digital_opportunity(product) is True

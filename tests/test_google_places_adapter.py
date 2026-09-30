@@ -104,6 +104,61 @@ def test_google_places_adapter_maps_places_to_search_results(monkeypatch) -> Non
     assert "reviews: 42" in result.data[0]["snippet"]
 
 
+def test_google_places_adapter_paginates_up_to_source_limit(monkeypatch) -> None:
+    calls = []
+
+    class PageResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self.payload
+
+    def place(index: int) -> dict:
+        return {
+            "id": f"place_{index}",
+            "displayName": {"text": f"Business {index}"},
+            "formattedAddress": "Toronto, ON",
+        }
+
+    def fake_post(url, *, timeout, headers, json):
+        calls.append(json)
+        if len(calls) == 1:
+            return PageResponse({"places": [place(index) for index in range(20)], "nextPageToken": "page-2"})
+        return PageResponse({"places": [place(index) for index in range(20, 25)]})
+
+    monkeypatch.setattr("tools.discovery.google_places.httpx.post", fake_post)
+    source = CampaignSourceRead(
+        id="campaign_source_1",
+        campaign_id="campaign_1",
+        slot=CampaignSourceSlot.DISCOVERY,
+        provider_id="google_places",
+        mode=CampaignSourceMode.ACCUMULATE,
+        input={"query": "painters", "geography": "Toronto"},
+        config={"limit": 25, "region_code": "CA"},
+        priority=10,
+        enabled=True,
+        created_at="2026-08-20T00:00:00Z",
+        updated_at="2026-08-20T00:00:00Z",
+    )
+
+    result = GooglePlacesDiscoveryAdapter(api_key="test-key").run(
+        source,
+        {
+            "product": _product_context(),
+            "campaign": _campaign_context(max_leads=25),
+        },
+    )
+
+    assert len(result.data) == 25
+    assert calls[0]["pageSize"] == 20
+    assert calls[1]["pageSize"] == 5
+    assert calls[1]["pageToken"] == "page-2"
+
+
 def test_google_places_adapter_does_not_append_broad_geography(monkeypatch) -> None:
     calls = []
 
@@ -166,3 +221,42 @@ def test_google_places_adapter_does_not_append_broad_geography(monkeypatch) -> N
     )
 
     assert calls[0]["textQuery"] == "residential painters Austin TX"
+
+
+def _product_context() -> dict:
+    return {
+        "id": "product_1",
+        "product_name": "Website Growth",
+        "product_description": "Website improvements for local businesses.",
+        "target_customer": "residential painters",
+        "problem_being_solved": "weak websites",
+        "value_proposition": "generate more inquiries",
+        "target_geography": "Toronto",
+        "validation_goal": "find opportunities",
+        "qualification_criteria": [{"label": "Residential painting business"}],
+        "preferred_discovery_sources": [],
+        "outreach_objective": "contact qualified businesses",
+        "constraints": [],
+        "created_at": "2026-08-20T00:00:00Z",
+        "updated_at": "2026-08-20T00:00:00Z",
+    }
+
+
+def _campaign_context(*, max_leads: int) -> dict:
+    return {
+        "id": "campaign_1",
+        "product_id": "product_1",
+        "name": "Test campaign",
+        "max_leads": max_leads,
+        "channels": ["manual"],
+        "discovery_seeds": [],
+        "status": "draft",
+        "stage": "discovery",
+        "goal_type": "learn",
+        "icp_preset_id": "default",
+        "source_preset_id": "google-places-local-business",
+        "source_input": None,
+        "source_inputs": {},
+        "created_at": "2026-08-20T00:00:00Z",
+        "updated_at": "2026-08-20T00:00:00Z",
+    }

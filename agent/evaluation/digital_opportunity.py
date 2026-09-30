@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from products.schemas import ProductRead
+
 
 OPPORTUNITY_LEVEL_RANK = {
     "none": 0,
@@ -10,6 +12,23 @@ OPPORTUNITY_LEVEL_RANK = {
     "moderate": 2,
     "high": 3,
 }
+
+OPPORTUNITY_PROBLEM_PHRASES = (
+    "weak website",
+    "outdated website",
+    "missing website",
+    "no website",
+    "missing quote",
+    "no quote",
+    "missing booking",
+    "no booking",
+    "weak conversion",
+    "poor conversion",
+    "low review",
+    "poor review",
+    "local reputation",
+    "digital opportunity",
+)
 
 
 @dataclass(frozen=True)
@@ -162,6 +181,22 @@ def has_minimum_opportunity(
 def opportunity_score_from_sources(sources: list[dict[str, Any]]) -> int:
     evidence = opportunity_evidence_from_sources(sources)
     return _safe_int(evidence.get("score")) if evidence else 0
+
+
+def product_requires_digital_opportunity(product: ProductRead) -> bool:
+    """Identify products whose buyers want businesses with fixable digital gaps."""
+    text = " ".join(
+        value
+        for value in [
+            product.product_description,
+            product.problem_being_solved,
+            product.value_proposition,
+            product.offer_summary,
+            *product.ideal_customer_signals,
+        ]
+        if value
+    ).lower()
+    return any(phrase in text for phrase in OPPORTUNITY_PROBLEM_PHRASES)
 
 
 def _walk_items(value: Any):

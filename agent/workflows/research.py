@@ -1,3 +1,5 @@
+import httpx
+
 from agents.llm import LLMClient
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus
@@ -7,7 +9,13 @@ from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
 from prompts.research import research_prompt
+from evaluation.lead_scoring import build_cached_lead_research
+from evaluation.digital_opportunity import has_minimum_opportunity
+from shared.logger import get_logger
 from tools.browser import DirectHttpBrowserTool
+
+
+logger = get_logger(__name__)
 
 
 class ResearchWorkflow:
@@ -35,19 +43,42 @@ class ResearchWorkflow:
             lead = LeadRead.model_validate(lead_model)
             if lead.status not in {LeadStatus.DISCOVERED, LeadStatus.RESEARCHING}:
                 continue
+            if (
+                (campaign.source_inputs or {}).get("requires_digital_opportunity")
+                and not has_minimum_opportunity(lead.raw_sources, minimum="moderate")
+            ):
+                continue
             self.leads.update_status(lead.id, LeadStatus.RESEARCHING)
             inspection = self.browser.inspect(lead.website_url) if lead.website_url else None
-            research = self.llm.generate_object(
-                task="lead_research",
-                system="Extract structured lead research from public evidence only.",
-                prompt=research_prompt(product, lead, inspection),
-                response_model=LeadResearch,
-                context={
-                    "product": product.model_dump(mode="json"),
-                    "lead": lead.model_dump(mode="json"),
-                    "inspection": inspection.model_dump(mode="json") if inspection else None,
-                },
-            )
+            try:
+                research = self.llm.generate_object(
+                    task="lead_research",
+                    system="Extract structured lead research from public evidence only.",
+                    prompt=research_prompt(product, lead, inspection),
+                    response_model=LeadResearch,
+                    context={
+                        "product": product.model_dump(mode="json"),
+                        "lead": lead.model_dump(mode="json"),
+                        "inspection": inspection.model_dump(mode="json") if inspection else None,
+                    },
+                )
+            except httpx.TransportError as exc:
+                logger.warning(
+                    "lead_research_transport_failed lead_id=%s error=%s",
+                    lead.id,
+                    exc,
+                )
+                research = build_cached_lead_research(
+                    product=product,
+                    lead=lead,
+                    row={
+                        "source": lead.source,
+                        "url": lead.website_url,
+                        "snippet": lead.description,
+                        "raw": {"sources": lead.raw_sources},
+                    },
+                    confidence=35,
+                )
             scraped_emails = inspection.emails if inspection else []
             candidates = list(
                 dict.fromkeys([*scraped_emails, *([research.contact_email] if research.contact_email else [])])
