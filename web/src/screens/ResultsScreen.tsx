@@ -147,6 +147,7 @@ export function ResultsScreen({
   } = useAppData();
   const { showToast } = useToast();
   const [selectedContactId, setSelectedContactId] = useState("");
+  const [detailPanelOpen, setDetailPanelOpen] = useState(true);
   const [leadSearch, setLeadSearch] = useState("");
   const [desktopSplitView, setDesktopSplitView] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1160px)").matches : false,
@@ -282,7 +283,9 @@ export function ResultsScreen({
         || contactScore(b) - contactScore(a);
     });
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
-  const selectedContact = contacts.find((contact) => contact.id === selectedContactId);
+  const selectedContact = detailPanelOpen
+    ? contacts.find((contact) => contact.id === selectedContactId)
+    : undefined;
   const selectedMessage = selectedContact ? messageByLeadId.get(selectedContact.id) : undefined;
 
   useEffect(() => {
@@ -299,7 +302,7 @@ export function ResultsScreen({
   }, []);
 
   useEffect(() => {
-    if (!desktopSplitView) return;
+    if (!desktopSplitView || !detailPanelOpen) return;
     if (!visibleContacts.length) {
       setSelectedContactId("");
       return;
@@ -307,7 +310,7 @@ export function ResultsScreen({
     if (!visibleContacts.some((contact) => contact.id === selectedContactId)) {
       setSelectedContactId(visibleContacts[0].id);
     }
-  }, [desktopSplitView, selectedContactId, visibleContacts.map((contact) => contact.id).join("|")]);
+  }, [desktopSplitView, detailPanelOpen, selectedContactId, visibleContacts.map((contact) => contact.id).join("|")]);
 
   useEffect(() => {
     document.body.classList.toggle("has-contact-detail", Boolean(selectedContact));
@@ -317,6 +320,7 @@ export function ResultsScreen({
   useEffect(() => {
     setDraftPrompt(runPrompt);
     setSelectedContactId("");
+    setDetailPanelOpen(true);
     setLeadSearch("");
     onWorkflowViewChange("this_week");
     setAttributeFilter(null);
@@ -1083,7 +1087,10 @@ export function ResultsScreen({
                   contact={contact}
                   key={contact.id}
                   selected={contact.id === selectedContactId}
-                  onOpen={() => setSelectedContactId(contact.id)}
+                  onOpen={() => {
+                    setSelectedContactId(contact.id);
+                    setDetailPanelOpen(true);
+                  }}
                   onToggleShortlist={() => void updateLead(contact.id, { shortlisted: !contact.shortlisted_at })}
                 />
               ))}
@@ -1106,7 +1113,7 @@ export function ResultsScreen({
             persistent={desktopSplitView}
             message={selectedMessage}
             gmailConnected={gmailConnected}
-            onClose={() => setSelectedContactId("")}
+            onClose={() => setDetailPanelOpen(false)}
             onApproveMessage={approveMessage}
             onCreateDraft={createOutreachDraft}
             onQualifyLead={qualifyLead}
@@ -1949,13 +1956,12 @@ function ContactDrawer({
   ].filter(Boolean)).size;
 
   useEffect(() => {
-    if (persistent) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, persistent]);
+  }, [onClose]);
 
   useEffect(() => {
     setReviewNote(contact.review_note || "");
@@ -2222,11 +2228,15 @@ function ContactDrawer({
             >
               <Star size={17} fill={shortlisted ? "currentColor" : "none"} />
             </button>
-            {persistent ? null : (
-              <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">
-                <X size={18} />
-              </button>
-            )}
+            <button
+              aria-label="Close details"
+              className="drawer-close"
+              title="Close details"
+              type="button"
+              onClick={onClose}
+            >
+              <X size={18} />
+            </button>
           </div>
         </header>
 

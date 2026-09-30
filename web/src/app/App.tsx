@@ -1,5 +1,7 @@
 import {
   CalendarClock,
+  Check,
+  ChevronDown,
   CircleX,
   Download,
   FilePlus2,
@@ -7,6 +9,7 @@ import {
   Inbox,
   List,
   Menu,
+  Package,
   Pencil,
   Plug,
   Plus,
@@ -16,7 +19,7 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
@@ -49,11 +52,13 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [productMenuOpen, setProductMenuOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  const productMenuRef = useRef<HTMLDivElement | null>(null);
   const { showToast } = useToast();
   const {
     loading,
@@ -186,6 +191,20 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setMobileRailOpen(false);
   };
 
+  const selectProduct = (productId: string) => {
+    setProductMenuOpen(false);
+    setMobileRailOpen(false);
+    if (productId === selectedProductId) return;
+
+    setSelectedProductId(productId);
+    setSelectedDiscoveryRunId("");
+    setLeadWorkflowView("this_week");
+    setWorkflowSummary(null);
+    setWorkspaceExpanded(false);
+    setDraftRunNameState(readDraftRunName(productId));
+    setViewMode("overview");
+  };
+
   const handleDeleteSelectedProduct = async () => {
     if (!selectedProduct) return;
     await deleteProduct(selectedProduct.id);
@@ -275,6 +294,24 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setDraftRunNameState(readDraftRunName(selectedProductId));
   }, [selectedProductId]);
 
+  useEffect(() => {
+    if (!productMenuOpen) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!productMenuRef.current?.contains(event.target as Node)) setProductMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProductMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [productMenuOpen]);
+
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
       <header className="mobile-topbar">
@@ -318,6 +355,79 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             <strong>ScoutLead</strong>
             <span>Discovery Console</span>
           </div>
+        </div>
+
+        <div
+          className={productMenuOpen ? "rail-product-switcher is-open" : "rail-product-switcher"}
+          ref={productMenuRef}
+        >
+          <button
+            aria-expanded={productMenuOpen}
+            aria-haspopup="menu"
+            aria-label={`Current product: ${selectedProductName}`}
+            className="rail-product-trigger"
+            title={`Product: ${selectedProductName}`}
+            type="button"
+            onClick={() => setProductMenuOpen((open) => !open)}
+          >
+            <Package className="rail-product-icon" size={15} />
+            <span className="rail-product-copy">
+              <small>Product</small>
+              <strong>{selectedProductName}</strong>
+            </span>
+            <ChevronDown className="rail-product-caret" size={14} />
+          </button>
+
+          {productMenuOpen ? (
+            <div className="rail-product-menu" role="menu">
+              <div className="rail-product-options">
+                {products.map((product) => {
+                  const active = product.id === selectedProductId;
+                  return (
+                    <button
+                      aria-checked={active}
+                      className={active ? "active" : ""}
+                      key={product.id}
+                      role="menuitemradio"
+                      title={displayProductName(product)}
+                      type="button"
+                      onClick={() => selectProduct(product.id)}
+                    >
+                      <span>{displayProductName(product)}</span>
+                      {active ? <Check size={13} /> : null}
+                    </button>
+                  );
+                })}
+                {!products.length ? <p>No products yet</p> : null}
+              </div>
+              <div className="rail-product-menu-actions">
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setProductMenuOpen(false);
+                    setMobileRailOpen(false);
+                    setIsCreatingProduct(true);
+                  }}
+                >
+                  <Plus size={14} />
+                  <span>New product</span>
+                </button>
+                <button
+                  disabled={!selectedProduct}
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setProductMenuOpen(false);
+                    selectScreen("product");
+                  }}
+                >
+                  <Settings size={14} />
+                  <span>Product settings</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <nav className="lead-workflow-nav" aria-label="Lead workflow">
@@ -461,7 +571,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
             if (created) {
               setSelectedProductId(created.id);
               setSelectedDiscoveryRunId("");
-              setViewMode("overview");
+              setViewMode("product");
             }
             return created;
           }}
@@ -861,7 +971,7 @@ function AddProductDialog({
       }
       showToast({
         title: "Product created",
-        message: "Use the product selector to run searches for this product.",
+        message: "Complete the product profile, then create its first search.",
         tone: "green",
       });
       onClose();
@@ -875,7 +985,7 @@ function AddProductDialog({
   };
 
   return (
-    <Modal title="Add product" onClose={onClose}>
+    <Modal title="New product" onClose={onClose}>
       <form
         className="add-product-form"
         onSubmit={(event) => {
@@ -908,7 +1018,7 @@ function AddProductDialog({
             Cancel
           </button>
           <button className="runbtn" disabled={!canCreateProduct} type="submit">
-            {creating ? "Creating..." : "Create offer"}
+            {creating ? "Creating..." : "Create product"}
           </button>
         </div>
       </form>

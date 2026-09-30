@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Plus, Target, Trash2, X } from "lucide-react";
+import { ArrowLeft, CircleOff, Plus, Target, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -13,12 +13,7 @@ type ProductScreenProps = {
   onNavigate: (screen: Screen) => void;
 };
 
-type FocusHintChip =
-  | { id: "geography"; label: string; kind: "geography" }
-  | { id: `constraint-${number}`; label: string; kind: "constraint"; index: number };
-
 const DEFAULT_TARGET_GEOGRAPHY = "United States, Canada";
-const HUMAN_APPROVAL_CONSTRAINT = "human approval required before outbound messages are sent";
 
 export function ProductScreen({
   onCreatingProductChange,
@@ -35,32 +30,23 @@ export function ProductScreen({
   } = useAppData();
   const { showToast } = useToast();
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [offerSummary, setOfferSummary] = useState("");
+  const [targetCustomer, setTargetCustomer] = useState("");
   const [targetGeography, setTargetGeography] = useState(DEFAULT_TARGET_GEOGRAPHY);
-  const [constraints, setConstraints] = useState<string[]>([]);
-  const [addingHint, setAddingHint] = useState(false);
-  const [hintDraft, setHintDraft] = useState("");
+  const [idealCustomerSignals, setIdealCustomerSignals] = useState<string[]>([]);
+  const [exclusions, setExclusions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const originalEditableConstraints = useMemo(
-    () => editableConstraints(selectedProduct),
-    [selectedProduct],
-  );
-
-  const hiddenConstraints = useMemo(
-    () => hiddenProductConstraints(selectedProduct),
-    [selectedProduct],
-  );
-
   useEffect(() => {
+    const draft = productProfileDraft(selectedProduct);
     setName(selectedProduct?.product_name || "");
-    setDescription(selectedProduct?.offer_summary || selectedProduct?.product_description || "");
+    setOfferSummary(draft.offerSummary);
+    setTargetCustomer(draft.targetCustomer);
     setTargetGeography(selectedProduct?.target_geography || DEFAULT_TARGET_GEOGRAPHY);
-    setConstraints(editableConstraints(selectedProduct));
-    setAddingHint(false);
-    setHintDraft("");
+    setIdealCustomerSignals(draft.idealCustomerSignals);
+    setExclusions(draft.exclusions);
   }, [selectedProduct]);
 
   const duplicateName = useMemo(() => {
@@ -75,43 +61,27 @@ export function ProductScreen({
     );
   }, [name, products, selectedProductId]);
 
-  const normalizedConstraints = useMemo(() => normalizeList(constraints), [constraints]);
+  const normalizedSignals = useMemo(() => normalizeList(idealCustomerSignals), [idealCustomerSignals]);
+  const normalizedExclusions = useMemo(() => normalizeList(exclusions), [exclusions]);
   const hasChanges = Boolean(
     selectedProduct &&
       (name.trim() !== selectedProduct.product_name.trim() ||
-        description.trim() !== (selectedProduct.offer_summary || selectedProduct.product_description || "").trim() ||
+        offerSummary.trim() !== (selectedProduct.offer_summary || selectedProduct.product_description || "").trim() ||
+        targetCustomer.trim() !== selectedProduct.target_customer.trim() ||
         targetGeography.trim() !== selectedProduct.target_geography.trim() ||
-        !sameList(normalizedConstraints, originalEditableConstraints)),
+        !sameList(normalizedSignals, normalizeList(selectedProduct.ideal_customer_signals || [])) ||
+        !sameList(normalizedExclusions, normalizeList(selectedProduct.exclusions || []))),
   );
   const canAutosave = Boolean(
     selectedProduct &&
       name.trim() &&
-      description.trim().length >= 20 &&
+      offerSummary.trim().length >= 20 &&
+      targetCustomer.trim() &&
       targetGeography.trim() &&
       hasChanges &&
       !duplicateName &&
       !saving,
   );
-  const focusHintChips = useMemo(
-    () => buildFocusHintChips(targetGeography, normalizedConstraints),
-    [normalizedConstraints, targetGeography],
-  );
-
-  const addHint = () => {
-    const normalized = hintDraft.trim();
-    if (!normalized) return;
-    setConstraints((current) => normalizeList([...current, normalized]));
-    setHintDraft("");
-    setAddingHint(false);
-  };
-
-  const removeHint = (chip: FocusHintChip) => {
-    if (chip.kind === "geography") {
-      setTargetGeography(DEFAULT_TARGET_GEOGRAPHY);
-      return;
-    }
-    setConstraints((current) => current.filter((_, index) => index !== chip.index));
-  };
 
   const confirmDeleteProduct = async () => {
     if (!selectedProduct || !onDeleteProduct || deleting) return;
@@ -130,9 +100,11 @@ export function ProductScreen({
     try {
       await autoSaveProduct(selectedProduct.id, {
         product_name: name.trim(),
-        offer_summary: description.trim(),
+        offer_summary: offerSummary.trim(),
+        target_customer: targetCustomer.trim(),
         target_geography: targetGeography.trim(),
-        constraints: normalizeList([...hiddenConstraints, ...normalizedConstraints]),
+        ideal_customer_signals: normalizedSignals,
+        exclusions: normalizedExclusions,
       });
     } catch (error) {
       showToast({
@@ -146,12 +118,15 @@ export function ProductScreen({
   }, [
     autoSaveProduct,
     canAutosave,
-    description,
-    hiddenConstraints,
+    exclusions,
+    idealCustomerSignals,
     name,
-    normalizedConstraints,
+    normalizedExclusions,
+    normalizedSignals,
+    offerSummary,
     selectedProduct,
     showToast,
+    targetCustomer,
     targetGeography,
   ]);
 
@@ -167,10 +142,11 @@ export function ProductScreen({
     return (
       <div className="product-page product-settings-page">
         <section className="product-settings-empty">
-          <h1>No offer selected</h1>
-          <p>Create an offer from the top bar before changing offer settings.</p>
+          <h1>No product selected</h1>
+          <p>Create a product profile before configuring lead discovery.</p>
           <button className="runbtn" type="button" onClick={() => onCreatingProductChange(true)}>
-            Add offer
+            <Plus size={15} />
+            New product
           </button>
         </section>
       </div>
@@ -181,21 +157,34 @@ export function ProductScreen({
     <div className="product-page product-settings-page">
       <section className="product-settings-shell">
         <header className="product-settings-heading">
-          <div className="product-settings-meta-line" aria-label="Offer summary">
-            <span>
-              <strong>{productDiscoveryRuns.length}</strong> {pluralize(productDiscoveryRuns.length, "run")}
-            </span>
-            <span>
-              <strong>{productContacts.length}</strong> {pluralize(productContacts.length, "contact")}
-            </span>
-            <span>
-              updated <strong>{formatDate(selectedProduct.updated_at)}</strong>
-            </span>
+          <div className="product-settings-title-block">
+            <h1>Product profile</h1>
+            <div className="product-settings-meta-line" aria-label="Product summary">
+              <span>
+                <strong>{productDiscoveryRuns.length}</strong> {pluralize(productDiscoveryRuns.length, "run")}
+              </span>
+              <span>
+                <strong>{productContacts.length}</strong> {pluralize(productContacts.length, "contact")}
+              </span>
+              <span>
+                {saving ? "saving changes" : <>updated <strong>{formatDate(selectedProduct.updated_at)}</strong></>}
+              </span>
+            </div>
           </div>
-          <button className="secondary product-settings-finder" type="button" onClick={() => onNavigate("overview")}>
-            <ArrowLeft size={15} />
-            Finder
-          </button>
+          <div className="product-settings-actions">
+            <button
+              className="secondary product-settings-new"
+              type="button"
+              onClick={() => onCreatingProductChange(true)}
+            >
+              <Plus size={15} />
+              New product
+            </button>
+            <button className="secondary product-settings-finder" type="button" onClick={() => onNavigate("overview")}>
+              <ArrowLeft size={15} />
+              Finder
+            </button>
+          </div>
         </header>
 
         <form
@@ -205,88 +194,101 @@ export function ProductScreen({
             void saveProduct();
           }}
         >
-          <label className="product-settings-field">
-            <span className="product-settings-label">Offer name</span>
-            <input
-              className="product-settings-input"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              onBlur={() => void saveProduct()}
-            />
-            {duplicateName ? <em>An offer with this name already exists.</em> : null}
-          </label>
-
-          <label className="product-settings-field">
-            <span className="product-settings-label">Offer summary</span>
-            <textarea
-              className="product-settings-textarea"
-              rows={7}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              onBlur={() => void saveProduct()}
-            />
-            <span className="product-settings-count">{description.length} chars</span>
-            <small className="product-settings-copy-hint">
-              This is what the finder scores against. Describe what it does, who it helps, and any market or geography
-              hints. The more specific, the sharper the fit scoring.
-            </small>
-          </label>
-
-          <section className="product-settings-field" aria-label="Focus hints">
-            <div className="product-settings-focus-head">
-              <span className="product-settings-label">Focus hints</span>
-              <span>optional</span>
-            </div>
-            <div className="product-settings-chip-list">
-              {focusHintChips.map((chip) => (
-                <span className="product-settings-chip" key={chip.id}>
-                  {chip.kind === "geography" ? <MapPin size={13} /> : <Target size={13} />}
-                  <span className="product-settings-chip-text">{chip.label}</span>
-                  <button
-                    className="product-settings-chip-remove"
-                    type="button"
-                    aria-label={`Remove ${chip.label}`}
-                    onClick={() => removeHint(chip)}
-                  >
-                    <X size={13} />
-                  </button>
-                </span>
-              ))}
-              <button
-                className="product-settings-chip product-settings-chip-add"
-                type="button"
-                onClick={() => setAddingHint(true)}
-              >
-                <Plus size={13} />
-                add hint
-              </button>
-            </div>
-            {addingHint ? (
-              <div className="product-settings-hint-editor">
-                <input
-                  autoFocus
-                  placeholder="e.g. owner-operated crews"
-                  value={hintDraft}
-                  onChange={(event) => setHintDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      addHint();
-                    }
-                    if (event.key === "Escape") {
-                      setAddingHint(false);
-                      setHintDraft("");
-                    }
-                  }}
-                />
-                <button className="secondary" type="button" onClick={addHint}>
-                  Add
-                </button>
+          <section className="product-profile-section" aria-labelledby="product-profile-offer">
+            <header className="product-profile-section-heading">
+              <span>01</span>
+              <div>
+                <h2 id="product-profile-offer">Your product</h2>
+                <p>Name the offer and describe the outcome you provide.</p>
               </div>
-            ) : null}
-            <small className="product-settings-copy-hint">
-              Optional structured hints the finder weights alongside the description.
-            </small>
+            </header>
+            <div className="product-profile-section-fields">
+              <label className="product-settings-field">
+                <span className="product-settings-label">Product name</span>
+                <input
+                  className="product-settings-input"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  onBlur={() => void saveProduct()}
+                />
+                {duplicateName ? <em>A product with this name already exists.</em> : null}
+              </label>
+
+              <label className="product-settings-field">
+                <span className="product-settings-label">What you sell</span>
+                <textarea
+                  className="product-settings-textarea is-compact"
+                  rows={3}
+                  value={offerSummary}
+                  onChange={(event) => setOfferSummary(event.target.value)}
+                  onBlur={() => void saveProduct()}
+                />
+                <small className="product-settings-copy-hint">
+                  State the service and the practical result a customer receives.
+                </small>
+              </label>
+            </div>
+          </section>
+
+          <section className="product-profile-section" aria-labelledby="product-profile-market">
+            <header className="product-profile-section-heading">
+              <span>02</span>
+              <div>
+                <h2 id="product-profile-market">Businesses to find</h2>
+                <p>Define the companies that should appear in your lead lists.</p>
+              </div>
+            </header>
+            <div className="product-profile-section-fields">
+              <label className="product-settings-field">
+                <span className="product-settings-label">Target customer</span>
+                <textarea
+                  className="product-settings-textarea is-compact"
+                  rows={3}
+                  value={targetCustomer}
+                  onChange={(event) => setTargetCustomer(event.target.value)}
+                  onBlur={() => void saveProduct()}
+                />
+                <small className="product-settings-copy-hint">
+                  Describe the business type, not the people you plan to contact.
+                </small>
+              </label>
+
+              <label className="product-settings-field">
+                <span className="product-settings-label">Geography</span>
+                <input
+                  className="product-settings-input"
+                  value={targetGeography}
+                  onChange={(event) => setTargetGeography(event.target.value)}
+                  onBlur={() => void saveProduct()}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="product-profile-section" aria-labelledby="product-profile-qualification">
+            <header className="product-profile-section-heading">
+              <span>03</span>
+              <div>
+                <h2 id="product-profile-qualification">Qualification</h2>
+                <p>Tell the finder what evidence makes a business useful or irrelevant.</p>
+              </div>
+            </header>
+            <div className="product-profile-section-fields">
+              <ProfileListEditor
+                kind="signal"
+                label="Opportunity signals"
+                placeholder="e.g. no quote form"
+                values={idealCustomerSignals}
+                onChange={setIdealCustomerSignals}
+              />
+              <ProfileListEditor
+                kind="exclusion"
+                label="Exclude"
+                placeholder="e.g. national chains"
+                values={exclusions}
+                onChange={setExclusions}
+              />
+            </div>
           </section>
 
           <section className="product-settings-danger" aria-label="Danger zone">
@@ -327,31 +329,146 @@ export function ProductScreen({
   );
 }
 
-function buildFocusHintChips(
-  targetGeography: string,
-  constraints: string[],
-): FocusHintChip[] {
-  const chips: FocusHintChip[] = [];
-  const geography = targetGeography.trim();
-  if (geography && geography !== DEFAULT_TARGET_GEOGRAPHY) {
-    chips.push({ id: "geography", label: geography, kind: "geography" });
+function productProfileDraft(product: Product | undefined) {
+  if (!product) {
+    return {
+      offerSummary: "",
+      targetCustomer: "",
+      idealCustomerSignals: [] as string[],
+      exclusions: [] as string[],
+    };
   }
-  constraints.forEach((constraint, index) => {
-    chips.push({ id: `constraint-${index}`, label: constraint, kind: "constraint", index });
+
+  const rawSummary = (product.offer_summary || product.product_description || "").trim();
+  const labeled = parseLabeledProductSummary(rawSummary);
+  const savedTarget = product.target_customer.trim();
+  return {
+    offerSummary: labeled.offer || rawSummary,
+    targetCustomer:
+      labeled.targetCustomer || (/^define target customer/i.test(savedTarget) ? "" : savedTarget),
+    idealCustomerSignals: normalizeList(
+      product.ideal_customer_signals.length
+        ? product.ideal_customer_signals
+        : splitProfileList(labeled.positiveSignals),
+    ),
+    exclusions: normalizeList(
+      product.exclusions.length ? product.exclusions : splitProfileList(labeled.disqualifiers),
+    ),
+  };
+}
+
+function parseLabeledProductSummary(value: string) {
+  const fields: Record<string, string> = {};
+  const labels = /(?:^|\s)(Offer|Target customer|Problem solved|Positive signals|Disqualifiers):\s*/gi;
+  const matches = [...value.matchAll(labels)];
+  matches.forEach((match, index) => {
+    const label = match[1].toLowerCase();
+    const start = (match.index || 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? value.length;
+    fields[label] = value.slice(start, end).trim().replace(/[.;]$/, "");
   });
-  return chips;
+  return {
+    offer: fields.offer || "",
+    targetCustomer: fields["target customer"] || "",
+    positiveSignals: fields["positive signals"] || "",
+    disqualifiers: fields.disqualifiers || "",
+  };
 }
 
-function editableConstraints(product: Product | undefined) {
-  return normalizeList((product?.constraints || []).filter((constraint) => !isHiddenConstraint(constraint)));
+function splitProfileList(value: string) {
+  return value ? value.replace(/,\s*and\s+/gi, ", ").split(/[,;]\s*/) : [];
 }
 
-function hiddenProductConstraints(product: Product | undefined) {
-  return normalizeList((product?.constraints || []).filter(isHiddenConstraint));
-}
+function ProfileListEditor({
+  kind,
+  label,
+  onChange,
+  placeholder,
+  values,
+}: {
+  kind: "signal" | "exclusion";
+  label: string;
+  onChange: (values: string[]) => void;
+  placeholder: string;
+  values: string[];
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const Icon = kind === "signal" ? Target : CircleOff;
 
-function isHiddenConstraint(value: string) {
-  return value.toLowerCase().includes(HUMAN_APPROVAL_CONSTRAINT);
+  const addValue = () => {
+    const normalized = draft.trim();
+    if (!normalized) return;
+    onChange(normalizeList([...values, normalized]));
+    setDraft("");
+    setAdding(false);
+  };
+
+  return (
+    <div className="product-settings-field product-profile-list-field">
+      <span className="product-settings-label">{label}</span>
+      <div className="product-settings-chip-list">
+        {values.map((value, index) => (
+          <span className={`product-settings-chip is-${kind}`} key={`${value}-${index}`}>
+            <Icon size={13} />
+            <span className="product-settings-chip-text">{value}</span>
+            <button
+              aria-label={`Remove ${value}`}
+              className="product-settings-chip-remove"
+              type="button"
+              onClick={() => onChange(values.filter((_, valueIndex) => valueIndex !== index))}
+            >
+              <X size={13} />
+            </button>
+          </span>
+        ))}
+        {!adding ? (
+          <button
+            className="product-settings-chip product-settings-chip-add"
+            type="button"
+            onClick={() => setAdding(true)}
+          >
+            <Plus size={13} />
+            Add
+          </button>
+        ) : null}
+      </div>
+      {adding ? (
+        <div className="product-settings-hint-editor">
+          <input
+            autoFocus
+            placeholder={placeholder}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addValue();
+              }
+              if (event.key === "Escape") {
+                setAdding(false);
+                setDraft("");
+              }
+            }}
+          />
+          <button className="secondary" type="button" onClick={addValue}>
+            Add
+          </button>
+          <button
+            aria-label="Cancel"
+            className="product-profile-list-cancel"
+            type="button"
+            onClick={() => {
+              setAdding(false);
+              setDraft("");
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function normalizeList(values: string[]) {
