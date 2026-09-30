@@ -31,6 +31,7 @@ def qualification_prompt(
             "Only put missing hard requirements or action-changing risks in missing_evidence.",
             "Do not repeat missing soft preferences, such as exact owner/solo/company-size evidence, when public evidence is usually unavailable.",
             "Populate positive_signals, missing_evidence, and risks with concise public-evidence bullets.",
+            "Always return a non-empty rationale and a concrete recommended_next_step.",
             (
                 "Populate signal_tags only with exact values from this controlled vocabulary: "
                 f"{signal_vocabulary or []}. Return an empty list when none apply."

@@ -5,6 +5,23 @@ from products.schemas import DiscoverySource, DiscoverySourceType, ProductRead, 
 from workflows.qualification import MIN_QUALIFICATION_SCORE, NOT_FIT_MAX_SCORE, enforce_qualification_boundary
 
 
+def test_missing_llm_explanation_fields_are_restored_without_inventing_a_score() -> None:
+    result = QualificationResult.model_validate(
+        {
+            "qualified": True,
+            "score": 82,
+            "positive_signals": ["Public website identifies a residential painting business."],
+        }
+    )
+
+    assert result.score == 82
+    assert result.rationale == (
+        "Lead met the configured qualification threshold with a score of 82. "
+        "Positive evidence: Public website identifies a residential painting business."
+    )
+    assert result.recommended_next_step == "Review the evidence before approving outreach."
+
+
 def test_low_score_cannot_be_qualified_for_outreach() -> None:
     result = QualificationResult(
         qualified=True,

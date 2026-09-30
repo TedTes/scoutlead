@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LeadStatus(StrEnum):
@@ -138,6 +138,45 @@ class QualificationResult(BaseModel):
     risks: list[str] = Field(default_factory=list)
     criteria: list[CriterionScore] = Field(default_factory=list)
     recommended_next_step: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def restore_missing_explanation_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+        qualified = data.get("qualified") is True
+        score = data.get("score")
+        if not isinstance(data.get("rationale"), str) or not data["rationale"].strip():
+            outcome = "met" if qualified else "did not meet"
+            score_detail = f" with a score of {score}" if isinstance(score, int) else ""
+            evidence = _first_qualification_detail(data)
+            data["rationale"] = (
+                f"Lead {outcome} the configured qualification threshold{score_detail}."
+                + (f" {evidence}" if evidence else "")
+            )
+        if not isinstance(data.get("recommended_next_step"), str) or not data["recommended_next_step"].strip():
+            data["recommended_next_step"] = (
+                "Review the evidence before approving outreach."
+                if qualified
+                else "Do not send outreach."
+            )
+        return data
+
+
+def _first_qualification_detail(value: dict[str, Any]) -> str:
+    for key, prefix in (
+        ("positive_signals", "Positive evidence:"),
+        ("risks", "Risk:"),
+        ("missing_evidence", "Missing evidence:"),
+    ):
+        entries = value.get(key)
+        if isinstance(entries, list):
+            detail = next((entry.strip() for entry in entries if isinstance(entry, str) and entry.strip()), "")
+            if detail:
+                return f"{prefix} {detail}"
+    return ""
 
 
 class LeadCreate(BaseModel):
