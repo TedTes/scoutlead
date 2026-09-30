@@ -111,6 +111,33 @@ class CanonicalRepository:
             source_observation_id=observation.id,
         )
 
+    def record_business_evidence(
+        self,
+        *,
+        business: BusinessModel,
+        source: str,
+        raw: dict[str, Any],
+        contact_email: str | None = None,
+    ) -> CanonicalLeadLink:
+        """Attach evidence and contact data without changing the business profile."""
+        contact = self._upsert_contact(
+            business=business,
+            email=contact_email,
+            raw=raw,
+        )
+        observation = self._record_source_observation(
+            business=business,
+            source=source,
+            query=_query_from_raw(raw),
+            raw=raw,
+        )
+        self.session.flush()
+        return CanonicalLeadLink(
+            business_id=business.id,
+            contact_id=contact.id if contact else None,
+            source_observation_id=observation.id,
+        )
+
     def list_cached_discovery_results(
         self,
         *,

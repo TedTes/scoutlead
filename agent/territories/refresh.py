@@ -7,12 +7,22 @@ from agents.llm import LLMClient
 from campaigns.schemas import CampaignCreate, CampaignGoalType
 from campaigns.service import CampaignService
 from db.models import LeadModel, NicheModel, TerritoryDeliveryModel
-from leads.schemas import AgentFitStatus, LeadRead
+from evaluation.digital_opportunity import (
+    has_minimum_opportunity,
+    opportunity_score_from_sources,
+)
+from leads.schemas import (
+    AgentFitStatus,
+    ContactPolicyStatus,
+    ContactVerificationStatus,
+    LeadRead,
+)
 from leads.approach_service import LeadApproachService
 from shared.errors import ConflictError
 from shared.logger import get_logger
 from shared.utils import new_id, utcnow
 from territories.repository import TerritoryRepository
+from territories.opportunity_audit import TerritoryOpportunityAuditor
 from territories.schemas import TerritoryMinFit
 
 
@@ -27,12 +37,14 @@ class TerritoryRefreshService:
         campaigns: CampaignService,
         workspace_id: str,
         llm: LLMClient | None = None,
+        opportunity_auditor: TerritoryOpportunityAuditor | None = None,
     ) -> None:
         self.session = session
         self.campaigns = campaigns
         self.territories = TerritoryRepository(session, workspace_id=workspace_id)
         self.workspace_id = workspace_id
         self.llm = llm
+        self.opportunity_auditor = opportunity_auditor
 
     def refresh(
         self,
@@ -92,6 +104,21 @@ class TerritoryRefreshService:
         self.session.commit()
         try:
             self.campaigns.run_contact_listing(campaign.id)
+            if self.opportunity_auditor is not None:
+                audit = self.opportunity_auditor.audit_campaign(
+                    campaign.id,
+                    category=niche.category if niche else None,
+                    market=territory.market_key,
+                )
+                logger.info(
+                    "territory_opportunity_audit territory_id=%s campaign_id=%s selected=%s "
+                    "inspected=%s written=%s",
+                    territory.id,
+                    campaign.id,
+                    audit.selected,
+                    audit.inspected,
+                    audit.written,
+                )
             contacts = self.contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
             self._generate_approaches(contacts)
             contacts = self.contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
@@ -126,15 +153,22 @@ class TerritoryRefreshService:
         allowed = {AgentFitStatus.GOOD_FIT.value}
         if min_fit == TerritoryMinFit.MAYBE:
             allowed.add(AgentFitStatus.MAYBE.value)
-        eligible = [
-            LeadRead.model_validate(lead)
-            for lead in leads
-            if isinstance(lead.qualification, dict)
-            and lead.qualification.get("fit_status") in allowed
-        ]
+        eligible = []
+        for lead_model in leads:
+            if not isinstance(lead_model.qualification, dict):
+                continue
+            if lead_model.qualification.get("fit_status") not in allowed:
+                continue
+            lead = LeadRead.model_validate(lead_model)
+            if not has_minimum_opportunity(lead.raw_sources, minimum="moderate"):
+                continue
+            if not _has_usable_contact(lead):
+                continue
+            eligible.append(lead)
         return sorted(
             eligible,
             key=lambda lead: (
+                opportunity_score_from_sources(lead.raw_sources),
                 lead.rank_score
                 if lead.rank_score is not None
                 else float(lead.qualification.score if lead.qualification else 0),
@@ -167,3 +201,41 @@ class TerritoryRefreshService:
 def _schedule_time(value: datetime) -> datetime:
     aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     return aware.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _has_usable_contact(lead: LeadRead) -> bool:
+    if lead.contact_policy_status != ContactPolicyStatus.ALLOWED:
+        return False
+    email_is_usable = bool(
+        lead.contact_email
+        and lead.verification_status != ContactVerificationStatus.INVALID
+    )
+    return email_is_usable or bool(
+        _raw_value(lead.raw_sources, {"phone", "phones", "contact_phone", "telephone"})
+    )
+
+
+def _raw_value(sources: list[dict], keys: set[str]) -> str | None:
+    stack: list[object] = list(sources)
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key.casefold() in keys:
+                    if isinstance(item, str) and item.strip():
+                        return item.strip()
+                    if isinstance(item, list):
+                        first = next(
+                            (
+                                entry.strip()
+                                for entry in item
+                                if isinstance(entry, str) and entry.strip()
+                            ),
+                            None,
+                        )
+                        if first:
+                            return first
+                stack.append(item)
+        elif isinstance(value, list):
+            stack.extend(value)
+    return None

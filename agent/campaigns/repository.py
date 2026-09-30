@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update as sql_update
 from sqlalchemy.orm import Session
 
 from campaigns.schemas import CampaignCreate, CampaignStage, CampaignStatus, CampaignUpdate
@@ -16,10 +16,12 @@ from db.models import (
     ConversationModel,
     DiscoveryCandidateModel,
     LeadModel,
+    LeadOutcomeModel,
     LearningSummaryModel,
     MessageModel,
     ProductModel,
     QueueJobModel,
+    TerritoryModel,
     ToolCallModel,
 )
 from shared.errors import NotFoundError
@@ -99,10 +101,35 @@ class CampaignRepository:
     def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
         model = self.get(campaign_id)
         data = update.model_dump(mode="python", exclude_unset=True)
+        territory = None
         if "name" in data and data["name"] is not None:
             data["name"] = self._unique_name(model.product_id, data["name"], exclude_id=campaign_id)
+        if "territory_id" in data and data["territory_id"] is not None:
+            territory = self.session.get(TerritoryModel, data["territory_id"])
+            if (
+                territory is None
+                or territory.product_id != model.product_id
+                or (self.workspace_id and territory.workspace_id != self.workspace_id)
+            ):
+                raise NotFoundError("territory not found", {"territory_id": data["territory_id"]})
         for field, value in data.items():
             setattr(model, field, value)
+        if "territory_id" in data:
+            lead_ids = select(LeadModel.id).where(LeadModel.campaign_id == campaign_id)
+            self.session.execute(
+                sql_update(LeadOutcomeModel)
+                .where(LeadOutcomeModel.lead_id.in_(lead_ids))
+                .values(
+                    territory_id=territory.id if territory else None,
+                    niche_id=territory.niche_id if territory else None,
+                    market_key=territory.market_key if territory else None,
+                )
+            )
+            self.session.execute(
+                sql_update(LeadModel)
+                .where(LeadModel.campaign_id == campaign_id)
+                .values(territory_id=data["territory_id"])
+            )
         model.updated_at = utcnow()
         self.session.commit()
         self.session.refresh(model)

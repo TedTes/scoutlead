@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaigns.repository import CampaignRepository
-from campaigns.schemas import CampaignCreate, LeadSeedInput
-from db.models import NicheModel, QueueJobModel, TerritoryModel
+from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
+from db.models import LeadModel, LeadOutcomeModel, NicheModel, QueueJobModel, TerritoryModel
 from db.session import create_database
 from products.repository import ProductRepository
 from products.schemas import ProductCreate, QualificationCriterion
@@ -147,10 +148,12 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
             )
         )
         campaigns = _FakeCampaigns(session, workspace_id="workspace:first")
+        auditor = _FakeOpportunityAuditor()
         refresh = TerritoryRefreshService(
             session=session,
             campaigns=campaigns,
             workspace_id="workspace:first",
+            opportunity_auditor=auditor,
         )
         scheduled = datetime(2026, 9, 28, tzinfo=timezone.utc)
 
@@ -161,10 +164,53 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
         assert first.status == "ready"
         assert first.new_contact_count == 2
         assert campaigns.run_count == 1
+        assert auditor.campaign_ids == [first.campaign_id]
         assert all(
             lead.territory_id == territory.id
             for lead in refresh.contacts(first, min_fit=territory.min_fit)
         )
+
+
+def test_delivery_requires_audited_opportunity_and_usable_contact() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        territory = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                batch_size=2,
+                confirmed=True,
+            )
+        )
+        refresh = TerritoryRefreshService(
+            session=session,
+            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
+            workspace_id="workspace:first",
+        )
+        delivery = refresh.refresh(territory.id)
+        leads = list(
+            session.scalars(
+                select(LeadModel)
+                .where(LeadModel.campaign_id == delivery.campaign_id)
+                .order_by(LeadModel.created_at)
+            )
+        )
+        leads[0].raw_sources = [
+            {"digital_opportunity": {"version": 1, "score": 15, "level": "low"}},
+            {"phone": "416-555-0101"},
+        ]
+        leads[1].contact_email = None
+        leads[1].raw_sources = [
+            {"digital_opportunity": {"version": 1, "score": 55, "level": "high"}}
+        ]
+        session.commit()
+
+        assert refresh.contacts(delivery, min_fit=territory.min_fit) == []
 
 
 def test_failed_refresh_reuses_delivery_on_retry() -> None:
@@ -286,6 +332,46 @@ def test_previous_territory_business_is_excluded_from_future_rows() -> None:
         assert [row["title"] for row in rows] == ["New"]
 
 
+def test_existing_search_can_be_attached_to_territory() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        territory = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                confirmed=True,
+            )
+        )
+        campaigns = CampaignRepository(session, workspace_id="workspace:first")
+        campaign = campaigns.create(
+            CampaignCreate(product_id=offer.id, name="HVAC Toronto", max_leads=10)
+        )
+        lead = LeadRepository(session, workspace_id="workspace:first").create_from_seed(
+            campaign.id,
+            offer.id,
+            LeadSeedInput(company_name="Existing HVAC", geography="Toronto"),
+        )
+        outcome = OutcomeService(session, workspace_id="workspace:first").record(
+            lead.id,
+            LeadOutcomeCreate(outcome=LeadOutcome.CONTACTED, channel=OutcomeChannel.EMAIL),
+        )
+
+        campaigns.update(campaign.id, CampaignUpdate(territory_id=territory.id))
+
+        assert campaigns.get(campaign.id).territory_id == territory.id
+        assert LeadRepository(session, workspace_id="workspace:first").get(lead.id).territory_id == territory.id
+        attached_outcome = session.get(LeadOutcomeModel, outcome.id)
+        assert attached_outcome is not None
+        assert attached_outcome.territory_id == territory.id
+        assert attached_outcome.niche_id == territory.niche_id
+        assert attached_outcome.market_key == territory.market_key
+
+
 def test_territory_metrics_report_coverage_and_conversion() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -404,7 +490,17 @@ class _FakeCampaigns:
                 LeadSeedInput(
                     company_name=f"HVAC {self.run_count}-{index}",
                     website_url=f"https://hvac-{self.run_count}-{index}.example",
+                    contact_email=f"owner{index}@hvac-{self.run_count}-{index}.example",
                     geography="Toronto",
+                    raw={
+                        "phone": f"416-555-010{index}",
+                        "digital_opportunity": {
+                            "version": 1,
+                            "score": 55 + index,
+                            "level": "high",
+                            "signals": [{"key": "missing_quote_or_booking_form"}],
+                        },
+                    },
                 ),
             )
             self.leads.attach_qualification(
@@ -417,3 +513,14 @@ class _FakeCampaigns:
                     recommended_next_step="Review contact.",
                 ),
             )
+
+
+class _FakeOpportunityAuditor:
+    def __init__(self) -> None:
+        self.campaign_ids: list[str] = []
+
+    def audit_campaign(self, campaign_id: str, *, category: str | None, market: str | None):
+        assert category == "HVAC contractors"
+        assert market == "toronto"
+        self.campaign_ids.append(campaign_id)
+        return SimpleNamespace(selected=2, inspected=2, written=2)

@@ -2,6 +2,9 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import AppServices
 from campaigns.service import CampaignService
+from territories.opportunity_audit import TerritoryOpportunityAuditor
+from territories.refresh import TerritoryRefreshService
+from tools.verify import EmailVerificationTool
 
 
 def campaign_service(
@@ -39,4 +42,38 @@ def campaign_service(
         semantic_cache_min_results=settings.semantic_cache_min_results,
         timeout_seconds=settings.request_timeout_seconds,
         workspace_id=workspace_id,
+    )
+
+
+def territory_refresh_service(
+    *,
+    session: Session,
+    services: AppServices,
+    workspace_id: str,
+) -> TerritoryRefreshService:
+    settings = services.settings
+    verifier = EmailVerificationTool(
+        provider=settings.contact_verification_provider,
+        endpoint=settings.email_verification_endpoint,
+        api_key=settings.email_verification_api_key,
+        bouncer_api_key=settings.bouncer_api_key,
+        bouncer_api_endpoint=settings.bouncer_api_endpoint,
+        zerobounce_api_key=settings.zerobounce_api_key,
+        zerobounce_api_endpoint=settings.zerobounce_api_endpoint,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+    return TerritoryRefreshService(
+        session=session,
+        campaigns=campaign_service(
+            session=session,
+            services=services,
+            workspace_id=workspace_id,
+        ),
+        workspace_id=workspace_id,
+        llm=services.llm,
+        opportunity_auditor=TerritoryOpportunityAuditor(
+            session=session,
+            verifier=verifier,
+            timeout_seconds=settings.request_timeout_seconds,
+        ),
     )

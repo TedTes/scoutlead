@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from agent_runs.repository import AgentRunRepository
 from app.config import get_settings
 from app.dependencies import AppServices, create_app_services
-from app.service_factory import campaign_service
+from app.service_factory import campaign_service, territory_refresh_service
 from campaigns.service import CampaignService
 from db.session import create_database
 from db.models import TerritoryModel
@@ -15,7 +15,6 @@ from job_queue.schemas import JobType
 from messages.service import MessageService
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
-from territories.refresh import TerritoryRefreshService
 from territories.scheduler import enqueue_due_territories
 
 logger = get_logger(__name__)
@@ -69,15 +68,10 @@ def run_once() -> bool:
                     time.min,
                     tzinfo=timezone.utc,
                 )
-                TerritoryRefreshService(
+                territory_refresh_service(
                     session=session,
-                    campaigns=campaign_service(
-                        session=session,
-                        services=services,
-                        workspace_id=territory.workspace_id,
-                    ),
+                    services=services,
                     workspace_id=territory.workspace_id,
-                    llm=services.llm,
                 ).refresh(territory_id, scheduled_for=scheduled_for)
             else:
                 raise ValueError(f"unknown job type: {job.type}")

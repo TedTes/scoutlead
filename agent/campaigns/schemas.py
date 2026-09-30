@@ -67,6 +67,7 @@ class CampaignCreate(BaseModel):
 
 class CampaignUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
+    territory_id: str | None = None
 
 
 class CampaignRead(CampaignCreate):

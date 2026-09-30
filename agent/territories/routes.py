@@ -3,11 +3,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
-from app.service_factory import campaign_service
+from app.service_factory import territory_refresh_service
 from leads.schemas import LeadRead
 from leads.export import leads_csv
 from shared.utils import utcnow
-from territories.refresh import TerritoryRefreshService
 from territories.metrics import (
     TerritoryMetricsRead,
     TerritoryMetricsService,
@@ -118,15 +117,10 @@ def refresh_territory(
     auth: CurrentAuth,
 ):
     territory = _service(session, auth).get(territory_id)
-    return TerritoryRefreshService(
+    return territory_refresh_service(
         session=session,
-        campaigns=campaign_service(
-            session=session,
-            services=services,
-            workspace_id=territory.workspace_id,
-        ),
+        services=services,
         workspace_id=territory.workspace_id,
-        llm=services.llm,
     ).refresh(territory_id)
 
 
@@ -147,15 +141,10 @@ def list_delivery_contacts(
     if delivery.viewed_at is None:
         delivery.viewed_at = utcnow()
         session.commit()
-    return TerritoryRefreshService(
+    return territory_refresh_service(
         session=session,
-        campaigns=campaign_service(
-            session=session,
-            services=services,
-            workspace_id=territory.workspace_id,
-        ),
+        services=services,
         workspace_id=territory.workspace_id,
-        llm=services.llm,
     ).contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
 
 
@@ -170,15 +159,10 @@ def export_delivery_contacts(
     territory_service = _service(session, auth)
     territory = territory_service.get(territory_id)
     delivery = territory_service.territories.get_delivery(territory_id, delivery_id)
-    contacts = TerritoryRefreshService(
+    contacts = territory_refresh_service(
         session=session,
-        campaigns=campaign_service(
-            session=session,
-            services=services,
-            workspace_id=territory.workspace_id,
-        ),
+        services=services,
         workspace_id=territory.workspace_id,
-        llm=services.llm,
     ).contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
     return Response(
         content=leads_csv(

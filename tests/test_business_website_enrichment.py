@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 
 from db.models import BusinessModel, ContactModel, SourceObservationModel
 from db.session import create_database
-from scripts.enrich_business_websites import (
+from canonical.website_enrichment import (
     SOURCE_NAME,
     cleanup_placeholder_emails,
     enrich_business_pool,
@@ -26,8 +26,11 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
             ],
             batch_id="painting-toronto-v1",
         )
+        original_business = session.scalar(select(BusinessModel))
+        assert original_business is not None
+        original_semantic_text = original_business.semantic_text
 
-        monkeypatch.setattr("scripts.enrich_business_websites.httpx.get", fake_get)
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_get)
 
         summary = enrich_business_pool(
             session,
@@ -47,8 +50,7 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
 
         business = session.scalar(select(BusinessModel))
         assert business is not None
-        assert business.semantic_text
-        assert "quote" in business.semantic_text.lower()
+        assert business.semantic_text == original_semantic_text
 
         contact = session.scalar(select(ContactModel).where(ContactModel.email.is_not(None)))
         assert contact is not None
@@ -62,6 +64,57 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert observation.business_id == business.id
         assert observation.raw_payload["website_enrichment"]["best_email"] == "owner@paint.testsite.ca"
         assert observation.raw_payload["website_enrichment"]["has_quote_form"] is True
+        assert observation.raw_payload["digital_opportunity"]["score"] == 15
+        assert observation.raw_payload["digital_opportunity"]["level"] == "low"
+
+
+def test_website_enrichment_records_review_and_conversion_opportunity(monkeypatch) -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        BusinessSeedService(session).import_seeds(
+            [
+                painting_seed(
+                    contact_email=None,
+                    contact_name=None,
+                    website_url="https://quiet.example",
+                    source="google_places_seed",
+                    source_url="https://maps.example/quiet",
+                    raw={
+                        "google_places": {
+                            "rating": 4.1,
+                            "userRatingCount": 8,
+                        }
+                    },
+                )
+            ],
+            batch_id="painting-toronto-v1",
+        )
+
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_no_signal_get)
+
+        summary = enrich_business_pool(
+            session,
+            category="painting",
+            market="toronto",
+            limit=1,
+            dry_run=False,
+            mark_attempted=True,
+            timeout_seconds=0.1,
+            page_delay_seconds=0,
+        )
+
+        observation = session.scalar(
+            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+        )
+        assert observation is not None
+        opportunity = observation.raw_payload["digital_opportunity"]
+        assert opportunity["score"] == 80
+        assert opportunity["level"] == "high"
+        assert opportunity["google_rating"] == 4.1
+        assert opportunity["google_review_count"] == 8
+        assert summary.with_digital_opportunity == 1
+        assert summary.high_digital_opportunity == 1
 
 
 def test_website_enrichment_dry_run_does_not_write(monkeypatch) -> None:
@@ -79,7 +132,7 @@ def test_website_enrichment_dry_run_does_not_write(monkeypatch) -> None:
             batch_id="painting-toronto-v1",
         )
 
-        monkeypatch.setattr("scripts.enrich_business_websites.httpx.get", fake_get)
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_get)
 
         summary = enrich_business_pool(
             session,
@@ -100,7 +153,7 @@ def test_website_enrichment_dry_run_does_not_write(monkeypatch) -> None:
         )
 
 
-def test_website_enrichment_can_mark_no_signal_site_as_attempted(monkeypatch) -> None:
+def test_website_enrichment_records_opportunity_without_contact_signal(monkeypatch) -> None:
     session_factory = _session_factory()
 
     with session_factory() as session:
@@ -115,7 +168,7 @@ def test_website_enrichment_can_mark_no_signal_site_as_attempted(monkeypatch) ->
             batch_id="painting-toronto-v1",
         )
 
-        monkeypatch.setattr("scripts.enrich_business_websites.httpx.get", fake_no_signal_get)
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_no_signal_get)
 
         summary = enrich_business_pool(
             session,
@@ -123,13 +176,13 @@ def test_website_enrichment_can_mark_no_signal_site_as_attempted(monkeypatch) ->
             market="toronto",
             limit=1,
             dry_run=False,
-            mark_attempted=True,
             timeout_seconds=0.1,
             page_delay_seconds=0,
         )
 
         assert summary.selected == 1
-        assert summary.skipped == 1
+        assert summary.skipped == 0
+        assert summary.with_digital_opportunity == 1
         assert summary.written == 1
         assert session.scalar(select(ContactModel).where(ContactModel.email.is_not(None))) is None
         assert (
@@ -143,12 +196,62 @@ def test_website_enrichment_can_mark_no_signal_site_as_attempted(monkeypatch) ->
             market="toronto",
             limit=1,
             dry_run=False,
-            mark_attempted=True,
             timeout_seconds=0.1,
             page_delay_seconds=0,
         )
 
         assert second.selected == 0
+
+
+def test_website_enrichment_can_target_exact_business_ids(monkeypatch) -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        BusinessSeedService(session).import_seeds(
+            [
+                painting_seed(
+                    company_name="Target Painter",
+                    website_url="https://paint.testsite.ca",
+                    contact_email=None,
+                    contact_name=None,
+                    external_id="target-painter",
+                ),
+                painting_seed(
+                    company_name="Other Painter",
+                    website_url="https://quiet.example",
+                    contact_email=None,
+                    contact_name=None,
+                    external_id="other-painter",
+                ),
+            ],
+            batch_id="painting-toronto-v1",
+        )
+        businesses = {
+            business.display_name: business
+            for business in session.scalars(select(BusinessModel))
+        }
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_get)
+
+        summary = enrich_business_pool(
+            session,
+            category="painting",
+            market="toronto",
+            limit=2,
+            dry_run=False,
+            timeout_seconds=0.1,
+            page_delay_seconds=0,
+            business_ids=[businesses["Target Painter"].id],
+        )
+
+        observations = list(
+            session.scalars(
+                select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            )
+        )
+        assert summary.selected == 1
+        assert [observation.business_id for observation in observations] == [
+            businesses["Target Painter"].id
+        ]
 
 
 def test_website_enrichment_ignores_placeholder_email(monkeypatch) -> None:
@@ -166,7 +269,7 @@ def test_website_enrichment_ignores_placeholder_email(monkeypatch) -> None:
             batch_id="painting-toronto-v1",
         )
 
-        monkeypatch.setattr("scripts.enrich_business_websites.httpx.get", fake_placeholder_email_get)
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_placeholder_email_get)
 
         summary = enrich_business_pool(
             session,
