@@ -5,6 +5,18 @@ import re
 from shared.errors import ValidationError
 
 
+LOCAL_MARKET_AREAS: dict[str, tuple[str, ...]] = {
+    "toronto": (
+        "Scarborough ON",
+        "Etobicoke ON",
+        "North York ON",
+        "East York ON",
+        "York ON",
+        "Toronto ON",
+    ),
+}
+
+
 def normalize_places_region_code(value: str | None) -> str | None:
     normalized = (value or "").strip().upper()
     if normalized in {"CA", "US"}:
@@ -33,6 +45,36 @@ def build_local_business_query(
     )
 
     return _normalized(f"{category} {market}")
+
+
+def build_local_business_queries(
+    *,
+    business_category: str,
+    location: str,
+    fallback_query: str | None = None,
+    expand_local_market: bool = False,
+) -> list[str]:
+    base_query = build_local_business_query(
+        business_category=business_category,
+        location=location,
+        fallback_query=fallback_query,
+    )
+    if not expand_local_market:
+        return [base_query]
+
+    normalized_location = _normalized(location).lower()
+    areas = next(
+        (
+            market_areas
+            for market, market_areas in LOCAL_MARKET_AREAS.items()
+            if market in normalized_location
+        ),
+        (),
+    )
+    if not areas:
+        return [base_query]
+    category = _normalized(business_category)
+    return list(dict.fromkeys(f"{category} in {area}" for area in areas))
 
 
 def validate_local_business_intent(

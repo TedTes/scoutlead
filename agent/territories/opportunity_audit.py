@@ -1,14 +1,33 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from canonical.normalization import normalize_business_name, normalize_domain
+from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import SOURCE_NAME, EnrichmentSummary, enrich_business_pool
-from db.models import ContactModel, LeadModel, SourceObservationModel
+from db.models import BusinessModel, ContactModel, LeadModel, SourceObservationModel
+from shared.utils import normalize_url, utcnow
+from tools.search import SearchTool
 from tools.verify import EmailVerificationTool
+
+
+WEBSITE_PRESENCE_SOURCE = "website_presence_check"
+BLOCKED_CONFIRMATION_HOSTS = (
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "yelp.",
+    "yellowpages.",
+    "google.com",
+    "google.ca",
+    "homestars.com",
+    "houzz.",
+)
 
 
 class BusinessOpportunityAuditor:
@@ -20,10 +39,12 @@ class BusinessOpportunityAuditor:
         session: Session,
         verifier: EmailVerificationTool | None,
         timeout_seconds: float,
+        search: SearchTool | None = None,
         workers: int = 4,
     ) -> None:
         self.session = session
         self.verifier = verifier
+        self.search = search
         self.timeout_seconds = timeout_seconds
         self.workers = max(1, workers)
 
@@ -42,6 +63,7 @@ class BusinessOpportunityAuditor:
         business_ids = list(
             dict.fromkeys(lead.business_id for lead in leads if lead.business_id)
         )
+        missing_website_count = self._audit_missing_websites(leads)
         summary = enrich_business_pool(
             self.session,
             category=category,
@@ -59,8 +81,112 @@ class BusinessOpportunityAuditor:
             workers=self.workers,
             business_ids=business_ids,
         )
+        summary.selected += missing_website_count
+        summary.inspected += missing_website_count
+        summary.with_digital_opportunity += missing_website_count
+        summary.high_digital_opportunity += missing_website_count
+        summary.written += missing_website_count
         self._synchronize_leads(leads, business_ids)
         return summary
+
+    def _audit_missing_websites(self, leads: list[LeadModel]) -> int:
+        canonical = CanonicalRepository(self.session)
+        audited = 0
+        changed = False
+        seen_business_ids: set[str] = set()
+        for lead in leads:
+            if not lead.business_id or lead.business_id in seen_business_ids:
+                continue
+            seen_business_ids.add(lead.business_id)
+            business = self.session.get(BusinessModel, lead.business_id)
+            if business is None or business.website_url or lead.website_url:
+                continue
+            if _raw_text(lead.raw_sources, "businessStatus") != "OPERATIONAL":
+                continue
+            phone = business.phone or _raw_text(lead.raw_sources, "nationalPhoneNumber")
+            maps_url = _raw_text(lead.raw_sources, "googleMapsUri")
+            if not phone and not maps_url:
+                continue
+
+            website_url, confirmation_attempted, confirmation_query = self._confirm_website(
+                business
+            )
+            if website_url:
+                business.website_url = website_url
+                business.domain = normalize_domain(website_url)
+                lead.website_url = website_url
+                changed = True
+                continue
+
+            status = "no_website_found" if confirmation_attempted else "no_website_listed"
+            label = "No website found" if confirmation_attempted else "No website listed"
+            message = (
+                "No business website was found in the Google profile or confirmation search."
+                if confirmation_attempted
+                else "Google Business Profile has no website listed."
+            )
+            points = 65 if confirmation_attempted else 50
+            raw = {
+                "external_id": f"{business.id}:website-presence",
+                "query": confirmation_query,
+                "source_url": maps_url,
+                "website_presence": {
+                    "status": status,
+                    "label": label,
+                    "google_website_listed": False,
+                    "confirmation_attempted": confirmation_attempted,
+                    "confirmed_at": utcnow().isoformat(),
+                    "phone": phone,
+                    "google_maps_url": maps_url,
+                },
+                "digital_opportunity": {
+                    "version": 1,
+                    "score": points,
+                    "level": "high",
+                    "assessed_at": utcnow().isoformat(),
+                    "signals": [
+                        {
+                            "key": status,
+                            "message": message,
+                            "points": points,
+                            "source_url": maps_url,
+                            "value": label,
+                        }
+                    ],
+                },
+            }
+            canonical.record_business_evidence(
+                business=business,
+                source=WEBSITE_PRESENCE_SOURCE,
+                raw=raw,
+            )
+            audited += 1
+            changed = True
+        if changed:
+            self.session.commit()
+        return audited
+
+    def _confirm_website(
+        self,
+        business: BusinessModel,
+    ) -> tuple[str | None, bool, str]:
+        location = business.address or business.geography or ""
+        query = f'"{business.display_name}" "{location}" official website'
+        if self.search is None or not self.search.is_configured:
+            return None, False, query
+        try:
+            results = self.search.lookup(query, limit=5)
+        except Exception:
+            return None, False, query
+        for result in results:
+            website_url = _credible_business_website(
+                result.url,
+                result.title,
+                business.display_name,
+            )
+            if website_url:
+                return website_url, True, query
+        return None, True, query
 
     def _synchronize_leads(
         self,
@@ -74,7 +200,9 @@ class BusinessOpportunityAuditor:
                 select(SourceObservationModel)
                 .where(
                     SourceObservationModel.business_id.in_(business_ids),
-                    SourceObservationModel.source == SOURCE_NAME,
+                    SourceObservationModel.source.in_(
+                        [SOURCE_NAME, WEBSITE_PRESENCE_SOURCE]
+                    ),
                 )
                 .order_by(SourceObservationModel.observed_at.desc())
             )
@@ -146,6 +274,44 @@ def _has_observation(lead: LeadModel, observation_id: str) -> bool:
         and source.get("source_observation_id") == observation_id
         for source in lead.raw_sources or []
     )
+
+
+def _credible_business_website(
+    value: str | None,
+    result_title: str,
+    business_name: str,
+) -> str | None:
+    url = normalize_url(value)
+    if not url:
+        return None
+    host = urlparse(url).netloc.casefold().removeprefix("www.")
+    if not host or any(blocked in host for blocked in BLOCKED_CONFIRMATION_HOSTS):
+        return None
+    business_tokens = {
+        token
+        for token in normalize_business_name(business_name).split()
+        if len(token) >= 3
+    }
+    result_text = f"{result_title} {host}".casefold()
+    matching_tokens = sum(token in result_text for token in business_tokens)
+    required_matches = min(2, len(business_tokens))
+    return url if required_matches and matching_tokens >= required_matches else None
+
+
+def _raw_text(sources: list[dict], key: str) -> str | None:
+    stack: list[object] = list(sources)
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            for item_key, item in value.items():
+                if item_key == key and isinstance(item, (str, int, float)):
+                    text = str(item).strip()
+                    if text:
+                        return text
+                stack.append(item)
+        elif isinstance(value, list):
+            stack.extend(value)
+    return None
 
 
 # Backward-compatible name for callers predating ordinary-search audits.

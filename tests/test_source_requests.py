@@ -100,11 +100,23 @@ def test_opportunity_source_request_over_sources_but_preserves_requested_limit()
                 run_immediately=False,
             )
         )
+        sources = CampaignSourceRepository(session).list_by_campaign(result.run.id)
 
         assert result.run.max_leads == 50
         assert result.run.source_inputs["requested_result_count"] == 25
         assert result.run.source_inputs["candidate_pool_size"] == 50
         assert result.run.source_inputs["requires_digital_opportunity"] is True
+        assert result.run.source_inputs["website_policy"] == "missing"
+        assert result.run.source_inputs["search_queries"] == [
+            "painting service in Scarborough ON",
+            "painting service in Etobicoke ON",
+            "painting service in North York ON",
+            "painting service in East York ON",
+            "painting service in York ON",
+            "painting service in Toronto ON",
+        ]
+        assert sources[0].input["website_policy"] == "missing"
+        assert sources[0].config["search_queries"] == result.run.source_inputs["search_queries"]
 
 
 def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -> None:

@@ -159,6 +159,94 @@ def test_google_places_adapter_paginates_up_to_source_limit(monkeypatch) -> None
     assert calls[1]["pageToken"] == "page-2"
 
 
+def test_google_places_adapter_keeps_reachable_active_businesses_without_websites(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class NeighborhoodResponse:
+        def __init__(self, query: str):
+            self.query = query
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            suffix = "scarborough" if "Scarborough" in self.query else "etobicoke"
+            return {
+                "places": [
+                    {
+                        "id": f"no-site-{suffix}",
+                        "displayName": {"text": f"Independent Painter {suffix}"},
+                        "formattedAddress": f"1 Main St, {suffix}, ON",
+                        "nationalPhoneNumber": "(416) 555-0101",
+                        "googleMapsUri": f"https://maps.google.com/?cid={suffix}",
+                        "businessStatus": "OPERATIONAL",
+                    },
+                    {
+                        "id": f"has-site-{suffix}",
+                        "displayName": {"text": "Painter With Website"},
+                        "websiteUri": "https://painter.example",
+                        "nationalPhoneNumber": "(416) 555-0102",
+                        "businessStatus": "OPERATIONAL",
+                    },
+                    {
+                        "id": f"closed-{suffix}",
+                        "displayName": {"text": "Closed Painter"},
+                        "nationalPhoneNumber": "(416) 555-0103",
+                        "businessStatus": "CLOSED_PERMANENTLY",
+                    },
+                ]
+            }
+
+    def fake_post(url, *, timeout, headers, json):
+        calls.append(json)
+        return NeighborhoodResponse(json["textQuery"])
+
+    monkeypatch.setattr("tools.discovery.google_places.httpx.post", fake_post)
+    source = CampaignSourceRead(
+        id="campaign_source_1",
+        campaign_id="campaign_1",
+        slot=CampaignSourceSlot.DISCOVERY,
+        provider_id="google_places",
+        mode=CampaignSourceMode.ACCUMULATE,
+        input={
+            "query": "painters Toronto ON",
+            "search_queries": [
+                "painters in Scarborough ON",
+                "painters in Etobicoke ON",
+            ],
+            "website_policy": "missing",
+        },
+        config={"limit": 4, "region_code": "CA"},
+        priority=10,
+        enabled=True,
+        created_at="2026-08-20T00:00:00Z",
+        updated_at="2026-08-20T00:00:00Z",
+    )
+
+    result = GooglePlacesDiscoveryAdapter(api_key="test-key").run(
+        source,
+        {
+            "product": _product_context(),
+            "campaign": _campaign_context(max_leads=4),
+        },
+    )
+
+    assert [call["textQuery"] for call in calls] == [
+        "painters in Scarborough ON",
+        "painters in Etobicoke ON",
+    ]
+    assert all(call["pageSize"] == 2 for call in calls)
+    assert len(result.data) == 2
+    assert all(row["url"] is None for row in result.data)
+    assert all(row["raw"]["businessStatus"] == "OPERATIONAL" for row in result.data)
+    assert all(
+        row["raw"]["website_presence_label"] == "No website listed"
+        for row in result.data
+    )
+
+
 def test_google_places_adapter_does_not_append_broad_geography(monkeypatch) -> None:
     calls = []
 

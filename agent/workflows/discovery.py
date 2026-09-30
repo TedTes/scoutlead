@@ -97,17 +97,21 @@ class DiscoveryWorkflow:
         canonical = CanonicalRepository(self.leads.session, embedding=self.embedding)
         semantic_rows: list[dict[str, Any]] = []
         over_source = bool((campaign.source_inputs or {}).get("requires_digital_opportunity"))
-        for source in sources:
-            source_query = str(source.input.get("query") or campaign.source_input or "").strip()
-            semantic_rows = canonical.list_semantic_discovery_results(
-                source_inputs=source.input,
-                source_input=source_query,
-                limit=campaign.max_leads,
-                min_score=self.semantic_cache_min_score,
-                min_results=min(self.semantic_cache_min_results, campaign.max_leads),
-            )
-            if semantic_rows:
-                break
+        missing_website_search = (
+            str((campaign.source_inputs or {}).get("website_policy") or "") == "missing"
+        )
+        if not missing_website_search:
+            for source in sources:
+                source_query = str(source.input.get("query") or campaign.source_input or "").strip()
+                semantic_rows = canonical.list_semantic_discovery_results(
+                    source_inputs=source.input,
+                    source_input=source_query,
+                    limit=campaign.max_leads,
+                    min_score=self.semantic_cache_min_score,
+                    min_results=min(self.semantic_cache_min_results, campaign.max_leads),
+                )
+                if semantic_rows:
+                    break
         if semantic_rows:
             cached_results.extend(
                 exclude_previously_delivered_rows(
@@ -121,6 +125,9 @@ class DiscoveryWorkflow:
                 sources = []
         else:
             for source in sources:
+                if missing_website_search:
+                    sources_to_run.append(source)
+                    continue
                 limit = int(source.config.get("limit") or campaign.max_leads)
                 cached_rows = canonical.list_cached_discovery_results(
                     source=source.provider_id,

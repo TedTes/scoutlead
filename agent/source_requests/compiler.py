@@ -4,7 +4,14 @@ import re
 from typing import Any
 
 from agents.llm import LLMClient
-from products.discovery_policy import build_local_business_query, normalize_places_region_code
+from evaluation.digital_opportunity import (
+    product_requires_digital_opportunity,
+    text_requires_digital_opportunity,
+)
+from products.discovery_policy import (
+    build_local_business_queries,
+    normalize_places_region_code,
+)
 from products.schemas import ProductRead
 from prompts.source_intent import SOURCE_INTENT_PROMPT, SOURCE_INTENT_SYSTEM
 from shared.errors import ValidationError
@@ -37,11 +44,17 @@ class SourceRequestCompiler:
         product: ProductRead,
     ) -> SourceRequestPlan:
         intent = self._interpret(request=request, product=product, source=GOOGLE_PLACES_PROVIDER_ID)
-        query = build_local_business_query(
+        missing_website_search = (
+            product_requires_digital_opportunity(product)
+            or text_requires_digital_opportunity(request.prompt)
+        )
+        queries = build_local_business_queries(
             business_category=intent.business_category,
             location=intent.location,
             fallback_query=intent.search_query,
+            expand_local_market=missing_website_search,
         )
+        query = queries[0]
         region_code = normalize_places_region_code(intent.country or product.target_geography)
         return SourceRequestPlan(
             source=GOOGLE_PLACES_PROVIDER_ID,
@@ -56,6 +69,8 @@ class SourceRequestCompiler:
             intent=intent,
             source_inputs={
                 "compiled_query": query,
+                "search_queries": queries,
+                "website_policy": "missing" if missing_website_search else "any",
                 "region_code": region_code,
                 "compiled_provider_input": {
                     "textQuery": query,

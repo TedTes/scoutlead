@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import httpx
@@ -58,9 +59,15 @@ class GooglePlacesDiscoveryAdapter:
 
         product = ProductRead.model_validate(context["product"])
         campaign = CampaignRead.model_validate(context["campaign"])
-        query = self._query(source=source, product=product)
+        queries = self._queries(source=source, product=product)
+        query = queries[0]
         limit = int(source.config.get("limit") or campaign.max_leads)
-        page_size = max(1, min(limit, 20))
+        page_size = max(1, min(math.ceil(limit / len(queries)), 20))
+        website_policy = str(
+            source.config.get("website_policy")
+            or source.input.get("website_policy")
+            or "any"
+        )
 
         request_body: dict[str, Any] = {
             "textQuery": query,
@@ -72,20 +79,29 @@ class GooglePlacesDiscoveryAdapter:
         included_type = source.config.get("included_type")
         if included_type:
             request_body["includedType"] = str(included_type)
-            request_body["strictTypeFiltering"] = bool(source.config.get("strict_type_filtering", False))
+            request_body["strictTypeFiltering"] = bool(
+                source.config.get("strict_type_filtering", False)
+            )
         region_code = source.config.get("region_code")
         if region_code:
             request_body["regionCode"] = str(region_code)
 
         def action() -> list[dict[str, Any]]:
-            places: list[dict[str, Any]] = []
-            next_page_token: str | None = None
-            seen_tokens: set[str] = set()
-            while len(places) < limit:
+            places: list[tuple[dict[str, Any], str]] = []
+            seen_places: set[str] = set()
+            continuations: list[tuple[str, str]] = []
+
+            def fetch_page(
+                search_query: str,
+                *,
+                size: int,
+                page_token: str | None = None,
+            ) -> str | None:
                 page_body = dict(request_body)
-                page_body["pageSize"] = min(20, limit - len(places))
-                if next_page_token:
-                    page_body["pageToken"] = next_page_token
+                page_body["textQuery"] = search_query
+                page_body["pageSize"] = size
+                if page_token:
+                    page_body["pageToken"] = page_token
                 response = httpx.post(
                     self.endpoint,
                     timeout=self.timeout_seconds,
@@ -100,14 +116,43 @@ class GooglePlacesDiscoveryAdapter:
                 )
                 response.raise_for_status()
                 payload = response.json()
-                places.extend(payload.get("places", []))
-                next_page_token = payload.get("nextPageToken")
-                if not next_page_token or next_page_token in seen_tokens:
-                    break
-                seen_tokens.add(next_page_token)
+                for place in payload.get("places", []):
+                    if not self._matches_website_policy(place, website_policy):
+                        continue
+                    dedupe_key = self._place_key(place)
+                    if dedupe_key in seen_places:
+                        continue
+                    seen_places.add(dedupe_key)
+                    places.append((place, search_query))
+                token = payload.get("nextPageToken")
+                return str(token) if token else None
+
+            for search_query in queries:
+                token = fetch_page(search_query, size=page_size)
+                if token:
+                    continuations.append((search_query, token))
+
+            seen_tokens: set[tuple[str, str]] = set()
+            while len(places) < limit and continuations:
+                search_query, token = continuations.pop(0)
+                token_key = (search_query, token)
+                if token_key in seen_tokens:
+                    continue
+                seen_tokens.add(token_key)
+                next_token = fetch_page(
+                    search_query,
+                    size=min(20, limit - len(places)),
+                    page_token=token,
+                )
+                if next_token:
+                    continuations.append((search_query, next_token))
             return [
-                self._to_search_result(place=place, query=query).model_dump(mode="json")
-                for place in places[:limit]
+                self._to_search_result(
+                    place=place,
+                    query=search_query,
+                    website_policy=website_policy,
+                ).model_dump(mode="json")
+                for place, search_query in places[:limit]
             ]
 
         return measured_tool_result(
@@ -120,7 +165,7 @@ class GooglePlacesDiscoveryAdapter:
                 "provider_id": source.provider_id,
                 "input": source.input,
                 "config": source.config,
-                "request": request_body,
+                "request": {**request_body, "queries": queries},
             },
             action=action,
         )
@@ -134,17 +179,34 @@ class GooglePlacesDiscoveryAdapter:
                 {"campaign_source_id": source.id, "provider_id": source.provider_id},
             )
         geography = str(source.input.get("geography") or product.target_geography or "").strip()
-        if geography and not _is_broad_geography(geography) and geography.lower() not in query.lower():
+        if (
+            geography
+            and not _is_broad_geography(geography)
+            and geography.lower() not in query.lower()
+        ):
             return f"{query} {geography}"
         return query
 
+    @classmethod
+    def _queries(cls, *, source: CampaignSourceRead, product: ProductRead) -> list[str]:
+        configured = source.config.get("search_queries") or source.input.get("search_queries")
+        if isinstance(configured, list):
+            queries = [str(item).strip() for item in configured if str(item).strip()]
+            if queries:
+                return list(dict.fromkeys(queries))
+        return [cls._query(source=source, product=product)]
+
     @staticmethod
-    def _to_search_result(*, place: dict[str, Any], query: str) -> SearchResult:
+    def _to_search_result(
+        *,
+        place: dict[str, Any],
+        query: str,
+        website_policy: str = "any",
+    ) -> SearchResult:
         display_name = place.get("displayName") or {}
         title = str(display_name.get("text") or place.get("id") or query)
         website_url = place.get("websiteUri")
         maps_url = place.get("googleMapsUri")
-        url = website_url or maps_url
         address = place.get("formattedAddress")
         phone = place.get("nationalPhoneNumber")
         rating = place.get("rating")
@@ -163,12 +225,46 @@ class GooglePlacesDiscoveryAdapter:
         ]
         return SearchResult(
             title=title,
-            url=url,
+            url=website_url,
             snippet=" | ".join(snippet_parts) or None,
             geography=address,
             source="google_places",
-            raw={**place, "query": query, "website_url": website_url, "google_maps_url": maps_url},
+            raw={
+                **place,
+                "query": query,
+                "website_url": website_url,
+                "google_maps_url": maps_url,
+                **(
+                    {
+                        "website_presence_status": "no_website_listed",
+                        "website_presence_label": "No website listed",
+                    }
+                    if website_policy == "missing" and not website_url
+                    else {}
+                ),
+            },
         )
+
+    @staticmethod
+    def _matches_website_policy(place: dict[str, Any], website_policy: str) -> bool:
+        if website_policy != "missing":
+            return True
+        return bool(
+            place.get("businessStatus") == "OPERATIONAL"
+            and not place.get("websiteUri")
+            and (place.get("nationalPhoneNumber") or place.get("googleMapsUri"))
+        )
+
+    @staticmethod
+    def _place_key(place: dict[str, Any]) -> str:
+        place_id = str(place.get("id") or "").strip()
+        if place_id:
+            return f"id:{place_id}"
+        display_name = place.get("displayName") or {}
+        name = str(display_name.get("text") or "").strip().casefold()
+        address = str(place.get("formattedAddress") or "").strip().casefold()
+        phone = str(place.get("nationalPhoneNumber") or "").strip()
+        return f"fallback:{name}|{address}|{phone}"
 
 
 def _is_broad_geography(value: str) -> bool:

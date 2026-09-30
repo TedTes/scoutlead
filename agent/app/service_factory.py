@@ -45,6 +45,7 @@ def campaign_service(
         opportunity_auditor=BusinessOpportunityAuditor(
             session=session,
             verifier=_verification_tool(services),
+            search=services.search,
             timeout_seconds=settings.request_timeout_seconds,
         ),
     )
@@ -69,6 +70,7 @@ def territory_refresh_service(
         opportunity_auditor=BusinessOpportunityAuditor(
             session=session,
             verifier=_verification_tool(services),
+            search=services.search,
             timeout_seconds=settings.request_timeout_seconds,
         ),
     )
