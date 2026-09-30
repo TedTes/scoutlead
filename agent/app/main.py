@@ -63,8 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(leads_router)
     app.include_router(messages_router)
     app.include_router(outcomes_router)
-    if settings.territories_enabled:
-        app.include_router(territories_router)
+    app.include_router(territories_router)
     app.include_router(webhooks_router)
     app.include_router(workspaces_router)
     app.include_router(unsubscribe_router)

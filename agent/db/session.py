@@ -271,6 +271,12 @@ def _ensure_campaign_runtime_columns(engine: Engine) -> None:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN icp_preset_id VARCHAR(255)"))
         if "source_preset_id" not in existing_columns:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN source_preset_id VARCHAR(255)"))
+        if "source_input" not in existing_columns:
+            connection.execute(text("ALTER TABLE campaigns ADD COLUMN source_input TEXT"))
+        if "source_inputs" not in existing_columns:
+            connection.execute(
+                text("ALTER TABLE campaigns ADD COLUMN source_inputs JSON NOT NULL DEFAULT '{}'")
+            )
         if "territory_id" not in existing_columns:
             connection.execute(text("ALTER TABLE campaigns ADD COLUMN territory_id VARCHAR(64)"))
         if "ix_campaigns_territory_id" not in existing_indexes:

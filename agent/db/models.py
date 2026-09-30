@@ -126,6 +126,8 @@ class CampaignModel(TimestampMixin, Base):
     goal_type: Mapped[str] = mapped_column(String(32), nullable=False, default="learn")
     icp_preset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_preset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_inputs: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     stage: Mapped[str] = mapped_column(String(64), nullable=False)
     max_leads: Mapped[int] = mapped_column(Integer, nullable=False)

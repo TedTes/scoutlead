@@ -35,8 +35,6 @@ class CampaignRepository:
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:
         data = campaign.model_dump(mode="json")
-        data.pop("source_input", None)
-        data.pop("source_inputs", None)
         self._assert_product_in_scope(data["product_id"])
         requested_name = data.pop("name") or f"Campaign {utcnow().date().isoformat()}"
         model = CampaignModel(
