@@ -2368,7 +2368,7 @@ function ContactDrawer({
                           {displayUrl(website)}
                         </a>
                       ) : (
-                        <span>No website found</span>
+                        <span>{contactWebsitePresenceLabel(contact)}</span>
                       )}
                     </DrawerRow>
                     </dl>
@@ -3191,6 +3191,16 @@ function contactListPrimarySignal(contact: DiscoveryResult) {
   if (bulkOutreachEmail(contact)) return "Public email available";
   if (getPhone(contact)) return "Public phone available";
   return "Public business listing available";
+}
+
+function contactWebsitePresenceLabel(contact: DiscoveryResult) {
+  for (const raw of getRawObjects(contact).reverse()) {
+    const value = getRawValue(raw, "website_presence.label")
+      ?? getRawValue(raw, "website_presence_label")
+      ?? getRawValue(raw, "raw_payload.website_presence.label");
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "No website listed";
 }
 
 function contactDrawerSummary(contact: DiscoveryResult) {
