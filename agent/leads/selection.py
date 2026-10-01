@@ -47,11 +47,16 @@ def _opportunity_rank(lead: LeadRead) -> tuple[int, int, float, float]:
 def _matches_website_policy(lead: LeadRead, website_policy: str) -> bool:
     signal_keys = opportunity_signal_keys_from_sources(lead.raw_sources)
     if website_policy == "missing":
-        return "no_website_found" in signal_keys
+        return bool(signal_keys & {"no_website_listed", "no_website_found"})
     if website_policy == "missing_or_unavailable":
         return bool(
             signal_keys
-            & {"no_website_found", "website_unavailable", "website_parked"}
+            & {
+                "no_website_listed",
+                "no_website_found",
+                "website_unavailable",
+                "website_parked",
+            }
         )
     return True
 

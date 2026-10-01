@@ -32,9 +32,10 @@ def test_standard_results_are_not_opportunity_filtered() -> None:
     assert select_campaign_results(campaign, leads) == leads
 
 
-def test_strict_missing_website_results_require_confirmed_absence_signal() -> None:
+def test_strict_missing_website_results_include_listed_and_confirmed_absence() -> None:
     campaign = _campaign(requested_count=5, website_policy="missing")
     leads = [
+        _lead("not-listed", opportunity_score=35, level="moderate", signal="no_website_listed"),
         _lead("confirmed-absent", opportunity_score=65, level="high", signal="no_website_found"),
         _lead("site-found", opportunity_score=0, level="none", signal="website_found_during_confirmation"),
         _lead("unavailable", opportunity_score=65, level="high", signal="website_unavailable"),
@@ -42,12 +43,13 @@ def test_strict_missing_website_results_require_confirmed_absence_signal() -> No
 
     selected = select_campaign_results(campaign, leads)
 
-    assert [lead.id for lead in selected] == ["confirmed-absent"]
+    assert [lead.id for lead in selected] == ["confirmed-absent", "not-listed"]
 
 
 def test_missing_or_unavailable_results_reject_active_website_signals() -> None:
     campaign = _campaign(requested_count=5, website_policy="missing_or_unavailable")
     leads = [
+        _lead("not-listed", opportunity_score=35, level="moderate", signal="no_website_listed"),
         _lead("confirmed-absent", opportunity_score=65, level="high", signal="no_website_found"),
         _lead("unavailable", opportunity_score=65, level="high", signal="website_unavailable"),
         _lead("parked", opportunity_score=65, level="high", signal="website_parked"),
@@ -56,7 +58,12 @@ def test_missing_or_unavailable_results_reject_active_website_signals() -> None:
 
     selected = select_campaign_results(campaign, leads)
 
-    assert {lead.id for lead in selected} == {"confirmed-absent", "unavailable", "parked"}
+    assert {lead.id for lead in selected} == {
+        "not-listed",
+        "confirmed-absent",
+        "unavailable",
+        "parked",
+    }
 
 
 def test_opportunity_results_exclude_disqualified_businesses() -> None:

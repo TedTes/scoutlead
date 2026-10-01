@@ -264,6 +264,76 @@ def test_missing_or_unavailable_policy_keeps_sites_for_availability_audit() -> N
     )
 
 
+def test_missing_or_unavailable_policy_paginates_past_prominent_websites(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class PageResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self.payload
+
+    def place(index: int, *, website: bool) -> dict:
+        return {
+            "id": f"place_{index}",
+            "displayName": {"text": f"Painter {index}"},
+            "formattedAddress": "Toronto, ON",
+            "nationalPhoneNumber": f"(416) 555-{index:04d}",
+            "googleMapsUri": f"https://maps.google.com/?cid={index}",
+            "businessStatus": "OPERATIONAL",
+            "userRatingCount": 100 - index,
+            **({"websiteUri": f"https://painter-{index}.example"} if website else {}),
+        }
+
+    def fake_post(url, *, timeout, headers, json):
+        calls.append(json)
+        if "pageToken" not in json:
+            return PageResponse(
+                {
+                    "places": [place(1, website=True), place(2, website=True)],
+                    "nextPageToken": "page-2",
+                }
+            )
+        return PageResponse({"places": [place(3, website=False)]})
+
+    monkeypatch.setattr("tools.discovery.google_places.httpx.post", fake_post)
+    source = CampaignSourceRead(
+        id="campaign_source_1",
+        campaign_id="campaign_1",
+        slot=CampaignSourceSlot.DISCOVERY,
+        provider_id="google_places",
+        mode=CampaignSourceMode.ACCUMULATE,
+        input={
+            "query": "painters Toronto ON",
+            "website_policy": "missing_or_unavailable",
+        },
+        config={"limit": 2, "region_code": "CA"},
+        priority=10,
+        enabled=True,
+        created_at="2026-08-20T00:00:00Z",
+        updated_at="2026-08-20T00:00:00Z",
+    )
+    campaign = _campaign_context(max_leads=2)
+    campaign["source_inputs"] = {"requested_result_count": 1}
+
+    result = GooglePlacesDiscoveryAdapter(api_key="test-key").run(
+        source,
+        {"product": _product_context(), "campaign": campaign},
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["pageSize"] == 20
+    assert calls[1]["pageToken"] == "page-2"
+    assert result.data[0]["title"] == "Painter 3"
+    assert result.data[0]["raw"]["website_presence_status"] == "no_website_listed"
+
+
 def test_google_places_deduplicates_distinct_place_ids_with_same_name_and_phone() -> None:
     first = {
         "id": "place-1",

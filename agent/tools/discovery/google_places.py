@@ -15,6 +15,7 @@ from tools.search import SearchResult
 
 
 DEFAULT_GOOGLE_PLACES_ENDPOINT = "https://places.googleapis.com/v1/places:searchText"
+MAX_TEXT_SEARCH_PAGES_PER_QUERY = 3
 GOOGLE_PLACES_FIELD_MASK = ",".join(
     [
         "nextPageToken",
@@ -63,11 +64,19 @@ class GooglePlacesDiscoveryAdapter:
         queries = self._queries(source=source, product=product)
         query = queries[0]
         limit = int(source.config.get("limit") or campaign.max_leads)
-        page_size = max(1, min(math.ceil(limit / len(queries)), 20))
         website_policy = str(
             source.config.get("website_policy")
             or source.input.get("website_policy")
             or "any"
+        )
+        requested_result_count = int(
+            (campaign.source_inputs or {}).get("requested_result_count") or limit
+        )
+        missing_website_target = min(limit, requested_result_count)
+        page_size = (
+            20
+            if website_policy == "missing_or_unavailable"
+            else max(1, min(math.ceil(limit / len(queries)), 20))
         )
 
         request_body: dict[str, Any] = {
@@ -91,6 +100,7 @@ class GooglePlacesDiscoveryAdapter:
             places: list[tuple[dict[str, Any], str]] = []
             seen_place_keys: set[str] = set()
             continuations: list[tuple[str, str]] = []
+            pages_loaded: dict[str, int] = {}
 
             def fetch_page(
                 search_query: str,
@@ -130,25 +140,39 @@ class GooglePlacesDiscoveryAdapter:
 
             for search_query in queries:
                 token = fetch_page(search_query, size=page_size)
+                pages_loaded[search_query] = 1
                 if token:
                     continuations.append((search_query, token))
 
             seen_tokens: set[tuple[str, str]] = set()
-            while len(places) < limit and continuations:
+            while continuations and self._needs_more_places(
+                places=places,
+                website_policy=website_policy,
+                limit=limit,
+                missing_website_target=missing_website_target,
+            ):
                 search_query, token = continuations.pop(0)
                 token_key = (search_query, token)
-                if token_key in seen_tokens:
+                if (
+                    token_key in seen_tokens
+                    or pages_loaded.get(search_query, 0) >= MAX_TEXT_SEARCH_PAGES_PER_QUERY
+                ):
                     continue
                 seen_tokens.add(token_key)
                 next_token = fetch_page(
                     search_query,
-                    size=min(20, limit - len(places)),
+                    size=(
+                        20
+                        if website_policy == "missing_or_unavailable"
+                        else min(20, max(1, limit - len(places)))
+                    ),
                     page_token=token,
                 )
+                pages_loaded[search_query] = pages_loaded.get(search_query, 0) + 1
                 if next_token:
                     continuations.append((search_query, next_token))
             if website_policy == "missing_or_unavailable":
-                places.sort(key=lambda item: bool(item[0].get("websiteUri")))
+                places.sort(key=self._opportunity_priority)
             return [
                 self._to_search_result(
                     place=place,
@@ -260,6 +284,31 @@ class GooglePlacesDiscoveryAdapter:
         if website_policy == "missing":
             return reachable_business and not place.get("websiteUri")
         return reachable_business
+
+    @staticmethod
+    def _needs_more_places(
+        *,
+        places: list[tuple[dict[str, Any], str]],
+        website_policy: str,
+        limit: int,
+        missing_website_target: int,
+    ) -> bool:
+        if website_policy != "missing_or_unavailable":
+            return len(places) < limit
+        missing_count = sum(1 for place, _query in places if not place.get("websiteUri"))
+        return missing_count < missing_website_target
+
+    @staticmethod
+    def _opportunity_priority(item: tuple[dict[str, Any], str]) -> tuple[int, int, float]:
+        place, _query = item
+        has_website = bool(place.get("websiteUri"))
+        review_count = place.get("userRatingCount")
+        rating = place.get("rating")
+        return (
+            1 if has_website else 0,
+            int(review_count) if isinstance(review_count, int | float) else 1_000_000,
+            float(rating) if isinstance(rating, int | float) else 5.0,
+        )
 
     @staticmethod
     def _place_keys(place: dict[str, Any]) -> set[str]:

@@ -168,8 +168,8 @@ class BusinessOpportunityAuditor:
                 if confirmation_attempted
                 else "Google Business Profile has no website listed."
             )
-            points = 65 if confirmation_attempted else 10
-            level = "high" if confirmation_attempted else "low"
+            points = 65 if confirmation_attempted else 35
+            level = "high" if confirmation_attempted else "moderate"
             raw = _website_presence_evidence(
                 business=business,
                 phone=phone,

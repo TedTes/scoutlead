@@ -39,7 +39,7 @@ def test_campaign_opportunity_audit_refreshes_existing_evidence(monkeypatch) -> 
     assert captured["refresh"] is True
 
 
-def test_campaign_opportunity_audit_keeps_unconfirmed_absence_low_confidence(monkeypatch) -> None:
+def test_campaign_opportunity_audit_keeps_unconfirmed_absence_reviewable(monkeypatch) -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -95,7 +95,8 @@ def test_campaign_opportunity_audit_keeps_unconfirmed_absence_low_confidence(mon
         session.refresh(lead)
         opportunity = opportunity_evidence_from_sources(lead.raw_sources)
         assert opportunity is not None
-        assert opportunity["level"] == "low"
+        assert opportunity["level"] == "moderate"
+        assert opportunity["score"] == 35
         assert opportunity["signals"][0]["key"] == "no_website_listed"
         assert opportunity["signals"][0]["message"] == (
             "Google Business Profile has no website listed."
