@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
-from agent_runs.schemas import AgentRunCreate
-from agent_runs.service import AgentRunService
-from agents.llm import LLMClient
+from business_index.repository import BusinessIndexRepository
+from business_index.schemas import BusinessIndexSearch, OpportunityType
+from business_index.search import BusinessIndexSearchService
 from campaign_sources.schemas import CampaignSourceSlot
-from campaigns.schemas import CampaignCreate, CampaignGoalType, CampaignRead
+from campaigns.schemas import (
+    CampaignCreate,
+    CampaignGoalType,
+    CampaignRead,
+    CampaignStatus,
+)
 from campaigns.service import CampaignService
 from evaluation.digital_opportunity import (
     product_requires_digital_opportunity,
@@ -14,6 +20,7 @@ from evaluation.digital_opportunity import (
 )
 from products.repository import ProductRepository
 from products.schemas import ProductRead
+from job_queue.service import QueueService
 from shared.errors import ValidationError
 from shared.utils import utcnow
 from source_requests.compiler import SourceRequestCompiler
@@ -32,8 +39,8 @@ class SourceRequestService:
         *,
         products: ProductRepository,
         campaigns: CampaignService,
-        agent_runs: AgentRunService,
-        llm: LLMClient,
+        agent_runs: Any | None = None,
+        llm: Any | None = None,
         apify_source_provider_id: str = "apify_actor",
         apify_source_label: str = "Kijiji",
         apify_sources: list[dict[str, Any]] | None = None,
@@ -44,8 +51,8 @@ class SourceRequestService:
     ) -> None:
         self.products = products
         self.campaigns = campaigns
-        self.agent_runs = agent_runs
-        self.compiler = SourceRequestCompiler(llm=llm)
+        del agent_runs, llm
+        self.compiler = SourceRequestCompiler()
         self.apify_source_provider_id = apify_source_provider_id
         self.apify_source_label = apify_source_label
         self.google_places_configured = (
@@ -109,9 +116,15 @@ class SourceRequestService:
             product_requires_digital_opportunity(product)
             or text_requires_digital_opportunity(request.prompt)
         )
-        candidate_pool_size = _candidate_pool_size(
-            requested_count=plan.max_results,
-            over_source=requires_digital_opportunity,
+        intent = plan.intent
+        if intent is None:
+            raise ValidationError("source request could not be interpreted")
+        segment = BusinessIndexRepository(self.products.session).resolve_or_create_segment(
+            product_id=product.id,
+            business_category=intent.business_category,
+            market_label=intent.location or intent.country,
+            source_plan=[task.model_dump(mode="json") for task in plan.tasks],
+            target_business_count=plan.max_results,
         )
         source_selection = (
             "google_places_local_business"
@@ -136,39 +149,70 @@ class SourceRequestService:
                         plan.intent.model_dump(mode="json") if plan.intent else None
                     ),
                     "requested_result_count": plan.max_results,
-                    "candidate_pool_size": candidate_pool_size,
+                    "business_index_segment_id": segment.id,
+                    "business_index_contract": {
+                        "niche_id": segment.niche_id,
+                        "market_key": segment.market_key,
+                        "opportunity_type": _opportunity_type(request, plan).value,
+                        "evidence_max_age_days": request.evidence_max_age_days,
+                        "result_count": plan.max_results,
+                    },
                     "requires_digital_opportunity": requires_digital_opportunity,
                     **plan.source_inputs,
                 },
-                max_leads=candidate_pool_size,
+                max_leads=plan.max_results,
                 channels=["manual"],
             )
         )
         if not request.run_immediately:
-            return SourceRequestRun(plan=plan, run=run, summary=None)
-
-        agent_run = self.agent_runs.create(AgentRunCreate(campaign_id=run.id))
-        summary = self.campaigns.run_contact_listing(run.id, agent_run_id=agent_run.id)
-        if requires_digital_opportunity:
-            results = self.campaigns.results(run.id)
-            summary = summary.model_copy(
-                update={
-                    "discovered_lead_count": len(results),
-                    "researched_lead_count": sum(1 for lead in results if lead.research),
-                    "contacted_lead_count": sum(1 for lead in results if lead.contact_email),
-                    "verified_lead_count": sum(
-                        1
-                        for lead in results
-                        if lead.verification_status.value != "unverified"
-                    ),
-                    "qualified_lead_count": sum(
-                        1
-                        for lead in results
-                        if lead.qualification and lead.qualification.qualified
-                    ),
-                }
+            return SourceRequestRun(
+                plan=plan,
+                run=run,
+                summary=None,
+                state="ready",
+                current_result_count=0,
+                requested_result_count=plan.max_results,
             )
-        return SourceRequestRun(plan=plan, run=summary.campaign, summary=summary)
+
+        matches = BusinessIndexSearchService(self.products.session).search(
+            BusinessIndexSearch(
+                niche_id=segment.niche_id,
+                market_key=segment.market_key,
+                opportunity_type=_opportunity_type(request, plan),
+                evidence_fresh_after=utcnow()
+                - timedelta(days=request.evidence_max_age_days),
+                result_count=plan.max_results,
+            )
+        )
+        self.campaigns.materialize_existing_matches(run.id, matches)
+        current_count = len(self.campaigns.results(run.id))
+        deficit = max(0, plan.max_results - current_count)
+        if deficit and plan.tasks:
+            run = self.campaigns.campaigns.update_status(
+                run.id,
+                CampaignStatus.EXPANDING,
+                commit=False,
+            )
+            QueueService(self.products.session).enqueue_business_index_refresh(
+                segment_id=segment.id,
+                campaign_id=run.id,
+                requested_deficit=deficit,
+                commit=False,
+            )
+            self.products.session.commit()
+            self.products.session.refresh(run)
+            state = CampaignStatus.EXPANDING.value
+        else:
+            run = self.campaigns.campaigns.update_status(run.id, CampaignStatus.COMPLETED)
+            state = "ready"
+        return SourceRequestRun(
+            plan=plan,
+            run=CampaignRead.model_validate(run),
+            summary=None,
+            state=state,
+            current_result_count=current_count,
+            requested_result_count=plan.max_results,
+        )
 
     def rerun(self, run_id: str, *, run_immediately: bool = True) -> SourceRequestRun:
         run = CampaignRead.model_validate(self.campaigns.get(run_id))
@@ -176,6 +220,10 @@ class SourceRequestService:
 
     def _rerun_request(self, run: CampaignRead, *, run_immediately: bool) -> SourceRequestCreate:
         source_inputs = run.source_inputs or {}
+        saved_intent = source_inputs.get("source_request_intent")
+        saved_intent = saved_intent if isinstance(saved_intent, dict) else {}
+        index_contract = source_inputs.get("business_index_contract")
+        index_contract = index_contract if isinstance(index_contract, dict) else {}
         source = _string_value(
             source_inputs.get("source_request_source")
             or source_inputs.get("source_provider_id")
@@ -224,6 +272,15 @@ class SourceRequestService:
                 or run.max_leads
             ),
             run_immediately=run_immediately,
+            business_category=_string_value(saved_intent.get("business_category")) or None,
+            geography=_string_value(
+                saved_intent.get("location") or saved_intent.get("country")
+            )
+            or None,
+            opportunity_type=_string_value(index_contract.get("opportunity_type")) or None,
+            evidence_max_age_days=(
+                _positive_int(index_contract.get("evidence_max_age_days")) or 30
+            ),
         )
 
     @staticmethod
@@ -287,12 +344,6 @@ def _truncate_name(value: str, max_length: int = 64) -> str:
     return f"{cleaned[: max_length - 1].rstrip()}…"
 
 
-def _candidate_pool_size(*, requested_count: int, over_source: bool) -> int:
-    if not over_source:
-        return requested_count
-    return min(60, max(requested_count + 15, requested_count * 2))
-
-
 def _apify_source_is_configured(source: dict[str, Any]) -> bool:
     return bool(
         source.get("api_token")
@@ -311,3 +362,27 @@ def _positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _opportunity_type(
+    request: SourceRequestCreate,
+    plan: SourceRequestPlan,
+) -> OpportunityType:
+    explicit = _string_value(request.opportunity_type)
+    if explicit:
+        try:
+            return OpportunityType(explicit)
+        except ValueError as exc:
+            raise ValidationError(
+                "unsupported opportunity type",
+                {
+                    "opportunity_type": explicit,
+                    "supported": [item.value for item in OpportunityType],
+                },
+            ) from exc
+    website_policy = _string_value(plan.source_inputs.get("website_policy"))
+    if website_policy == "missing":
+        return OpportunityType.MISSING_WEBSITE
+    if website_policy in {"missing_or_unavailable", "weak_or_missing"}:
+        return OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE
+    return OpportunityType.ANY

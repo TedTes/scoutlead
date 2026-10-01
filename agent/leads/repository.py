@@ -141,7 +141,7 @@ class LeadRepository:
         self.session.refresh(model)
         return model
 
-    def create_from_cached_result(
+    def create_from_existing_match(
         self,
         campaign_id: str,
         product_id: str,
@@ -182,7 +182,7 @@ class LeadRepository:
             contact_email=contact_email,
             geography=str(result.get("geography") or business.geography or ""),
             description=str(result.get("snippet") or business.semantic_text or ""),
-            source=str(result.get("source") or raw.get("provider_id") or "canonical_cache"),
+            source=str(result.get("source") or raw.get("provider_id") or "business_index"),
             status=LeadStatus.DISCOVERED.value,
             review_status=LeadReviewStatus.UNREVIEWED.value,
             verification_status=verification_status,
@@ -198,6 +198,15 @@ class LeadRepository:
         self.session.commit()
         self.session.refresh(model)
         return model
+
+    def create_from_cached_result(
+        self,
+        campaign_id: str,
+        product_id: str,
+        result: dict[str, Any],
+    ) -> LeadModel:
+        """Compatibility alias for callers that still use the old cache name."""
+        return self.create_from_existing_match(campaign_id, product_id, result)
 
     def create_from_candidate(self, candidate: DiscoveryCandidateModel) -> LeadModel:
         self._assert_product_in_scope(candidate.product_id)

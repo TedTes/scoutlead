@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from agents.llm import LLMClient
 from evaluation.digital_opportunity import (
     product_requires_digital_opportunity,
     text_requires_digital_opportunity,
@@ -14,7 +13,6 @@ from products.discovery_policy import (
     normalize_places_region_code,
 )
 from products.schemas import ProductRead
-from prompts.source_intent import SOURCE_INTENT_PROMPT, SOURCE_INTENT_SYSTEM
 from shared.errors import ValidationError
 from shared.utils import normalize_text, truncate
 from source_requests.schemas import (
@@ -36,12 +34,23 @@ URL_INPUT_KINDS = {
     SourceProviderKind.SEARCH_URL.value,
     SourceProviderKind.CLASSIFIED_SEARCH_URL.value,
 }
+DEFAULT_SOURCE_RESULT_QUOTA = 25
+
+_REQUEST_PREFIX_RE = re.compile(
+    r"^(?:please\s+)?(?:find|list|show|search\s+for|look\s+for)\s+",
+    flags=re.IGNORECASE,
+)
+_CONTACT_SUFFIX_RE = re.compile(
+    r"\s+(?:business|businesses|company|companies|contacts?|leads?)\s*$",
+    flags=re.IGNORECASE,
+)
+_REQUEST_QUALIFIER_RE = re.compile(
+    r"\s+(?:with|without|that\s+have|that\s+do\s+not\s+have)\s+.+$",
+    flags=re.IGNORECASE,
+)
 
 
 class SourceRequestCompiler:
-    def __init__(self, *, llm: LLMClient) -> None:
-        self.llm = llm
-
     def compile_google_places(
         self,
         *,
@@ -93,10 +102,12 @@ class SourceRequestCompiler:
                     query=query,
                     stage=1,
                     priority=10,
-                    max_results=request.max_results,
+                    max_results=min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA),
                     reason="Primary structured local-business discovery.",
                     input={
                         "search_queries": queries,
+                        "business_category": intent.business_category,
+                        "location": intent.location,
                         "website_policy": website_policy,
                     },
                     config={
@@ -119,8 +130,11 @@ class SourceRequestCompiler:
         source_id = str(source_config.get("id") or request.source).strip()
         source_label = str(source_config.get("label") or source_id)
         intent = intent or self._interpret(request=request, product=product, source=source_id)
+        quota_request = request.model_copy(
+            update={"max_results": min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA)}
+        )
         values = _template_values(
-            request=request,
+            request=quota_request,
             product=product,
             source_config=source_config,
             intent=intent,
@@ -156,8 +170,12 @@ class SourceRequestCompiler:
                     query=query,
                     stage=3,
                     priority=30,
-                    max_results=request.max_results,
+                    max_results=min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA),
                     reason=f"Configured fallback discovery through {source_label}.",
+                    input={
+                        "business_category": intent.business_category,
+                        "location": intent.location,
+                    },
                     config={
                         "actor_input": actor_input,
                         "result_mapping": source_config.get("result_mapping"),
@@ -188,7 +206,10 @@ class SourceRequestCompiler:
         queries = list(google_plan.source_inputs.get("search_queries") or [google_plan.query])
         tasks: list[SourceTask] = []
         if google_places_configured:
-            tasks.extend(google_plan.tasks)
+            tasks.extend(
+                task.model_copy(update={"max_results": DEFAULT_SOURCE_RESULT_QUOTA})
+                for task in google_plan.tasks
+            )
         if openstreetmap_enabled:
             tasks.append(
                 SourceTask(
@@ -196,7 +217,7 @@ class SourceRequestCompiler:
                     query=intent.search_query,
                     stage=2,
                     priority=20,
-                    max_results=request.max_results,
+                    max_results=DEFAULT_SOURCE_RESULT_QUOTA,
                     reason="Expand local-business coverage with open map data.",
                     input={
                         "business_category": intent.business_category,
@@ -206,20 +227,24 @@ class SourceRequestCompiler:
                     config={"website_policy": website_policy},
                 )
             )
-        if search_configured and website_policy != "missing":
+        if search_configured:
             tasks.append(
                 SourceTask(
                     provider_id=CONFIGURED_SEARCH_PROVIDER_ID,
                     query=intent.search_query,
                     stage=2,
                     priority=25,
-                    max_results=request.max_results,
+                    max_results=DEFAULT_SOURCE_RESULT_QUOTA,
                     reason="Expand coverage through public-web business results.",
-                    input={"source_type": "web_search"},
+                    input={
+                        "source_type": "web_search",
+                        "business_category": intent.business_category,
+                        "location": intent.location,
+                    },
                     config={"website_policy": website_policy},
                 )
             )
-        if search_configured and website_policy != "missing":
+        if search_configured:
             for index, recipe in enumerate(source_recipes):
                 query = _render_search_recipe(recipe, intent=intent, product=product)
                 if not query:
@@ -231,8 +256,8 @@ class SourceRequestCompiler:
                         stage=int(recipe.get("stage") or 3),
                         priority=int(recipe.get("priority") or 40 + index),
                         max_results=min(
-                            request.max_results,
-                            int(recipe.get("max_results") or request.max_results),
+                            DEFAULT_SOURCE_RESULT_QUOTA,
+                            int(recipe.get("max_results") or DEFAULT_SOURCE_RESULT_QUOTA),
                         ),
                         reason=str(
                             recipe.get("reason")
@@ -241,6 +266,8 @@ class SourceRequestCompiler:
                         input={
                             "source_type": "web_search",
                             "source_recipe_id": recipe["id"],
+                            "business_category": intent.business_category,
+                            "location": intent.location,
                         },
                         config={"website_policy": website_policy},
                     )
@@ -250,16 +277,14 @@ class SourceRequestCompiler:
             if not source_id:
                 continue
             apify_plan = self.compile_apify_source(
-                request=request,
+                request=request.model_copy(update={"max_results": DEFAULT_SOURCE_RESULT_QUOTA}),
                 product=product,
                 source_config=source_config,
                 intent=intent,
             )
-            tasks.extend(apify_plan.tasks)
-        if not tasks:
-            raise ValidationError(
-                "no discovery source is configured",
-                {"source": AUTO_PROVIDER_ID},
+            tasks.extend(
+                task.model_copy(update={"max_results": DEFAULT_SOURCE_RESULT_QUOTA})
+                for task in apify_plan.tasks
             )
         return SourceRequestPlan(
             source=AUTO_PROVIDER_ID,
@@ -268,7 +293,8 @@ class SourceRequestCompiler:
             max_results=request.max_results,
             source_preset_id="dynamic-discovery",
             explanation=(
-                "Use configured discovery sources in stages until enough candidates are found."
+                "Search the business index immediately, then use every configured live "
+                "discovery source to expand coverage in the background."
             ),
             intent=intent,
             source_inputs={
@@ -287,24 +313,23 @@ class SourceRequestCompiler:
         product: ProductRead,
         source: str,
     ) -> SourceRequestIntent:
-        prompt = "\n".join(
-            [
-                SOURCE_INTENT_PROMPT,
-                f"Source: {source}",
-                f"Request: {request.prompt}",
-                f"Product: {product.model_dump(mode='json')}",
-            ]
+        category, location = _deterministic_request_scope(
+            prompt=request.prompt,
+            explicit_category=request.business_category,
+            explicit_geography=request.geography,
+            default_category=product.target_customer,
+            default_geography=product.target_geography,
         )
-        return self.llm.generate_object(
-            task="source_request_intent",
-            system=SOURCE_INTENT_SYSTEM,
-            prompt=prompt,
-            response_model=SourceRequestIntent,
-            context={
-                "source": source,
-                "request": request.model_dump(mode="json"),
-                "product": product.model_dump(mode="json"),
-            },
+        search_query = normalize_text(f"{category} in {location}")
+        return SourceRequestIntent(
+            business_category=category,
+            location=location,
+            country=_country_hint(location or product.target_geography),
+            required_signals=_required_signals(request.prompt),
+            excluded_result_types=["directories", "closed businesses", "national chains"],
+            search_query=search_query,
+            confidence=90 if request.business_category and request.geography else 75,
+            rationale="Deterministically parsed from structured fields and the request text.",
         )
 
     @staticmethod
@@ -418,6 +443,75 @@ def _render_search_recipe(
         "domain": normalize_text(recipe.get("domain")),
     }
     return normalize_text(_render_template(str(recipe.get("query_template") or ""), values))
+
+
+def _deterministic_request_scope(
+    *,
+    prompt: str,
+    explicit_category: str | None,
+    explicit_geography: str | None,
+    default_category: str,
+    default_geography: str,
+) -> tuple[str, str]:
+    normalized = normalize_text(prompt)
+    category_part = normalized
+    location_part = ""
+    match = re.match(r"^(?P<category>.+?)\s+in\s+(?P<location>.+)$", normalized, flags=re.I)
+    if match:
+        category_part = normalize_text(match.group("category"))
+        location_part = normalize_text(match.group("location"))
+    category = normalize_text(explicit_category) or _clean_category(category_part)
+    location = normalize_text(explicit_geography) or _clean_location(location_part)
+    if not category:
+        category = _clean_category(default_category) or "local businesses"
+    if not location:
+        location = normalize_text(default_geography)
+    if not location:
+        raise ValidationError(
+            "search request needs a geography",
+            {"user_message": "Add a city or region to the search."},
+        )
+    return category, location
+
+
+def _clean_category(value: str) -> str:
+    cleaned = _REQUEST_PREFIX_RE.sub("", normalize_text(value))
+    cleaned = re.sub(
+        r"\b(?:contact|lead)\s+(?:details|information|info)\b",
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = _CONTACT_SUFFIX_RE.sub("", cleaned)
+    return normalize_text(cleaned.strip(" ,.-"))
+
+
+def _clean_location(value: str) -> str:
+    cleaned = _REQUEST_QUALIFIER_RE.sub("", normalize_text(value))
+    return normalize_text(cleaned.strip(" ,.-"))
+
+
+def _required_signals(prompt: str) -> list[str]:
+    lower = prompt.lower()
+    signals = []
+    if any(term in lower for term in ("no website", "without a website", "missing website")):
+        signals.append("no website")
+    if any(term in lower for term in ("dead website", "inactive website", "broken website")):
+        signals.append("unavailable website")
+    if "phone" in lower:
+        signals.append("phone")
+    if "email" in lower:
+        signals.append("email")
+    return signals
+
+
+def _country_hint(value: str) -> str:
+    lower = value.lower()
+    if "canada" in lower or re.search(r"\b(?:on|bc|ab|qc|mb|sk|ns|nb|nl|pe)\b", lower):
+        return "Canada"
+    if "united states" in lower or " usa" in f" {lower}" or re.search(r"\b[A-Z]{2}\b", value):
+        return "United States"
+    return ""
 
 
 def _split_location(location: str) -> tuple[str, str, str]:

@@ -1,10 +1,12 @@
 from sqlalchemy.orm import Session
 
 from app.dependencies import AppServices
+from business_index.refresh import BusinessIndexRefreshService
 from campaigns.service import CampaignService
 from territories.opportunity_audit import BusinessOpportunityAuditor
 from territories.refresh import TerritoryRefreshService
 from tools.verify import EmailVerificationTool
+from tools.source_registry import SourceAdapterRegistry
 
 
 def campaign_service(
@@ -73,6 +75,46 @@ def territory_refresh_service(
             search=services.search,
             timeout_seconds=settings.request_timeout_seconds,
         ),
+    )
+
+
+def business_index_refresh_service(
+    *,
+    session: Session,
+    services: AppServices,
+) -> BusinessIndexRefreshService:
+    settings = services.settings
+    return BusinessIndexRefreshService(
+        session=session,
+        registry=SourceAdapterRegistry(
+            search_tool=services.search,
+            google_places_api_key=settings.google_places_api_key,
+            google_places_api_endpoint=settings.google_places_api_endpoint,
+            apify_api_token=settings.apify_api_token,
+            apify_api_base_url=settings.apify_api_base_url,
+            apify_source_provider_id=settings.apify_source_provider_id,
+            apify_actor_id=settings.apify_actor_id,
+            apify_actor_input_template=settings.apify_actor_input_template,
+            apify_actor_result_mapping=settings.apify_actor_result_mapping,
+            apify_actor_max_charge_usd=settings.apify_actor_max_charge_usd,
+            apify_sources=settings.apify_source_configs,
+            timeout_seconds=settings.request_timeout_seconds,
+        ),
+        campaigns=campaign_service(session=session, services=services, workspace_id=None),
+        auditor=BusinessOpportunityAuditor(
+            session=session,
+            verifier=_verification_tool(services),
+            search=services.search,
+            timeout_seconds=settings.request_timeout_seconds,
+        ),
+        embedding=services.embedding,
+        discovery_config={
+            "google_places_configured": bool(settings.google_places_api_key),
+            "search_configured": services.search.is_configured,
+            "openstreetmap_enabled": settings.openstreetmap_enabled,
+            "apify_sources": settings.apify_source_configs,
+            "source_recipes": settings.discovery_source_recipe_configs,
+        },
     )
 
 

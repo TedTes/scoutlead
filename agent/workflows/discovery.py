@@ -111,7 +111,7 @@ class DiscoveryWorkflow:
         if not live_website_search:
             for source in sources:
                 source_query = str(source.input.get("query") or campaign.source_input or "").strip()
-                semantic_rows = canonical.list_semantic_discovery_results(
+                semantic_rows = canonical.list_existing_matches(
                     source_inputs=source.input,
                     source_input=source_query,
                     limit=campaign.max_leads,
@@ -137,7 +137,7 @@ class DiscoveryWorkflow:
                     sources_to_run.append(source)
                     continue
                 limit = int(source.config.get("limit") or campaign.max_leads)
-                cached_rows = canonical.list_cached_discovery_results(
+                cached_rows = canonical.list_exact_index_matches(
                     source=source.provider_id,
                     source_input=source.input,
                     limit=limit,

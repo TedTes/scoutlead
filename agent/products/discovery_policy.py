@@ -16,6 +16,16 @@ LOCAL_MARKET_AREAS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+CATEGORY_SEARCH_VARIANTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("paint", "painter"), ("painters", "painting contractors", "house painters")),
+    (("roof", "roofer"), ("roofers", "roofing contractors")),
+    (("plumb", "plumber"), ("plumbers", "plumbing contractors")),
+    (("hvac", "heating", "cooling"), ("HVAC contractors", "heating contractors")),
+    (("electric", "electrician"), ("electricians", "electrical contractors")),
+    (("landscap", "lawn"), ("landscapers", "lawn care companies")),
+    (("clean", "maid"), ("cleaning companies", "house cleaners")),
+)
+
 
 def normalize_places_region_code(value: str | None) -> str | None:
     normalized = (value or "").strip().upper()
@@ -74,7 +84,20 @@ def build_local_business_queries(
     if not areas:
         return [base_query]
     category = _normalized(business_category)
-    return list(dict.fromkeys(f"{category} in {area}" for area in areas))
+    area_queries = [f"{category} in {area}" for area in areas]
+    variant_queries = [
+        f"{variant} in {_normalized(location)}"
+        for variant in _category_search_variants(category)
+    ]
+    return list(dict.fromkeys([*area_queries, *variant_queries]))
+
+
+def _category_search_variants(category: str) -> tuple[str, ...]:
+    normalized = category.lower()
+    for terms, variants in CATEGORY_SEARCH_VARIANTS:
+        if any(term in normalized for term in terms):
+            return tuple(variant for variant in variants if variant.lower() != normalized)
+    return ()
 
 
 def validate_local_business_intent(

@@ -22,3 +22,23 @@ class QueueService:
             dedupe_key=key,
             max_attempts=2,
         )
+
+    def enqueue_business_index_refresh(
+        self,
+        *,
+        segment_id: str,
+        campaign_id: str | None = None,
+        requested_deficit: int = 0,
+        commit: bool = True,
+    ):
+        return self.queue.enqueue_once(
+            JobType.BUSINESS_INDEX_REFRESH,
+            {
+                "segment_id": segment_id,
+                "campaign_id": campaign_id,
+                "requested_deficit": max(0, requested_deficit),
+            },
+            dedupe_key=segment_id,
+            max_attempts=3,
+            commit=commit,
+        )

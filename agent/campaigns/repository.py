@@ -174,6 +174,7 @@ class CampaignRepository:
         *,
         stage: CampaignStage | None = None,
         failure_reason: str | None = None,
+        commit: bool = True,
     ) -> CampaignModel:
         model = self.get(campaign_id)
         current = CampaignStatus(model.status)
@@ -186,8 +187,11 @@ class CampaignRepository:
         if status == CampaignStatus.COMPLETED:
             model.completed_at = utcnow()
             model.stage = CampaignStage.COMPLETE.value
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
 

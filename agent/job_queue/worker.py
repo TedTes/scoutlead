@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 from agent_runs.repository import AgentRunRepository
 from app.config import get_settings
 from app.dependencies import AppServices, create_app_services
-from app.service_factory import campaign_service, territory_refresh_service
+from app.service_factory import (
+    business_index_refresh_service,
+    campaign_service,
+    territory_refresh_service,
+)
+from business_index.scheduler import enqueue_due_business_index_refreshes
 from campaigns.service import CampaignService
 from db.session import create_database
 from db.models import TerritoryModel
@@ -19,6 +24,7 @@ from territories.scheduler import enqueue_due_territories
 
 logger = get_logger(__name__)
 _last_territory_scheduler_tick = 0.0
+_last_business_index_scheduler_tick = 0.0
 _last_outcome_maintenance_date: date | None = None
 
 
@@ -32,10 +38,13 @@ def run_once() -> bool:
     generator = services.db.session()
     session = next(generator)
     try:
-        agent_runs = AgentRunRepository(session)
         _scheduler_tick(session, services)
-        agent_run = agent_runs.claim_next()
-        if agent_run is not None:
+        queue = QueueRepository(session)
+        job = queue.claim_next()
+        if job is None:
+            agent_run = AgentRunRepository(session).claim_next()
+            if agent_run is None:
+                return False
             try:
                 _campaign_service(session=session, services=services).run_campaign(
                     agent_run.campaign_id,
@@ -44,11 +53,6 @@ def run_once() -> bool:
             except Exception:
                 logger.exception("agent_run_failed run_id=%s", agent_run.id)
             return True
-
-        queue = QueueRepository(session)
-        job = queue.claim_next()
-        if job is None:
-            return False
         try:
             if job.type == JobType.CAMPAIGN_RUN.value:
                 _campaign_service(session=session, services=services).run_campaign(
@@ -73,6 +77,11 @@ def run_once() -> bool:
                     services=services,
                     workspace_id=territory.workspace_id,
                 ).refresh(territory_id, scheduled_for=scheduled_for)
+            elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
+                business_index_refresh_service(
+                    session=session,
+                    services=services,
+                ).refresh(str(job.payload["segment_id"]))
             else:
                 raise ValueError(f"unknown job type: {job.type}")
         except Exception as exc:
@@ -105,10 +114,17 @@ def _campaign_service(*, session: Session, services: AppServices) -> CampaignSer
 
 
 def _scheduler_tick(session: Session, services: AppServices) -> None:
+    global _last_business_index_scheduler_tick
     global _last_outcome_maintenance_date, _last_territory_scheduler_tick
+    now = monotonic()
+    if (
+        services.settings.business_index_scheduler_enabled
+        and now - _last_business_index_scheduler_tick >= 60
+    ):
+        enqueue_due_business_index_refreshes(session)
+        _last_business_index_scheduler_tick = now
     if not services.settings.territory_scheduler_enabled:
         return
-    now = monotonic()
     if now - _last_territory_scheduler_tick < 60:
         return
     enqueue_due_territories(session)

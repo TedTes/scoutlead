@@ -32,6 +32,10 @@ class SourceRequestCreate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     max_results: int = Field(default=25, gt=0, le=100)
     run_immediately: bool = True
+    business_category: str | None = None
+    geography: str | None = None
+    opportunity_type: str | None = None
+    evidence_max_age_days: int = Field(default=30, ge=1, le=365)
 
 
 class SourceRequestIntent(BaseModel):
@@ -81,3 +85,6 @@ class SourceRequestRun(BaseModel):
     plan: SourceRequestPlan
     run: CampaignRead
     summary: CampaignRunSummary | None = None
+    state: str = "ready"
+    current_result_count: int = 0
+    requested_result_count: int = 0

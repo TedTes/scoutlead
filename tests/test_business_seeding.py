@@ -226,7 +226,7 @@ def test_business_seed_import_supports_semantic_cache_reuse() -> None:
 
         assert len(rows) == 1
         assert rows[0]["title"] == "Example Solo Painting Co."
-        assert rows[0]["raw"]["semantic_cache_hit"] is True
+        assert rows[0]["raw"]["business_index_semantic_match"] is True
         assert rows[0]["raw"]["niche_membership"]["niche_slug"] == "home_service_painting"
         assert rows[0]["raw"]["niche_membership"]["seed_batch_id"] == "painting-toronto-v1"
 

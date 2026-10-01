@@ -138,7 +138,7 @@ class CanonicalRepository:
             source_observation_id=observation.id,
         )
 
-    def list_cached_discovery_results(
+    def list_exact_index_matches(
         self,
         *,
         source: str,
@@ -183,7 +183,7 @@ class CanonicalRepository:
             seen_business_ids.add(business.id)
             row = _observation_to_search_result(observation, business)
             raw = dict(row.get("raw") or {})
-            raw["exact_cache_hit"] = True
+            raw["business_index_exact_match"] = True
             raw["niche_membership"] = {
                 "id": membership.id,
                 "niche_id": resolution.niche_id,
@@ -203,7 +203,11 @@ class CanonicalRepository:
                 break
         return rows
 
-    def list_semantic_discovery_results(
+    def list_cached_discovery_results(self, **kwargs) -> list[dict[str, Any]]:
+        """Compatibility alias for the former cache-oriented API."""
+        return self.list_exact_index_matches(**kwargs)
+
+    def list_existing_matches(
         self,
         *,
         source_inputs: dict[str, Any],
@@ -265,7 +269,7 @@ class CanonicalRepository:
                 else _business_to_search_result(business)
             )
             raw = dict(row.get("raw") or {})
-            raw["semantic_cache_hit"] = True
+            raw["business_index_semantic_match"] = True
             raw["semantic_similarity"] = (
                 round(match.similarity, 4) if match.similarity is not None else None
             )
@@ -291,6 +295,10 @@ class CanonicalRepository:
             row["raw"] = raw
             rows.append(row)
         return rows
+
+    def list_semantic_discovery_results(self, **kwargs) -> list[dict[str, Any]]:
+        """Compatibility alias for the former cache-oriented API."""
+        return self.list_existing_matches(**kwargs)
 
     def apply_contact_verification(
         self,
@@ -859,7 +867,7 @@ def _observation_to_search_result(
         _first_cached_text(
             raw,
             nested,
-            ("url", "website_url", "websiteUri", "google_maps_url", "googleMapsUri"),
+            ("url", "website_url", "websiteUri"),
         )
         or business.website_url
     )
@@ -880,7 +888,7 @@ def _observation_to_search_result(
         "source": result_source,
         "raw": {
             **raw,
-            "cache_hit": True,
+            "match_origin": "business_index",
             "canonical_business_id": business.id,
             "source_observation_id": observation.id,
         },
@@ -894,9 +902,9 @@ def _business_to_search_result(business: BusinessModel) -> dict[str, Any]:
         "snippet": business.semantic_text,
         "geography": business.geography,
         "contact_email": _first_contact_email(business),
-        "source": "canonical_cache",
+        "source": "business_index",
         "raw": {
-            "cache_hit": True,
+            "match_origin": "business_index",
             "canonical_business_id": business.id,
         },
     }

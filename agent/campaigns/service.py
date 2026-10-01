@@ -276,6 +276,21 @@ class CampaignService:
         ]
         return select_campaign_results(campaign, leads)
 
+    def materialize_existing_matches(
+        self,
+        campaign_id: str,
+        rows: list[dict[str, Any]],
+    ) -> list[LeadRead]:
+        """Append eligible database matches without invoking external tools."""
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        product = ProductRead.model_validate(self.products.get(campaign.product_id))
+        assessed_rows = self._assessed_cached_rows(product=product, rows=rows)
+        return self._create_existing_match_listing(
+            product=product,
+            campaign=campaign,
+            assessed_rows=assessed_rows,
+        )
+
     def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
         return self.campaigns.update(campaign_id, update)
 
@@ -574,7 +589,7 @@ class CampaignService:
                 sequence=1,
                 objective="List contacts from the cached canonical business pool.",
                 input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: self._create_cached_contact_listing(
+                action=lambda _step_id: self._create_existing_match_listing(
                     product=product,
                     campaign=campaign_read,
                     assessed_rows=assessed_rows,
@@ -662,7 +677,7 @@ class CampaignService:
         min_results = min(self.semantic_cache_min_results, campaign.max_leads)
         for source in sources:
             source_query = str(source.input.get("query") or campaign.source_input or "").strip()
-            semantic_rows = canonical.list_semantic_discovery_results(
+            semantic_rows = canonical.list_existing_matches(
                 source_inputs=source.input,
                 source_input=source_query,
                 limit=campaign.max_leads,
@@ -683,7 +698,7 @@ class CampaignService:
         cached_results: list[dict[str, Any]] = []
         for source in sources:
             limit = int(source.config.get("limit") or campaign.max_leads)
-            cached_rows = canonical.list_cached_discovery_results(
+            cached_rows = canonical.list_exact_index_matches(
                 source=source.provider_id,
                 source_input=source.input,
                 limit=limit,
@@ -720,7 +735,7 @@ class CampaignService:
             assessed.append((row, search_result, assess_discovery_candidate(search_result, product)))
         return assessed
 
-    def _create_cached_contact_listing(
+    def _create_existing_match_listing(
         self,
         *,
         product: ProductRead,
@@ -748,7 +763,7 @@ class CampaignService:
             )
             if not assessment.is_promotable or len(discovered) >= campaign.max_leads:
                 continue
-            lead = self.leads.create_from_cached_result(
+            lead = self.leads.create_from_existing_match(
                 campaign_id=campaign.id,
                 product_id=product.id,
                 result=row,
@@ -780,11 +795,15 @@ class CampaignService:
                 product_id=product.id,
                 campaign_id=campaign.id,
                 type=ObservationType.LEAD_QUALITY,
-                content=f"Cached contact listing produced {len(discovered)} leads.",
-                tags=["discovery", "cache", product.target_customer],
+                content=f"Business index produced {len(discovered)} existing matches.",
+                tags=["discovery", "business_index", product.target_customer],
             )
         )
         return discovered
+
+    def _create_cached_contact_listing(self, **kwargs) -> list[LeadRead]:
+        """Compatibility alias for the legacy campaign execution path."""
+        return self._create_existing_match_listing(**kwargs)
 
     def _log_hit_rates(self, *, agent_run_id: str, campaign_id: str, product_id: str) -> None:
         """Surface per-provider hit-rate for this run as a readable observation.

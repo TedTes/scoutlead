@@ -125,10 +125,10 @@ def qualification_rationale(
     if disqualifiers:
         return (
             f"{lead.company_name} needs review "
-            f"because cached evidence raised: {', '.join(disqualifiers[:2])}."
+            f"because indexed evidence raised: {', '.join(disqualifiers[:2])}."
         )
     return (
-        f"{lead.company_name} matched cached public business evidence. "
+        f"{lead.company_name} matched existing public business evidence. "
         "Review the listed signals before outreach."
     )
 
@@ -178,7 +178,7 @@ def source_quality_score_for(*, row: dict[str, Any], lead: LeadRead) -> int:
     enrichment = website_enrichment(row)
 
     score = 35
-    if raw.get("semantic_cache_hit"):
+    if raw.get("business_index_semantic_match") or raw.get("semantic_cache_hit"):
         score += 5
     if lead.website_url:
         score += 20

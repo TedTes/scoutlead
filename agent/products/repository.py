@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from db.models import (
     AgentRunModel,
     AgentStepModel,
+    BusinessIndexSegmentModel,
     CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
@@ -271,6 +272,13 @@ class ProductRepository:
         message_ids = list(
             self.session.scalars(select(MessageModel.id).where(MessageModel.product_id == product_id))
         )
+        business_index_segment_ids = list(
+            self.session.scalars(
+                select(BusinessIndexSegmentModel.id).where(
+                    BusinessIndexSegmentModel.product_id == product_id
+                )
+            )
+        )
 
         if conversation_ids or message_ids:
             event_conditions = []
@@ -299,6 +307,19 @@ class ProductRepository:
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))
         self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.product_id == product_id))
         self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.product_id == product_id))
+        if business_index_segment_ids:
+            self.session.execute(
+                delete(QueueJobModel).where(
+                    QueueJobModel.payload["segment_id"].as_string().in_(
+                        business_index_segment_ids
+                    )
+                )
+            )
+        self.session.execute(
+            delete(BusinessIndexSegmentModel).where(
+                BusinessIndexSegmentModel.product_id == product_id
+            )
+        )
         self.session.execute(delete(CampaignModel).where(CampaignModel.product_id == product_id))
         self.session.execute(
             delete(QueueJobModel).where(QueueJobModel.payload["product_id"].as_string() == product_id)

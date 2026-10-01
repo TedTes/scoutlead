@@ -8,6 +8,7 @@ class JobType(StrEnum):
     CAMPAIGN_RUN = "campaign.run"
     MESSAGE_SEND = "message.send"
     TERRITORY_REFRESH = "territory.refresh"
+    BUSINESS_INDEX_REFRESH = "business_index.refresh"
 
 
 class JobStatus(StrEnum):

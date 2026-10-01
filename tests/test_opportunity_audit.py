@@ -3,7 +3,10 @@ from sqlalchemy.orm import sessionmaker
 
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate
-from canonical.website_enrichment import EnrichmentSummary
+from canonical.website_enrichment import (
+    BusinessWebsiteEnrichment,
+    EnrichmentSummary,
+)
 from db.session import create_database
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from leads.repository import LeadRepository
@@ -115,6 +118,16 @@ def test_website_confirmation_accepts_matching_site_and_rejects_directory() -> N
         "Northside Painting Reviews",
         "Northside Painting Co.",
     ) is None
+    assert _credible_business_website(
+        "https://www.profilecanada.com/northside-painting",
+        "Northside Painting",
+        "Northside Painting Co.",
+    ) is None
+    assert _credible_business_website(
+        "https://ecopainting.ca/",
+        "ECO Painting Services - Toronto",
+        "ECO Painting Services",
+    ) == "https://ecopainting.ca/"
 
 
 def test_campaign_opportunity_audit_confirms_no_website_found(monkeypatch) -> None:
@@ -157,6 +170,10 @@ def test_campaign_opportunity_audit_excludes_site_found_during_confirmation(
         return EnrichmentSummary(dry_run=False)
 
     monkeypatch.setattr("territories.opportunity_audit.enrich_business_pool", fake_enrich)
+    monkeypatch.setattr(
+        "territories.opportunity_audit.WebsiteEnrichmentClient.inspect",
+        _active_website_inspection,
+    )
 
     class WebsiteSearch:
         is_configured = True
@@ -185,6 +202,129 @@ def test_campaign_opportunity_audit_excludes_site_found_during_confirmation(
         assert opportunity["level"] == "none"
         assert opportunity["signals"][0]["key"] == "website_found_during_confirmation"
         assert captured["business_ids"] == []
+
+
+def test_website_confirmation_retries_with_a_broader_query(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+    monkeypatch.setattr(
+        "territories.opportunity_audit.WebsiteEnrichmentClient.inspect",
+        _active_website_inspection,
+    )
+
+    class ProgressiveSearch:
+        is_configured = True
+
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def lookup(self, query: str, limit: int = 5):
+            self.queries.append(query)
+            if len(self.queries) == 1:
+                return []
+            return [
+                SearchResult(
+                    title="Neighborhood Painting - Toronto",
+                    url="https://neighborhoodpainting.ca",
+                )
+            ]
+
+    search = ProgressiveSearch()
+    with session_factory() as session:
+        campaign, lead = _create_no_website_lead(session, website_policy="missing")
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            search=search,
+            timeout_seconds=1,
+        ).audit_campaign(campaign.id, category="painting", market="Toronto")
+
+        session.refresh(lead)
+        assert lead.website_url == "https://neighborhoodpainting.ca"
+        assert len(search.queries) == 2
+
+
+def test_website_confirmation_rejects_a_stale_matching_domain(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+    monkeypatch.setattr(
+        "territories.opportunity_audit.WebsiteEnrichmentClient.inspect",
+        _unavailable_website_inspection,
+    )
+
+    class StaleWebsiteSearch:
+        is_configured = True
+
+        def lookup(self, query: str, limit: int = 5):
+            return [
+                SearchResult(
+                    title="Neighborhood Painting - Toronto",
+                    url="https://neighborhoodpainting.ca",
+                )
+            ]
+
+    with session_factory() as session:
+        campaign, lead = _create_no_website_lead(session, website_policy="missing")
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            search=StaleWebsiteSearch(),
+            timeout_seconds=1,
+        ).audit_campaign(campaign.id, category="painting", market="Toronto")
+
+        session.refresh(lead)
+        opportunity = opportunity_evidence_from_sources(lead.raw_sources)
+        assert lead.website_url is None
+        assert opportunity is not None
+        assert opportunity["signals"][0]["key"] == "no_website_found"
+
+
+def _active_website_inspection(inspector, business):
+    return _website_inspection(
+        business,
+        availability_status="active",
+        inspected_urls=[business.website_url],
+    )
+
+
+def _unavailable_website_inspection(inspector, business):
+    return _website_inspection(
+        business,
+        availability_status="unavailable",
+        inspected_urls=[],
+    )
+
+
+def _website_inspection(business, *, availability_status, inspected_urls):
+    return BusinessWebsiteEnrichment(
+        business_id=business.id,
+        company_name=business.display_name,
+        website_url=business.website_url,
+        inspected_urls=inspected_urls,
+        emails=[],
+        best_email=None,
+        phones=[],
+        contact_name=None,
+        contact_role=None,
+        has_contact_form=False,
+        has_quote_form=False,
+        has_booking_form=False,
+        uses_https=True,
+        has_mobile_viewport=True,
+        quote_signals=[],
+        service_signals=[],
+        source_url=business.website_url,
+        description="",
+        errors=[],
+        availability_status=availability_status,
+        availability_reason="",
+    )
 
 
 def _session_factory():

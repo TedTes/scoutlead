@@ -22,6 +22,7 @@ class QueueRepository:
         *,
         delay_seconds: int = 0,
         max_attempts: int = 3,
+        commit: bool = True,
     ) -> QueueJobModel:
         model = QueueJobModel(
             id=new_id("job"),
@@ -33,8 +34,11 @@ class QueueRepository:
             run_after=utcnow() + timedelta(seconds=delay_seconds),
         )
         self.session.add(model)
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
     def enqueue_once(
@@ -44,6 +48,7 @@ class QueueRepository:
         *,
         dedupe_key: str,
         max_attempts: int = 3,
+        commit: bool = True,
     ) -> QueueJobModel:
         active = list(
             self.session.scalars(
@@ -60,6 +65,7 @@ class QueueRepository:
             job_type,
             {**payload, "dedupe_key": dedupe_key},
             max_attempts=max_attempts,
+            commit=commit,
         )
 
     def claim_next(self) -> QueueJobModel | None:

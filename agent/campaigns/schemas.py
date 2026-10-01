@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class CampaignStatus(StrEnum):
     DRAFT = "draft"
+    EXPANDING = "expanding"
     DISCOVERING = "discovering"
     RESEARCHING = "researching"
     QUALIFYING = "qualifying"

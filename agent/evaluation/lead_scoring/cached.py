@@ -31,7 +31,7 @@ def build_cached_lead_research(
     signals = cached_signals(row=row, lead=lead)
     summary = truncate(
         lead.description
-        or f"{lead.company_name} matched cached business-pool evidence for {product.product_name}.",
+        or f"{lead.company_name} matched existing business-index evidence for {product.product_name}.",
         700,
     )
     return LeadResearch(

@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     semantic_cache_min_results: int = Field(default=5, ge=0, le=100)
     territories_enabled: bool = False
     territory_scheduler_enabled: bool = False
+    business_index_scheduler_enabled: bool = True
     unsubscribe_signing_secret: str | None = None
     public_api_base: str | None = None
     daily_send_cap_per_connection: int = Field(default=50, ge=1, le=1000)

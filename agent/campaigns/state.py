@@ -3,7 +3,18 @@ from shared.errors import WorkflowBoundaryError
 
 
 ALLOWED_CAMPAIGN_TRANSITIONS: dict[CampaignStatus, set[CampaignStatus]] = {
-    CampaignStatus.DRAFT: {CampaignStatus.DISCOVERING, CampaignStatus.PAUSED, CampaignStatus.FAILED},
+    CampaignStatus.DRAFT: {
+        CampaignStatus.EXPANDING,
+        CampaignStatus.DISCOVERING,
+        CampaignStatus.COMPLETED,
+        CampaignStatus.PAUSED,
+        CampaignStatus.FAILED,
+    },
+    CampaignStatus.EXPANDING: {
+        CampaignStatus.COMPLETED,
+        CampaignStatus.PAUSED,
+        CampaignStatus.FAILED,
+    },
     CampaignStatus.DISCOVERING: {CampaignStatus.RESEARCHING, CampaignStatus.FAILED, CampaignStatus.PAUSED},
     CampaignStatus.RESEARCHING: {CampaignStatus.QUALIFYING, CampaignStatus.FAILED, CampaignStatus.PAUSED},
     CampaignStatus.QUALIFYING: {

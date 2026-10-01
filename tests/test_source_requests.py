@@ -7,7 +7,7 @@ from campaign_sources.repository import CampaignSourceRepository
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
-from db.models import NicheModel
+from db.models import NicheModel, QueueJobModel
 from db.session import create_database
 from leads.repository import LeadRepository
 from products.repository import ProductRepository
@@ -109,7 +109,7 @@ def test_auto_source_request_expands_ranked_discovery_tasks() -> None:
         assert sources[1].input["location"] == "Toronto ON"
 
 
-def test_opportunity_source_request_over_sources_but_preserves_requested_limit() -> None:
+def test_opportunity_source_request_preserves_requested_result_limit() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -146,18 +146,16 @@ def test_opportunity_source_request_over_sources_but_preserves_requested_limit()
         )
         sources = CampaignSourceRepository(session).list_by_campaign(result.run.id)
 
-        assert result.run.max_leads == 50
+        assert result.run.max_leads == 25
         assert result.run.source_inputs["requested_result_count"] == 25
-        assert result.run.source_inputs["candidate_pool_size"] == 50
+        assert result.run.source_inputs["business_index_contract"]["result_count"] == 25
         assert result.run.source_inputs["requires_digital_opportunity"] is True
         assert result.run.source_inputs["website_policy"] == "missing_or_unavailable"
-        assert result.run.source_inputs["search_queries"] == [
-            "painting service in Scarborough ON",
-            "painting service in Etobicoke ON",
-            "painting service in North York ON",
-            "painting service in East York ON",
-            "painting service in York ON",
-            "painting service in Toronto ON",
+        assert result.run.source_inputs["search_queries"][0] == (
+            "Independent painters in Scarborough ON"
+        )
+        assert "Independent painters in Toronto ON" in result.run.source_inputs[
+            "search_queries"
         ]
         assert sources[0].input["website_policy"] == "missing_or_unavailable"
         assert sources[0].config["search_queries"] == result.run.source_inputs["search_queries"]
@@ -368,7 +366,7 @@ def test_source_request_rejects_unconfigured_source_adapter() -> None:
             )
 
 
-def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None:
+def test_source_request_returns_existing_index_matches_and_queues_deficit() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -410,6 +408,19 @@ def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None
                     "has_contact_form": True,
                     "has_quote_form": True,
                 },
+                "digital_opportunity": {
+                    "version": 1,
+                    "score": 30,
+                    "level": "moderate",
+                    "assessed_at": "2026-10-01T12:00:00+00:00",
+                    "signals": [
+                        {
+                            "key": "missing_quote_or_booking_form",
+                            "message": "No quote form found.",
+                            "points": 30,
+                        }
+                    ],
+                },
             },
         )
         search_tool = CountingSearchTool()
@@ -437,12 +448,17 @@ def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None
         )
 
         leads = LeadRepository(session).list_by_campaign(result.run.id)
+        jobs = session.query(QueueJobModel).all()
 
     assert search_tool.calls == 0
-    assert result.summary is not None
-    assert result.summary.discovered_lead_count == 1
-    assert result.summary.drafted_message_count == 0
-    assert result.run.status == "completed"
+    assert result.summary is None
+    assert result.current_result_count == 1
+    assert result.requested_result_count == 5
+    assert result.state == "expanding"
+    assert result.run.status == "expanding"
+    assert len(jobs) == 1
+    assert jobs[0].type == "business_index.refresh"
+    assert jobs[0].payload["requested_deficit"] == 4
     assert leads[0].company_name == "All Painting Toronto"
     assert leads[0].contact_email == "info@allpainting.ca"
     assert leads[0].research is not None
@@ -450,7 +466,7 @@ def test_source_request_uses_cached_pool_for_immediate_contact_listing() -> None
     assert leads[0].qualification["score_breakdown"]["fit_score"] >= 65
     assert leads[0].qualification["score_breakdown"]["reachability_score"] > 0
     assert leads[0].qualification["score_breakdown"]["source_quality_score"] >= 65
-    assert leads[0].raw_sources[0]["from_semantic_cache"] is True
+    assert leads[0].raw_sources[0]["raw"]["match_origin"] == "business_index"
 
 
 def test_contact_listing_run_does_not_create_outreach_drafts() -> None:

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base, TimestampMixin
@@ -160,6 +160,12 @@ class BusinessModel(TimestampMixin, Base):
     __tablename__ = "businesses"
     __table_args__ = (
         UniqueConstraint("normalized_name", "domain", name="uq_businesses_normalized_name_domain"),
+        Index(
+            "ix_businesses_status_market_category",
+            "status",
+            "market_key",
+            "category_key",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -313,6 +319,11 @@ class BusinessNicheMembershipModel(TimestampMixin, Base):
             "market_key",
             name="uq_business_niche_memberships_business_niche_market",
         ),
+        Index(
+            "ix_business_niche_memberships_niche_market",
+            "niche_id",
+            "market_key",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -351,10 +362,45 @@ class BusinessNicheMembershipModel(TimestampMixin, Base):
     seed_batch: Mapped[SeedBatchModel | None] = relationship(back_populates="memberships")
 
 
+class BusinessIndexSegmentModel(TimestampMixin, Base):
+    __tablename__ = "business_index_segments"
+    __table_args__ = (
+        UniqueConstraint(
+            "niche_id",
+            "market_key",
+            name="uq_business_index_segments_niche_market",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    market_label: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    demand_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    target_business_count: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    source_plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    source_state: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    last_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    niche: Mapped[NicheModel] = relationship()
+    product: Mapped[ProductModel] = relationship()
+
+
 class ContactModel(TimestampMixin, Base):
     __tablename__ = "contacts"
     __table_args__ = (
         UniqueConstraint("business_id", "email", name="uq_contacts_business_email"),
+        Index(
+            "ix_contacts_business_verification",
+            "business_id",
+            "verification_status",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -379,6 +425,11 @@ class SourceObservationModel(TimestampMixin, Base):
     __tablename__ = "source_observations"
     __table_args__ = (
         UniqueConstraint("source", "external_id", name="uq_source_observations_source_external_id"),
+        Index(
+            "ix_source_observations_business_observed",
+            "business_id",
+            "observed_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
