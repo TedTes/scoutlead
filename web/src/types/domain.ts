@@ -137,6 +137,10 @@ export type SourceRequestInput = {
   prompt: string;
   max_results: number;
   run_immediately?: boolean;
+  business_category?: string;
+  geography?: string;
+  opportunity_type?: "any" | "missing_website" | "missing_or_unavailable_website";
+  evidence_max_age_days?: number;
 };
 
 export type SourceRequestRun = {
@@ -158,6 +162,9 @@ export type SourceRequestRun = {
   };
   run: DiscoveryRun;
   summary?: DiscoveryRunSummary | null;
+  state: "ready" | "expanding";
+  current_result_count: number;
+  requested_result_count: number;
 };
 
 export type ResultSeedInput = {

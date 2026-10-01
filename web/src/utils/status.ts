@@ -2,7 +2,13 @@ import type { Tone } from "../types/navigation";
 
 export function statusTone(status: string): Tone {
   const value = status.toLowerCase();
-  if (["running", "researching", "discovered", "outreach_drafted", "sent"].includes(value)) return "blue";
+  if (
+    ["running", "expanding", "researching", "discovered", "outreach_drafted", "sent"].includes(
+      value,
+    )
+  ) {
+    return "blue";
+  }
   if (
     [
       "active",

@@ -1125,7 +1125,11 @@ function listMeta(run: DiscoveryRun) {
 
 function runDotClass(run: DiscoveryRun) {
   const status = run.status.toLowerCase();
-  if (["discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(status)) {
+  if (
+    ["expanding", "discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(
+      status,
+    )
+  ) {
     return "is-running";
   }
   if (["draft", "paused"].includes(status)) return "is-new";

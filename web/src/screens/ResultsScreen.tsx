@@ -435,7 +435,7 @@ export function ResultsScreen({
     setRunning(true);
     showToast({
       title: "Search started",
-      message: "ScoutLead is finding and scoring contacts. This can take a little while.",
+      message: "Checking existing matches now. Live discovery will continue in the background if needed.",
       tone: "blue",
     });
     try {
@@ -449,11 +449,14 @@ export function ResultsScreen({
       });
       if (result) {
         setRerunPromptOpen(false);
-        const foundCount = result.summary?.discovered_lead_count ?? 0;
+        const foundCount = result.current_result_count;
+        const expanding = result.state === "expanding";
         showToast({
-          title: foundCount ? "Updated search complete" : "Search finished",
-          message: foundCount ? `${foundCount} contact${foundCount === 1 ? "" : "s"} found.` : "No contacts were returned. Try another search.",
-          tone: foundCount ? "green" : "amber",
+          title: expanding ? "Existing matches ready" : "Search ready",
+          message: expanding
+            ? `${foundCount} existing match${foundCount === 1 ? "" : "es"} shown. Expanding toward ${result.requested_result_count}.`
+            : `${foundCount} match${foundCount === 1 ? "" : "es"} ready.`,
+          tone: foundCount ? "green" : "blue",
         });
       }
     } catch (err) {
@@ -3237,7 +3240,7 @@ function isNoisyEnrichmentText(value: string) {
 }
 
 function isInternalQualificationText(value: string) {
-  return /matched cached business evidence|fit \d+|source quality \d+|reachability \d+/i.test(value);
+  return /matched (?:cached|existing) (?:public )?business evidence|fit \d+|source quality \d+|reachability \d+/i.test(value);
 }
 
 function isLowValueContactListText(value: string) {

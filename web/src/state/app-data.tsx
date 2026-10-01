@@ -371,6 +371,15 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     void refreshAll();
   }, [refreshAll]);
 
+  const hasExpandingRun = discoveryRuns.some((run) => run.status === "expanding");
+  useEffect(() => {
+    if (!hasExpandingRun) return;
+    const timer = window.setInterval(() => {
+      void refreshAll({ showLoading: false });
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [hasExpandingRun, refreshAll]);
+
   useEffect(() => {
     void refreshProductContacts(selectedProductIdState, discoveryRuns);
   }, [discoveryRuns, refreshProductContacts, selectedProductIdState]);
