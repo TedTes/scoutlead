@@ -7,6 +7,7 @@ import httpx
 
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignRead
+from canonical.normalization import normalize_business_name, normalize_phone
 from products.schemas import ProductRead
 from shared.errors import ConfigurationError
 from tools.base import ToolResult, ToolSlot, measured_tool_result
@@ -88,7 +89,7 @@ class GooglePlacesDiscoveryAdapter:
 
         def action() -> list[dict[str, Any]]:
             places: list[tuple[dict[str, Any], str]] = []
-            seen_places: set[str] = set()
+            seen_place_keys: set[str] = set()
             continuations: list[tuple[str, str]] = []
 
             def fetch_page(
@@ -119,10 +120,10 @@ class GooglePlacesDiscoveryAdapter:
                 for place in payload.get("places", []):
                     if not self._matches_website_policy(place, website_policy):
                         continue
-                    dedupe_key = self._place_key(place)
-                    if dedupe_key in seen_places:
+                    place_keys = self._place_keys(place)
+                    if place_keys & seen_place_keys:
                         continue
-                    seen_places.add(dedupe_key)
+                    seen_place_keys.update(place_keys)
                     places.append((place, search_query))
                 token = payload.get("nextPageToken")
                 return str(token) if token else None
@@ -146,6 +147,8 @@ class GooglePlacesDiscoveryAdapter:
                 )
                 if next_token:
                     continuations.append((search_query, next_token))
+            if website_policy == "missing_or_unavailable":
+                places.sort(key=lambda item: bool(item[0].get("websiteUri")))
             return [
                 self._to_search_result(
                     place=place,
@@ -239,7 +242,8 @@ class GooglePlacesDiscoveryAdapter:
                         "website_presence_status": "no_website_listed",
                         "website_presence_label": "No website listed",
                     }
-                    if website_policy == "missing" and not website_url
+                    if website_policy in {"missing", "missing_or_unavailable"}
+                    and not website_url
                     else {}
                 ),
             },
@@ -247,24 +251,35 @@ class GooglePlacesDiscoveryAdapter:
 
     @staticmethod
     def _matches_website_policy(place: dict[str, Any], website_policy: str) -> bool:
-        if website_policy != "missing":
+        if website_policy not in {"missing", "missing_or_unavailable"}:
             return True
-        return bool(
+        reachable_business = bool(
             place.get("businessStatus") == "OPERATIONAL"
-            and not place.get("websiteUri")
             and (place.get("nationalPhoneNumber") or place.get("googleMapsUri"))
         )
+        if website_policy == "missing":
+            return reachable_business and not place.get("websiteUri")
+        return reachable_business
 
     @staticmethod
-    def _place_key(place: dict[str, Any]) -> str:
+    def _place_keys(place: dict[str, Any]) -> set[str]:
+        keys: set[str] = set()
         place_id = str(place.get("id") or "").strip()
         if place_id:
-            return f"id:{place_id}"
+            keys.add(f"id:{place_id}")
         display_name = place.get("displayName") or {}
-        name = str(display_name.get("text") or "").strip().casefold()
-        address = str(place.get("formattedAddress") or "").strip().casefold()
-        phone = str(place.get("nationalPhoneNumber") or "").strip()
-        return f"fallback:{name}|{address}|{phone}"
+        name = normalize_business_name(str(display_name.get("text") or ""))
+        address = " ".join(
+            str(place.get("formattedAddress") or "").lower().replace(",", " ").split()
+        )
+        phone = normalize_phone(place.get("nationalPhoneNumber"))
+        if name and phone:
+            keys.add(f"name-phone:{name}|{phone}")
+        if name and address:
+            keys.add(f"name-address:{name}|{address}")
+        if not keys:
+            keys.add(f"fallback:{name}|{address}|{phone or ''}")
+        return keys
 
 
 def _is_broad_geography(value: str) -> bool:

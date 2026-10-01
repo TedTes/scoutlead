@@ -247,6 +247,43 @@ def test_google_places_adapter_keeps_reachable_active_businesses_without_website
     )
 
 
+def test_missing_or_unavailable_policy_keeps_sites_for_availability_audit() -> None:
+    place = {
+        "businessStatus": "OPERATIONAL",
+        "websiteUri": "https://painter.example",
+        "nationalPhoneNumber": "(416) 555-0101",
+    }
+
+    assert GooglePlacesDiscoveryAdapter._matches_website_policy(place, "missing") is False
+    assert (
+        GooglePlacesDiscoveryAdapter._matches_website_policy(
+            place,
+            "missing_or_unavailable",
+        )
+        is True
+    )
+
+
+def test_google_places_deduplicates_distinct_place_ids_with_same_name_and_phone() -> None:
+    first = {
+        "id": "place-1",
+        "displayName": {"text": "Neighborhood Painting Ltd."},
+        "formattedAddress": "1 Main St, Toronto, ON",
+        "nationalPhoneNumber": "(416) 555-0101",
+    }
+    second = {
+        "id": "place-2",
+        "displayName": {"text": "Neighborhood Painting"},
+        "formattedAddress": "Toronto, ON",
+        "nationalPhoneNumber": "416-555-0101",
+    }
+
+    assert (
+        GooglePlacesDiscoveryAdapter._place_keys(first)
+        & GooglePlacesDiscoveryAdapter._place_keys(second)
+    )
+
+
 def test_google_places_adapter_does_not_append_broad_geography(monkeypatch) -> None:
     calls = []
 

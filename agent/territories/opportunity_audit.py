@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from sqlalchemy import select
@@ -10,7 +11,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from canonical.normalization import normalize_business_name, normalize_domain
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import SOURCE_NAME, EnrichmentSummary, enrich_business_pool
-from db.models import BusinessModel, ContactModel, LeadModel, SourceObservationModel
+from db.models import (
+    BusinessModel,
+    CampaignModel,
+    ContactModel,
+    LeadModel,
+    SourceObservationModel,
+)
 from shared.utils import normalize_url, utcnow
 from tools.search import SearchTool
 from tools.verify import EmailVerificationTool
@@ -28,6 +35,11 @@ BLOCKED_CONFIRMATION_HOSTS = (
     "homestars.com",
     "houzz.",
 )
+
+
+@dataclass
+class MissingWebsiteAudit:
+    confirmed_absent: int = 0
 
 
 class BusinessOpportunityAuditor:
@@ -63,12 +75,16 @@ class BusinessOpportunityAuditor:
         business_ids = list(
             dict.fromkeys(lead.business_id for lead in leads if lead.business_id)
         )
-        missing_website_count = self._audit_missing_websites(leads)
+        website_policy = self._campaign_website_policy(campaign_id)
+        missing_website_audit = self._audit_missing_websites(leads)
+        website_business_ids = business_ids
+        if website_policy == "missing":
+            website_business_ids = []
         summary = enrich_business_pool(
             self.session,
             category=category,
             market=market,
-            limit=len(business_ids),
+            limit=len(website_business_ids),
             include_with_email=True,
             refresh=True,
             verify=self.verifier is not None,
@@ -79,19 +95,28 @@ class BusinessOpportunityAuditor:
             verifier=self.verifier,
             mark_attempted=True,
             workers=self.workers,
-            business_ids=business_ids,
+            business_ids=website_business_ids,
+            opportunity_policy=website_policy,
         )
-        summary.selected += missing_website_count
-        summary.inspected += missing_website_count
-        summary.with_digital_opportunity += missing_website_count
-        summary.high_digital_opportunity += missing_website_count
-        summary.written += missing_website_count
+        summary.selected += missing_website_audit.confirmed_absent
+        summary.inspected += missing_website_audit.confirmed_absent
+        summary.with_digital_opportunity += missing_website_audit.confirmed_absent
+        summary.high_digital_opportunity += missing_website_audit.confirmed_absent
+        summary.written += missing_website_audit.confirmed_absent
         self._synchronize_leads(leads, business_ids)
         return summary
 
-    def _audit_missing_websites(self, leads: list[LeadModel]) -> int:
+    def _campaign_website_policy(self, campaign_id: str) -> str:
+        if not hasattr(self.session, "get"):
+            return "any"
+        campaign = self.session.get(CampaignModel, campaign_id)
+        if campaign is None:
+            return "any"
+        return str((campaign.source_inputs or {}).get("website_policy") or "any")
+
+    def _audit_missing_websites(self, leads: list[LeadModel]) -> MissingWebsiteAudit:
         canonical = CanonicalRepository(self.session)
-        audited = 0
+        audit = MissingWebsiteAudit()
         changed = False
         seen_business_ids: set[str] = set()
         for lead in leads:
@@ -115,6 +140,24 @@ class BusinessOpportunityAuditor:
                 business.website_url = website_url
                 business.domain = normalize_domain(website_url)
                 lead.website_url = website_url
+                raw = _website_presence_evidence(
+                    business=business,
+                    phone=phone,
+                    maps_url=maps_url,
+                    confirmation_query=confirmation_query,
+                    status="website_found_during_confirmation",
+                    label="Website found",
+                    message="A credible business website was found during confirmation.",
+                    score=0,
+                    level="none",
+                    confirmation_attempted=True,
+                    website_url=website_url,
+                )
+                canonical.record_business_evidence(
+                    business=business,
+                    source=WEBSITE_PRESENCE_SOURCE,
+                    raw=raw,
+                )
                 changed = True
                 continue
 
@@ -125,46 +168,31 @@ class BusinessOpportunityAuditor:
                 if confirmation_attempted
                 else "Google Business Profile has no website listed."
             )
-            points = 65 if confirmation_attempted else 50
-            raw = {
-                "external_id": f"{business.id}:website-presence",
-                "query": confirmation_query,
-                "source_url": maps_url,
-                "website_presence": {
-                    "status": status,
-                    "label": label,
-                    "google_website_listed": False,
-                    "confirmation_attempted": confirmation_attempted,
-                    "confirmed_at": utcnow().isoformat(),
-                    "phone": phone,
-                    "google_maps_url": maps_url,
-                },
-                "digital_opportunity": {
-                    "version": 1,
-                    "score": points,
-                    "level": "high",
-                    "assessed_at": utcnow().isoformat(),
-                    "signals": [
-                        {
-                            "key": status,
-                            "message": message,
-                            "points": points,
-                            "source_url": maps_url,
-                            "value": label,
-                        }
-                    ],
-                },
-            }
+            points = 65 if confirmation_attempted else 10
+            level = "high" if confirmation_attempted else "low"
+            raw = _website_presence_evidence(
+                business=business,
+                phone=phone,
+                maps_url=maps_url,
+                confirmation_query=confirmation_query,
+                status=status,
+                label=label,
+                message=message,
+                score=points,
+                level=level,
+                confirmation_attempted=confirmation_attempted,
+            )
             canonical.record_business_evidence(
                 business=business,
                 source=WEBSITE_PRESENCE_SOURCE,
                 raw=raw,
             )
-            audited += 1
+            if confirmation_attempted:
+                audit.confirmed_absent += 1
             changed = True
         if changed:
             self.session.commit()
-        return audited
+        return audit
 
     def _confirm_website(
         self,
@@ -274,6 +302,53 @@ def _has_observation(lead: LeadModel, observation_id: str) -> bool:
         and source.get("source_observation_id") == observation_id
         for source in lead.raw_sources or []
     )
+
+
+def _website_presence_evidence(
+    *,
+    business: BusinessModel,
+    phone: str | None,
+    maps_url: str | None,
+    confirmation_query: str,
+    status: str,
+    label: str,
+    message: str,
+    score: int,
+    level: str,
+    confirmation_attempted: bool,
+    website_url: str | None = None,
+) -> dict:
+    assessed_at = utcnow().isoformat()
+    return {
+        "external_id": f"{business.id}:website-presence",
+        "query": confirmation_query,
+        "source_url": website_url or maps_url,
+        "website_presence": {
+            "status": status,
+            "label": label,
+            "google_website_listed": False,
+            "confirmation_attempted": confirmation_attempted,
+            "confirmed_at": assessed_at,
+            "phone": phone,
+            "google_maps_url": maps_url,
+            "website_url": website_url,
+        },
+        "digital_opportunity": {
+            "version": 1,
+            "score": score,
+            "level": level,
+            "assessed_at": assessed_at,
+            "signals": [
+                {
+                    "key": status,
+                    "message": message,
+                    "points": score,
+                    "source_url": website_url or maps_url,
+                    "value": label,
+                }
+            ],
+        },
+    }
 
 
 def _credible_business_website(

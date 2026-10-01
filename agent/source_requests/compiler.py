@@ -7,6 +7,7 @@ from agents.llm import LLMClient
 from evaluation.digital_opportunity import (
     product_requires_digital_opportunity,
     text_requires_digital_opportunity,
+    website_opportunity_policy,
 )
 from products.discovery_policy import (
     build_local_business_queries,
@@ -44,15 +45,16 @@ class SourceRequestCompiler:
         product: ProductRead,
     ) -> SourceRequestPlan:
         intent = self._interpret(request=request, product=product, source=GOOGLE_PLACES_PROVIDER_ID)
-        missing_website_search = (
+        requires_digital_opportunity = (
             product_requires_digital_opportunity(product)
             or text_requires_digital_opportunity(request.prompt)
         )
+        website_policy = website_opportunity_policy(product, request.prompt)
         queries = build_local_business_queries(
             business_category=intent.business_category,
             location=intent.location,
             fallback_query=intent.search_query,
-            expand_local_market=missing_website_search,
+            expand_local_market=requires_digital_opportunity,
         )
         query = queries[0]
         region_code = normalize_places_region_code(intent.country or product.target_geography)
@@ -70,7 +72,7 @@ class SourceRequestCompiler:
             source_inputs={
                 "compiled_query": query,
                 "search_queries": queries,
-                "website_policy": "missing" if missing_website_search else "any",
+                "website_policy": website_policy,
                 "region_code": region_code,
                 "compiled_provider_input": {
                     "textQuery": query,

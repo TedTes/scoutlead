@@ -30,6 +30,22 @@ OPPORTUNITY_PROBLEM_PHRASES = (
     "digital opportunity",
 )
 
+NO_WEBSITE_REQUEST_PHRASES = (
+    "no website",
+    "without a website",
+    "missing website",
+    "website not listed",
+)
+
+UNAVAILABLE_WEBSITE_REQUEST_PHRASES = (
+    "dead website",
+    "inactive website",
+    "broken website",
+    "unavailable website",
+    "parked website",
+    "expired website",
+)
+
 
 @dataclass(frozen=True)
 class OpportunitySignal:
@@ -202,6 +218,32 @@ def product_requires_digital_opportunity(product: ProductRead) -> bool:
 def text_requires_digital_opportunity(text: str | None) -> bool:
     normalized = (text or "").lower()
     return any(phrase in normalized for phrase in OPPORTUNITY_PROBLEM_PHRASES)
+
+
+def website_opportunity_policy(product: ProductRead, request_text: str | None) -> str:
+    """Choose the evidence lane without letting a broad product profile weaken an explicit request."""
+    normalized = (request_text or "").lower()
+    if any(phrase in normalized for phrase in UNAVAILABLE_WEBSITE_REQUEST_PHRASES):
+        return "missing_or_unavailable"
+    if any(phrase in normalized for phrase in NO_WEBSITE_REQUEST_PHRASES):
+        return "missing"
+    if product_requires_digital_opportunity(product):
+        return "missing_or_unavailable"
+    return "any"
+
+
+def opportunity_signal_keys_from_sources(sources: list[dict[str, Any]]) -> set[str]:
+    evidence = opportunity_evidence_from_sources(sources)
+    if evidence is None:
+        return set()
+    signals = evidence.get("signals")
+    if not isinstance(signals, list):
+        return set()
+    return {
+        str(signal.get("key") or "").strip()
+        for signal in signals
+        if isinstance(signal, dict) and str(signal.get("key") or "").strip()
+    }
 
 
 def source_inputs_require_digital_opportunity(source_inputs: dict[str, Any] | None) -> bool:

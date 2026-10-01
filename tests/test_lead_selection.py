@@ -32,7 +32,55 @@ def test_standard_results_are_not_opportunity_filtered() -> None:
     assert select_campaign_results(campaign, leads) == leads
 
 
-def _campaign(*, requested_count: int, requires_opportunity: bool = True) -> CampaignRead:
+def test_strict_missing_website_results_require_confirmed_absence_signal() -> None:
+    campaign = _campaign(requested_count=5, website_policy="missing")
+    leads = [
+        _lead("confirmed-absent", opportunity_score=65, level="high", signal="no_website_found"),
+        _lead("site-found", opportunity_score=0, level="none", signal="website_found_during_confirmation"),
+        _lead("unavailable", opportunity_score=65, level="high", signal="website_unavailable"),
+    ]
+
+    selected = select_campaign_results(campaign, leads)
+
+    assert [lead.id for lead in selected] == ["confirmed-absent"]
+
+
+def test_missing_or_unavailable_results_reject_active_website_signals() -> None:
+    campaign = _campaign(requested_count=5, website_policy="missing_or_unavailable")
+    leads = [
+        _lead("confirmed-absent", opportunity_score=65, level="high", signal="no_website_found"),
+        _lead("unavailable", opportunity_score=65, level="high", signal="website_unavailable"),
+        _lead("parked", opportunity_score=65, level="high", signal="website_parked"),
+        _lead("missing-form", opportunity_score=30, level="moderate", signal="missing_quote_or_booking_form"),
+    ]
+
+    selected = select_campaign_results(campaign, leads)
+
+    assert {lead.id for lead in selected} == {"confirmed-absent", "unavailable", "parked"}
+
+
+def test_opportunity_results_exclude_disqualified_businesses() -> None:
+    campaign = _campaign(requested_count=5, website_policy="missing")
+    leads = [
+        _lead("qualified", opportunity_score=65, level="high", signal="no_website_found"),
+        _lead(
+            "chain",
+            opportunity_score=65,
+            level="high",
+            signal="no_website_found",
+            status=LeadStatus.DISQUALIFIED,
+        ),
+    ]
+
+    assert [lead.id for lead in select_campaign_results(campaign, leads)] == ["qualified"]
+
+
+def _campaign(
+    *,
+    requested_count: int,
+    requires_opportunity: bool = True,
+    website_policy: str = "any",
+) -> CampaignRead:
     now = datetime.now(UTC)
     return CampaignRead(
         id="campaign_test",
@@ -47,6 +95,7 @@ def _campaign(*, requested_count: int, requires_opportunity: bool = True) -> Cam
         source_inputs={
             "requires_digital_opportunity": requires_opportunity,
             "requested_result_count": requested_count,
+            "website_policy": website_policy,
         },
         created_at=now,
         updated_at=now,
@@ -60,6 +109,8 @@ def _lead(
     level: str,
     email: str | None = None,
     verification_status: ContactVerificationStatus = ContactVerificationStatus.UNVERIFIED,
+    signal: str | None = None,
+    status: LeadStatus = LeadStatus.RESEARCHED,
 ) -> LeadRead:
     now = datetime.now(UTC)
     return LeadRead(
@@ -76,11 +127,11 @@ def _lead(
                     "version": 1,
                     "score": opportunity_score,
                     "level": level,
-                    "signals": [],
+                    "signals": [{"key": signal}] if signal else [],
                 }
             }
         ],
-        status=LeadStatus.RESEARCHED,
+        status=status,
         verification_status=verification_status,
         created_at=now,
         updated_at=now,

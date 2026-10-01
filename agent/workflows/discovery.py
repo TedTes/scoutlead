@@ -97,10 +97,11 @@ class DiscoveryWorkflow:
         canonical = CanonicalRepository(self.leads.session, embedding=self.embedding)
         semantic_rows: list[dict[str, Any]] = []
         over_source = bool((campaign.source_inputs or {}).get("requires_digital_opportunity"))
-        missing_website_search = (
-            str((campaign.source_inputs or {}).get("website_policy") or "") == "missing"
+        website_policy = str(
+            (campaign.source_inputs or {}).get("website_policy") or "any"
         )
-        if not missing_website_search:
+        live_website_search = website_policy in {"missing", "missing_or_unavailable"}
+        if not live_website_search:
             for source in sources:
                 source_query = str(source.input.get("query") or campaign.source_input or "").strip()
                 semantic_rows = canonical.list_semantic_discovery_results(
@@ -125,7 +126,7 @@ class DiscoveryWorkflow:
                 sources = []
         else:
             for source in sources:
-                if missing_website_search:
+                if live_website_search:
                     sources_to_run.append(source)
                     continue
                 limit = int(source.config.get("limit") or campaign.max_leads)

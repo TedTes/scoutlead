@@ -41,6 +41,7 @@ from db.models import (
 from db.session import Database
 from evaluation.digital_opportunity import (
     DigitalOpportunityAssessment,
+    OpportunitySignal,
     assess_digital_opportunity,
 )
 from shared.utils import normalize_text, normalize_url, truncate, utcnow
@@ -99,6 +100,15 @@ COMMON_PATHS = (
     "/free-quote",
     "/services",
     "/about",
+)
+PARKED_PAGE_TERMS = (
+    "buy this domain",
+    "domain is for sale",
+    "domain may be for sale",
+    "this domain is parked",
+    "parked free courtesy",
+    "expired domain",
+    "sedo domain parking",
 )
 SOURCE_NAME = "company_website_seed"
 PLACEHOLDER_EMAIL_DOMAINS = {
@@ -189,6 +199,8 @@ class WebsitePage:
     has_booking_form: bool = False
     has_mobile_viewport: bool = False
     error: str = ""
+    status_code: int | None = None
+    failure_kind: str | None = None
 
 
 @dataclass
@@ -212,6 +224,8 @@ class BusinessWebsiteEnrichment:
     source_url: str | None
     description: str
     errors: list[str]
+    availability_status: str
+    availability_reason: str
 
     @property
     def found_signal(self) -> bool:
@@ -258,26 +272,46 @@ class WebsiteEnrichmentClient:
     def inspect(self, business: BusinessModel | BusinessTarget) -> BusinessWebsiteEnrichment:
         website_url = normalize_url(business.website_url)
         if not website_url:
-            return _empty_enrichment(business, error="Business has no website URL.")
+            return _empty_enrichment(
+                business,
+                error="Business has no website URL.",
+                availability_status="missing",
+                availability_reason="No website URL was available for inspection.",
+            )
 
         pages: list[WebsitePage] = []
         errors: list[str] = []
-        homepage = self._fetch_page(website_url)
-        if homepage.error and website_url.startswith("https://"):
-            errors.append(f"{website_url}: {homepage.error}")
-            http_url = "http://" + website_url.removeprefix("https://")
-            homepage = self._fetch_page(http_url)
-            if homepage.error:
-                errors.append(f"{http_url}: {homepage.error}")
-        elif homepage.error:
-            errors.append(f"{website_url}: {homepage.error}")
+        checks: list[WebsitePage] = []
+        candidate_urls = [website_url]
+        if website_url.startswith("https://"):
+            candidate_urls.append("http://" + website_url.removeprefix("https://"))
+        homepage = WebsitePage(url=website_url, error="Website was not checked.")
+        for candidate_url in candidate_urls:
+            for _attempt in range(2):
+                homepage = self._fetch_page(candidate_url)
+                checks.append(homepage)
+                if not homepage.error:
+                    break
+                errors.append(f"{candidate_url}: {homepage.error}")
+                if homepage.failure_kind == "not_found":
+                    break
+            if not homepage.error:
+                break
         if not homepage.error:
             pages.append(homepage)
             if self.page_delay_seconds:
                 time.sleep(self.page_delay_seconds)
 
         if not pages:
-            return _empty_enrichment(business, website_url=website_url, error="No website pages loaded.")
+            availability_status, availability_reason = _failed_availability(checks)
+            return _empty_enrichment(
+                business,
+                website_url=website_url,
+                error="No website pages loaded.",
+                errors=errors,
+                availability_status=availability_status,
+                availability_reason=availability_reason,
+            )
 
         linked_urls = _ranked_evidence_links(
             links=homepage.links,
@@ -315,12 +349,37 @@ class WebsiteEnrichmentClient:
                 headers={"user-agent": "scoutlead/0.1 website-enrichment"},
             )
             response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in {404, 410}:
+                failure_kind = "not_found"
+            elif status_code in {401, 403, 429}:
+                failure_kind = "blocked"
+            elif status_code >= 500:
+                failure_kind = "server_error"
+            else:
+                failure_kind = "http_error"
+            return WebsitePage(
+                url=url,
+                error=str(exc),
+                status_code=status_code,
+                failure_kind=failure_kind,
+            )
+        except httpx.ConnectError as exc:
+            return WebsitePage(url=url, error=str(exc), failure_kind="connection")
+        except httpx.TimeoutException as exc:
+            return WebsitePage(url=url, error=str(exc), failure_kind="timeout")
         except Exception as exc:
-            return WebsitePage(url=url, error=str(exc))
+            return WebsitePage(url=url, error=str(exc), failure_kind="other")
 
         content_type = str(response.headers.get("content-type", ""))
         if content_type and "html" not in content_type and "text" not in content_type:
-            return WebsitePage(url=str(response.url), error=f"unsupported content type: {content_type}")
+            return WebsitePage(
+                url=str(response.url),
+                error=f"unsupported content type: {content_type}",
+                status_code=getattr(response, "status_code", 200),
+                failure_kind="unsupported",
+            )
 
         html = response.text or ""
         soup = BeautifulSoup(html, "html.parser")
@@ -359,6 +418,7 @@ class WebsiteEnrichmentClient:
             has_quote_form=has_form and _has_quote_signal(form_context),
             has_booking_form=has_form and bool(_term_hits(form_context, BOOKING_TERMS)),
             has_mobile_viewport=viewport is not None,
+            status_code=getattr(response, "status_code", 200),
         )
 
 
@@ -382,6 +442,7 @@ def enrich_business_pool(
     workers: int = 1,
     progress_every: int = 0,
     business_ids: list[str] | None = None,
+    opportunity_policy: str = "any",
 ) -> EnrichmentSummary:
     businesses = select_businesses(
         session,
@@ -428,6 +489,7 @@ def enrich_business_pool(
                     writes_since_commit=writes_since_commit,
                     commit_every=commit_every,
                     progress_every=progress_every,
+                    opportunity_policy=opportunity_policy,
                 )
     else:
         for business in businesses:
@@ -446,6 +508,7 @@ def enrich_business_pool(
                 writes_since_commit=writes_since_commit,
                 commit_every=commit_every,
                 progress_every=progress_every,
+                opportunity_policy=opportunity_policy,
             )
 
     if dry_run:
@@ -470,20 +533,27 @@ def _process_enrichment(
     writes_since_commit: int,
     commit_every: int,
     progress_every: int,
+    opportunity_policy: str,
 ) -> int:
     reputation = _google_places_reputation(session, business.id)
-    assessment = assess_digital_opportunity(
-        website_reachable=bool(enrichment.inspected_urls),
-        uses_https=enrichment.uses_https,
-        has_mobile_viewport=enrichment.has_mobile_viewport,
-        has_quote_or_booking_form=(enrichment.has_quote_form or enrichment.has_booking_form)
-        if enrichment.inspected_urls
-        else None,
-        rating=reputation[0],
-        review_count=reputation[1],
-        website_source_url=enrichment.source_url or business.website_url,
-        reviews_source_url=reputation[2],
-    )
+    if opportunity_policy == "missing_or_unavailable":
+        assessment = _availability_assessment(
+            enrichment,
+            source_url=enrichment.source_url or business.website_url,
+        )
+    else:
+        assessment = assess_digital_opportunity(
+            website_reachable=bool(enrichment.inspected_urls),
+            uses_https=enrichment.uses_https,
+            has_mobile_viewport=enrichment.has_mobile_viewport,
+            has_quote_or_booking_form=(enrichment.has_quote_form or enrichment.has_booking_form)
+            if enrichment.inspected_urls
+            else None,
+            rating=reputation[0],
+            review_count=reputation[1],
+            website_source_url=enrichment.source_url or business.website_url,
+            reviews_source_url=reputation[2],
+        )
     summary.inspected += 1
     if enrichment.inspected_urls:
         summary.reachable += 1
@@ -673,6 +743,16 @@ def _enrichment_from_pages(
         quote_signals=quote_signals,
         service_signals=service_signals,
     )
+    parked_term = next(
+        (term for term in PARKED_PAGE_TERMS if term in combined_text.lower()),
+        None,
+    )
+    availability_status = "parked" if parked_term else "active"
+    availability_reason = (
+        f"Website content contains a domain-parking indicator: {parked_term}."
+        if parked_term
+        else "Website homepage loaded successfully."
+    )
     return BusinessWebsiteEnrichment(
         business_id=business.id,
         company_name=business.display_name,
@@ -693,7 +773,49 @@ def _enrichment_from_pages(
         source_url=source_url,
         description=description,
         errors=errors,
+        availability_status=availability_status,
+        availability_reason=availability_reason,
     )
+
+
+def _failed_availability(checks: list[WebsitePage]) -> tuple[str, str]:
+    failures = [check.failure_kind for check in checks if check.failure_kind]
+    statuses = [check.status_code for check in checks if check.status_code is not None]
+    if "not_found" in failures:
+        return "unavailable", "Website returned HTTP 404 or 410 during repeated checks."
+    if failures and all(failure == "connection" for failure in failures):
+        return "unavailable", "Website connection failed on every HTTP and HTTPS check."
+    detail = ", ".join(str(status) for status in statuses) or ", ".join(failures)
+    return (
+        "inconclusive",
+        f"Website availability could not be confirmed ({detail or 'unknown fetch error'}).",
+    )
+
+
+def _availability_assessment(
+    enrichment: BusinessWebsiteEnrichment,
+    *,
+    source_url: str | None,
+) -> DigitalOpportunityAssessment:
+    if enrichment.availability_status == "unavailable":
+        signal = OpportunitySignal(
+            key="website_unavailable",
+            message=enrichment.availability_reason,
+            points=65,
+            source_url=source_url,
+            value="Website unavailable",
+        )
+        return DigitalOpportunityAssessment(score=65, level="high", signals=(signal,))
+    if enrichment.availability_status == "parked":
+        signal = OpportunitySignal(
+            key="website_parked",
+            message=enrichment.availability_reason,
+            points=65,
+            source_url=source_url,
+            value="Website parked",
+        )
+        return DigitalOpportunityAssessment(score=65, level="high", signals=(signal,))
+    return DigitalOpportunityAssessment(score=0, level="none", signals=())
 
 
 def _raw_payload(
@@ -758,6 +880,8 @@ def _raw_payload(
         "website_enrichment": {
             "inspected_at": utcnow().isoformat(),
             "inspected_urls": enrichment.inspected_urls,
+            "availability_status": enrichment.availability_status,
+            "availability_reason": enrichment.availability_reason,
             "emails": enrichment.emails,
             "best_email": enrichment.best_email,
             "phones": enrichment.phones,
@@ -1219,6 +1343,9 @@ def _empty_enrichment(
     *,
     website_url: str | None = None,
     error: str,
+    errors: list[str] | None = None,
+    availability_status: str = "inconclusive",
+    availability_reason: str = "Website availability could not be confirmed.",
 ) -> BusinessWebsiteEnrichment:
     description = (
         f"{business.display_name} website enrichment attempted; "
@@ -1243,7 +1370,9 @@ def _empty_enrichment(
         service_signals=[],
         source_url=None,
         description=description,
-        errors=[error],
+        errors=errors or [error],
+        availability_status=availability_status,
+        availability_reason=availability_reason,
     )
 
 
