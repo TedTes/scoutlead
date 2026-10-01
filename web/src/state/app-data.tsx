@@ -686,9 +686,48 @@ function upsertDiscoveryRun(runs: DiscoveryRun[], nextRun: DiscoveryRun) {
 }
 
 function contactKey(contact: DiscoveryResult) {
-  const website = (contact.website_url || contact.research?.website_url || "").trim().toLowerCase();
-  if (website) return `website:${website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}`;
-  return `name:${contact.company_name.trim().toLowerCase()}|${(contact.geography || contact.research?.geography || "").trim().toLowerCase()}`;
+  const website = (contact.website_url || contact.research?.website_url || "").trim();
+  try {
+    const domain = new URL(website).hostname.replace(/^www\./, "").toLowerCase();
+    if (domain) return `domain:${domain}`;
+  } catch {
+    // Continue with canonical and public-listing identity fields.
+  }
+  const name = contact.company_name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const phone = contactRawValue(contact, [
+    "normalized_contact_phone",
+    "contact_phone",
+    "nationalPhoneNumber",
+    "phone",
+    "telephone",
+  ]).replace(/\D+/g, "");
+  if (name && phone) return `name-phone:${name}|${phone}`;
+  if (contact.business_id) return `business:${contact.business_id}`;
+  const geography = (contact.geography || contact.research?.geography || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return `name:${name}|${geography}`;
+}
+
+function contactRawValue(contact: DiscoveryResult, keys: string[]) {
+  const wanted = new Set(keys.map((key) => key.toLowerCase()));
+  const stack: unknown[] = [...(contact.raw_sources || [])];
+  while (stack.length) {
+    const value = stack.pop();
+    if (Array.isArray(value)) {
+      stack.push(...value);
+      continue;
+    }
+    if (!value || typeof value !== "object") continue;
+    for (const [key, item] of Object.entries(value)) {
+      if (wanted.has(key.toLowerCase()) && typeof item === "string" && item.trim()) {
+        return item.trim();
+      }
+      if (item && typeof item === "object") stack.push(item);
+    }
+  }
+  return "";
 }
 
 export function useAppData() {

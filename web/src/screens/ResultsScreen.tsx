@@ -3540,6 +3540,18 @@ function deduplicateContacts(contacts: DiscoveryResult[]) {
 
 function contactBusinessKey(contact: DiscoveryResult) {
   const name = contact.company_name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const website = contact.website_url || contact.research?.website_url || "";
+  try {
+    const domain = new URL(website).hostname.replace(/^www\./, "").toLowerCase();
+    if (domain) return `domain:${domain}`;
+  } catch {
+    // Continue with canonical and public-listing identity fields.
+  }
+
+  const phone = getPhone(contact).replace(/\D+/g, "");
+  if (name && phone) return `name-phone:${name}|${phone}`;
+  if (contact.business_id) return `business:${contact.business_id}`;
+
   const geography = (contact.geography || contact.research?.geography || "")
     .toLowerCase()
     .split(",")
@@ -3548,13 +3560,7 @@ function contactBusinessKey(contact: DiscoveryResult) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
   if (name) return `${name}|${geography}`;
-
-  const website = contact.website_url || contact.research?.website_url || "";
-  try {
-    return new URL(website).hostname.replace(/^www\./, "").toLowerCase();
-  } catch {
-    return contact.id;
-  }
+  return contact.id;
 }
 
 function contactRecordPriority(contact: DiscoveryResult) {
