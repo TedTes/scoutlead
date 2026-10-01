@@ -284,6 +284,7 @@ class EmailVerificationTool:
         self.zerobounce_api_key = zerobounce_api_key
         self.zerobounce_api_endpoint = zerobounce_api_endpoint
         self.timeout_seconds = timeout_seconds
+        self.provider_unavailable_reason: str | None = None
         self.verifier = build_email_verifier(
             provider=provider,
             endpoint=endpoint,
@@ -298,7 +299,33 @@ class EmailVerificationTool:
     def run(self, context: dict[str, Any]) -> ToolResult:
         start = perf_counter()
         email = str(context.get("email") or "").strip()
-        result = self.verifier.verify(email, context)
+        if self.provider_unavailable_reason:
+            result = VerificationResult(
+                provider=self.provider,
+                email=email,
+                status="unknown",
+                reason=self.provider_unavailable_reason,
+                score=0,
+                raw={"provider_unavailable": True},
+            )
+        else:
+            try:
+                result = self.verifier.verify(email, context)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 402:
+                    raise
+                self.provider_unavailable_reason = (
+                    f"{self.provider.title()} verification is unavailable because the provider "
+                    "returned HTTP 402. Check account credits or billing."
+                )
+                result = VerificationResult(
+                    provider=self.provider,
+                    email=email,
+                    status="unknown",
+                    reason=self.provider_unavailable_reason,
+                    score=0,
+                    raw={"provider_unavailable": True, "status_code": 402},
+                )
         data = result.as_tool_data()
         latency_ms = round((perf_counter() - start) * 1000)
         return ToolResult(

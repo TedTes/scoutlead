@@ -1,3 +1,4 @@
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -137,6 +138,35 @@ def test_bouncer_provider_maps_non_verified_statuses(
 def test_bouncer_provider_requires_api_key() -> None:
     with pytest.raises(ValueError, match="BOUNCER_API_KEY"):
         EmailVerificationTool(provider="bouncer").run({"email": "owner@example.com"})
+
+
+def test_bouncer_payment_error_disables_more_calls_for_the_run(monkeypatch) -> None:
+    calls = 0
+
+    def payment_required(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        request = httpx.Request("GET", args[0])
+        response = httpx.Response(402, request=request)
+        raise httpx.HTTPStatusError(
+            "Payment Required",
+            request=request,
+            response=response,
+        )
+
+    monkeypatch.setattr("tools.verify.httpx.get", payment_required)
+    tool = EmailVerificationTool(
+        provider="bouncer",
+        bouncer_api_key="bouncer_test_key",
+    )
+
+    first = tool.run({"email": "first@example.com"})
+    second = tool.run({"email": "second@example.com"})
+
+    assert first.data["status"] == "unknown"
+    assert second.data["status"] == "unknown"
+    assert "HTTP 402" in second.data["reason"]
+    assert calls == 1
 
 
 def test_bouncer_preflight_requires_api_key() -> None:
