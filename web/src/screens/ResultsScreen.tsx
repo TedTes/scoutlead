@@ -45,7 +45,6 @@ import type {
   Message,
   Product,
   SenderProfile,
-  SourceRequestSource,
   Territory,
   TerritoryDelivery,
   TerritoryMetrics,
@@ -58,7 +57,6 @@ import {
   normalizeExportFileName,
 } from "../utils/export-file";
 import { formatDate } from "../utils/format";
-import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
 import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
 
 type ResultAttributeFilter = "good_fit" | "verified" | "not_fit" | "has_draft";
@@ -120,7 +118,6 @@ export function ResultsScreen({
   workflowView: LeadWorkflowView;
 }) {
   const {
-    activeSourceIds,
     runSourceRequest,
     selectedDiscoveryRun,
     selectedDiscoveryRunId,
@@ -144,7 +141,6 @@ export function ResultsScreen({
     approveCampaignOutreachDrafts,
     sendCampaignOutreachDrafts,
     snapshot,
-    sourceProviders,
     territories,
     territoryApi,
     refreshAll,
@@ -160,7 +156,6 @@ export function ResultsScreen({
   const [draftPrompt, setDraftPrompt] = useState("");
   const [attributeFilter, setAttributeFilter] = useState<ResultAttributeFilter | null>(null);
   const [sort, setSort] = useState<ResultSort>("score");
-  const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>([]);
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
   const [sendingWebhook, setSendingWebhook] = useState(false);
@@ -200,11 +195,8 @@ export function ResultsScreen({
   const contacts = useMemo(() => deduplicateContacts(sourceContacts), [sourceContacts]);
   const isDeliveryScoped = Boolean(selectedDelivery && deliveryContacts);
   const thisWeekCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
-  const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = runPrompt;
-  const selectedSource = selectedSources[0] || getRunSource(selectedDiscoveryRun) || "";
   const activeMessages = snapshot.messages.filter((message) => message.status !== "cancelled");
   const messageByLeadId = new Map(activeMessages.map((message) => [message.lead_id, message]));
   const approvedLeadIds = new Set(
@@ -429,18 +421,6 @@ export function ResultsScreen({
     return () => window.removeEventListener("resize", positionPopover);
   }, [bulkOutreachOpen]);
 
-  useEffect(() => {
-    setSelectedSources((current) => {
-      const fromRun = getRunSource(selectedDiscoveryRun);
-      const validCurrent = current.filter((sourceId) => connectedProviders.some((provider) => provider.id === sourceId));
-      const validActive = normalizeActiveSourceIds(activeSourceIds, connectedProviders).slice(0, 1);
-      if (validActive.length) return validActive;
-      if (validCurrent.length) return validCurrent.slice(0, 1);
-      if (fromRun && connectedProviders.some((provider) => provider.id === fromRun)) return [fromRun];
-      return connectedProviders[0] ? [connectedProviders[0].id] : [];
-    });
-  }, [activeSourceIds, connectedProviders, selectedDiscoveryRun]);
-
   const updateSearch = async () => {
     const request = draftPrompt.trim() || runPrompt;
     if (running) return;
@@ -452,10 +432,6 @@ export function ResultsScreen({
       showToast({ title: "Enter a search prompt", message: "Describe the businesses to find before re-running discovery.", tone: "amber" });
       return;
     }
-    if (!selectedSource) {
-      showToast({ title: "No discovery source", message: "Connect or enable a source before re-running discovery.", tone: "amber" });
-      return;
-    }
     setRunning(true);
     showToast({
       title: "Search started",
@@ -465,7 +441,7 @@ export function ResultsScreen({
     try {
       const result = await runSourceRequest({
         product_id: selectedProductId,
-        source: selectedSource,
+        source: "auto",
         name: selectedDiscoveryRun?.name || undefined,
         prompt: request,
         max_results: requestedResultCount(selectedDiscoveryRun),
@@ -1150,7 +1126,7 @@ export function ResultsScreen({
         <RerunSearchDialog
           prompt={draftPrompt}
           running={running}
-          ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4 && selectedSource)}
+          ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4)}
           onChange={setDraftPrompt}
           onClose={() => setRerunPromptOpen(false)}
           onSubmit={updateSearch}
@@ -2794,11 +2770,6 @@ function getRunPrompt(run: { source_input?: string | null; source_inputs?: Recor
   }
   if (run?.source_input?.trim() && !run.source_input.trim().startsWith("http")) return run.source_input.trim();
   return "";
-}
-
-function getRunSource(run: { source_inputs?: Record<string, unknown> } | undefined) {
-  const source = run?.source_inputs?.source_request_source;
-  return typeof source === "string" && source.trim() ? source.trim() : "";
 }
 
 function requestedResultCount(

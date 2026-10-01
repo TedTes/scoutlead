@@ -147,6 +147,14 @@ export type SourceRequestRun = {
     max_results: number;
     source_preset_id: string;
     explanation: string;
+    tasks?: Array<{
+      provider_id: string;
+      query: string;
+      stage: number;
+      priority: number;
+      max_results: number;
+      reason: string;
+    }>;
   };
   run: DiscoveryRun;
   summary?: DiscoveryRunSummary | null;

@@ -2,8 +2,7 @@ import { ArrowRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
-import type { DiscoveryRun, SourceRequestSource } from "../types/domain";
-import { mergeSourceProviders, normalizeActiveSourceIds } from "../utils/source-providers";
+import type { DiscoveryRun } from "../types/domain";
 import { searchDiscoveryTemplates } from "../utils/template-search";
 
 export function OverviewScreen({
@@ -21,15 +20,10 @@ export function OverviewScreen({
     selectedDiscoveryRunId,
     selectedProduct,
     selectedProductId,
-    sourceProviders,
-    activeSourceIds,
   } = useAppData();
   const { showToast } = useToast();
-  const [selectedSources, setSelectedSources] = useState<SourceRequestSource[]>(["google_places"]);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
-  const providers = useMemo(() => mergeSourceProviders(sourceProviders), [sourceProviders]);
-  const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured), [providers]);
   const promptValue = prompt.trim();
   const currentQuery = promptValue || getRunPrompt(selectedDiscoveryRun) || "";
   const promptTags = parsePromptTags(currentQuery);
@@ -37,12 +31,7 @@ export function OverviewScreen({
     () => searchDiscoveryTemplates({ product: selectedProduct, limit: 3 }),
     [selectedProduct],
   );
-  const selectedSource = selectedSources[0] || "";
-  const ready = Boolean(selectedProductId && promptValue.length >= 4 && selectedSource);
-
-  useEffect(() => {
-    setSelectedSources(normalizeActiveSourceIds(activeSourceIds, connectedProviders).slice(0, 1));
-  }, [activeSourceIds, connectedProviders]);
+  const ready = Boolean(selectedProductId && promptValue.length >= 4);
 
   useEffect(() => {
     setPrompt(selectedDiscoveryRunId ? getRunPrompt(selectedDiscoveryRun) : "");
@@ -59,10 +48,6 @@ export function OverviewScreen({
       showToast({ title: "Enter a search prompt", message: "Describe the businesses to find before running discovery.", tone: "amber" });
       return;
     }
-    if (!selectedSource) {
-      showToast({ title: "No discovery source", message: "Connect or enable a source before running discovery.", tone: "amber" });
-      return;
-    }
     const requestedName = draftRunName?.trim();
     setRunning(true);
     showToast({
@@ -73,7 +58,7 @@ export function OverviewScreen({
     try {
       const result = await runSourceRequest({
         product_id: selectedProductId,
-        source: selectedSource,
+        source: "auto",
         name: requestedName && !isDraftPlaceholder(requestedName) ? requestedName : undefined,
         prompt: request,
         max_results: 25,
