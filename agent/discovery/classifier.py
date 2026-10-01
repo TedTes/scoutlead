@@ -130,7 +130,10 @@ STRUCTURED_LOCAL_BUSINESS_SOURCES = {"google_places", "openstreetmap"}
 
 
 def assess_discovery_candidate(result: SearchResult, product: ProductRead) -> CandidateAssessment:
-    is_structured_local_business = result.source in STRUCTURED_LOCAL_BUSINESS_SOURCES
+    is_business_index_match = (result.raw or {}).get("match_origin") == "business_index"
+    is_structured_local_business = (
+        result.source in STRUCTURED_LOCAL_BUSINESS_SOURCES or is_business_index_match
+    )
     if not result.url and not (
         is_structured_local_business and _has_structured_contact_signal(result)
     ):

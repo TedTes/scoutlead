@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from canonical.semantics import semantic_key
+from canonical.semantics import market_is_compatible, semantic_key
 from db.models import (
     BusinessIndexSegmentModel,
     BusinessNicheMembershipModel,
@@ -88,6 +88,20 @@ class BusinessIndexRepository:
 
     def get(self, segment_id: str) -> BusinessIndexSegmentModel | None:
         return self.session.get(BusinessIndexSegmentModel, segment_id)
+
+    def business_ids(self, segment: BusinessIndexSegmentModel) -> list[str]:
+        memberships = self.session.scalars(
+            select(BusinessNicheMembershipModel).where(
+                BusinessNicheMembershipModel.niche_id == segment.niche_id
+            )
+        )
+        return list(
+            dict.fromkeys(
+                membership.business_id
+                for membership in memberships
+                if market_is_compatible(segment.market_key, membership.market_key)
+            )
+        )
 
     def due(self, *, limit: int = 25) -> list[BusinessIndexSegmentModel]:
         now = utcnow()

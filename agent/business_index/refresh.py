@@ -63,7 +63,8 @@ class BusinessIndexRefreshService:
         campaigns = self._expanding_campaigns(segment.id)
         context_campaign = campaigns[0] if campaigns else self._scheduled_campaign(segment, product)
         canonical = CanonicalRepository(self.session, embedding=self.embedding)
-        business_ids: set[str] = set()
+        # Refresh evidence for durable inventory as well as newly discovered rows.
+        business_ids = set(self.segments.business_ids(segment))
         successful_sources = 0
 
         for index, task_data in enumerate(segment.source_plan or []):
@@ -305,10 +306,12 @@ def _indexed_row(
         "provider_payload": result.model_dump(mode="json"),
         "business_index_segment_id": segment_id,
         "source_input": {
+            "niche_id": niche_id,
             "business_category": task.input.get("business_category") or task.query,
             "location": task.input.get("location") or market_label,
             "query": task.query,
             "source_request_intent": {
+                "niche_id": niche_id,
                 "business_category": task.input.get("business_category") or task.query,
                 "location": task.input.get("location") or market_label,
             },
