@@ -85,6 +85,29 @@ class QueueRepository:
         self.session.refresh(job)
         return job
 
+    def recover_stale_running(self, *, stale_after_seconds: int = 3600) -> list[QueueJobModel]:
+        cutoff = utcnow() - timedelta(seconds=stale_after_seconds)
+        jobs = list(
+            self.session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.status == JobStatus.RUNNING.value,
+                    QueueJobModel.updated_at <= cutoff,
+                )
+            )
+        )
+        for job in jobs:
+            job.last_error = "Worker stopped before the job completed."
+            if job.attempts < job.max_attempts:
+                job.status = JobStatus.QUEUED.value
+                job.run_after = utcnow()
+            else:
+                job.status = JobStatus.FAILED.value
+        if jobs:
+            self.session.commit()
+            for job in jobs:
+                self.session.refresh(job)
+        return jobs
+
     def complete(self, job_id: str) -> QueueJobModel:
         job = self._get(job_id)
         job.status = JobStatus.COMPLETED.value

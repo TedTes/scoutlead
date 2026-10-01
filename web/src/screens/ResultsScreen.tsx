@@ -721,7 +721,12 @@ export function ResultsScreen({
   }
 
   if (!contacts.length && !selectedTerritory) {
-    return <OverviewScreen emptyMessage="No contacts were returned for this run. Try a different business type, location, or wording." />;
+    const emptyMessage = selectedDiscoveryRun.status === "expanding"
+      ? "Searching configured sources in the background. Matching contacts will appear here automatically."
+      : selectedDiscoveryRun.status === "failed"
+        ? selectedDiscoveryRun.failure_reason || "This search could not finish. Run it again after checking the worker."
+        : "No eligible contacts were found in the available business index.";
+    return <OverviewScreen emptyMessage={emptyMessage} />;
   }
 
   return (

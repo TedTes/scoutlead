@@ -12,11 +12,13 @@ from app.service_factory import (
     territory_refresh_service,
 )
 from business_index.scheduler import enqueue_due_business_index_refreshes
+from campaigns.repository import CampaignRepository
+from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
 from db.session import create_database
-from db.models import TerritoryModel
+from db.models import CampaignModel, TerritoryModel
 from job_queue.repository import QueueRepository
-from job_queue.schemas import JobType
+from job_queue.schemas import JobStatus, JobType
 from messages.service import MessageService
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
@@ -86,11 +88,20 @@ def run_once() -> bool:
                 raise ValueError(f"unknown job type: {job.type}")
         except Exception as exc:
             logger.exception("job_failed job_id=%s", job.id)
-            queue.fail(
+            failed_job = queue.fail(
                 job.id,
                 str(exc),
                 retry_delay_seconds=(3600 if job.type == JobType.TERRITORY_REFRESH.value else None),
             )
+            if (
+                failed_job.status == JobStatus.FAILED.value
+                and job.type == JobType.BUSINESS_INDEX_REFRESH.value
+            ):
+                _fail_expanding_campaigns(
+                    session,
+                    segment_id=str(job.payload["segment_id"]),
+                    reason=str(exc),
+                )
             return True
         queue.complete(job.id)
         return True
@@ -99,10 +110,53 @@ def run_once() -> bool:
 
 
 def run() -> None:
+    _recover_interrupted_jobs()
     while True:
         did_work = run_once()
         if not did_work:
             sleep(2)
+
+
+def _recover_interrupted_jobs() -> None:
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    services = create_app_services(settings)
+    create_database(services.db.engine)
+    generator = services.db.session()
+    session = next(generator)
+    try:
+        recovered = QueueRepository(session).recover_stale_running()
+        for job in recovered:
+            if (
+                job.status == JobStatus.FAILED.value
+                and job.type == JobType.BUSINESS_INDEX_REFRESH.value
+            ):
+                _fail_expanding_campaigns(
+                    session,
+                    segment_id=str(job.payload["segment_id"]),
+                    reason=job.last_error or "Background discovery stopped before completion.",
+                )
+        if recovered:
+            logger.warning("recovered_stale_jobs count=%s", len(recovered))
+    finally:
+        generator.close()
+
+
+def _fail_expanding_campaigns(session: Session, *, segment_id: str, reason: str) -> None:
+    campaigns = CampaignRepository(session)
+    rows = session.query(CampaignModel).filter(
+        CampaignModel.status == CampaignStatus.EXPANDING.value
+    )
+    for row in rows:
+        if (row.source_inputs or {}).get("business_index_segment_id") != segment_id:
+            continue
+        campaigns.update_status(
+            row.id,
+            CampaignStatus.FAILED,
+            failure_reason=reason,
+            commit=False,
+        )
+    session.commit()
 
 
 def _campaign_service(*, session: Session, services: AppServices) -> CampaignService:
