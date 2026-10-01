@@ -145,6 +145,42 @@ def test_google_places_review_metadata_does_not_make_business_a_directory() -> N
     assert assessment.rejection_reason is None
 
 
+def test_google_places_business_without_website_is_classified_from_listing_evidence() -> None:
+    product_data = product_input().model_dump(mode="json")
+    product_data.update(
+        {
+            "id": "product_google_places_no_website",
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    product = ProductRead.model_validate(product_data)
+
+    assessment = assess_discovery_candidate(
+        SearchResult(
+            title="Newbright Painting",
+            url=None,
+            snippet=(
+                "159 Gowan Ave, East York, ON | phone: (416) 985-8639 | "
+                "painter, painting contractor, service"
+            ),
+            geography="159 Gowan Ave, East York, ON",
+            source="google_places",
+            raw={
+                "nationalPhoneNumber": "(416) 985-8639",
+                "googleMapsUri": "https://maps.google.com/?cid=123",
+                "businessStatus": "OPERATIONAL",
+                "types": ["painter", "general_contractor", "service"],
+            },
+        ),
+        product,
+    )
+
+    assert assessment.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS
+    assert assessment.confidence >= 65
+    assert assessment.rejection_reason is None
+
+
 def test_lead_review_state_and_shortlist_are_persisted() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

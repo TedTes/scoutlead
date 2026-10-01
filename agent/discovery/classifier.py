@@ -140,7 +140,7 @@ def assess_discovery_candidate(result: SearchResult, product: ProductRead) -> Ca
             rejection_reason="Search result has no URL.",
         )
 
-    parsed = urlparse(result.url)
+    parsed = urlparse(result.url or "")
     host = parsed.netloc.lower().removeprefix("www.")
     path = parsed.path.lower()
     title = result.title.lower()
