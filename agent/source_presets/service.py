@@ -45,9 +45,17 @@ class SourcePresetService:
                             mode=template.mode,
                             input=self._render_payload(template.input, source_input),
                             config=self._render_payload(template.config, source_input),
-                            priority=template.priority + index,
+                            priority=int(
+                                source_input.get("priority")
+                                if source_input.get("priority") is not None
+                                else template.priority + index
+                            ),
                             enabled=template.enabled,
-                            budget_limit=template.budget_limit,
+                            budget_limit=(
+                                source_input.get("budget_limit")
+                                if source_input.get("budget_limit") is not None
+                                else template.budget_limit
+                            ),
                         )
                     )
                 continue
@@ -73,6 +81,28 @@ class SourcePresetService:
             "region_code": _region_code_for_geography(product.target_geography),
             **campaign.source_inputs,
         }
+        planned_tasks = campaign.source_inputs.get("discovery_tasks")
+        if isinstance(planned_tasks, list) and planned_tasks:
+            inputs: list[dict[str, Any]] = []
+            for task in planned_tasks:
+                if not isinstance(task, dict):
+                    continue
+                task_input = task.get("input") if isinstance(task.get("input"), dict) else {}
+                task_config = task.get("config") if isinstance(task.get("config"), dict) else {}
+                inputs.append(
+                    {
+                        **provider_context,
+                        **task_input,
+                        **task_config,
+                        "provider_id": task.get("provider_id"),
+                        "query": task.get("query"),
+                        "limit": task.get("max_results") or campaign.max_leads,
+                        "stage": task.get("stage") or 1,
+                        "priority": task.get("priority") or 100,
+                        "budget_limit": task.get("budget_limit"),
+                    }
+                )
+            return inputs
         explicit_query = (campaign.source_input or "").strip()
         if explicit_query:
             return [

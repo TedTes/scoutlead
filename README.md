@@ -199,6 +199,9 @@ GOOGLE_TOKEN_ENCRYPTION_KEY=...
 CONTACT_VERIFICATION_PROVIDER=bouncer
 BOUNCER_API_KEY=...
 GOOGLE_PLACES_API_KEY=...
+OPENSTREETMAP_ENABLED=true
+# Optional search recipes for permitted directories, chambers, or registries.
+DISCOVERY_SOURCE_RECIPES=[{"id":"local_chamber","domain":"examplechamber.ca","query_template":"site:{{domain}} {{business_category}} {{location}}"}]
 APIFY_API_TOKEN=...
 APIFY_SOURCE_KIJIJI={"id":"kijiji","label":"Kijiji","enabled":true,"actor_id":"actor-owner/kijiji-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}}
 APIFY_SOURCE_HOMESTARS={"id":"homestars","label":"HomeStars","enabled":true,"actor_id":"actor-owner/homestars-actor","input_kind":"text_query","input_template":{"query":"{{query}}","maxResults":"{{limit}}"}}
@@ -207,6 +210,8 @@ APIFY_SOURCE_HOMESTARS={"id":"homestars","label":"HomeStars","enabled":true,"act
 If you use Resend instead of Gmail, set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and a verified `EMAIL_FROM_ADDRESS`.
 
 Use one `APIFY_SOURCE_<NAME>` env var per Apify-backed source. The suffix must match the object `id`, so `APIFY_SOURCE_KIJIJI` maps to source id `kijiji`. Each source must define an `input_template` or URL template that matches that actor's expected input shape; ScoutLead interprets the user's plain-language request once, then renders that source-specific template. Template values include `{{query}}`, `{{business_category}}`, `{{business_slug}}`, `{{location}}`, `{{location_slug}}`, `{{city}}`, `{{region}}`, `{{country}}`, `{{limit}}`, and `{{source_url}}`. The old `APIFY_SOURCES` array is still read only when no per-source env vars are present.
+
+Automatic discovery runs configured providers in stages: Google Places first, OpenStreetMap and web search next, then configured recipes and Apify sources as fallbacks. `DISCOVERY_SOURCE_RECIPES` is a JSON array of permitted domain/query templates and uses `{{business_category}}`, `{{location}}`, `{{city}}`, `{{region}}`, `{{country}}`, `{{query}}`, and `{{domain}}` values.
 
 Set `CONTACT_VERIFICATION_PROVIDER=bouncer` to verify discovered email addresses through Bouncer before drafts can be generated. The verifier is provider-backed, so `syntax`, generic `http`, and `zerobounce` remain available for local/testing or future swaps.
 

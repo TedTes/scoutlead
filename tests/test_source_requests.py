@@ -65,6 +65,50 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert sources[0].input["source_request_action"] == "list_contacts"
 
 
+def test_auto_source_request_expands_ranked_discovery_tasks() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+            google_places_configured=True,
+            search_configured=True,
+            openstreetmap_enabled=True,
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="List painting service contacts in Toronto ON",
+                max_results=12,
+                run_immediately=False,
+            )
+        )
+
+        sources = CampaignSourceRepository(session).list_by_campaign(result.run.id)
+
+        assert result.plan.source == "auto"
+        assert result.plan.source_preset_id == "dynamic-discovery"
+        assert [source.provider_id for source in sources] == [
+            "google_places",
+            "openstreetmap",
+            "configured_search",
+        ]
+        assert [source.priority for source in sources] == [10, 20, 25]
+        assert sources[1].input["business_category"] == "painting service"
+        assert sources[1].input["location"] == "Toronto ON"
+
+
 def test_opportunity_source_request_over_sources_but_preserves_requested_limit() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

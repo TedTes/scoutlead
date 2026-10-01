@@ -18,6 +18,7 @@ from shared.errors import ValidationError
 from shared.utils import utcnow
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.schemas import (
+    AUTO_PROVIDER_ID,
     GOOGLE_PLACES_PROVIDER_ID,
     SourceRequestCreate,
     SourceRequestPlan,
@@ -36,6 +37,10 @@ class SourceRequestService:
         apify_source_provider_id: str = "apify_actor",
         apify_source_label: str = "Kijiji",
         apify_sources: list[dict[str, Any]] | None = None,
+        google_places_configured: bool | None = None,
+        search_configured: bool | None = None,
+        openstreetmap_enabled: bool = True,
+        source_recipes: list[dict[str, Any]] | None = None,
     ) -> None:
         self.products = products
         self.campaigns = campaigns
@@ -43,6 +48,18 @@ class SourceRequestService:
         self.compiler = SourceRequestCompiler(llm=llm)
         self.apify_source_provider_id = apify_source_provider_id
         self.apify_source_label = apify_source_label
+        self.google_places_configured = (
+            bool(campaigns.google_places_api_key)
+            if google_places_configured is None
+            else google_places_configured
+        )
+        self.search_configured = (
+            campaigns.search_tool.is_configured
+            if search_configured is None
+            else search_configured
+        )
+        self.openstreetmap_enabled = openstreetmap_enabled
+        self.source_recipes = source_recipes or []
         self.apify_sources = self._apify_source_map(
             apify_sources=apify_sources,
             fallback_provider_id=apify_source_provider_id,
@@ -52,6 +69,20 @@ class SourceRequestService:
     def plan(self, request: SourceRequestCreate) -> SourceRequestPlan:
         product = ProductRead.model_validate(self.products.get(request.product_id))
         source = request.source.strip()
+        if source == AUTO_PROVIDER_ID:
+            return self.compiler.compile_auto(
+                request=request,
+                product=product,
+                google_places_configured=self.google_places_configured,
+                search_configured=self.search_configured,
+                openstreetmap_enabled=self.openstreetmap_enabled,
+                apify_sources=[
+                    config
+                    for config in self.apify_sources.values()
+                    if _apify_source_is_configured(config)
+                ],
+                source_recipes=self.source_recipes,
+            )
         if source == GOOGLE_PLACES_PROVIDER_ID:
             return self.compiler.compile_google_places(request=request, product=product)
         source_config = self.apify_sources.get(source)
@@ -61,7 +92,11 @@ class SourceRequestService:
                 product=product,
                 source_config=source_config,
             )
-        supported_sources = [GOOGLE_PLACES_PROVIDER_ID, *self.apify_sources.keys()]
+        supported_sources = [
+            AUTO_PROVIDER_ID,
+            GOOGLE_PLACES_PROVIDER_ID,
+            *self.apify_sources.keys(),
+        ]
         raise ValidationError(
             "source provider is not configured",
             {"source": source, "supported_sources": supported_sources},
@@ -256,6 +291,18 @@ def _candidate_pool_size(*, requested_count: int, over_source: bool) -> int:
     if not over_source:
         return requested_count
     return min(60, max(requested_count + 15, requested_count * 2))
+
+
+def _apify_source_is_configured(source: dict[str, Any]) -> bool:
+    return bool(
+        source.get("api_token")
+        and source.get("actor_id")
+        and (
+            source.get("input_template")
+            or source.get("search_url_template")
+            or source.get("input_kind")
+        )
+    )
 
 
 def _positive_int(value: Any) -> int | None:

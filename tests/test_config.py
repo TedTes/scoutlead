@@ -127,6 +127,23 @@ def test_settings_keeps_legacy_apify_sources_when_no_per_source_env_exists(monke
     assert [source["id"] for source in sources] == ["kijiji"]
 
 
+def test_settings_accepts_discovery_source_recipes(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "DISCOVERY_SOURCE_RECIPES",
+        '[{"id":"chamber","domain":"example.ca","query_template":"site:{{domain}} {{query}}"}]',
+    )
+
+    recipes = Settings().discovery_source_recipe_configs
+
+    assert recipes == [
+        {
+            "id": "chamber",
+            "domain": "example.ca",
+            "query_template": "site:{{domain}} {{query}}",
+        }
+    ]
+
+
 def test_database_url_normalizes_railway_postgres_url() -> None:
     assert (
         normalize_database_url("postgresql://user:pass@host:5432/db")

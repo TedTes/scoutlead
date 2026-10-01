@@ -39,12 +39,11 @@ from messages.service import MessageService
 from products.repository import ProductRepository
 from shared.errors import ConflictError
 from source_requests.schemas import (
-    GOOGLE_PLACES_PROVIDER_ID,
-    SourceProviderKind,
     SourceProviderRead,
     SourceRequestCreate,
     SourceRequestRun,
 )
+from source_requests.catalog import build_source_catalog
 from source_requests.service import SourceRequestService
 
 router = APIRouter(prefix="/discovery-runs", tags=["discovery-runs"])
@@ -105,6 +104,10 @@ def _source_request_service(
         apify_source_provider_id=services.settings.apify_source_provider_id,
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,
+        google_places_configured=bool(services.settings.google_places_api_key),
+        search_configured=services.search.is_configured,
+        openstreetmap_enabled=services.settings.openstreetmap_enabled,
+        source_recipes=services.settings.discovery_source_recipe_configs,
     )
 
 
@@ -113,39 +116,20 @@ def list_source_providers(
     services: Annotated[AppServices, Depends(get_services)],
 ) -> list[SourceProviderRead]:
     settings = services.settings
-    providers = [
+    return [
         SourceProviderRead(
-            id=GOOGLE_PLACES_PROVIDER_ID,
-            label="Google Places",
-            configured=bool(settings.google_places_api_key),
-            detail="Local business discovery",
+            id=source.id,
+            label=source.label,
+            configured=source.configured,
+            detail=source.detail,
+        )
+        for source in build_source_catalog(
+            google_places_configured=bool(settings.google_places_api_key),
+            search_configured=services.search.is_configured,
+            openstreetmap_enabled=settings.openstreetmap_enabled,
+            apify_sources=settings.apify_source_configs,
         )
     ]
-    for source in settings.apify_source_configs:
-        source_id = str(source["id"])
-        label = str(source.get("label") or source_id)
-        providers.append(
-            SourceProviderRead(
-                id=source_id,
-                label=label,
-                configured=_apify_source_is_configured(source),
-                detail=str(source.get("detail") or f"{label} listings"),
-            )
-        )
-    return providers
-
-
-def _apify_source_is_configured(source: dict) -> bool:
-    if not (source.get("api_token") and source.get("actor_id")):
-        return False
-    if source.get("input_template") or source.get("search_url_template"):
-        return True
-    return source.get("input_kind") in {
-        SourceProviderKind.URL_LIST.value,
-        SourceProviderKind.SEARCH_URL.value,
-        SourceProviderKind.CLASSIFIED_SEARCH_URL.value,
-    }
-
 
 @router.get("", response_model=list[CampaignRead])
 def list_discovery_runs(

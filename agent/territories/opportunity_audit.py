@@ -129,7 +129,9 @@ class BusinessOpportunityAuditor:
             if _raw_text(lead.raw_sources, "businessStatus") != "OPERATIONAL":
                 continue
             phone = business.phone or _raw_text(lead.raw_sources, "nationalPhoneNumber")
-            maps_url = _raw_text(lead.raw_sources, "googleMapsUri")
+            maps_url = _raw_text(lead.raw_sources, "googleMapsUri") or _raw_text(
+                lead.raw_sources, "source_url"
+            )
             if not phone and not maps_url:
                 continue
 

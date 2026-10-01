@@ -18,7 +18,36 @@ from memory.repository import MemoryRepository
 from products.repository import ProductRepository
 from products.schemas import DiscoverySource, DiscoverySourceType, ProductCreate, ProductRead, QualificationCriterion
 from tools.search import SearchResult
-from workflows.discovery import DiscoveryWorkflow
+from workflows.discovery import DiscoveryWorkflow, _merge_unique_rows
+
+
+def test_discovery_rows_merge_across_sources_by_phone() -> None:
+    merged = _merge_unique_rows(
+        [
+            {
+                "title": "Neighbourhood Painting",
+                "url": None,
+                "geography": "Toronto, ON",
+                "source": "google_places",
+                "provider_id": "google_places",
+                "raw": {"nationalPhoneNumber": "(416) 555-0101"},
+            }
+        ],
+        [
+            {
+                "title": "Neighbourhood Painting Inc.",
+                "url": "https://painting.example",
+                "geography": "Toronto ON",
+                "source": "openstreetmap",
+                "provider_id": "openstreetmap",
+                "raw": {"phone": "+1 416 555 0101"},
+            }
+        ],
+    )
+
+    assert len(merged) == 1
+    assert merged[0]["url"] == "https://painting.example"
+    assert len(merged[0]["raw"]["source_evidence"]) == 2
 
 
 class FakeSearchTool:

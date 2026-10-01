@@ -6,6 +6,13 @@ from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus, LeadSeedInput
+from canonical.normalization import (
+    external_id_from_raw,
+    normalize_business_name,
+    normalize_domain,
+    normalize_phone,
+    phone_from_raw,
+)
 from canonical.repository import CanonicalRepository
 from discovery.classifier import assess_discovery_candidate
 from discovery.repository import DiscoveryCandidateRepository
@@ -172,6 +179,8 @@ class DiscoveryWorkflow:
         def decide(state: dict, iteration: int):
             if state["source_index"] >= len(sources):
                 return StopAction("no more campaign discovery sources")
+            if state["eligible_count"] >= campaign.max_leads:
+                return StopAction("candidate target reached")
             source = sources[state["source_index"]]
             return ToolAction(
                 tool_name=source_tool.name,
@@ -205,14 +214,51 @@ class DiscoveryWorkflow:
                 product_id=product.id,
                 rows=enriched_rows,
             )
+            merged_rows = _merge_unique_rows(state["results"], enriched_rows)
+            eligible_count = sum(
+                1
+                for row in merged_rows
+                if assess_discovery_candidate(
+                    SearchResult.model_validate(row), product
+                ).is_promotable
+            )
+            metric = {
+                "provider_id": source.provider_id,
+                "stage": source.config.get("stage") or 1,
+                "fetched_count": len(tool_data),
+                "unique_count": len(merged_rows) - len(state["results"]),
+                "eligible_count": max(0, eligible_count - state["eligible_count"]),
+                "latency_ms": observation.get("latency_ms", 0)
+                if isinstance(observation, dict)
+                else 0,
+                "cost_usd": observation.get("cost_usd", 0)
+                if isinstance(observation, dict)
+                else 0,
+                "error": observation.get("error")
+                if isinstance(observation, dict)
+                else None,
+            }
             return {
                 "source_index": state["source_index"] + 1,
-                "results": [*state["results"], *enriched_rows],
+                "results": merged_rows,
+                "eligible_count": eligible_count,
+                "source_metrics": [*state["source_metrics"], metric],
             }
 
         result = runner.run(
             goal=f"Discover leads for {product.product_name}",
-            initial_state={"source_index": 0, "results": cached_results},
+            initial_state={
+                "source_index": 0,
+                "results": cached_results,
+                "eligible_count": sum(
+                    1
+                    for row in cached_results
+                    if assess_discovery_candidate(
+                        SearchResult.model_validate(row), product
+                    ).is_promotable
+                ),
+                "source_metrics": [],
+            },
             max_iterations=max(1, len(sources)),
             allowed_tools={source_tool.name},
             tools=[source_tool],
@@ -221,6 +267,9 @@ class DiscoveryWorkflow:
             on_tool_start=self.on_tool_start,
             on_tool_success=self.on_tool_success,
             on_tool_error=self.on_tool_error,
+            continue_on_tool_error=(
+                (campaign.source_inputs or {}).get("discovery_strategy") == "staged"
+            ),
         )
 
         for row in result.state["results"]:
@@ -258,6 +307,16 @@ class DiscoveryWorkflow:
                 tags=["discovery", product.target_customer],
             )
         )
+        if result.state["source_metrics"]:
+            self.memory.create_observation(
+                CampaignMemoryCreate(
+                    product_id=product.id,
+                    campaign_id=campaign.id,
+                    type=ObservationType.LEAD_QUALITY,
+                    content=f"Discovery source metrics: {result.state['source_metrics']}",
+                    tags=["discovery", "source-metrics"],
+                )
+            )
         return [LeadRead.model_validate(row) for row in discovered]
 
 
@@ -299,3 +358,73 @@ def _rows_with_semantic_context(rows: list[dict[str, Any]]) -> list[dict[str, An
         enriched["from_semantic_cache"] = True
         enriched_rows.append(enriched)
     return enriched_rows
+
+
+def _merge_unique_rows(
+    existing_rows: list[dict[str, Any]],
+    new_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = [dict(row) for row in existing_rows]
+    key_to_index: dict[str, int] = {}
+    for index, row in enumerate(merged):
+        for key in _discovery_row_keys(row):
+            key_to_index[key] = index
+
+    for incoming in new_rows:
+        row = dict(incoming)
+        keys = _discovery_row_keys(row)
+        matching_indexes = {key_to_index[key] for key in keys if key in key_to_index}
+        if not matching_indexes:
+            index = len(merged)
+            merged.append(row)
+            for key in keys:
+                key_to_index[key] = index
+            continue
+
+        index = min(matching_indexes)
+        current = merged[index]
+        for field in ("url", "snippet", "geography", "contact_email"):
+            if not current.get(field) and row.get(field):
+                current[field] = row[field]
+        raw = dict(current.get("raw") or {})
+        evidence = list(raw.get("source_evidence") or [])
+        if not evidence:
+            evidence.append(
+                {
+                    "provider_id": current.get("provider_id") or current.get("source"),
+                    "raw": current.get("raw") or {},
+                }
+            )
+        evidence.append(
+            {
+                "provider_id": row.get("provider_id") or row.get("source"),
+                "raw": row.get("raw") or {},
+            }
+        )
+        raw["source_evidence"] = evidence
+        current["raw"] = raw
+        for key in keys:
+            key_to_index[key] = index
+    return merged
+
+
+def _discovery_row_keys(row: dict[str, Any]) -> set[str]:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    provider = str(row.get("provider_id") or row.get("source") or "unknown")
+    external_id = external_id_from_raw(raw)
+    domain = normalize_domain(row.get("url"))
+    phone = normalize_phone(phone_from_raw(raw))
+    name = normalize_business_name(str(row.get("title") or ""))
+    geography = " ".join(str(row.get("geography") or "").lower().replace(",", " ").split())
+    keys: set[str] = set()
+    if external_id:
+        keys.add(f"external:{provider}:{external_id}")
+    if domain:
+        keys.add(f"domain:{domain}")
+    if phone:
+        keys.add(f"phone:{phone}")
+    if name and geography:
+        keys.add(f"name-geography:{name}|{geography}")
+    if not keys and name:
+        keys.add(f"name-provider:{provider}:{name}")
+    return keys

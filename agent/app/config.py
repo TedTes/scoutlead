@@ -45,8 +45,10 @@ class Settings(BaseSettings):
     search_api_endpoint: str | None = None
     search_api_key: str | None = None
     search_provider: Literal["generic", "tavily", "brave"] = "generic"
+    discovery_source_recipes: str | None = None
     google_places_api_key: str | None = None
     google_places_api_endpoint: str | None = None
+    openstreetmap_enabled: bool = True
     apify_api_token: str | None = None
     apify_api_base_url: str = "https://api.apify.com/v2"
     apify_sources: str | None = None
@@ -144,6 +146,23 @@ class Settings(BaseSettings):
                 }
             )
         ]
+
+    @property
+    def discovery_source_recipe_configs(self) -> list[dict[str, Any]]:
+        if not self.discovery_source_recipes:
+            return []
+        parsed = json.loads(self.discovery_source_recipes)
+        if not isinstance(parsed, list):
+            raise ValueError("DISCOVERY_SOURCE_RECIPES must be a JSON array")
+        recipes: list[dict[str, Any]] = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            recipe_id = str(item.get("id") or "").strip()
+            query_template = str(item.get("query_template") or "").strip()
+            if recipe_id and query_template:
+                recipes.append({**item, "id": recipe_id, "query_template": query_template})
+        return recipes
 
     def _parse_apify_sources(self) -> list[dict[str, Any]]:
         if not self.apify_sources:

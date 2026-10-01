@@ -9,6 +9,9 @@ from campaigns.schemas import CampaignRead, CampaignRunSummary
 
 
 GOOGLE_PLACES_PROVIDER_ID = "google_places"
+AUTO_PROVIDER_ID = "auto"
+OPENSTREETMAP_PROVIDER_ID = "openstreetmap"
+CONFIGURED_SEARCH_PROVIDER_ID = "configured_search"
 
 
 class SourceRequestAction(StrEnum):
@@ -24,7 +27,7 @@ class SourceProviderKind(StrEnum):
 
 class SourceRequestCreate(BaseModel):
     product_id: str = Field(min_length=1)
-    source: str = Field(min_length=1)
+    source: str = Field(default=AUTO_PROVIDER_ID, min_length=1)
     prompt: str = Field(min_length=3)
     name: str | None = Field(default=None, min_length=1)
     max_results: int = Field(default=25, gt=0, le=100)
@@ -43,6 +46,18 @@ class SourceRequestIntent(BaseModel):
     rationale: str = Field(min_length=1)
 
 
+class SourceTask(BaseModel):
+    provider_id: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    stage: int = Field(default=1, ge=1)
+    priority: int = Field(default=100, ge=0)
+    max_results: int = Field(gt=0, le=100)
+    reason: str = Field(min_length=1)
+    input: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+    budget_limit: float | None = Field(default=None, ge=0)
+
+
 class SourceRequestPlan(BaseModel):
     source: str = Field(min_length=1)
     action: SourceRequestAction = SourceRequestAction.LIST_CONTACTS
@@ -52,6 +67,7 @@ class SourceRequestPlan(BaseModel):
     explanation: str
     intent: SourceRequestIntent | None = None
     source_inputs: dict[str, Any] = Field(default_factory=dict)
+    tasks: list[SourceTask] = Field(default_factory=list)
 
 
 class SourceProviderRead(BaseModel):

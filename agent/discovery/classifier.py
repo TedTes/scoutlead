@@ -126,7 +126,7 @@ BUSINESS_TERMS = (
     "contact us",
 )
 
-STRUCTURED_LOCAL_BUSINESS_SOURCES = {"google_places"}
+STRUCTURED_LOCAL_BUSINESS_SOURCES = {"google_places", "openstreetmap"}
 
 
 def assess_discovery_candidate(result: SearchResult, product: ProductRead) -> CandidateAssessment:
@@ -230,6 +230,8 @@ def _business_confidence(text: str, result: SearchResult, product: ProductRead) 
     confidence += min(matched_target_terms * 10, 30)
     confidence += min(matched_business_terms * 8, 24)
 
+    if result.source in STRUCTURED_LOCAL_BUSINESS_SOURCES:
+        confidence += 12
     if result.contact_email:
         confidence += 10
     if _has_structured_contact_signal(result):

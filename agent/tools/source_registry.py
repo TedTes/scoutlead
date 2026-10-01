@@ -7,6 +7,7 @@ from shared.errors import ConfigurationError
 from tools.base import ToolResult
 from tools.discovery.apify_actor import ApifyActorDiscoveryAdapter
 from tools.discovery.google_places import GooglePlacesDiscoveryAdapter
+from tools.discovery.openstreetmap import OpenStreetMapDiscoveryAdapter
 from tools.search import SearchTool
 from tools.source_adapters import ConfiguredSearchAdapter, SeedAdapter, SourceAdapter
 
@@ -35,6 +36,7 @@ class SourceAdapterRegistry:
                 endpoint=google_places_api_endpoint,
                 timeout_seconds=timeout_seconds,
             ),
+            OpenStreetMapDiscoveryAdapter(timeout_seconds=timeout_seconds),
             SeedAdapter(),
         ]
         apify_source_configs = apify_sources

@@ -59,6 +59,7 @@ class BoundedAgentRunner:
         on_tool_start: ToolStartCallback | None = None,
         on_tool_success: ToolSuccessCallback | None = None,
         on_tool_error: ToolErrorCallback | None = None,
+        continue_on_tool_error: bool = False,
     ) -> AgentRunResult:
         tool_map = {tool.name: tool for tool in tools}
         state = dict(initial_state)
@@ -91,7 +92,22 @@ class BoundedAgentRunner:
             except Exception as exc:
                 if tool_call_id and on_tool_error:
                     on_tool_error(tool_call_id, exc)
-                raise
+                if not continue_on_tool_error:
+                    raise
+                observation = {
+                    "data": [],
+                    "error": str(exc),
+                    "error_type": exc.__class__.__name__,
+                }
+                trace.append(
+                    AgentTraceEntry(
+                        iteration=iteration,
+                        action=action,
+                        observation=observation,
+                    )
+                )
+                state = observe(state, action, observation, iteration)
+                continue
             if tool_call_id and on_tool_success:
                 on_tool_success(tool_call_id, observation)
             trace.append(AgentTraceEntry(iteration=iteration, action=action, observation=observation))
