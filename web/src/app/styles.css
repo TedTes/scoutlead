@@ -2510,11 +2510,12 @@ a {
   background: var(--_panel);
   border-right: 1px solid var(--line);
   display: flex;
-  flex: 0 0 244px;
+  flex: 0 0 var(--rail-width, 244px);
   flex-direction: column;
   height: 100%;
   min-width: 0;
   overflow: hidden;
+  position: relative;
   transform: translateX(0);
   transition:
     flex-basis 220ms var(--ease-out, ease),
@@ -2522,7 +2523,7 @@ a {
     transform 220ms var(--ease-out, ease),
     opacity 160ms ease,
     border-color 160ms ease;
-  width: 244px;
+  width: var(--rail-width, 244px);
 }
 
 @media (min-width: 1160px) {
@@ -2750,10 +2751,14 @@ a {
 }
 
 .lead-workflow-links {
-  border-bottom: 1px solid var(--line);
   display: grid;
+  flex: 0 0 var(--workflow-section-height, 247px);
   gap: 3px;
+  min-height: 0;
+  overflow-y: auto;
   padding-bottom: 13px;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .lead-workflow-links button,
@@ -2828,9 +2833,12 @@ a {
 }
 
 .lead-workspace-list {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding-bottom: 12px;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .lead-workspace-list button {
@@ -3280,10 +3288,93 @@ a {
   --_red: var(--red, #c23b3b);
   --_red-bg: var(--red-bg, #fbeaea);
   --_red-line: var(--red-line, #efc9c9);
-  border-top: 1px solid var(--_line);
-  flex: 0 0 auto;
-  margin-top: auto;
+  border-top: 0;
+  flex: 0 0 var(--manage-section-height, 151px);
+  min-height: 0;
+  overflow-y: auto;
   padding: 10px 9px 13px;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.navigation-resizer {
+  background: transparent;
+  border: 0;
+  flex: 0 0 auto;
+  outline: 0;
+  padding: 0;
+  position: relative;
+  touch-action: none;
+  z-index: 12;
+}
+
+.navigation-resizer::after {
+  background: var(--line);
+  content: "";
+  position: absolute;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.navigation-resizer:hover::after,
+.navigation-resizer:focus-visible::after,
+body.is-resizing-navigation .navigation-resizer::after {
+  background: var(--line-strong);
+}
+
+.navigation-resizer.is-horizontal {
+  cursor: row-resize;
+  height: 9px;
+  margin: 0 -10px;
+}
+
+.navigation-resizer.is-horizontal::after {
+  height: 1px;
+  left: 10px;
+  right: 10px;
+  top: 4px;
+}
+
+.navigation-resizer.is-horizontal:hover::after,
+.navigation-resizer.is-horizontal:focus-visible::after {
+  box-shadow: 0 0 0 2px rgba(27, 31, 36, 0.06);
+}
+
+.navigation-resizer.is-vertical {
+  bottom: 0;
+  cursor: col-resize;
+  position: absolute;
+  right: -4px;
+  top: 0;
+  width: 9px;
+}
+
+.navigation-resizer.is-vertical::after {
+  bottom: 0;
+  left: 4px;
+  top: 0;
+  width: 1px;
+}
+
+.navigation-resizer.is-vertical:hover::after,
+.navigation-resizer.is-vertical:focus-visible::after {
+  box-shadow: 0 0 0 2px rgba(27, 31, 36, 0.06);
+}
+
+.manage-section-resizer {
+  margin: 0;
+}
+
+body.is-resizing-navigation {
+  cursor: row-resize;
+  user-select: none;
+}
+
+body.is-resizing-navigation:has(.navigation-resizer.is-vertical:hover) {
+  cursor: col-resize;
+}
+
+body.is-resizing-navigation .rail {
+  transition: none;
 }
 
 .mng-label {
@@ -8184,6 +8275,24 @@ button.bulk-recipient-select:hover {
 .results-body.has-detail .contact-card-list::-webkit-scrollbar-thumb:hover {
   background: rgba(27, 31, 36, 0.22);
   background-clip: content-box;
+}
+
+@media (max-width: 1159px) {
+  .navigation-resizer {
+    display: none;
+  }
+
+  .lead-workflow-links {
+    border-bottom: 1px solid var(--line);
+    flex-basis: auto;
+    overflow-y: visible;
+  }
+
+  .mng {
+    border-top: 1px solid var(--line);
+    flex-basis: auto;
+    overflow-y: visible;
+  }
 }
 
 @media (min-width: 901px) and (max-width: 1159px) {

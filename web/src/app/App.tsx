@@ -19,7 +19,18 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
@@ -40,6 +51,15 @@ type AppProps = {
 };
 
 type AppViewMode = "auto" | Screen;
+
+const RAIL_WIDTH_DEFAULT = 244;
+const RAIL_WIDTH_MIN = 220;
+const RAIL_WIDTH_MAX = 420;
+const WORKFLOW_HEIGHT_DEFAULT = 247;
+const WORKFLOW_HEIGHT_MIN = 150;
+const MANAGE_HEIGHT_DEFAULT = 151;
+const MANAGE_HEIGHT_MIN = 112;
+const RAIL_FIXED_HEIGHT_BUDGET = 330;
 
 export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {}) {
   return (
@@ -63,7 +83,17 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  const [railWidth, setRailWidth] = useState(() =>
+    readStoredDimension("scoutlead:rail-width", RAIL_WIDTH_DEFAULT, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX),
+  );
+  const [workflowSectionHeight, setWorkflowSectionHeight] = useState(() =>
+    readStoredDimension("scoutlead:workflow-height", WORKFLOW_HEIGHT_DEFAULT, WORKFLOW_HEIGHT_MIN, 360),
+  );
+  const [manageSectionHeight, setManageSectionHeight] = useState(() =>
+    readStoredDimension("scoutlead:manage-height", MANAGE_HEIGHT_DEFAULT, MANAGE_HEIGHT_MIN, 280),
+  );
   const productMenuRef = useRef<HTMLDivElement | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
   const { showToast } = useToast();
   const {
     loading,
@@ -157,6 +187,25 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       return { runId, counts };
     });
   }, []);
+
+  const availableResizableHeight = () =>
+    Math.max(
+      WORKFLOW_HEIGHT_MIN + MANAGE_HEIGHT_MIN,
+      (railRef.current?.getBoundingClientRect().height || window.innerHeight) - RAIL_FIXED_HEIGHT_BUDGET,
+    );
+
+  const openWorkflowView = (nextView: LeadWorkflowView) => {
+    setLeadWorkflowView(nextView);
+    const targetRunId = selectedRunExists
+      ? selectedDiscoveryRunId
+      : productRunLabels[0]?.run.id;
+    if (targetRunId) {
+      setSelectedDiscoveryRunId(targetRunId);
+      void refreshSnapshot(targetRunId);
+      selectScreen("results");
+    }
+    setMobileRailOpen(false);
+  };
 
   const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
     setDraftRunNameState((current) => {
@@ -317,6 +366,24 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     };
   }, [productMenuOpen]);
 
+  useEffect(() => {
+    writeStoredDimension("scoutlead:rail-width", railWidth);
+  }, [railWidth]);
+
+  useEffect(() => {
+    writeStoredDimension("scoutlead:workflow-height", workflowSectionHeight);
+  }, [workflowSectionHeight]);
+
+  useEffect(() => {
+    writeStoredDimension("scoutlead:manage-height", manageSectionHeight);
+  }, [manageSectionHeight]);
+
+  const railStyle = {
+    "--rail-width": `${railWidth}px`,
+    "--workflow-section-height": `${workflowSectionHeight}px`,
+    "--manage-section-height": `${manageSectionHeight}px`,
+  } as CSSProperties;
+
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
       <header className="mobile-topbar">
@@ -353,7 +420,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         <Menu size={18} />
       </button>
 
-      <aside className="rail">
+      <aside className="rail" ref={railRef} style={railStyle}>
         <div className="brand">
           <span className="brand-mark">S</span>
           <div className="brand-copy">
@@ -444,12 +511,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 aria-label={`${item.label}, ${item.count}`}
                 title={`${item.label} (${item.count})`}
                 type="button"
-                onClick={() => {
-                  setLeadWorkflowView(item.id);
-                  if (selectedDiscoveryRunId) selectScreen("results");
-                  else startNewList();
-                  setMobileRailOpen(false);
-                }}
+                onClick={() => openWorkflowView(item.id)}
               >
                 {item.icon}
                 <span>{item.label}</span>
@@ -457,6 +519,15 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
               </button>
             ))}
           </div>
+          <ResizeHandle
+            ariaLabel="Resize lead workflow section"
+            axis="y"
+            defaultValue={WORKFLOW_HEIGHT_DEFAULT}
+            max={() => Math.max(WORKFLOW_HEIGHT_MIN, availableResizableHeight() - manageSectionHeight)}
+            min={WORKFLOW_HEIGHT_MIN}
+            onChange={setWorkflowSectionHeight}
+            value={workflowSectionHeight}
+          />
           <div className="lead-workspace-heading">
             <span>Workspaces</span>
             <button type="button" aria-label="New search" title="New search" onClick={startNewList}>
@@ -510,6 +581,17 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           </div>
         </nav>
 
+        <ResizeHandle
+          ariaLabel="Resize Manage section"
+          axis="y"
+          className="manage-section-resizer"
+          defaultValue={MANAGE_HEIGHT_DEFAULT}
+          direction={-1}
+          max={() => Math.max(MANAGE_HEIGHT_MIN, availableResizableHeight() - workflowSectionHeight)}
+          min={MANAGE_HEIGHT_MIN}
+          onChange={setManageSectionHeight}
+          value={manageSectionHeight}
+        />
         <ProductManagementSection
           activeScreen={activeScreen}
           integrationCount={getEnabledIntegrationCount(selectedProduct, Boolean(gmailConnectionStatus?.connected))}
@@ -523,6 +605,16 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           <AccountControl accountSlot={accountSlot} placement="desktop" />
           <span className="rail-account-label">Account</span>
         </div>
+        <ResizeHandle
+          ariaLabel="Resize navigation width"
+          axis="x"
+          className="rail-width-resizer"
+          defaultValue={RAIL_WIDTH_DEFAULT}
+          max={RAIL_WIDTH_MAX}
+          min={RAIL_WIDTH_MIN}
+          onChange={setRailWidth}
+          value={railWidth}
+        />
       </aside>
 
       <section
@@ -596,6 +688,94 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         />
       ) : null}
     </div>
+  );
+}
+
+function ResizeHandle({
+  ariaLabel,
+  axis,
+  className = "",
+  defaultValue,
+  direction = 1,
+  max,
+  min,
+  onChange,
+  value,
+}: {
+  ariaLabel: string;
+  axis: "x" | "y";
+  className?: string;
+  defaultValue: number;
+  direction?: 1 | -1;
+  max: number | (() => number);
+  min: number;
+  onChange: (value: number) => void;
+  value: number;
+}) {
+  const dragStart = useRef<{ coordinate: number; value: number } | null>(null);
+  const resolvedMax = () => Math.max(min, typeof max === "function" ? max() : max);
+  const updateValue = (nextValue: number) => {
+    onChange(Math.round(Math.min(resolvedMax(), Math.max(min, nextValue))));
+  };
+  const coordinate = (event: ReactPointerEvent<HTMLDivElement>) =>
+    axis === "x" ? event.clientX : event.clientY;
+
+  const startDragging = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStart.current = { coordinate: coordinate(event), value };
+    document.body.classList.add("is-resizing-navigation");
+  };
+
+  const stopDragging = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragStart.current = null;
+    document.body.classList.remove("is-resizing-navigation");
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const decrementKey = axis === "x" ? "ArrowLeft" : "ArrowUp";
+    const incrementKey = axis === "x" ? "ArrowRight" : "ArrowDown";
+    if (![decrementKey, incrementKey, "Home"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      updateValue(defaultValue);
+      return;
+    }
+    const physicalDelta = event.key === incrementKey ? 1 : -1;
+    updateValue(value + physicalDelta * direction * (event.shiftKey ? 24 : 8));
+  };
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      aria-orientation={axis === "x" ? "vertical" : "horizontal"}
+      aria-valuemax={resolvedMax()}
+      aria-valuemin={min}
+      aria-valuenow={value}
+      className={["navigation-resizer", axis === "x" ? "is-vertical" : "is-horizontal", className]
+        .filter(Boolean)
+        .join(" ")}
+      role="separator"
+      tabIndex={0}
+      title={`${ariaLabel}. Double-click to reset.`}
+      onDoubleClick={() => updateValue(defaultValue)}
+      onKeyDown={handleKeyDown}
+      onLostPointerCapture={() => {
+        dragStart.current = null;
+        document.body.classList.remove("is-resizing-navigation");
+      }}
+      onPointerDown={startDragging}
+      onPointerMove={(event) => {
+        if (!dragStart.current) return;
+        const delta = (coordinate(event) - dragStart.current.coordinate) * direction;
+        updateValue(dragStart.current.value + delta);
+      }}
+      onPointerUp={stopDragging}
+    />
   );
 }
 
@@ -1176,6 +1356,23 @@ function writeDraftRunName(productId: string, value: string | null) {
     return;
   }
   localStorage.setItem(key, value);
+}
+
+function readStoredDimension(key: string, fallback: number, min: number, max: number) {
+  try {
+    const stored = Number.parseInt(localStorage.getItem(key) || "", 10);
+    return Number.isFinite(stored) ? Math.min(max, Math.max(min, stored)) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredDimension(key: string, value: number) {
+  try {
+    localStorage.setItem(key, String(Math.round(value)));
+  } catch {
+    // Resizing remains available when browser storage is disabled.
+  }
 }
 
 function titleFromQuery(query: string) {
