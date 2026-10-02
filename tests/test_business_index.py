@@ -89,6 +89,13 @@ def test_only_structured_business_sources_set_canonical_website() -> None:
         )
         == "https://official-painter.example"
     )
+    assert (
+        _canonical_website_url(
+            "https://search.example/unrelated-result",
+            provider_id="configured_search",
+        )
+        is None
+    )
 
 
 def test_audit_prioritizes_google_website_conflicts_for_repair() -> None:
@@ -118,13 +125,6 @@ def test_audit_prioritizes_google_website_conflicts_for_repair() -> None:
     )
 
     assert conflict < new_missing < ordinary
-    assert (
-        _canonical_website_url(
-            "https://search.example/unrelated-result",
-            provider_id="configured_search",
-        )
-        is None
-    )
 
 
 def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
