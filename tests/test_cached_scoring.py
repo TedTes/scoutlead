@@ -70,6 +70,41 @@ def test_quote_form_does_not_raise_fit_for_digital_opportunity_product() -> None
     assert with_quote_result.score_breakdown.fit_score == without_quote_result.score_breakdown.fit_score
 
 
+def test_versioned_opportunity_evidence_drives_fit_without_email() -> None:
+    product = _product().model_copy(
+        update={
+            "product_name": "Local Service Website Growth",
+            "product_description": "Website and conversion improvements for local businesses.",
+            "problem_being_solved": "Weak websites and missing quote or booking flows.",
+        }
+    )
+    row = _cached_row()
+    row["raw"] = {
+        "canonical_business_id": "business_test",
+        "nationalPhoneNumber": "(416) 555-1212",
+        "business_index_opportunity_evidence": {
+            "digital_opportunity": {
+                "version": 1,
+                "score": 45,
+                "level": "high",
+                "signals": [{"key": "website_unreachable"}],
+            }
+        },
+    }
+
+    result = score_cached_lead(
+        product=product,
+        lead=_lead(contact_email=None),
+        row=row,
+        confidence=92,
+    )
+
+    assert result.qualified is True
+    assert result.score_breakdown is not None
+    assert result.score_breakdown.fit_score >= 80
+    assert result.score_breakdown.reachability_score == 25
+
+
 def test_cached_directory_result_with_email_is_not_good_fit() -> None:
     result = score_cached_lead(
         product=_product(),

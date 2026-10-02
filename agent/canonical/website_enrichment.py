@@ -317,12 +317,17 @@ class WebsiteEnrichmentClient:
             links=homepage.links,
             base_url=pages[0].url,
         )
-        fallback_urls = self._candidate_urls(website_url)[1:]
+        fallback_urls = self._candidate_urls(website_url)[1:4]
+        attempted_internal_pages = 0
+        max_internal_attempts = self.max_pages_per_business + 3
         for url in dict.fromkeys([*linked_urls, *fallback_urls]):
             if len(pages) >= self.max_pages_per_business:
                 break
+            if attempted_internal_pages >= max_internal_attempts:
+                break
             if url in {page.url for page in pages}:
                 continue
+            attempted_internal_pages += 1
             page = self._fetch_page(url)
             if page.error:
                 errors.append(f"{url}: {page.error}")

@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agent_runs.service import AgentRunService
-from business_index.refresh import BusinessIndexRefreshService
+from business_index.refresh import BusinessIndexRefreshService, _round_robin_unique
 from business_index.repository import BusinessIndexRepository
 from business_index.scheduler import enqueue_due_business_index_refreshes
 from campaigns.service import CampaignService
@@ -60,6 +60,20 @@ class EmptySourceRegistry:
             confidence=80,
             data=[],
         )
+
+
+def test_refresh_candidate_order_interleaves_providers_before_existing_inventory() -> None:
+    assert _round_robin_unique(
+        [["google-1", "google-2", "shared"], ["osm-1", "shared", "osm-2"]],
+        ["existing-1", "google-1"],
+    ) == [
+        "google-1",
+        "osm-1",
+        "google-2",
+        "shared",
+        "osm-2",
+        "existing-1",
+    ]
 
 
 def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:

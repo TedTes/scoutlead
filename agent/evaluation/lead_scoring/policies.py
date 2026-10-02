@@ -14,7 +14,10 @@ from evaluation.lead_scoring.signals import (
     target_terms,
     website_enrichment,
 )
-from evaluation.digital_opportunity import product_requires_digital_opportunity
+from evaluation.digital_opportunity import (
+    opportunity_evidence_from_sources,
+    product_requires_digital_opportunity,
+)
 from leads.schemas import AgentFitStatus, ContactVerificationStatus, LeadRead, QualificationScoreBreakdown
 from products.schemas import ProductRead
 
@@ -144,6 +147,13 @@ def problem_fit_score(*, product: ProductRead, row: dict[str, Any], lead: LeadRe
     score += min(len(service_signals) * 6, 18)
     if has_quote_signal(row) and not product_requires_digital_opportunity(product):
         score += 15
+    if product_requires_digital_opportunity(product):
+        opportunity = opportunity_evidence_from_sources([row, *lead.raw_sources])
+        opportunity_level = str((opportunity or {}).get("level") or "none").lower()
+        if opportunity_level == "high":
+            score = max(score, 82)
+        elif opportunity_level == "moderate":
+            score = max(score, 68)
     if product.target_geography.lower() and product.target_geography.lower() in text:
         score += 5
     if product_problem_signal_required(product) and not has_product_problem_signal(
@@ -370,6 +380,13 @@ def product_problem_signal_required(product: ProductRead) -> bool:
 
 
 def has_product_problem_signal(*, product: ProductRead, row: dict[str, Any], lead: LeadRead) -> bool:
+    if product_requires_digital_opportunity(product):
+        opportunity = opportunity_evidence_from_sources([row, *lead.raw_sources])
+        if str((opportunity or {}).get("level") or "none").lower() in {
+            "moderate",
+            "high",
+        }:
+            return True
     terms = required_product_problem_terms(product)
     if not terms:
         return True

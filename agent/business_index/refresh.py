@@ -18,7 +18,8 @@ from campaign_sources.schemas import (
 from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
-from db.models import CampaignModel
+from canonical.website_enrichment import SOURCE_NAME as WEBSITE_AUDIT_SOURCE
+from db.models import BusinessModel, CampaignModel, SourceObservationModel
 from discovery.classifier import assess_discovery_candidate
 from products.repository import ProductRepository
 from products.schemas import ProductRead
@@ -26,7 +27,10 @@ from shared.utils import new_id, utcnow
 from source_requests.schemas import SourceTask
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.schemas import SourceRequestCreate
-from territories.opportunity_audit import BusinessOpportunityAuditor
+from territories.opportunity_audit import (
+    WEBSITE_PRESENCE_SOURCE,
+    BusinessOpportunityAuditor,
+)
 from tools.search import SearchResult
 from tools.source_registry import SourceAdapterRegistry
 
@@ -63,8 +67,8 @@ class BusinessIndexRefreshService:
         campaigns = self._expanding_campaigns(segment.id)
         context_campaign = campaigns[0] if campaigns else self._scheduled_campaign(segment, product)
         canonical = CanonicalRepository(self.session, embedding=self.embedding)
-        # Refresh evidence for durable inventory as well as newly discovered rows.
-        business_ids = set(self.segments.business_ids(segment))
+        existing_business_ids = self.segments.business_ids(segment)
+        provider_business_ids: list[list[str]] = []
         successful_sources = 0
 
         for index, task_data in enumerate(segment.source_plan or []):
@@ -88,6 +92,7 @@ class BusinessIndexRefreshService:
                 )
                 rows = list(result.data or [])[: task.max_results]
                 written = 0
+                source_business_ids: list[str] = []
                 for row in rows:
                     normalized = _indexed_row(
                         row,
@@ -110,9 +115,10 @@ class BusinessIndexRefreshService:
                         raw=normalized["raw"],
                     )
                     if link.business_id:
-                        business_ids.add(link.business_id)
+                        source_business_ids.append(link.business_id)
                         written += 1
                 self.session.commit()
+                provider_business_ids.append(source_business_ids)
                 successful_sources += 1
                 self.segments.record_source_result(
                     segment,
@@ -150,20 +156,26 @@ class BusinessIndexRefreshService:
             self.segments.complete_refresh(segment, succeeded=False)
             raise RuntimeError(f"all business index sources failed for segment {segment.id}")
 
-        if business_ids:
+        business_ids = _round_robin_unique(provider_business_ids, existing_business_ids)
+        # Existing audited matches should become visible while fresh candidates are
+        # inspected. The final pass below re-scores the same leads idempotently.
+        self._fill_expanding_campaigns(segment.id, complete=False)
+        audit_business_ids = self._audit_batch(segment, business_ids)
+        if audit_business_ids:
             self.auditor.audit_businesses(
-                list(business_ids),
+                audit_business_ids,
                 category=segment.niche.category if segment.niche else None,
                 market=segment.market_label,
                 opportunity_policy=_opportunity_policy(segment.source_plan),
             )
-        filled = self._fill_expanding_campaigns(segment.id)
+        filled = self._fill_expanding_campaigns(segment.id, complete=True)
         self.segments.complete_refresh(segment, succeeded=successful_sources > 0)
         return {
             "segment_id": segment.id,
             "source_count": len(segment.source_plan or []),
             "successful_source_count": successful_sources,
             "business_count": len(business_ids),
+            "audited_business_count": len(audit_business_ids),
             "filled_campaign_count": filled,
         }
 
@@ -215,7 +227,40 @@ class BusinessIndexRefreshService:
             if (row.source_inputs or {}).get("business_index_segment_id") == segment_id
         ]
 
-    def _fill_expanding_campaigns(self, segment_id: str) -> int:
+    def _audit_batch(self, segment, business_ids: list[str]) -> list[str]:
+        if not business_ids:
+            return []
+        businesses = {
+            business.id: business
+            for business in self.session.scalars(
+                select(BusinessModel).where(BusinessModel.id.in_(business_ids))
+            )
+        }
+        audited_ids = set(
+            self.session.scalars(
+                select(SourceObservationModel.business_id).where(
+                    SourceObservationModel.business_id.in_(business_ids),
+                    SourceObservationModel.source.in_(
+                        [WEBSITE_AUDIT_SOURCE, WEBSITE_PRESENCE_SOURCE]
+                    ),
+                )
+            )
+        )
+        positions = {business_id: index for index, business_id in enumerate(business_ids)}
+        candidates = [
+            business_id for business_id in business_ids if business_id in businesses
+        ]
+        candidates.sort(
+            key=lambda business_id: (
+                business_id in audited_ids,
+                bool(businesses[business_id].website_url),
+                positions[business_id],
+            )
+        )
+        limit = min(max(int(segment.target_business_count or 25), 1), 25)
+        return candidates[:limit]
+
+    def _fill_expanding_campaigns(self, segment_id: str, *, complete: bool) -> int:
         segment = self.segments.get(segment_id)
         if segment is None:
             return 0
@@ -239,7 +284,10 @@ class BusinessIndexRefreshService:
                 )
             )
             self.campaigns.materialize_existing_matches(campaign.id, rows)
-            self.campaigns.campaigns.update_status(campaign.id, CampaignStatus.COMPLETED)
+            if complete:
+                self.campaigns.campaigns.update_status(
+                    campaign.id, CampaignStatus.COMPLETED
+                )
             filled += 1
         return filled
 
@@ -284,6 +332,28 @@ def _campaign_source(
         created_at=now,
         updated_at=now,
     )
+
+
+def _round_robin_unique(
+    provider_business_ids: list[list[str]],
+    remaining_business_ids: list[str],
+) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    longest = max((len(items) for items in provider_business_ids), default=0)
+    for index in range(longest):
+        for items in provider_business_ids:
+            if index >= len(items):
+                continue
+            business_id = items[index]
+            if business_id not in seen:
+                ordered.append(business_id)
+                seen.add(business_id)
+    for business_id in remaining_business_ids:
+        if business_id not in seen:
+            ordered.append(business_id)
+            seen.add(business_id)
+    return ordered
 
 
 def _indexed_row(

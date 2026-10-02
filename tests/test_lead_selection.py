@@ -53,6 +53,7 @@ def test_missing_or_unavailable_results_reject_active_website_signals() -> None:
         _lead("confirmed-absent", opportunity_score=65, level="high", signal="no_website_found"),
         _lead("unavailable", opportunity_score=65, level="high", signal="website_unavailable"),
         _lead("parked", opportunity_score=65, level="high", signal="website_parked"),
+        _lead("unreachable", opportunity_score=45, level="moderate", signal="website_unreachable"),
         _lead("missing-form", opportunity_score=30, level="moderate", signal="missing_quote_or_booking_form"),
     ]
 
@@ -63,6 +64,7 @@ def test_missing_or_unavailable_results_reject_active_website_signals() -> None:
         "confirmed-absent",
         "unavailable",
         "parked",
+        "unreachable",
     }
 
 

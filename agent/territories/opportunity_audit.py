@@ -159,9 +159,9 @@ class BusinessOpportunityAuditor:
             limit=len(website_ids),
             include_with_email=True,
             refresh=True,
-            verify=self.verifier is not None,
+            verify=False,
             timeout_seconds=self.timeout_seconds,
-            max_pages_per_business=5,
+            max_pages_per_business=2,
             page_delay_seconds=0,
             commit_every=max(1, len(unique_ids)),
             verifier=self.verifier,
@@ -347,7 +347,7 @@ class BusinessOpportunityAuditor:
             return None, False, default_query
         attempted_queries: list[str] = []
         seen_urls: set[str] = set()
-        for query in queries:
+        for query in queries[:2]:
             try:
                 results = self.search.lookup(query, limit=8)
             except Exception:

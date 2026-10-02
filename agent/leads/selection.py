@@ -56,6 +56,7 @@ def _matches_website_policy(lead: LeadRead, website_policy: str) -> bool:
                 "no_website_found",
                 "website_unavailable",
                 "website_parked",
+                "website_unreachable",
             }
         )
     return True
