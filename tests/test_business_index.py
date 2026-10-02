@@ -5,7 +5,9 @@ from agent_runs.service import AgentRunService
 from business_index.refresh import (
     BusinessIndexRefreshService,
     _audit_candidate_priority,
+    _canonical_contact_email,
     _canonical_website_url,
+    _observation_has_website,
     _round_robin_unique,
 )
 from business_index.repository import BusinessIndexRepository
@@ -95,6 +97,36 @@ def test_only_structured_business_sources_set_canonical_website() -> None:
             provider_id="configured_search",
         )
         is None
+    )
+
+
+def test_only_structured_business_sources_set_canonical_contact_email() -> None:
+    assert (
+        _canonical_contact_email(
+            "owner@official-painter.example",
+            provider_id="openstreetmap",
+        )
+        == "owner@official-painter.example"
+    )
+    assert (
+        _canonical_contact_email(
+            "directory@example.test",
+            provider_id="configured_search",
+        )
+        is None
+    )
+
+
+def test_google_observation_finds_website_in_nested_provider_payload() -> None:
+    assert _observation_has_website(
+        {
+            "provider_id": "google_places",
+            "provider_payload": {
+                "raw": {
+                    "websiteUri": "https://www.prestigepaintinggta.ca/",
+                }
+            },
+        }
     )
 
 

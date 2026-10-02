@@ -5,6 +5,7 @@ from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceCreate, CampaignSourceMode, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, CampaignRead, LeadSeedInput
+from canonical.repository import CanonicalRepository
 from db.models import BusinessModel, ContactModel, NicheModel, SourceObservationModel
 from db.session import create_database
 from discovery.repository import DiscoveryCandidateRepository
@@ -72,6 +73,27 @@ class FakeEmbeddingClient:
             sum(lower.count(term) for term in ("roof", "hvac", "plumb")),
             1.0,
         ]
+
+
+def test_untrusted_raw_email_is_observed_but_not_promoted_to_contact() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Scarborough Painting Company",
+            geography="Scarborough, ON",
+            source="configured_search",
+            raw={"contact_email": "directory@example.test"},
+            allow_raw_contact_email=False,
+        )
+
+        observation = session.get(SourceObservationModel, link.source_observation_id)
+        assert link.contact_id is None
+        assert session.scalar(select(func.count()).select_from(ContactModel)) == 0
+        assert observation is not None
+        assert observation.raw_payload["contact_email"] == "directory@example.test"
 
 
 def test_leads_from_repeat_runs_share_canonical_business_and_contact() -> None:

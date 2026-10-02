@@ -16,7 +16,9 @@ from products.repository import ProductRepository
 from products.schemas import ProductCreate, QualificationCriterion
 from territories.opportunity_audit import (
     BusinessOpportunityAuditor,
+    _business_domain_matches,
     _credible_business_website,
+    _google_lists_no_website,
 )
 from tools.search import SearchResult
 
@@ -117,6 +119,12 @@ def test_website_confirmation_accepts_matching_site_and_rejects_directory() -> N
         business_location="Toronto, ON",
     ) == "https://northsidepainting.ca"
     assert _credible_business_website(
+        "https://ctpainters.ca",
+        "CT Painters | Toronto & GTA",
+        "CT Painters",
+        business_location="Toronto, ON",
+    ) == "https://ctpainters.ca"
+    assert _credible_business_website(
         "https://www.yelp.ca/biz/northside-painting",
         "Northside Painting Reviews",
         "Northside Painting Co.",
@@ -163,7 +171,127 @@ def test_website_confirmation_accepts_matching_site_and_rejects_directory() -> N
     ) is None
 
 
-def test_campaign_opportunity_audit_confirms_no_website_found(monkeypatch) -> None:
+def test_google_website_detection_reads_nested_discovery_payload() -> None:
+    source = {
+        "_observation_source": "google_places",
+        "candidate_id": "candidate_test",
+        "raw": {
+            "title": "Prestige Painting & Contracting Ltd.",
+            "raw": {
+                "websiteUri": "https://www.prestigepaintinggta.ca/",
+                "businessStatus": "OPERATIONAL",
+            },
+        },
+    }
+
+    assert _google_lists_no_website([source]) is False
+
+
+def test_contact_domain_identity_rejects_unrelated_businesses() -> None:
+    assert _business_domain_matches("CT Painters", "ctpainters.ca")
+    assert _business_domain_matches(
+        "Paint & Drywall Guys Toronto", "paintingdrywalltoronto.ca"
+    )
+    assert not _business_domain_matches("Time to paint", "pinotspalette.com")
+    assert not _business_domain_matches(
+        "Scarborough Painting Company", "altonapainting.com"
+    )
+    assert not _business_domain_matches("Prime Painting Toronto", "gmail.com")
+
+
+def test_business_audit_confirms_matching_contact_domain(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+    monkeypatch.setattr(
+        "territories.opportunity_audit.WebsiteEnrichmentClient.inspect",
+        _active_website_inspection,
+    )
+    with session_factory() as session:
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="CT Painters",
+            website_url=None,
+            contact_email="contact@ctpainters.ca",
+            geography="Toronto, ON",
+            source="google_places",
+            raw={
+                "businessStatus": "OPERATIONAL",
+                "nationalPhoneNumber": "4165550101",
+                "googleMapsUri": "https://maps.google.com/?cid=123",
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            timeout_seconds=1,
+        ).audit_businesses(
+            [business.id],
+            category="painting",
+            market="Toronto",
+            opportunity_policy="weak_or_missing",
+        )
+
+        session.refresh(business)
+        assert business.website_url == "https://ctpainters.ca"
+
+
+def test_business_audit_restores_nested_google_website(monkeypatch) -> None:
+    session_factory = _session_factory()
+    captured: dict[str, object] = {}
+
+    def fake_enrich(session, **kwargs):
+        captured.update(kwargs)
+        return EnrichmentSummary(dry_run=False)
+
+    monkeypatch.setattr("territories.opportunity_audit.enrich_business_pool", fake_enrich)
+    with session_factory() as session:
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Prestige Painting & Contracting Ltd.",
+            website_url=None,
+            geography="North York, ON",
+            source="google_places",
+            raw={
+                "raw": {
+                    "raw": {
+                        "websiteUri": "https://www.prestigepaintinggta.ca/",
+                        "businessStatus": "OPERATIONAL",
+                    }
+                }
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            timeout_seconds=1,
+        ).audit_businesses(
+            [business.id],
+            category="painting",
+            market="Toronto",
+            opportunity_policy="weak_or_missing",
+        )
+
+        session.refresh(business)
+        latest = session.query(SourceObservationModel).filter_by(
+            business_id=business.id,
+            source="website_presence_check",
+        ).one()
+        assert business.website_url == "https://www.prestigepaintinggta.ca/"
+        assert business.domain == "prestigepaintinggta.ca"
+        assert latest.raw_payload["digital_opportunity"]["signals"][0]["key"] == (
+            "website_found_during_confirmation"
+        )
+        assert captured["business_ids"] == [business.id]
+
+
+def test_campaign_opportunity_audit_does_not_treat_search_miss_as_proof(monkeypatch) -> None:
     session_factory = _session_factory()
     monkeypatch.setattr(
         "territories.opportunity_audit.enrich_business_pool",
@@ -188,8 +316,9 @@ def test_campaign_opportunity_audit_confirms_no_website_found(monkeypatch) -> No
         session.refresh(lead)
         opportunity = opportunity_evidence_from_sources(lead.raw_sources)
         assert opportunity is not None
-        assert opportunity["level"] == "high"
-        assert opportunity["signals"][0]["key"] == "no_website_found"
+        assert opportunity["level"] == "moderate"
+        assert opportunity["signals"][0]["key"] == "no_website_listed"
+        assert opportunity["signals"][0]["value"] == "Website not confirmed"
 
 
 def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatch) -> None:
@@ -243,7 +372,7 @@ def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatc
         ).one()
         assert business.website_url is None
         assert latest.raw_payload["digital_opportunity"]["signals"][0]["key"] == (
-            "no_website_found"
+            "no_website_listed"
         )
 
 
@@ -370,7 +499,7 @@ def test_website_confirmation_rejects_a_stale_matching_domain(monkeypatch) -> No
         opportunity = opportunity_evidence_from_sources(lead.raw_sources)
         assert lead.website_url is None
         assert opportunity is not None
-        assert opportunity["signals"][0]["key"] == "no_website_found"
+        assert opportunity["signals"][0]["key"] == "no_website_listed"
 
 
 def _active_website_inspection(inspector, business):

@@ -111,11 +111,15 @@ class BusinessIndexRefreshService:
                             search_result.url,
                             provider_id=task.provider_id,
                         ),
-                        contact_email=search_result.contact_email,
+                        contact_email=_canonical_contact_email(
+                            search_result.contact_email,
+                            provider_id=task.provider_id,
+                        ),
                         geography=search_result.geography,
                         description=search_result.snippet,
                         source=task.provider_id,
                         raw=normalized["raw"],
+                        allow_raw_contact_email=False,
                     )
                     if link.business_id:
                         source_business_ids.append(link.business_id)
@@ -398,6 +402,12 @@ def _canonical_website_url(value: str | None, *, provider_id: str) -> str | None
     return value
 
 
+def _canonical_contact_email(value: str | None, *, provider_id: str) -> str | None:
+    if provider_id != "openstreetmap":
+        return None
+    return value
+
+
 def _audit_candidate_priority(
     business_id: str,
     *,
@@ -417,13 +427,18 @@ def _audit_candidate_priority(
 
 
 def _observation_has_website(raw: dict[str, Any]) -> bool:
-    direct = raw.get("website_url")
-    if direct:
-        return True
-    google_places = raw.get("google_places")
-    return bool(
-        isinstance(google_places, dict) and google_places.get("websiteUri")
-    )
+    stack: list[object] = [raw]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"website_url", "websiteUri"} and isinstance(item, str):
+                    if item.strip():
+                        return True
+                stack.append(item)
+        elif isinstance(value, list):
+            stack.extend(value)
+    return False
 
 
 def _indexed_row(

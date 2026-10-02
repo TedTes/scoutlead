@@ -68,6 +68,7 @@ class CanonicalRepository:
         description: str | None = None,
         source: str | None = None,
         raw: dict[str, Any] | None = None,
+        allow_raw_contact_email: bool = True,
     ) -> CanonicalLeadLink:
         raw_payload = raw or {}
         source_name = normalize_text(source) or "unknown"
@@ -83,6 +84,7 @@ class CanonicalRepository:
             business=business,
             email=contact_email,
             raw=raw_payload,
+            allow_raw_email=allow_raw_contact_email,
         )
         observation = self._record_source_observation(
             business=business,
@@ -475,8 +477,11 @@ class CanonicalRepository:
         business: BusinessModel,
         email: str | None,
         raw: dict[str, Any],
+        allow_raw_email: bool = True,
     ) -> ContactModel | None:
-        normalized_email = normalize_email(email) or email_from_raw(raw)
+        normalized_email = normalize_email(email)
+        if not normalized_email and allow_raw_email:
+            normalized_email = email_from_raw(raw)
         phone = phone_from_raw(raw)
         name = contact_name_from_raw(raw)
         if not any([normalized_email, phone, name]):
