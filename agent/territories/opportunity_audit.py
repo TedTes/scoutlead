@@ -408,6 +408,7 @@ class BusinessOpportunityAuditor:
                     business.display_name,
                     result.snippet,
                     business.phone,
+                    business.address or business.geography,
                 )
                 if not website_url:
                     continue
@@ -568,6 +569,7 @@ def _credible_business_website(
     business_name: str,
     result_snippet: str | None = None,
     business_phone: str | None = None,
+    business_location: str | None = None,
 ) -> str | None:
     url = normalize_url(value)
     if not url:
@@ -587,13 +589,16 @@ def _credible_business_website(
         return url
     host_text = re.sub(r"[^a-z0-9]+", "", host)
     title_tokens = set(normalize_business_name(result_title).split())
-    matching_host_tokens = {token for token in business_tokens if token in host_text}
-    matching_title_tokens = business_tokens & title_tokens
-    if matching_host_tokens and matching_title_tokens:
-        return url
-    if len(business_tokens) >= 2 and len(matching_title_tokens) >= 2:
-        return url
-    return None
+    if not business_tokens:
+        return None
+    if not all(token in host_text for token in business_tokens):
+        return None
+    if not business_tokens.issubset(title_tokens):
+        return None
+    location_tokens = _confirmation_location_tokens(business_location)
+    if location_tokens and not any(token in result_text for token in location_tokens):
+        return None
+    return url
 
 
 def _google_lists_no_website(sources: list[dict]) -> bool:
@@ -619,6 +624,27 @@ def _website_confirmation_queries(business: BusinessModel) -> list[str]:
         queries.append(f'"{business.display_name}" "{business.phone}" website')
     queries.append(f'"{business.display_name}" official website')
     return list(dict.fromkeys(queries))
+
+
+def _confirmation_location_tokens(value: str | None) -> set[str]:
+    parts = [part.strip() for part in (value or "").split(",") if part.strip()]
+    if parts and any(character.isdigit() for character in parts[0]):
+        parts = parts[1:]
+    locality = next(
+        (
+            part
+            for part in parts
+            if normalize_business_name(part)
+            not in {"ca", "canada", "on", "ontario"}
+            and not re.search(r"\b[A-Z]\d[A-Z]\s*\d[A-Z]\d\b", part, re.IGNORECASE)
+        ),
+        "",
+    )
+    return {
+        token
+        for token in normalize_business_name(locality).split()
+        if len(token) >= 3 and token not in {"canada", "ontario"}
+    }
 
 
 def _locality_from_location(value: str) -> str:

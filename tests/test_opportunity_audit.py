@@ -114,6 +114,7 @@ def test_website_confirmation_accepts_matching_site_and_rejects_directory() -> N
         "https://northsidepainting.ca",
         "Northside Painting - Toronto",
         "Northside Painting Co.",
+        business_location="Toronto, ON",
     ) == "https://northsidepainting.ca"
     assert _credible_business_website(
         "https://www.yelp.ca/biz/northside-painting",
@@ -129,16 +130,36 @@ def test_website_confirmation_accepts_matching_site_and_rejects_directory() -> N
         "https://ecopainting.ca/",
         "ECO Painting Services - Toronto",
         "ECO Painting Services",
+        business_location="Toronto, ON",
     ) == "https://ecopainting.ca/"
     assert _credible_business_website(
         "https://www.pinotspalette.com/toronto",
         "Paint and Sip in Toronto",
         "Time to paint",
+        business_location="Toronto, ON",
     ) is None
     assert _credible_business_website(
         "https://news.yahoo.com/painting-services-toronto",
         "Painting Services Toronto",
         "Painting Services Toronto",
+    ) is None
+    assert _credible_business_website(
+        "https://lionheartpaintingks.com",
+        "Lionheart Painting - Olathe, Kansas",
+        "Lionheart Painting & Decorating Inc",
+        business_location="Toronto, ON",
+    ) is None
+    assert _credible_business_website(
+        "https://www.angleseypremiertouchpainting.com",
+        "Premier Touch Painting Anglesey",
+        "Premier Touch Painting",
+        business_location="Toronto, ON",
+    ) is None
+    assert _credible_business_website(
+        "https://www.handypro.com/service-categories/handyman-services",
+        "HandyPro Handyman Services",
+        "Pro Handyman",
+        business_location="Toronto, ON",
     ) is None
 
 
