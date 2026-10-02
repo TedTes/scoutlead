@@ -52,7 +52,7 @@ export function OverviewScreen({
     setRunning(true);
     showToast({
       title: "Search started",
-      message: "Checking existing matches now. Live discovery will continue in the background if needed.",
+      message: "Checking the business index for existing matches.",
       tone: "blue",
     });
     try {
@@ -66,12 +66,9 @@ export function OverviewScreen({
       });
       if (result) {
         const foundCount = result.current_result_count;
-        const expanding = result.state === "expanding";
         showToast({
-          title: expanding ? "Existing matches ready" : "Search ready",
-          message: expanding
-            ? `${foundCount} existing match${foundCount === 1 ? "" : "es"} shown. Expanding toward ${result.requested_result_count}.`
-            : `${foundCount} match${foundCount === 1 ? "" : "es"} ready.`,
+          title: "Search ready",
+          message: `${foundCount} indexed match${foundCount === 1 ? "" : "es"} ready.`,
           tone: foundCount ? "green" : "blue",
         });
         onRunCreated?.(result.run);

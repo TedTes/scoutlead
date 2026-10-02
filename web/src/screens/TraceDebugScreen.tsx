@@ -3,13 +3,15 @@ import {
   ArrowRight,
   CheckCircle2,
   CircleX,
+  Copy,
   Database,
+  RotateCcw,
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Card, StatusPill } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { RunDiagnostics, RunPipelineEvent, ToolCall } from "../types/domain";
+import type { RunDiagnostics, RunPipelineEvent, SourceItem, ToolCall } from "../types/domain";
 import { statusTone } from "../utils/status";
 
 type TraceDebugScreenProps = {
@@ -20,6 +22,7 @@ const stageLabels: Record<string, string> = {
   request: "Request",
   index_match: "Existing matches",
   background_discovery: "Background job",
+  index_demand: "Index demand",
   source_fetch: "Provider fetch",
   candidate_filter: "Candidate filter",
   opportunity_audit: "Opportunity audit",
@@ -38,6 +41,9 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
   const urlRunId = useMemo(() => new URLSearchParams(window.location.search).get("run") || "", []);
   const [runId, setRunId] = useState(urlRunId || selectedDiscoveryRunId || discoveryRuns[0]?.id || "");
   const [diagnostics, setDiagnostics] = useState<RunDiagnostics | null>(null);
+  const [sourceItems, setSourceItems] = useState<SourceItem[]>([]);
+  const [sourceItemFilter, setSourceItemFilter] = useState<"needs_review" | "active" | "rejected" | "all">("needs_review");
+  const [reviewingItemId, setReviewingItemId] = useState("");
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const latestRun = snapshot.latestAgentRun || snapshot.trace?.latest_run || snapshot.trace?.runs?.[0];
@@ -57,6 +63,9 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
       refreshSnapshot(runId),
       territoryApi.getDiscoveryRunDiagnostics(runId).then((value) => {
         if (active) setDiagnostics(value);
+      }),
+      territoryApi.getDiscoveryRunSourceItems(runId).then((value) => {
+        if (active) setSourceItems(value);
       }),
     ])
       .catch((error: unknown) => {
@@ -81,11 +90,13 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
     setRefreshing(true);
     setDiagnosticsError("");
     try {
-      const [, value] = await Promise.all([
+      const [, value, items] = await Promise.all([
         refreshSnapshot(runId),
         territoryApi.getDiscoveryRunDiagnostics(runId),
+        territoryApi.getDiscoveryRunSourceItems(runId),
       ]);
       setDiagnostics(value);
+      setSourceItems(items);
     } catch (error) {
       setDiagnosticsError(error instanceof Error ? error.message : "Unable to load run diagnostics.");
     } finally {
@@ -96,6 +107,25 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
   const candidateEvents = diagnostics?.events.filter((event) => event.event_type === "candidate_decision") || [];
   const indexEvents = diagnostics?.events.filter((event) => event.event_type === "index_decision") || [];
   const operationalEvents = diagnostics?.events.filter((event) => !["candidate_decision", "index_decision"].includes(event.event_type)) || [];
+  const visibleSourceItems = sourceItems.filter((item) => {
+    if (sourceItemFilter === "all") return true;
+    if (sourceItemFilter === "rejected") return ["rejected", "excluded", "failed"].includes(item.state);
+    if (sourceItemFilter === "active") return !["needs_review", "rejected", "excluded", "failed"].includes(item.state);
+    return item.state === "needs_review";
+  });
+
+  const reviewSourceItem = async (item: SourceItem, action: "accept" | "reject" | "duplicate" | "reaudit") => {
+    setReviewingItemId(item.id);
+    setDiagnosticsError("");
+    try {
+      const updated = await territoryApi.reviewDiscoveryRunSourceItem(runId, item.id, action);
+      setSourceItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : "Unable to review source item.");
+    } finally {
+      setReviewingItemId("");
+    }
+  };
 
   return (
     <div className="trace-debug-page run-inspector">
@@ -209,6 +239,44 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
             {candidateEvents.length ? <DecisionLedger events={candidateEvents} /> : <p className="empty-copy">Individual source rows were not retained for this run.</p>}
           </Card>
 
+          <Card title="Source review" meta={<span className="inspector-card-meta">{sourceItems.length} durable rows</span>}>
+            <div className="source-review-tabs" role="tablist" aria-label="Source item state">
+              {(["needs_review", "active", "rejected", "all"] as const).map((filter) => (
+                <button
+                  className={sourceItemFilter === filter ? "active" : ""}
+                  key={filter}
+                  onClick={() => setSourceItemFilter(filter)}
+                  role="tab"
+                  type="button"
+                >
+                  {sourceFilterLabel(filter)} <span>{sourceFilterCount(sourceItems, filter)}</span>
+                </button>
+              ))}
+            </div>
+            {visibleSourceItems.length ? (
+              <div className="source-review-list">
+                {visibleSourceItems.map((item) => (
+                  <article className="source-review-row" key={item.id}>
+                    <div className="source-review-main">
+                      <strong>{item.title || "Untitled source result"}</strong>
+                      <span>{item.provider_id} · {item.query}</span>
+                      {item.source_url ? <a href={item.source_url} rel="noreferrer" target="_blank">{item.source_url}</a> : null}
+                      <small>{item.decisions[item.decisions.length - 1]?.reason || "Awaiting judgment."}</small>
+                    </div>
+                    <StatusPill tone={sourceItemTone(item.state)}>{item.state.replace(/_/g, " ")}</StatusPill>
+                    <div className="source-review-actions">
+                      <button aria-label="Accept source item" className="icon-button" disabled={reviewingItemId === item.id} onClick={() => void reviewSourceItem(item, "accept")} title="Accept" type="button"><CheckCircle2 size={15} /></button>
+                      <button aria-label="Reject source item" className="icon-button" disabled={reviewingItemId === item.id} onClick={() => void reviewSourceItem(item, "reject")} title="Reject" type="button"><CircleX size={15} /></button>
+                      <button aria-label="Mark source item as duplicate" className="icon-button" disabled={reviewingItemId === item.id} onClick={() => void reviewSourceItem(item, "duplicate")} title="Mark duplicate" type="button"><Copy size={15} /></button>
+                      <button aria-label="Request opportunity re-audit" className="icon-button" disabled={reviewingItemId === item.id} onClick={() => void reviewSourceItem(item, "reaudit")} title="Re-audit" type="button"><RotateCcw size={15} /></button>
+                    </div>
+                    <JsonPanel label="Raw provider row and decisions" value={{ raw: item.raw_payload, decisions: item.decisions }} />
+                  </article>
+                ))}
+              </div>
+            ) : <p className="empty-copy">No source items in this state.</p>}
+          </Card>
+
           <Card title="Index matching decisions" meta={<span className="inspector-card-meta">{indexEvents.length} evaluated businesses</span>}>
             {indexEvents.length ? <DecisionLedger events={indexEvents} /> : <p className="empty-copy">No per-business index decisions were retained for this run.</p>}
           </Card>
@@ -276,3 +344,6 @@ function formatTime(value: string) { return new Intl.DateTimeFormat(undefined, {
 function formatJson(value: unknown) { if (value === undefined) return "undefined"; if (typeof value === "string") return value; return JSON.stringify(value, null, 2); }
 function redact(value: unknown): unknown { if (Array.isArray(value)) return value.map(redact); if (!value || typeof value !== "object") return value; return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, shouldRedactKey(key) ? "[redacted]" : redact(entry)])); }
 function shouldRedactKey(key: string) { return /(api[_-]?key|authorization|bearer|password|secret|token)/i.test(key); }
+function sourceFilterLabel(value: "needs_review" | "active" | "rejected" | "all") { return value === "needs_review" ? "Needs review" : value[0].toUpperCase() + value.slice(1); }
+function sourceFilterCount(items: SourceItem[], filter: "needs_review" | "active" | "rejected" | "all") { return items.filter((item) => filter === "all" || (filter === "active" ? !["needs_review", "rejected", "excluded", "failed"].includes(item.state) : filter === "rejected" ? ["rejected", "excluded", "failed"].includes(item.state) : item.state === filter)).length; }
+function sourceItemTone(state: SourceItem["state"]): "green" | "amber" | "red" | "gray" { if (["rejected", "excluded", "failed"].includes(state)) return "red"; if (state === "needs_review") return "amber"; if (["relevant", "identity_resolved", "audit_pending", "audited", "eligible"].includes(state)) return "green"; return "gray"; }

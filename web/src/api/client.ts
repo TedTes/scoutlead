@@ -11,6 +11,7 @@ import type {
   DiscoveryCandidate,
   DiscoveryResult,
   RunDiagnostics,
+  SourceItem,
   CampaignMessageApprovalInput,
   CampaignMessageBatchResult,
   CampaignMessageSendInput,
@@ -222,6 +223,21 @@ export class ApiClient {
 
   getDiscoveryRunDiagnostics(runId: string) {
     return this.request<RunDiagnostics>(`/discovery-runs/${runId}/diagnostics`);
+  }
+
+  getDiscoveryRunSourceItems(runId: string) {
+    return this.request<SourceItem[]>(`/discovery-runs/${runId}/source-items`);
+  }
+
+  reviewDiscoveryRunSourceItem(
+    runId: string,
+    sourceItemId: string,
+    action: "accept" | "reject" | "duplicate" | "reaudit",
+  ) {
+    return this.request<SourceItem>(`/discovery-runs/${runId}/source-items/${sourceItemId}/review`, {
+      method: "POST",
+      body: { action },
+    });
   }
 
   getAgentRun(id: string) {

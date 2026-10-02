@@ -451,12 +451,9 @@ export function ResultsScreen({
       if (result) {
         setRerunPromptOpen(false);
         const foundCount = result.current_result_count;
-        const expanding = result.state === "expanding";
         showToast({
-          title: expanding ? "Existing matches ready" : "Search ready",
-          message: expanding
-            ? `${foundCount} existing match${foundCount === 1 ? "" : "es"} shown. Expanding toward ${result.requested_result_count}.`
-            : `${foundCount} match${foundCount === 1 ? "" : "es"} ready.`,
+          title: "Search ready",
+          message: `${foundCount} indexed match${foundCount === 1 ? "" : "es"} ready.`,
           tone: foundCount ? "green" : "blue",
         });
       }
@@ -722,11 +719,9 @@ export function ResultsScreen({
   }
 
   if (!contacts.length && !selectedTerritory) {
-    const emptyMessage = selectedDiscoveryRun.status === "expanding"
-      ? "Searching configured sources in the background. Matching contacts will appear here automatically."
-      : selectedDiscoveryRun.status === "failed"
+    const emptyMessage = selectedDiscoveryRun.status === "failed"
         ? selectedDiscoveryRun.failure_reason || "This search could not finish. Run it again after checking the worker."
-        : "No eligible contacts were found in the available business index.";
+        : "No eligible contacts were found in the available business index. This request will guide the next scheduled refresh.";
     return <OverviewScreen emptyMessage={emptyMessage} />;
   }
 
@@ -3759,6 +3754,16 @@ function getContactUrl(contact: DiscoveryResult) {
     "booking_url",
     "bookingUrl",
     "website_enrichment.contact_url",
+    "messagingUrl",
+    "messaging_url",
+    "seller.messagingUrl",
+    "seller.profileUrl",
+    "seller.profile_url",
+    "profileUrl",
+    "profile_url",
+    "source_url",
+    "listingUrl",
+    "adUrl",
   ]);
 }
 

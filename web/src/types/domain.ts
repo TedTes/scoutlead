@@ -162,7 +162,7 @@ export type SourceRequestRun = {
   };
   run: DiscoveryRun;
   summary?: DiscoveryRunSummary | null;
-  state: "ready" | "expanding";
+  state: "ready";
   current_result_count: number;
   requested_result_count: number;
 };
@@ -581,6 +581,40 @@ export type RunPipelineEvent = {
   request_payload?: Record<string, unknown> | null;
   response_payload?: Record<string, unknown> | null;
   reason?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SourceItemDecision = {
+  id: string;
+  source_item_id: string;
+  stage: "relevance" | "identity" | "opportunity" | "eligibility";
+  decision: "accepted" | "rejected" | "needs_review" | "duplicate" | "resolved" | "audited" | "eligible" | "excluded" | "failed";
+  reason?: string | null;
+  confidence?: number | null;
+  details: Record<string, unknown>;
+  actor_type: string;
+  actor_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SourceItem = {
+  id: string;
+  segment_id: string;
+  job_id?: string | null;
+  provider_id: string;
+  external_id?: string | null;
+  query: string;
+  source_url?: string | null;
+  title?: string | null;
+  raw_payload: Record<string, unknown>;
+  fetched_at: string;
+  content_hash: string;
+  state: "fetched" | "needs_review" | "relevant" | "rejected" | "identity_resolved" | "audit_pending" | "audited" | "eligible" | "excluded" | "failed";
+  business_id?: string | null;
+  last_error?: string | null;
+  decisions: SourceItemDecision[];
   created_at: string;
   updated_at: string;
 };
