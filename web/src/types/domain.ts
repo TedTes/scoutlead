@@ -566,6 +566,82 @@ export type DiscoveryTrace = {
   runs: AgentRunDetail[];
 };
 
+export type RunPipelineEvent = {
+  id: string;
+  campaign_id: string;
+  segment_id?: string | null;
+  job_id?: string | null;
+  stage: string;
+  event_type: string;
+  status: string;
+  provider_id?: string | null;
+  business_id?: string | null;
+  lead_id?: string | null;
+  item_key?: string | null;
+  request_payload?: Record<string, unknown> | null;
+  response_payload?: Record<string, unknown> | null;
+  reason?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RunSourceDiagnostic = {
+  key: string;
+  provider_id: string;
+  query: string;
+  quota: number;
+  status: string;
+  fetched_count: number;
+  accepted_count?: number | null;
+  rejected_count?: number | null;
+  written_count: number;
+  final_count: number;
+  failure?: string | null;
+  request: Record<string, unknown>;
+  state: Record<string, unknown>;
+  exact_decisions: boolean;
+};
+
+export type RunJobDiagnostic = {
+  id: string;
+  type: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  payload: Record<string, unknown>;
+  last_error?: string | null;
+  run_after: string;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RunDiagnostics = {
+  run_id: string;
+  run_name: string;
+  run_status: string;
+  run_stage: string;
+  created_at: string;
+  updated_at: string;
+  retention: "exact" | "aggregate_only";
+  request: Record<string, unknown>;
+  segment?: Record<string, unknown> | null;
+  summary: {
+    requested?: number | null;
+    existing_matches?: number | null;
+    fetched?: number | null;
+    accepted?: number | null;
+    rejected?: number | null;
+    failed_sources?: number | null;
+    final?: number | null;
+  };
+  sources: RunSourceDiagnostic[];
+  jobs: RunJobDiagnostic[];
+  events: RunPipelineEvent[];
+  final_results: DiscoveryResult[];
+  caveats: string[];
+};
+
 export type DiscoveryPreflightCheck = {
   name: string;
   status: string;

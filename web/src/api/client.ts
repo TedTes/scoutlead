@@ -10,6 +10,7 @@ import type {
   DiscoveryTrace,
   DiscoveryCandidate,
   DiscoveryResult,
+  RunDiagnostics,
   CampaignMessageApprovalInput,
   CampaignMessageBatchResult,
   CampaignMessageSendInput,
@@ -217,6 +218,10 @@ export class ApiClient {
 
   getDiscoveryTrace(runId: string) {
     return this.request<DiscoveryTrace>(`/discovery-runs/${runId}/trace`);
+  }
+
+  getDiscoveryRunDiagnostics(runId: string) {
+    return this.request<RunDiagnostics>(`/discovery-runs/${runId}/diagnostics`);
   }
 
   getAgentRun(id: string) {

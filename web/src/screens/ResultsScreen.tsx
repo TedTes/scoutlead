@@ -23,6 +23,7 @@ import {
   Trash2,
   User,
   Users,
+  Workflow,
   X,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -1019,6 +1020,16 @@ export function ResultsScreen({
                 </button>
                 <button type="button" onClick={() => void renameCurrentRun()}>
                   Rename search
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRunMenuOpen(false);
+                    window.location.assign(`/trace?run=${encodeURIComponent(selectedDiscoveryRunId)}`);
+                  }}
+                >
+                  <Workflow size={14} />
+                  Inspect run
                 </button>
                 {!selectedTerritory ? (
                   <button type="button" disabled={running} onClick={openRerunPrompt}>
