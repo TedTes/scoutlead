@@ -3577,7 +3577,8 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
   for (const raw of getRawObjects(contact).reverse()) {
     const value = getRawValue(raw, "digital_opportunity")
       ?? getRawValue(raw, "raw_payload.digital_opportunity")
-      ?? getRawValue(raw, "evidence.digital_opportunity");
+      ?? getRawValue(raw, "evidence.digital_opportunity")
+      ?? getRawValue(raw, "business_index_opportunity_evidence.digital_opportunity");
     if (!isRecord(value)) continue;
     const levelValue = typeof value.level === "string" ? value.level.toLowerCase() : "unknown";
     const level = (["high", "moderate", "low", "none"] as const).find((item) => item === levelValue) || "unknown";
