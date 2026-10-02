@@ -730,6 +730,42 @@ class QueueJobModel(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class RunPipelineEventModel(TimestampMixin, Base):
+    __tablename__ = "run_pipeline_events"
+    __table_args__ = (
+        Index(
+            "ix_run_pipeline_events_campaign_created",
+            "campaign_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id"), nullable=False, index=True
+    )
+    segment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("business_index_segments.id"), nullable=True, index=True
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("queue_jobs.id"), nullable=True, index=True
+    )
+    stage: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    provider_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    business_id: Mapped[str | None] = mapped_column(
+        ForeignKey("businesses.id"), nullable=True, index=True
+    )
+    lead_id: Mapped[str | None] = mapped_column(
+        ForeignKey("leads.id"), nullable=True, index=True
+    )
+    item_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    request_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    response_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class AgentRunModel(TimestampMixin, Base):
     __tablename__ = "agent_runs"
 

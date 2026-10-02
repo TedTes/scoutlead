@@ -37,6 +37,8 @@ from messages.schemas import (
 )
 from messages.service import MessageService
 from products.repository import ProductRepository
+from run_diagnostics.schemas import RunDiagnostics
+from run_diagnostics.service import build_run_diagnostics
 from shared.errors import ConflictError
 from source_requests.schemas import (
     SourceProviderRead,
@@ -276,6 +278,19 @@ def list_discovery_results(
     auth: CurrentAuth,
 ):
     return _service(session, services, auth).results(run_id)
+
+
+@router.get("/{run_id}/diagnostics", response_model=RunDiagnostics)
+def get_discovery_run_diagnostics(
+    run_id: str,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    service = _service(session, services, auth)
+    run = CampaignRead.model_validate(service.get(run_id))
+    results = [LeadRead.model_validate(result) for result in service.results(run_id)]
+    return build_run_diagnostics(session, run=run, final_results=results)
 
 
 @router.post("/{run_id}/results/seeds", response_model=list[LeadRead])

@@ -21,6 +21,7 @@ from evaluation.digital_opportunity import (
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from job_queue.service import QueueService
+from run_diagnostics.repository import RunPipelineEventRepository
 from shared.errors import ValidationError
 from shared.utils import utcnow
 from source_requests.compiler import SourceRequestCompiler
@@ -164,6 +165,31 @@ class SourceRequestService:
                 channels=["manual"],
             )
         )
+        pipeline_events = RunPipelineEventRepository(self.products.session)
+        pipeline_events.create(
+            campaign_id=run.id,
+            segment_id=segment.id,
+            stage="request",
+            event_type="request_created",
+            status="completed",
+            request_payload=request.model_dump(mode="json"),
+            response_payload={
+                "source": plan.source,
+                "query": plan.query,
+                "intent": plan.intent.model_dump(mode="json") if plan.intent else None,
+                "task_count": len(plan.tasks),
+                "tasks": [
+                    {
+                        "provider_id": task.provider_id,
+                        "query": task.query,
+                        "quota": task.max_results,
+                        "reason": task.reason,
+                    }
+                    for task in plan.tasks
+                ],
+                "segment_id": segment.id,
+            },
+        )
         if not request.run_immediately:
             return SourceRequestRun(
                 plan=plan,
@@ -174,7 +200,9 @@ class SourceRequestService:
                 requested_result_count=plan.max_results,
             )
 
-        matches = BusinessIndexSearchService(self.products.session).search(
+        matches, index_decisions = BusinessIndexSearchService(
+            self.products.session
+        ).search_with_diagnostics(
             BusinessIndexSearch(
                 niche_id=segment.niche_id,
                 market_key=segment.market_key,
@@ -187,13 +215,52 @@ class SourceRequestService:
         self.campaigns.materialize_existing_matches(run.id, matches)
         current_count = len(self.campaigns.results(run.id))
         deficit = max(0, plan.max_results - current_count)
+        pipeline_events.create(
+            campaign_id=run.id,
+            segment_id=segment.id,
+            stage="index_match",
+            event_type="index_query",
+            status="completed",
+            request_payload={
+                "niche_id": segment.niche_id,
+                "market_key": segment.market_key,
+                "opportunity_type": _opportunity_type(request, plan).value,
+                "evidence_max_age_days": request.evidence_max_age_days,
+                "result_count": plan.max_results,
+            },
+            response_payload={
+                "match_count": current_count,
+                "deficit": deficit,
+                "business_ids": [
+                    business_id
+                    for match in matches
+                    if (business_id := _match_business_id(match))
+                ],
+            },
+        )
+        for decision in index_decisions:
+            pipeline_events.create(
+                campaign_id=run.id,
+                segment_id=segment.id,
+                stage="index_match",
+                event_type="index_decision",
+                status=str(decision["status"]),
+                business_id=str(decision["business_id"]),
+                item_key=str(decision.get("company_name") or decision["business_id"]),
+                request_payload={
+                    "opportunity_type": _opportunity_type(request, plan).value,
+                    "evidence_max_age_days": request.evidence_max_age_days,
+                },
+                response_payload=decision,
+                reason=str(decision["reason"]),
+            )
         if deficit and plan.tasks:
             run = self.campaigns.campaigns.update_status(
                 run.id,
                 CampaignStatus.EXPANDING,
                 commit=False,
             )
-            QueueService(self.products.session).enqueue_business_index_refresh(
+            job = QueueService(self.products.session).enqueue_business_index_refresh(
                 segment_id=segment.id,
                 campaign_id=run.id,
                 requested_deficit=deficit,
@@ -201,9 +268,30 @@ class SourceRequestService:
             )
             self.products.session.commit()
             self.products.session.refresh(run)
+            pipeline_events.create(
+                campaign_id=run.id,
+                segment_id=segment.id,
+                job_id=job.id,
+                stage="background_discovery",
+                event_type="job_queued",
+                status=job.status,
+                request_payload=job.payload,
+                response_payload={"job_id": job.id},
+            )
             state = CampaignStatus.EXPANDING.value
         else:
             run = self.campaigns.campaigns.update_status(run.id, CampaignStatus.COMPLETED)
+            pipeline_events.create(
+                campaign_id=run.id,
+                segment_id=segment.id,
+                stage="final_output",
+                event_type="output_snapshot",
+                status="completed",
+                response_payload={
+                    "result_count": current_count,
+                    "lead_ids": [result.id for result in self.campaigns.results(run.id)],
+                },
+            )
             state = "ready"
         return SourceRequestRun(
             plan=plan,
@@ -362,6 +450,14 @@ def _positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _match_business_id(match: Any) -> str | None:
+    raw = match.get("raw") if isinstance(match, dict) else getattr(match, "raw", None)
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("canonical_business_id")
+    return str(value) if value else None
 
 
 def _opportunity_type(

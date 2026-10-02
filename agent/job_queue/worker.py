@@ -83,7 +83,7 @@ def run_once() -> bool:
                 business_index_refresh_service(
                     session=session,
                     services=services,
-                ).refresh(str(job.payload["segment_id"]))
+                ).refresh(str(job.payload["segment_id"]), job_id=job.id)
             else:
                 raise ValueError(f"unknown job type: {job.type}")
         except Exception as exc:

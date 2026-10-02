@@ -13,10 +13,13 @@ from business_index.refresh import (
 from business_index.repository import BusinessIndexRepository
 from business_index.scheduler import enqueue_due_business_index_refreshes
 from campaigns.service import CampaignService
-from db.models import NicheModel, QueueJobModel
+from campaigns.schemas import CampaignRead
+from db.models import NicheModel, QueueJobModel, RunPipelineEventModel
 from db.session import create_database
 from products.repository import ProductRepository
 from leads.repository import LeadRepository
+from leads.schemas import LeadRead
+from run_diagnostics.service import build_run_diagnostics
 from seeding.service import BusinessSeedService
 from source_requests.schemas import SourceRequestCreate
 from source_requests.service import SourceRequestService
@@ -228,6 +231,14 @@ def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
         job = session.query(QueueJobModel).one()
         scheduled = enqueue_due_business_index_refreshes(session)
         queued_job_count = session.query(QueueJobModel).count()
+        pipeline_events = session.query(RunPipelineEventModel).filter_by(
+            campaign_id=created.run.id
+        ).all()
+        diagnostics = build_run_diagnostics(
+            session,
+            run=CampaignRead.model_validate(refreshed_run),
+            final_results=[LeadRead.model_validate(lead) for lead in leads],
+        )
 
     assert [call.provider_id for call in registry.calls] == [
         "google_places",
@@ -245,6 +256,13 @@ def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
     assert jobs_before_refresh == 1
     assert scheduled == 0
     assert queued_job_count == 1
+    assert len([event for event in pipeline_events if event.event_type == "provider_fetch"]) == 3
+    assert len([event for event in pipeline_events if event.event_type == "candidate_decision"]) == 3
+    assert diagnostics.retention == "exact"
+    assert diagnostics.summary["fetched"] == 3
+    assert diagnostics.summary["accepted"] == 2
+    assert diagnostics.summary["rejected"] == 1
+    assert diagnostics.summary["final"] == 2
 
 
 def test_refresh_audits_existing_seeded_inventory_before_refilling_run() -> None:

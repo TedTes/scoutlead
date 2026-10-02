@@ -27,6 +27,14 @@ class BusinessIndexSearchService:
         self.session = session
 
     def search(self, request: BusinessIndexSearch) -> list[dict]:
+        rows, _ = self.search_with_diagnostics(request)
+        return rows
+
+    def search_with_diagnostics(
+        self,
+        request: BusinessIndexSearch,
+    ) -> tuple[list[dict], list[dict]]:
+        decisions: list[dict] = []
         memberships = list(
             self.session.scalars(
                 select(BusinessNicheMembershipModel)
@@ -43,7 +51,7 @@ class BusinessIndexSearchService:
             if market_is_compatible(request.market_key, membership.market_key)
         ]
         if not memberships:
-            return []
+            return [], decisions
         business_ids = list(dict.fromkeys(item.business_id for item in memberships))
         businesses = {
             business.id: business
@@ -86,6 +94,14 @@ class BusinessIndexSearchService:
         for membership in memberships:
             business = businesses.get(membership.business_id)
             if business is None:
+                decisions.append(
+                    _decision(
+                        membership.business_id,
+                        None,
+                        "rejected",
+                        "Business is missing or is not active.",
+                    )
+                )
                 continue
             business_observations = observations.get(business.id, [])
             opportunity_observation = next(
@@ -97,17 +113,49 @@ class BusinessIndexSearchService:
                 None,
             )
             if opportunity_observation is None:
+                decisions.append(
+                    _decision(
+                        business.id,
+                        business.display_name,
+                        "rejected",
+                        "No fresh digital-opportunity evidence was found.",
+                    )
+                )
                 continue
             if _aware(opportunity_observation.observed_at) < _aware(
                 request.evidence_fresh_after
             ):
+                decisions.append(
+                    _decision(
+                        business.id,
+                        business.display_name,
+                        "rejected",
+                        "Digital-opportunity evidence is older than the run freshness limit.",
+                    )
+                )
                 continue
             opportunity_sources = [opportunity_observation.raw_payload]
             if "website_unreachable" in opportunity_signal_keys_from_sources(
                 opportunity_sources
             ):
+                decisions.append(
+                    _decision(
+                        business.id,
+                        business.display_name,
+                        "rejected",
+                        "Website evidence is inconclusive because the site could not be reached.",
+                    )
+                )
                 continue
             if not _matches_opportunity_type(opportunity_sources, request.opportunity_type):
+                decisions.append(
+                    _decision(
+                        business.id,
+                        business.display_name,
+                        "rejected",
+                        f"Opportunity evidence does not match {request.opportunity_type.value}.",
+                    )
+                )
                 continue
             listing_observation = latest_listings.get(
                 business.id,
@@ -148,7 +196,25 @@ class BusinessIndexSearchService:
             )
             ranked.append((rank, row))
         ranked.sort(key=lambda item: item[0], reverse=True)
-        return [row for _, row in ranked[: request.result_count]]
+        selected = ranked[: request.result_count]
+        selected_ids = {row["raw"]["canonical_business_id"] for _, row in selected}
+        for rank, row in ranked:
+            business_id = row["raw"]["canonical_business_id"]
+            is_selected = business_id in selected_ids
+            decisions.append(
+                {
+                    **_decision(
+                        business_id,
+                        row["title"],
+                        "accepted" if is_selected else "rejected",
+                        "Matched the run contract and was selected."
+                        if is_selected
+                        else "Matched the contract but fell outside the requested result limit.",
+                    ),
+                    "rank": list(rank),
+                }
+            )
+        return [row for _, row in selected], decisions
 
 
 def _matches_opportunity_type(sources: list[dict], opportunity_type: OpportunityType) -> bool:
@@ -166,6 +232,20 @@ def _matches_opportunity_type(sources: list[dict], opportunity_type: Opportunity
             "website_parked",
         }
     )
+
+
+def _decision(
+    business_id: str,
+    company_name: str | None,
+    status: str,
+    reason: str,
+) -> dict:
+    return {
+        "business_id": business_id,
+        "company_name": company_name,
+        "status": status,
+        "reason": reason,
+    }
 
 
 def _best_contact(contacts: list[ContactModel]) -> ContactModel | None:

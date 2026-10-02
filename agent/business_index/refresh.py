@@ -23,6 +23,7 @@ from db.models import BusinessModel, CampaignModel, SourceObservationModel
 from discovery.classifier import assess_discovery_candidate
 from products.repository import ProductRepository
 from products.schemas import ProductRead
+from run_diagnostics.repository import RunPipelineEventRepository
 from shared.utils import new_id, utcnow
 from source_requests.schemas import SourceTask
 from source_requests.compiler import SourceRequestCompiler
@@ -56,7 +57,7 @@ class BusinessIndexRefreshService:
         self.discovery_config = discovery_config
         self.segments = BusinessIndexRepository(session)
 
-    def refresh(self, segment_id: str) -> dict[str, Any]:
+    def refresh(self, segment_id: str, *, job_id: str | None = None) -> dict[str, Any]:
         segment = self.segments.get(segment_id)
         if segment is None:
             raise ValueError(f"business index segment not found: {segment_id}")
@@ -65,6 +66,7 @@ class BusinessIndexRefreshService:
         )
         self._rebuild_source_plan(segment, product)
         campaigns = self._expanding_campaigns(segment.id)
+        pipeline_events = RunPipelineEventRepository(self.session)
         context_campaign = campaigns[0] if campaigns else self._scheduled_campaign(segment, product)
         canonical = CanonicalRepository(self.session, embedding=self.embedding)
         existing_business_ids = self.segments.business_ids(segment)
@@ -91,6 +93,23 @@ class BusinessIndexRefreshService:
                     },
                 )
                 rows = list(result.data or [])[: task.max_results]
+                self._record_pipeline_events(
+                    pipeline_events,
+                    campaigns,
+                    segment_id=segment.id,
+                    job_id=job_id,
+                    stage="source_fetch",
+                    event_type="provider_fetch",
+                    status="completed",
+                    provider_id=task.provider_id,
+                    request_payload=_safe_task_request(task),
+                    response_payload={
+                        "fetched_count": len(rows),
+                        "cost_usd": result.cost_usd,
+                        "has_next_cursor": bool((result.raw or {}).get("next_page_token")),
+                    },
+                    commit=False,
+                )
                 written = 0
                 source_business_ids: list[str] = []
                 for row in rows:
@@ -103,7 +122,24 @@ class BusinessIndexRefreshService:
                         fetched_at=attempted_at,
                     )
                     search_result = SearchResult.model_validate(normalized)
-                    if not assess_discovery_candidate(search_result, product).is_promotable:
+                    assessment = assess_discovery_candidate(search_result, product)
+                    if not assessment.is_promotable:
+                        self._record_pipeline_events(
+                            pipeline_events,
+                            campaigns,
+                            segment_id=segment.id,
+                            job_id=job_id,
+                            stage="candidate_filter",
+                            event_type="candidate_decision",
+                            status="rejected",
+                            provider_id=task.provider_id,
+                            item_key=search_result.url or search_result.title,
+                            request_payload={"query": task.query},
+                            response_payload=search_result.model_dump(mode="json"),
+                            reason=assessment.rejection_reason
+                            or f"Classified as {assessment.candidate_type.value} ({assessment.confidence} confidence).",
+                            commit=False,
+                        )
                         continue
                     link = canonical.upsert_from_discovery_result(
                         company_name=search_result.title,
@@ -124,6 +160,26 @@ class BusinessIndexRefreshService:
                     if link.business_id:
                         source_business_ids.append(link.business_id)
                         written += 1
+                        self._record_pipeline_events(
+                            pipeline_events,
+                            campaigns,
+                            segment_id=segment.id,
+                            job_id=job_id,
+                            stage="candidate_filter",
+                            event_type="candidate_decision",
+                            status="accepted",
+                            provider_id=task.provider_id,
+                            business_id=link.business_id,
+                            item_key=search_result.url or search_result.title,
+                            request_payload={"query": task.query},
+                            response_payload={
+                                **search_result.model_dump(mode="json"),
+                                "candidate_type": assessment.candidate_type.value,
+                                "confidence": assessment.confidence,
+                            },
+                            reason="Written to the canonical business index.",
+                            commit=False,
+                        )
                 self.session.commit()
                 provider_business_ids.append(source_business_ids)
                 successful_sources += 1
@@ -145,6 +201,18 @@ class BusinessIndexRefreshService:
                 )
             except Exception as exc:
                 self.session.rollback()
+                self._record_pipeline_events(
+                    pipeline_events,
+                    campaigns,
+                    segment_id=segment.id,
+                    job_id=job_id,
+                    stage="source_fetch",
+                    event_type="provider_fetch",
+                    status="failed",
+                    provider_id=task.provider_id,
+                    request_payload=_safe_task_request(task),
+                    reason=str(exc),
+                )
                 self.segments.record_source_result(
                     segment,
                     provider_id=state_key,
@@ -175,7 +243,40 @@ class BusinessIndexRefreshService:
                 market=segment.market_label,
                 opportunity_policy=_opportunity_policy(segment.source_plan),
             )
-        filled = self._fill_expanding_campaigns(segment.id, complete=True)
+        self._record_pipeline_events(
+            pipeline_events,
+            campaigns,
+            segment_id=segment.id,
+            job_id=job_id,
+            stage="opportunity_audit",
+            event_type="audit_batch",
+            status="completed",
+            response_payload={
+                "candidate_count": len(business_ids),
+                "audited_count": len(audit_business_ids),
+                "business_ids": audit_business_ids,
+            },
+        )
+        filled = self._fill_expanding_campaigns(
+            segment.id,
+            complete=True,
+            pipeline_events=pipeline_events,
+            job_id=job_id,
+        )
+        for campaign in campaigns:
+            results = self.campaigns.results(campaign.id)
+            pipeline_events.create(
+                campaign_id=campaign.id,
+                segment_id=segment.id,
+                job_id=job_id,
+                stage="final_output",
+                event_type="output_snapshot",
+                status="completed",
+                response_payload={
+                    "result_count": len(results),
+                    "lead_ids": [result.id for result in results],
+                },
+            )
         self.segments.complete_refresh(segment, succeeded=successful_sources > 0)
         return {
             "segment_id": segment.id,
@@ -185,6 +286,19 @@ class BusinessIndexRefreshService:
             "audited_business_count": len(audit_business_ids),
             "filled_campaign_count": filled,
         }
+
+    @staticmethod
+    def _record_pipeline_events(
+        repository: RunPipelineEventRepository,
+        campaigns: list[CampaignRead],
+        *,
+        commit: bool = True,
+        **values: Any,
+    ) -> None:
+        for campaign in campaigns:
+            repository.create(campaign_id=campaign.id, commit=False, **values)
+        if campaigns and commit:
+            repository.session.commit()
 
     def _rebuild_source_plan(self, segment, product: ProductRead) -> None:
         if self.discovery_config is None:
@@ -300,7 +414,14 @@ class BusinessIndexRefreshService:
         limit = min(max(int(segment.target_business_count or 25), 1), 25)
         return candidates[:limit]
 
-    def _fill_expanding_campaigns(self, segment_id: str, *, complete: bool) -> int:
+    def _fill_expanding_campaigns(
+        self,
+        segment_id: str,
+        *,
+        complete: bool,
+        pipeline_events: RunPipelineEventRepository | None = None,
+        job_id: str | None = None,
+    ) -> int:
         segment = self.segments.get(segment_id)
         if segment is None:
             return 0
@@ -314,7 +435,9 @@ class BusinessIndexRefreshService:
             except ValueError:
                 opportunity_type = OpportunityType.ANY
             max_age_days = int(contract.get("evidence_max_age_days") or 30)
-            rows = BusinessIndexSearchService(self.session).search(
+            rows, decisions = BusinessIndexSearchService(
+                self.session
+            ).search_with_diagnostics(
                 BusinessIndexSearch(
                     niche_id=segment.niche_id,
                     market_key=segment.market_key,
@@ -323,6 +446,28 @@ class BusinessIndexRefreshService:
                     result_count=campaign.max_leads,
                 )
             )
+            if complete and pipeline_events is not None:
+                for decision in decisions:
+                    pipeline_events.create(
+                        campaign_id=campaign.id,
+                        segment_id=segment.id,
+                        job_id=job_id,
+                        stage="index_match",
+                        event_type="index_decision",
+                        status=str(decision["status"]),
+                        business_id=str(decision["business_id"]),
+                        item_key=str(
+                            decision.get("company_name") or decision["business_id"]
+                        ),
+                        request_payload={
+                            "opportunity_type": opportunity_type.value,
+                            "evidence_max_age_days": max_age_days,
+                        },
+                        response_payload=decision,
+                        reason=str(decision["reason"]),
+                        commit=False,
+                    )
+                self.session.commit()
             self.campaigns.materialize_existing_matches(campaign.id, rows)
             if complete:
                 self.campaigns.campaigns.update_status(
@@ -372,6 +517,35 @@ def _campaign_source(
         created_at=now,
         updated_at=now,
     )
+
+
+def _safe_task_request(task: SourceTask) -> dict[str, Any]:
+    return {
+        "query": task.query,
+        "provider_id": task.provider_id,
+        "quota": task.max_results,
+        "stage": task.stage,
+        "priority": task.priority,
+        "input": _redact_secrets(task.input),
+        "config": _redact_secrets(task.config),
+        "reason": task.reason,
+    }
+
+
+def _redact_secrets(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    redacted: dict[str, Any] = {}
+    for key, item in value.items():
+        normalized = str(key).lower().replace("-", "_")
+        is_secret = any(
+            part in normalized
+            for part in ("api_key", "token", "secret", "password", "authorization")
+        )
+        redacted[str(key)] = "[redacted]" if is_secret else _redact_secrets(item)
+    return redacted
 
 
 def _round_robin_unique(
