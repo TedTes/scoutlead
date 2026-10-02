@@ -266,7 +266,7 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert summary["successful_source_count"] == 3
     assert summary["filled_campaign_count"] == 0
     assert refreshed_run.status == "completed"
-    assert len(leads) == 2
+    assert len(leads) == 0
     assert segment is not None
     assert len(segment.source_state) == 3
     assert job.type == "business_index.refresh"
@@ -285,7 +285,7 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert len(source_item_decisions) == 5
 
 
-def test_staged_refresh_processes_fetch_identity_audit_and_eligibility_jobs() -> None:
+def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -364,14 +364,13 @@ def test_staged_refresh_processes_fetch_identity_audit_and_eligibility_jobs() ->
         JobType.SOURCE_ITEM_CLASSIFY.value,
         JobType.BUSINESS_IDENTITY_RESOLVE.value,
         JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
-        JobType.SEARCH_ELIGIBILITY_MATCH.value,
     }
-    assert sorted(item.state for item in items) == ["eligible", "eligible", "rejected"]
+    assert sorted(item.state for item in items) == ["audited", "audited", "rejected"]
     assert segment is not None
     assert segment.next_refresh_at > segment.last_refresh_at
 
 
-def test_refresh_audits_existing_inventory_for_the_next_database_search() -> None:
+def test_unconfirmed_missing_listing_is_not_returned_as_missing_website() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -439,4 +438,4 @@ def test_refresh_audits_existing_inventory_for_the_next_database_search() -> Non
         )
         leads = LeadRepository(session).list_by_campaign(next_search.run.id)
 
-    assert [lead.company_name for lead in leads] == ["Example Solo Painting Co."]
+    assert leads == []

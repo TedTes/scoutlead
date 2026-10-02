@@ -193,6 +193,42 @@ class BusinessModel(TimestampMixin, Base):
     niche_memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
         back_populates="business"
     )
+    facts: Mapped[list["BusinessFactModel"]] = relationship(back_populates="business")
+
+
+class BusinessFactModel(TimestampMixin, Base):
+    __tablename__ = "business_facts"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "fact_key",
+            name="uq_business_facts_business_key",
+        ),
+        Index("ix_business_facts_key_text", "fact_key", "value_text"),
+        Index("ix_business_facts_key_number", "fact_key", "value_number"),
+        Index("ix_business_facts_key_boolean", "fact_key", "value_boolean"),
+        Index("ix_business_facts_business_observed", "business_id", "observed_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    value_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_observation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_observations.id"), nullable=True, index=True
+    )
+    resolver_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    business: Mapped[BusinessModel] = relationship(back_populates="facts")
+    source_observation: Mapped["SourceObservationModel | None"] = relationship()
 
 
 class NicheModel(TimestampMixin, Base):
@@ -221,7 +257,8 @@ class TerritoryModel(TimestampMixin, Base):
             "product_id",
             "niche_id",
             "market_key",
-            name="uq_territories_workspace_offer_niche_market",
+            "criteria_hash",
+            name="uq_territories_workspace_offer_niche_market_criteria",
         ),
     )
 
@@ -237,6 +274,10 @@ class TerritoryModel(TimestampMixin, Base):
     cadence: Mapped[str] = mapped_column(String(32), nullable=False, default="weekly")
     batch_size: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
     min_fit: Mapped[str] = mapped_column(String(32), nullable=False, default="maybe")
+    search_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_contract: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    evidence_max_age_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    criteria_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -424,7 +465,6 @@ class ContactModel(TimestampMixin, Base):
 class SourceObservationModel(TimestampMixin, Base):
     __tablename__ = "source_observations"
     __table_args__ = (
-        UniqueConstraint("source", "external_id", name="uq_source_observations_source_external_id"),
         Index(
             "ix_source_observations_business_observed",
             "business_id",
@@ -448,12 +488,6 @@ class SourceObservationModel(TimestampMixin, Base):
 class SourceItemModel(TimestampMixin, Base):
     __tablename__ = "source_items"
     __table_args__ = (
-        UniqueConstraint(
-            "segment_id",
-            "provider_id",
-            "content_hash",
-            name="uq_source_items_segment_provider_content",
-        ),
         Index("ix_source_items_segment_state", "segment_id", "state"),
         Index("ix_source_items_provider_fetched", "provider_id", "fetched_at"),
     )

@@ -17,7 +17,7 @@ from source_items.schemas import (
 from source_items.service import SourceItemReviewService
 
 
-def test_source_item_is_immutable_and_deduplicated_before_judgment() -> None:
+def test_repeated_fetches_create_distinct_immutable_source_items() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         _add_segment(session)
@@ -37,9 +37,18 @@ def test_source_item_is_immutable_and_deduplicated_before_judgment() -> None:
         first = repository.ingest(value)
         repeated = repository.ingest(value)
 
-        assert first.id == repeated.id
+        assert first.id != repeated.id
+        assert first.content_hash == repeated.content_hash
         assert first.state == SourceItemState.FETCHED.value
         assert first.business_id is None
+        SourceItemReviewService(session).review(
+            first.id,
+            SourceItemReview(action=SourceItemReviewAction.REJECT),
+            actor_id="reviewer-1",
+        )
+        prior = repository.latest_user_decision_for(repeated)
+        assert prior is not None
+        assert prior.decision == SourceItemDecisionValue.REJECTED.value
 
 
 def test_source_item_decisions_are_append_only_and_update_current_state() -> None:

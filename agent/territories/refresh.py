@@ -4,6 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
+from business_index.contracts import compile_search_contract
+from business_index.schemas import BusinessIndexSearch, OpportunityType, SearchContract
+from business_index.search import BusinessIndexSearchService
 from campaigns.schemas import CampaignCreate, CampaignGoalType
 from campaigns.service import CampaignService
 from db.models import LeadModel, NicheModel, TerritoryDeliveryModel
@@ -18,10 +21,13 @@ from leads.schemas import (
     LeadRead,
 )
 from leads.approach_service import LeadApproachService
+from products.repository import ProductRepository
+from products.schemas import ProductRead
 from shared.errors import ConflictError
 from shared.logger import get_logger
 from shared.utils import new_id, utcnow
 from territories.repository import TerritoryRepository
+from territories.dedupe import exclude_previously_delivered_rows
 from territories.opportunity_audit import TerritoryOpportunityAuditor
 from territories.schemas import TerritoryMinFit
 
@@ -60,7 +66,19 @@ class TerritoryRefreshService:
         if existing and existing.status != "failed":
             return existing
         niche = self.session.get(NicheModel, territory.niche_id)
-        query = f"{niche.label if niche else territory.label} in {territory.market_key}"
+        product = ProductRead.model_validate(
+            ProductRepository(self.session, workspace_id=self.workspace_id).get(
+                territory.product_id
+            )
+        )
+        query = territory.search_prompt or (
+            f"{niche.label if niche else territory.label} in {territory.market_key}"
+        )
+        opportunity_type, search_contract = _territory_contract(
+            territory,
+            product=product,
+            query=query,
+        )
         campaign = self.campaigns.create(
             CampaignCreate(
                 product_id=territory.product_id,
@@ -77,6 +95,14 @@ class TerritoryRefreshService:
                         "location": territory.market_key,
                         "search_query": query,
                         "niche_id": territory.niche_id,
+                    },
+                    "business_index_contract": {
+                        "niche_id": territory.niche_id,
+                        "market_key": territory.market_key,
+                        "opportunity_type": opportunity_type.value,
+                        "evidence_max_age_days": territory.evidence_max_age_days,
+                        "result_count": territory.batch_size,
+                        "search_contract": search_contract.as_dict(),
                     },
                 },
                 max_leads=territory.batch_size,
@@ -103,22 +129,24 @@ class TerritoryRefreshService:
             self.session.add(delivery)
         self.session.commit()
         try:
-            self.campaigns.run_contact_listing(campaign.id)
-            if self.opportunity_auditor is not None:
-                audit = self.opportunity_auditor.audit_campaign(
-                    campaign.id,
-                    category=niche.category if niche else None,
-                    market=territory.market_key,
+            rows = BusinessIndexSearchService(self.session).search(
+                BusinessIndexSearch(
+                    niche_id=territory.niche_id,
+                    market_key=territory.market_key,
+                    opportunity_type=opportunity_type,
+                    evidence_fresh_after=utcnow()
+                    - timedelta(days=territory.evidence_max_age_days),
+                    result_count=territory.batch_size * 3,
+                    contract=search_contract,
                 )
-                logger.info(
-                    "territory_opportunity_audit territory_id=%s campaign_id=%s selected=%s "
-                    "inspected=%s written=%s",
-                    territory.id,
-                    campaign.id,
-                    audit.selected,
-                    audit.inspected,
-                    audit.written,
-                )
+            )
+            rows = exclude_previously_delivered_rows(
+                self.session,
+                campaign_id=campaign.id,
+                product_id=territory.product_id,
+                rows=rows,
+            )[: territory.batch_size]
+            self.campaigns.materialize_existing_matches(campaign.id, rows)
             contacts = self.contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
             self._generate_approaches(contacts)
             contacts = self.contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
@@ -160,7 +188,10 @@ class TerritoryRefreshService:
             if lead_model.qualification.get("fit_status") not in allowed:
                 continue
             lead = LeadRead.model_validate(lead_model)
-            if not has_minimum_opportunity(lead.raw_sources, minimum="moderate"):
+            if not _is_business_index_match(lead) and not has_minimum_opportunity(
+                lead.raw_sources,
+                minimum="moderate",
+            ):
                 continue
             if not _has_usable_contact(lead):
                 continue
@@ -213,6 +244,51 @@ def _has_usable_contact(lead: LeadRead) -> bool:
     return email_is_usable or bool(
         _raw_value(lead.raw_sources, {"phone", "phones", "contact_phone", "telephone"})
     )
+
+
+def _territory_contract(
+    territory,
+    *,
+    product: ProductRead,
+    query: str,
+) -> tuple[OpportunityType, SearchContract]:
+    stored = territory.search_contract or {}
+    try:
+        opportunity_type = OpportunityType(
+            stored.get("opportunity_type") or OpportunityType.ANY.value
+        )
+    except ValueError:
+        opportunity_type = OpportunityType.ANY
+    contract = SearchContract.from_dict(stored.get("search_contract"))
+    if contract.all_of or contract.any_of:
+        return opportunity_type, contract
+    product_text = " ".join(
+        str(value or "")
+        for value in (
+            product.product_description,
+            product.problem_being_solved,
+            " ".join(product.ideal_customer_signals or []),
+        )
+    ).casefold()
+    if any(term in product_text for term in ("website", "quote form", "booking flow", "reviews")):
+        opportunity_type = OpportunityType.WEAK_OR_MISSING_WEBSITE
+    return opportunity_type, compile_search_contract(
+        query,
+        opportunity_type=opportunity_type,
+    )
+
+
+def _is_business_index_match(lead: LeadRead) -> bool:
+    stack: list[object] = list(lead.raw_sources)
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            if value.get("match_origin") == "business_index" and value.get("business_facts"):
+                return True
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return False
 
 
 def _raw_value(sources: list[dict], keys: set[str]) -> str | None:

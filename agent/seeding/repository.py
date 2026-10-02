@@ -36,6 +36,7 @@ class BusinessSeedRepository:
             description=seed.description,
             source=seed.source,
             raw=seed_raw_payload(seed, batch_id=batch_id),
+            append_observation=False,
         )
         if link.business_id:
             self._record_seed_membership(seed, batch_id=batch_id, link=link)

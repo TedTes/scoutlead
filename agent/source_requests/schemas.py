@@ -88,3 +88,5 @@ class SourceRequestRun(BaseModel):
     state: str = "ready"
     current_result_count: int = 0
     requested_result_count: int = 0
+    unsupported_criteria: list[str] = Field(default_factory=list)
+    unresolved_criteria: list[str] = Field(default_factory=list)

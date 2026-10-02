@@ -151,7 +151,7 @@ def test_opportunity_source_request_preserves_requested_result_limit() -> None:
         assert result.run.source_inputs["business_index_contract"]["result_count"] == 25
         assert result.run.source_inputs["requires_digital_opportunity"] is True
         assert result.run.source_inputs["website_policy"] == "weak_or_missing"
-        assert result.run.source_inputs["business_index_contract"]["opportunity_type"] == "any"
+        assert result.run.source_inputs["business_index_contract"]["opportunity_type"] == "weak_or_missing_website"
         assert result.run.source_inputs["search_queries"][0] == (
             "Independent painters in Scarborough ON"
         )
@@ -367,7 +367,7 @@ def test_source_request_rejects_unconfigured_source_adapter() -> None:
             )
 
 
-def test_source_request_returns_existing_index_matches_and_queues_deficit() -> None:
+def test_source_request_rejects_existing_business_without_a_matching_current_fact() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -453,19 +453,12 @@ def test_source_request_returns_existing_index_matches_and_queues_deficit() -> N
 
     assert search_tool.calls == 0
     assert result.summary is None
-    assert result.current_result_count == 1
+    assert result.current_result_count == 0
     assert result.requested_result_count == 5
     assert result.state == "ready"
     assert result.run.status == "completed"
     assert jobs == []
-    assert leads[0].company_name == "All Painting Toronto"
-    assert leads[0].contact_email == "info@allpainting.ca"
-    assert leads[0].research is not None
-    assert leads[0].qualification is not None
-    assert leads[0].qualification["score_breakdown"]["fit_score"] >= 65
-    assert leads[0].qualification["score_breakdown"]["reachability_score"] > 0
-    assert leads[0].qualification["score_breakdown"]["source_quality_score"] >= 65
-    assert leads[0].raw_sources[0]["raw"]["match_origin"] == "business_index"
+    assert leads == []
 
 
 def test_contact_listing_run_does_not_create_outreach_drafts() -> None:

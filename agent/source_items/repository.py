@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from db.models import SourceItemDecisionModel, SourceItemModel
@@ -22,15 +22,6 @@ class SourceItemRepository:
 
     def ingest(self, value: SourceItemCreate, *, commit: bool = True) -> SourceItemModel:
         content_hash = source_item_content_hash(value)
-        existing = self.session.scalar(
-            select(SourceItemModel).where(
-                SourceItemModel.segment_id == value.segment_id,
-                SourceItemModel.provider_id == value.provider_id,
-                SourceItemModel.content_hash == content_hash,
-            )
-        )
-        if existing is not None:
-            return existing
         item = SourceItemModel(
             id=new_id("source_item"),
             **value.model_dump(),
@@ -70,6 +61,33 @@ class SourceItemRepository:
         if item is None:
             raise NotFoundError("source item not found", {"source_item_id": source_item_id})
         return item
+
+    def latest_user_decision_for(self, item: SourceItemModel) -> SourceItemDecisionModel | None:
+        identity_filters = [SourceItemModel.content_hash == item.content_hash]
+        if item.external_id:
+            identity_filters.append(SourceItemModel.external_id == item.external_id)
+        if item.source_url:
+            identity_filters.append(SourceItemModel.source_url == item.source_url)
+        return self.session.scalar(
+            select(SourceItemDecisionModel)
+            .join(SourceItemModel, SourceItemModel.id == SourceItemDecisionModel.source_item_id)
+            .where(
+                SourceItemModel.id != item.id,
+                SourceItemModel.segment_id == item.segment_id,
+                SourceItemModel.provider_id == item.provider_id,
+                SourceItemDecisionModel.actor_type == "user",
+                SourceItemDecisionModel.decision.in_(
+                    [
+                        "accepted",
+                        "rejected",
+                        "duplicate",
+                    ]
+                ),
+                or_(*identity_filters),
+            )
+            .order_by(SourceItemDecisionModel.created_at.desc())
+            .limit(1)
+        )
 
     def list_for_segment(
         self,

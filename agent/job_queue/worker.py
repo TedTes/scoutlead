@@ -112,8 +112,14 @@ def run_once() -> bool:
                     session=session,
                     services=services,
                 ).audit_opportunity(
-                    str(job.payload["source_item_id"]),
+                    (
+                        str(job.payload["source_item_id"])
+                        if job.payload.get("source_item_id")
+                        else None
+                    ),
                     business_id=str(job.payload["business_id"]),
+                    segment_id=str(job.payload["segment_id"]),
+                    job_id=job.id,
                 )
             elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
                 business_index_pipeline_service(

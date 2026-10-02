@@ -4,7 +4,8 @@ from datetime import timedelta
 from typing import Any
 
 from business_index.repository import BusinessIndexRepository
-from business_index.schemas import BusinessIndexSearch, OpportunityType
+from business_index.contracts import compile_search_contract
+from business_index.schemas import BusinessIndexSearch, OpportunityType, SearchContract
 from business_index.search import BusinessIndexSearchService
 from campaign_sources.schemas import CampaignSourceSlot
 from campaigns.schemas import (
@@ -111,6 +112,11 @@ class SourceRequestService:
 
     def create(self, request: SourceRequestCreate) -> SourceRequestRun:
         plan = self.plan(request)
+        opportunity_type = _opportunity_type(request, plan)
+        search_contract = compile_search_contract(
+            request.prompt,
+            opportunity_type=opportunity_type,
+        )
         product = ProductRead.model_validate(self.products.get(request.product_id))
         requires_digital_opportunity = (
             product_requires_digital_opportunity(product)
@@ -153,9 +159,10 @@ class SourceRequestService:
                     "business_index_contract": {
                         "niche_id": segment.niche_id,
                         "market_key": segment.market_key,
-                        "opportunity_type": _opportunity_type(request, plan).value,
+                        "opportunity_type": opportunity_type.value,
                         "evidence_max_age_days": request.evidence_max_age_days,
                         "result_count": plan.max_results,
+                        "search_contract": search_contract.as_dict(),
                     },
                     "requires_digital_opportunity": requires_digital_opportunity,
                     **plan.source_inputs,
@@ -197,6 +204,8 @@ class SourceRequestService:
                 state="ready",
                 current_result_count=0,
                 requested_result_count=plan.max_results,
+                unsupported_criteria=list(search_contract.unsupported),
+                unresolved_criteria=[],
             )
 
         matches, index_decisions = BusinessIndexSearchService(
@@ -205,10 +214,11 @@ class SourceRequestService:
             BusinessIndexSearch(
                 niche_id=segment.niche_id,
                 market_key=segment.market_key,
-                opportunity_type=_opportunity_type(request, plan),
+                opportunity_type=opportunity_type,
                 evidence_fresh_after=utcnow()
                 - timedelta(days=request.evidence_max_age_days),
                 result_count=plan.max_results,
+                contract=search_contract,
             )
         )
         self.campaigns.materialize_existing_matches(run.id, matches)
@@ -223,9 +233,10 @@ class SourceRequestService:
             request_payload={
                 "niche_id": segment.niche_id,
                 "market_key": segment.market_key,
-                "opportunity_type": _opportunity_type(request, plan).value,
+                "opportunity_type": opportunity_type.value,
                 "evidence_max_age_days": request.evidence_max_age_days,
                 "result_count": plan.max_results,
+                "search_contract": search_contract.as_dict(),
             },
             response_payload={
                 "match_count": current_count,
@@ -247,7 +258,7 @@ class SourceRequestService:
                 business_id=str(decision["business_id"]),
                 item_key=str(decision.get("company_name") or decision["business_id"]),
                 request_payload={
-                    "opportunity_type": _opportunity_type(request, plan).value,
+                    "opportunity_type": opportunity_type.value,
                     "evidence_max_age_days": request.evidence_max_age_days,
                 },
                 response_payload=decision,
@@ -294,6 +305,12 @@ class SourceRequestService:
             state="ready",
             current_result_count=current_count,
             requested_result_count=plan.max_results,
+            unsupported_criteria=list(search_contract.unsupported),
+            unresolved_criteria=_unresolved_criteria(
+                index_decisions,
+                search_contract=search_contract,
+                has_matches=bool(current_count),
+            ),
         )
 
     def rerun(self, run_id: str, *, run_immediately: bool = True) -> SourceRequestRun:
@@ -454,6 +471,28 @@ def _match_business_id(match: Any) -> str | None:
     return str(value) if value else None
 
 
+def _unresolved_criteria(
+    decisions: list[dict],
+    *,
+    search_contract: SearchContract,
+    has_matches: bool,
+) -> list[str]:
+    unresolved: set[str] = set()
+    marker = "Current facts are unavailable for: "
+    for decision in decisions:
+        reason = str(decision.get("reason") or "")
+        if marker not in reason:
+            continue
+        values = reason.split(marker, 1)[1].rstrip(".")
+        unresolved.update(item.strip() for item in values.split(",") if item.strip())
+    if not decisions and not has_matches:
+        unresolved.update(
+            predicate.key
+            for predicate in (*search_contract.all_of, *search_contract.any_of)
+        )
+    return sorted(unresolved)
+
+
 def _opportunity_type(
     request: SourceRequestCreate,
     plan: SourceRequestPlan,
@@ -475,4 +514,6 @@ def _opportunity_type(
         return OpportunityType.MISSING_WEBSITE
     if website_policy == "missing_or_unavailable":
         return OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE
+    if website_policy == "weak_or_missing":
+        return OpportunityType.WEAK_OR_MISSING_WEBSITE
     return OpportunityType.ANY

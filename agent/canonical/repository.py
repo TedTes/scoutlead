@@ -29,6 +29,7 @@ from canonical.semantics import (
     request_semantic_profile,
     semantic_key,
 )
+from business_facts.service import reconcile_business_facts
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
@@ -69,6 +70,7 @@ class CanonicalRepository:
         source: str | None = None,
         raw: dict[str, Any] | None = None,
         allow_raw_contact_email: bool = True,
+        append_observation: bool = True,
     ) -> CanonicalLeadLink:
         raw_payload = raw or {}
         source_name = normalize_text(source) or "unknown"
@@ -99,6 +101,7 @@ class CanonicalRepository:
                 "description": description,
                 "source": source_name,
             },
+            append=append_observation,
         )
         self._record_discovered_membership(
             business=business,
@@ -106,6 +109,7 @@ class CanonicalRepository:
             source=source_name,
             raw=raw_payload,
         )
+        reconcile_business_facts(self.session, business.id)
         self.session.flush()
         return CanonicalLeadLink(
             business_id=business.id,
@@ -133,6 +137,7 @@ class CanonicalRepository:
             query=_query_from_raw(raw),
             raw=raw,
         )
+        reconcile_business_facts(self.session, business.id)
         self.session.flush()
         return CanonicalLeadLink(
             business_id=business.id,
@@ -545,52 +550,38 @@ class CanonicalRepository:
         source: str,
         query: str | None,
         raw: dict[str, Any],
+        append: bool = True,
     ) -> SourceObservationModel:
         now = utcnow()
         external_id = external_id_from_raw(raw)
         signature = query_signature(source=source, query=query)
         content_hash = stable_content_hash(raw)
 
-        observation = None
-        if external_id:
-            observation = self.session.scalar(
-                select(SourceObservationModel)
-                .where(
-                    SourceObservationModel.source == source,
-                    SourceObservationModel.external_id == external_id,
-                )
-                .limit(1)
-            )
-        if observation is None:
-            observation = self.session.scalar(
+        if not append:
+            existing = self.session.scalar(
                 select(SourceObservationModel)
                 .where(
                     SourceObservationModel.source == source,
                     SourceObservationModel.content_hash == content_hash,
                 )
+                .order_by(SourceObservationModel.observed_at.desc())
                 .limit(1)
             )
-        if observation is None:
-            observation = SourceObservationModel(
-                id=new_id("sourceobs"),
-                business_id=business.id,
-                source=source,
-                external_id=external_id,
-                query_signature=signature,
-                content_hash=content_hash,
-                source_url=source_url_from_raw(raw),
-                raw_payload=raw,
-                observed_at=now,
-            )
-            self.session.add(observation)
-            self.session.flush()
-            return observation
+            if existing is not None:
+                return existing
 
-        observation.business_id = business.id
-        observation.query_signature = observation.query_signature or signature
-        observation.source_url = observation.source_url or source_url_from_raw(raw)
-        observation.raw_payload = raw
-        observation.observed_at = now
+        observation = SourceObservationModel(
+            id=new_id("sourceobs"),
+            business_id=business.id,
+            source=source,
+            external_id=external_id,
+            query_signature=signature,
+            content_hash=content_hash,
+            source_url=source_url_from_raw(raw),
+            raw_payload=raw,
+            observed_at=now,
+        )
+        self.session.add(observation)
         self.session.flush()
         return observation
 

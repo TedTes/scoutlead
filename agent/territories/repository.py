@@ -23,6 +23,7 @@ class TerritoryRepository:
                     TerritoryModel.product_id == data.product_id,
                     TerritoryModel.niche_id == niche_id,
                     TerritoryModel.market_key == data.market_key,
+                    TerritoryModel.criteria_hash == data.criteria_hash,
                 )
             ).limit(1)
         )
@@ -42,6 +43,10 @@ class TerritoryRepository:
             cadence=data.cadence.value,
             batch_size=data.batch_size,
             min_fit=data.min_fit.value,
+            search_prompt=data.request,
+            search_contract=data.search_contract,
+            evidence_max_age_days=data.evidence_max_age_days,
+            criteria_hash=data.criteria_hash,
             next_run_at=utcnow(),
         )
         self.session.add(model)

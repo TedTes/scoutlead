@@ -291,7 +291,7 @@ def test_business_audit_restores_nested_google_website(monkeypatch) -> None:
         assert captured["business_ids"] == [business.id]
 
 
-def test_campaign_opportunity_audit_does_not_treat_search_miss_as_proof(monkeypatch) -> None:
+def test_campaign_opportunity_audit_records_completed_confirmation_search(monkeypatch) -> None:
     session_factory = _session_factory()
     monkeypatch.setattr(
         "territories.opportunity_audit.enrich_business_pool",
@@ -317,7 +317,7 @@ def test_campaign_opportunity_audit_does_not_treat_search_miss_as_proof(monkeypa
         opportunity = opportunity_evidence_from_sources(lead.raw_sources)
         assert opportunity is not None
         assert opportunity["level"] == "moderate"
-        assert opportunity["signals"][0]["key"] == "no_website_listed"
+        assert opportunity["signals"][0]["key"] == "no_website_found"
         assert opportunity["signals"][0]["value"] == "Website not confirmed"
 
 
@@ -372,7 +372,7 @@ def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatc
         ).one()
         assert business.website_url is None
         assert latest.raw_payload["digital_opportunity"]["signals"][0]["key"] == (
-            "no_website_listed"
+            "no_website_found"
         )
 
 
@@ -499,7 +499,7 @@ def test_website_confirmation_rejects_a_stale_matching_domain(monkeypatch) -> No
         opportunity = opportunity_evidence_from_sources(lead.raw_sources)
         assert lead.website_url is None
         assert opportunity is not None
-        assert opportunity["signals"][0]["key"] == "no_website_listed"
+        assert opportunity["signals"][0]["key"] == "no_website_found"
 
 
 def _active_website_inspection(inspector, business):

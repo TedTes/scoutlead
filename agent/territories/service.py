@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from canonical.semantics import semantic_key
+from business_index.contracts import compile_search_contract
+from business_index.schemas import OpportunityType
 from db.models import LeadOutcomeModel, NicheModel
 from outcomes.policy import POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
@@ -83,13 +87,28 @@ class TerritoryService:
     def create(self, data: TerritoryCreate):
         if not data.confirmed:
             raise ValidationError("territory resolution must be confirmed before creation")
-        self.products.get(data.product_id)
         niche = self._confirmed_niche(data)
+        product = self.products.get(data.product_id)
+        opportunity_type = (
+            OpportunityType.WEAK_OR_MISSING_WEBSITE
+            if _product_targets_digital_opportunity(product)
+            else OpportunityType.ANY
+        )
+        search_contract = compile_search_contract(
+            data.request,
+            opportunity_type=opportunity_type,
+        )
+        contract_payload = {
+            "opportunity_type": opportunity_type.value,
+            "search_contract": search_contract.as_dict(),
+        }
         normalized = data.model_copy(
             update={
                 "niche_slug": niche.slug,
                 "niche_label": niche.label,
                 "market_key": semantic_key(data.market_key) or "unknown",
+                "search_contract": contract_payload,
+                "criteria_hash": _criteria_hash(contract_payload),
             }
         )
         return self.territories.create(normalized, niche_id=niche.id)
@@ -194,3 +213,20 @@ def _title_label(value: str) -> str:
         word.upper() if word.lower() in {"hvac", "b2b"} else word.title()
         for word in value.split()
     )
+
+
+def _criteria_hash(value: dict) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _product_targets_digital_opportunity(product) -> bool:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            product.product_description,
+            product.problem_being_solved,
+            " ".join(product.ideal_customer_signals or []),
+        )
+    ).casefold()
+    return any(term in text for term in ("website", "quote form", "booking flow", "reviews"))

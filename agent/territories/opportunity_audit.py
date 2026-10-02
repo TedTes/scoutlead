@@ -299,6 +299,7 @@ class BusinessOpportunityAuditor:
                     ),
                 )
                 continue
+            confirmed_missing = attempted
             canonical.record_business_evidence(
                 business=business,
                 source=WEBSITE_PRESENCE_SOURCE,
@@ -307,7 +308,9 @@ class BusinessOpportunityAuditor:
                     phone=phone,
                     maps_url=source_url,
                     confirmation_query=query,
-                    status="no_website_listed",
+                    status=(
+                        "no_website_found" if confirmed_missing else "no_website_listed"
+                    ),
                     label="Website not confirmed" if attempted else "No website listed",
                     message=(
                         "The source profile has no website listed, and the confirmation "
@@ -380,7 +383,9 @@ class BusinessOpportunityAuditor:
                 changed = True
                 continue
 
-            status = "no_website_listed"
+            status = (
+                "no_website_found" if confirmation_attempted else "no_website_listed"
+            )
             label = "Website not confirmed" if confirmation_attempted else "No website listed"
             message = (
                 "Google Business Profile has no website listed, and the confirmation "

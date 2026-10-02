@@ -7,6 +7,7 @@ import pytest
 
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
+from canonical.repository import CanonicalRepository
 from db.models import LeadModel, LeadOutcomeModel, NicheModel, QueueJobModel, TerritoryModel
 from db.session import create_database
 from products.repository import ProductRepository
@@ -136,6 +137,7 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
         niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
         territory = TerritoryService(session, workspace_id="workspace:first").create(
             TerritoryCreate(
                 product_id=offer.id,
@@ -164,7 +166,7 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
         assert first.status == "ready"
         assert first.new_contact_count == 2
         assert campaigns.run_count == 1
-        assert auditor.campaign_ids == [first.campaign_id]
+        assert auditor.campaign_ids == []
         assert all(
             lead.territory_id == territory.id
             for lead in refresh.contacts(first, min_fit=territory.min_fit)
@@ -176,6 +178,7 @@ def test_delivery_requires_audited_opportunity_and_usable_contact() -> None:
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
         niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
         territory = TerritoryService(session, workspace_id="workspace:first").create(
             TerritoryCreate(
                 product_id=offer.id,
@@ -218,6 +221,7 @@ def test_failed_refresh_reuses_delivery_on_retry() -> None:
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
         niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
         territory = TerritoryService(session, workspace_id="workspace:first").create(
             TerritoryCreate(
                 product_id=offer.id,
@@ -377,6 +381,7 @@ def test_territory_metrics_report_coverage_and_conversion() -> None:
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
         niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
         territory = TerritoryService(session, workspace_id="workspace:first").create(
             TerritoryCreate(
                 product_id=offer.id,
@@ -475,44 +480,58 @@ class _FakeCampaigns:
     def create(self, campaign):
         return self.repository.create(campaign)
 
-    def run_contact_listing(self, campaign_id: str):
+    def materialize_existing_matches(self, campaign_id: str, rows: list[dict]):
         self.run_count += 1
         if self.fail_first and self.run_count == 1:
             raise RuntimeError("temporary source failure")
         campaign = self.repository.get(campaign_id)
-        for index, fit_status in enumerate(
-            (AgentFitStatus.GOOD_FIT, AgentFitStatus.MAYBE),
-            start=1,
-        ):
-            lead = self.leads.create_from_seed(
+        created = []
+        for index, row in enumerate(rows, start=1):
+            lead = self.leads.create_from_existing_match(
                 campaign.id,
                 campaign.product_id,
-                LeadSeedInput(
-                    company_name=f"HVAC {self.run_count}-{index}",
-                    website_url=f"https://hvac-{self.run_count}-{index}.example",
-                    contact_email=f"owner{index}@hvac-{self.run_count}-{index}.example",
-                    geography="Toronto",
-                    raw={
-                        "phone": f"416-555-010{index}",
-                        "digital_opportunity": {
-                            "version": 1,
-                            "score": 55 + index,
-                            "level": "high",
-                            "signals": [{"key": "missing_quote_or_booking_form"}],
-                        },
-                    },
-                ),
+                row,
             )
             self.leads.attach_qualification(
                 lead.id,
                 QualificationResult(
                     qualified=True,
-                    fit_status=fit_status,
+                    fit_status=(
+                        AgentFitStatus.GOOD_FIT
+                        if index == 1
+                        else AgentFitStatus.MAYBE
+                    ),
                     score=80,
                     rationale="Matches the niche.",
                     recommended_next_step="Review contact.",
                 ),
             )
+            created.append(lead)
+        return created
+
+
+def _seed_hvac_businesses(session) -> None:
+    canonical = CanonicalRepository(session)
+    for index in (1, 2):
+        canonical.upsert_from_discovery_result(
+            company_name=f"HVAC {index}",
+            contact_email=f"owner{index}@hvac-{index}.example",
+            geography="Toronto",
+            description="Independent HVAC contractor",
+            source="google_places",
+            raw={
+                "id": f"places/hvac-{index}",
+                "businessStatus": "OPERATIONAL",
+                "nationalPhoneNumber": f"416-555-010{index}",
+                "website_presence": {"status": "no_website_found"},
+                "source_request_intent": {
+                    "business_category": "HVAC contractors",
+                    "location": "Toronto",
+                    "search_query": "HVAC contractors in Toronto",
+                },
+            },
+        )
+    session.commit()
 
 
 class _FakeOpportunityAuditor:

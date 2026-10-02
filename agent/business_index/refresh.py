@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient
 from business_index.repository import BusinessIndexRepository
-from business_index.schemas import BusinessIndexSearch, OpportunityType
+from business_index.schemas import BusinessIndexSearch, OpportunityType, SearchContract
 from business_index.search import BusinessIndexSearchService
 from campaign_sources.schemas import (
     CampaignSourceMode,
@@ -524,6 +524,7 @@ class BusinessIndexRefreshService:
                     opportunity_type=opportunity_type,
                     evidence_fresh_after=utcnow() - timedelta(days=max_age_days),
                     result_count=campaign.max_leads,
+                    contract=SearchContract.from_dict(contract.get("search_contract")),
                 )
             )
             if complete and pipeline_events is not None:

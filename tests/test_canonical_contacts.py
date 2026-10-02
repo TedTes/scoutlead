@@ -132,7 +132,7 @@ def test_leads_from_repeat_runs_share_canonical_business_and_contact() -> None:
         assert first_lead.contact_id == second_lead.contact_id
         assert session.scalar(select(func.count()).select_from(BusinessModel)) == 1
         assert session.scalar(select(func.count()).select_from(ContactModel)) == 1
-        assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 1
+        assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 2
 
 
 def test_lead_verification_updates_canonical_contact() -> None:

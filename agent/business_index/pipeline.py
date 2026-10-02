@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -19,11 +19,14 @@ from business_index.refresh import (
     _source_state_key,
 )
 from business_index.repository import BusinessIndexRepository
-from business_index.schemas import BusinessIndexSearch, OpportunityType
-from business_index.search import BusinessIndexSearchService
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
-from db.models import QueueJobModel, SourceItemModel, SourceObservationModel
+from db.models import (
+    BusinessFactModel,
+    QueueJobModel,
+    SourceItemModel,
+    SourceObservationModel,
+)
 from discovery.classifier import assess_discovery_candidate
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from job_queue.schemas import JobStatus, JobType
@@ -39,6 +42,7 @@ from source_items.schemas import (
     SourceItemStage,
     SourceItemState,
 )
+from business_facts.repository import BusinessFactRepository, fact_value
 from source_requests.schemas import SourceTask
 from territories.opportunity_audit import BusinessOpportunityAuditor
 from tools.search import SearchResult
@@ -93,9 +97,21 @@ class BusinessIndexPipelineService:
             )
             for index, task_data in enumerate(segment.source_plan or [])
         ]
-        if not jobs:
+        audit_jobs = [
+            self.queue.enqueue_business_opportunity_audit(
+                source_item_id=None,
+                segment_id=segment.id,
+                business_id=business_id,
+            )
+            for business_id in self._businesses_needing_fact_audit(segment)
+        ]
+        if not jobs and not audit_jobs:
             self.segments.complete_refresh(segment, succeeded=False)
-        return {"segment_id": segment.id, "source_job_count": len(jobs)}
+        return {
+            "segment_id": segment.id,
+            "source_job_count": len(jobs),
+            "fact_audit_job_count": len(audit_jobs),
+        }
 
     def fetch_source(
         self,
@@ -154,11 +170,44 @@ class BusinessIndexPipelineService:
                 ),
                 commit=False,
             )
+            self._carry_forward_human_decision(item)
             source_items.append(item)
         self.session.commit()
         queued = 0
         for item in source_items:
-            if item.state in {SourceItemState.FETCHED.value, SourceItemState.FAILED.value}:
+            latest_decision = item.decisions[-1] if item.decisions else None
+            if (
+                latest_decision is not None
+                and (
+                    latest_decision.actor_type == "user"
+                    or bool((latest_decision.details or {}).get("prior_user_decision_id"))
+                )
+                and latest_decision.decision in {
+                    SourceItemDecisionValue.REJECTED.value,
+                    SourceItemDecisionValue.DUPLICATE.value,
+                }
+            ):
+                continue
+            if item.business_id:
+                self.queue.enqueue_business_opportunity_audit(
+                    source_item_id=item.id,
+                    segment_id=segment.id,
+                    business_id=item.business_id,
+                )
+                queued += 1
+            elif item.state == SourceItemState.RELEVANT.value:
+                self.queue.enqueue_business_identity_resolve(
+                    source_item_id=item.id,
+                    segment_id=segment.id,
+                )
+                queued += 1
+            elif item.state in {
+                SourceItemState.FETCHED.value,
+                SourceItemState.FAILED.value,
+                SourceItemState.REJECTED.value,
+                SourceItemState.NEEDS_REVIEW.value,
+                SourceItemState.EXCLUDED.value,
+            }:
                 self.queue.enqueue_source_item_classify(
                     source_item_id=item.id,
                     segment_id=segment.id,
@@ -182,7 +231,7 @@ class BusinessIndexPipelineService:
         )
         if not queued:
             self._maybe_complete(segment, current_job_id=job_id)
-        return {"fetched_count": len(rows), "classification_job_count": queued}
+        return {"fetched_count": len(rows), "processing_job_count": queued}
 
     def classify_source_item(self, source_item_id: str, *, job_id: str) -> dict[str, Any]:
         item = self.items.get(source_item_id)
@@ -234,6 +283,29 @@ class BusinessIndexPipelineService:
         )
         return {"state": "relevant"}
 
+    def _carry_forward_human_decision(self, item: SourceItemModel) -> None:
+        previous = self.items.latest_user_decision_for(item)
+        if previous is None:
+            return
+        decision = SourceItemDecisionValue(previous.decision)
+        state = {
+            SourceItemDecisionValue.ACCEPTED: SourceItemState.RELEVANT,
+            SourceItemDecisionValue.REJECTED: SourceItemState.REJECTED,
+            SourceItemDecisionValue.DUPLICATE: SourceItemState.EXCLUDED,
+        }[decision]
+        self.items.add_decision(
+            item.id,
+            SourceItemDecisionCreate(
+                stage=SourceItemStage.RELEVANCE,
+                decision=decision,
+                reason=f"Applied prior human decision: {previous.reason or decision.value}.",
+                actor_type="system",
+                details={"prior_user_decision_id": previous.id},
+            ),
+            next_state=state,
+            commit=False,
+        )
+
     def resolve_identity(self, source_item_id: str) -> dict[str, Any]:
         item = self.items.get(source_item_id)
         result = SearchResult.model_validate(item.raw_payload)
@@ -274,12 +346,17 @@ class BusinessIndexPipelineService:
 
     def audit_opportunity(
         self,
-        source_item_id: str,
+        source_item_id: str | None,
         *,
         business_id: str,
+        segment_id: str | None = None,
+        job_id: str | None = None,
     ) -> dict[str, Any]:
-        item = self.items.get(source_item_id)
-        segment = self._segment(item.segment_id)
+        item = self.items.get(source_item_id) if source_item_id else None
+        resolved_segment_id = item.segment_id if item else segment_id
+        if not resolved_segment_id:
+            raise ValueError("segment_id is required when auditing without a source item")
+        segment = self._segment(resolved_segment_id)
         self.auditor.audit_businesses(
             [business_id],
             category=segment.niche.category if segment.niche else None,
@@ -298,71 +375,65 @@ class BusinessIndexPipelineService:
             )
             if opportunity_evidence is not None:
                 break
-        self.items.add_decision(
-            item.id,
-            SourceItemDecisionCreate(
-                stage=SourceItemStage.OPPORTUNITY,
-                decision=SourceItemDecisionValue.AUDITED,
-                reason="Opportunity audit completed; eligibility is evaluated separately.",
-                details={
-                    "business_id": business_id,
-                    "opportunity_evidence": opportunity_evidence,
-                },
-            ),
-            next_state=SourceItemState.AUDITED,
-            business_id=business_id,
-        )
-        self.queue.enqueue_search_eligibility_match(segment_id=segment.id)
+        if item is not None:
+            self.items.add_decision(
+                item.id,
+                SourceItemDecisionCreate(
+                    stage=SourceItemStage.OPPORTUNITY,
+                    decision=SourceItemDecisionValue.AUDITED,
+                    reason="Opportunity audit completed; eligibility is evaluated separately.",
+                    details={
+                        "business_id": business_id,
+                        "opportunity_evidence": opportunity_evidence,
+                        "business_facts": {
+                            key: fact_value(fact)
+                            for key, fact in BusinessFactRepository(self.session)
+                            .map_for_businesses([business_id])
+                            .get(business_id, {})
+                            .items()
+                        },
+                    },
+                ),
+                next_state=SourceItemState.AUDITED,
+                business_id=business_id,
+            )
+        if job_id:
+            self._maybe_complete(segment, current_job_id=job_id)
         return {"business_id": business_id, "state": "audited"}
 
-    def match_eligibility(self, segment_id: str, *, job_id: str) -> dict[str, Any]:
-        segment = self._segment(segment_id)
-        _, decisions = BusinessIndexSearchService(self.session).search_with_diagnostics(
-            BusinessIndexSearch(
-                niche_id=segment.niche_id,
-                market_key=segment.market_key,
-                opportunity_type=OpportunityType.ANY,
-                evidence_fresh_after=utcnow() - timedelta(days=30),
-                result_count=max(segment.target_business_count, 25),
-            )
-        )
-        items_by_business: dict[str, list[SourceItemModel]] = {}
-        for item in self.items.list_for_segment(segment.id, limit=2000):
-            if item.business_id:
-                items_by_business.setdefault(item.business_id, []).append(item)
-        updated = 0
-        for decision in decisions:
-            business_id = str(decision["business_id"])
-            outside_limit = "outside the requested result limit" in str(decision["reason"])
-            for item in items_by_business.get(business_id, []):
-                if item.state not in {
-                    SourceItemState.AUDITED.value,
-                    SourceItemState.AUDIT_PENDING.value,
-                }:
-                    continue
-                if decision["status"] == "accepted":
-                    value = SourceItemDecisionValue.ELIGIBLE
-                    state = SourceItemState.ELIGIBLE
-                elif outside_limit:
-                    continue
-                else:
-                    value = SourceItemDecisionValue.EXCLUDED
-                    state = SourceItemState.EXCLUDED
-                self.items.add_decision(
-                    item.id,
-                    SourceItemDecisionCreate(
-                        stage=SourceItemStage.ELIGIBILITY,
-                        decision=value,
-                        reason=str(decision["reason"]),
-                        details=decision,
-                    ),
-                    next_state=state,
-                    commit=False,
+    def _businesses_needing_fact_audit(self, segment) -> list[str]:
+        business_ids = self.segments.business_ids(segment)
+        if not business_ids:
+            return []
+        freshness_cutoff = utcnow() - timedelta(days=30)
+        current = {
+            row.business_id: row
+            for row in self.session.scalars(
+                select(BusinessFactModel).where(
+                    BusinessFactModel.business_id.in_(business_ids),
+                    BusinessFactModel.fact_key == "website_status",
                 )
-                updated += 1
-        self.session.commit()
+            )
+        }
+        candidates = [
+            business_id
+            for business_id in business_ids
+            if business_id not in current
+            or _aware(current[business_id].observed_at) < _aware(freshness_cutoff)
+            or current[business_id].value_text in {"unknown", "not_listed"}
+        ]
+        limit = min(max(int(segment.target_business_count or 25), 1), 100)
+        return candidates[:limit]
+
+    def match_eligibility(self, segment_id: str, *, job_id: str) -> dict[str, Any]:
+        """Complete legacy queued jobs; eligibility now belongs to a search contract."""
+        segment = self._segment(segment_id)
         self._maybe_complete(segment, current_job_id=job_id)
-        return {"evaluated_count": len(decisions), "updated_item_count": updated}
+        return {
+            "evaluated_count": 0,
+            "updated_item_count": 0,
+            "deprecated": True,
+        }
 
     def _segment(self, segment_id: str):
         segment = self.segments.get(segment_id)
@@ -395,3 +466,7 @@ class BusinessIndexPipelineService:
         )
         self.segments.complete_refresh(segment, succeeded=succeeded)
         return True
+
+
+def _aware(value):
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)

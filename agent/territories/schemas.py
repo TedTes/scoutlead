@@ -60,6 +60,10 @@ class TerritoryCreate(BaseModel):
     cadence: TerritoryCadence = TerritoryCadence.WEEKLY
     batch_size: int = Field(default=25, ge=1, le=100)
     min_fit: TerritoryMinFit = TerritoryMinFit.MAYBE
+    request: str | None = None
+    search_contract: dict = Field(default_factory=dict)
+    evidence_max_age_days: int = Field(default=30, ge=1, le=365)
+    criteria_hash: str = "default"
 
 
 class TerritoryUpdate(BaseModel):
@@ -82,6 +86,10 @@ class TerritoryRead(BaseModel):
     cadence: TerritoryCadence
     batch_size: int
     min_fit: TerritoryMinFit
+    search_prompt: str | None = None
+    search_contract: dict = Field(default_factory=dict)
+    evidence_max_age_days: int = 30
+    criteria_hash: str = "default"
     next_run_at: datetime | None = None
     last_run_at: datetime | None = None
     last_delivery_count: int = 0

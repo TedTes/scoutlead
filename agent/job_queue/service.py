@@ -70,18 +70,20 @@ class QueueService:
     def enqueue_business_opportunity_audit(
         self,
         *,
-        source_item_id: str,
+        source_item_id: str | None,
         segment_id: str,
         business_id: str,
     ):
+        payload = {
+            "segment_id": segment_id,
+            "business_id": business_id,
+        }
+        if source_item_id:
+            payload["source_item_id"] = source_item_id
         return self.queue.enqueue_once(
             JobType.BUSINESS_OPPORTUNITY_AUDIT,
-            {
-                "source_item_id": source_item_id,
-                "segment_id": segment_id,
-                "business_id": business_id,
-            },
-            dedupe_key=f"{source_item_id}:{business_id}",
+            payload,
+            dedupe_key=f"{segment_id}:{business_id}:{source_item_id or 'index'}",
             max_attempts=3,
         )
 
