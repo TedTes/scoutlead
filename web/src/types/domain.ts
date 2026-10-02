@@ -139,7 +139,7 @@ export type SourceRequestInput = {
   run_immediately?: boolean;
   business_category?: string;
   geography?: string;
-  opportunity_type?: "any" | "missing_website" | "missing_or_unavailable_website";
+  opportunity_type?: "any" | "missing_website" | "missing_or_unavailable_website" | "weak_or_missing_website";
   evidence_max_age_days?: number;
 };
 
@@ -165,6 +165,8 @@ export type SourceRequestRun = {
   state: "ready";
   current_result_count: number;
   requested_result_count: number;
+  unsupported_criteria: string[];
+  unresolved_criteria: string[];
 };
 
 export type ResultSeedInput = {
@@ -288,6 +290,10 @@ export type Territory = {
   cadence: "weekly";
   batch_size: number;
   min_fit: "good_fit" | "maybe";
+  search_prompt?: string | null;
+  search_contract: Record<string, unknown>;
+  evidence_max_age_days: number;
+  criteria_hash: string;
   next_run_at?: string | null;
   last_run_at?: string | null;
   last_delivery_count: number;

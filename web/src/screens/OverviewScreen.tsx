@@ -66,10 +66,11 @@ export function OverviewScreen({
       });
       if (result) {
         const foundCount = result.current_result_count;
+        const criteriaMessage = searchCriteriaMessage(result);
         showToast({
           title: "Search ready",
-          message: `${foundCount} indexed match${foundCount === 1 ? "" : "es"} ready.`,
-          tone: foundCount ? "green" : "blue",
+          message: criteriaMessage || `${foundCount} indexed match${foundCount === 1 ? "" : "es"} ready.`,
+          tone: criteriaMessage ? "amber" : foundCount ? "green" : "blue",
         });
         onRunCreated?.(result.run);
       }
@@ -155,6 +156,19 @@ export function OverviewScreen({
       </section>
     </section>
   );
+}
+
+function searchCriteriaMessage(result: {
+  unsupported_criteria: string[];
+  unresolved_criteria: string[];
+}): string {
+  if (result.unsupported_criteria.length) {
+    return `Not evaluated: ${result.unsupported_criteria.join(", ")}.`;
+  }
+  if (result.unresolved_criteria.length) {
+    return `Current evidence is missing for: ${result.unresolved_criteria.join(", ")}.`;
+  }
+  return "";
 }
 
 function getRunPrompt(run: { source_input?: string | null; source_inputs?: Record<string, unknown> } | undefined) {

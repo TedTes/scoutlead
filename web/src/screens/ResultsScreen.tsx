@@ -436,7 +436,7 @@ export function ResultsScreen({
     setRunning(true);
     showToast({
       title: "Search started",
-      message: "Checking existing matches now. Live discovery will continue in the background if needed.",
+      message: "Checking the current business index. Unmet demand will guide the next scheduled refresh.",
       tone: "blue",
     });
     try {
@@ -451,10 +451,15 @@ export function ResultsScreen({
       if (result) {
         setRerunPromptOpen(false);
         const foundCount = result.current_result_count;
+        const criteriaMessage = result.unsupported_criteria.length
+          ? `Not evaluated: ${result.unsupported_criteria.join(", ")}.`
+          : result.unresolved_criteria.length
+            ? `Current evidence is missing for: ${result.unresolved_criteria.join(", ")}.`
+            : "";
         showToast({
           title: "Search ready",
-          message: `${foundCount} indexed match${foundCount === 1 ? "" : "es"} ready.`,
-          tone: foundCount ? "green" : "blue",
+          message: criteriaMessage || `${foundCount} indexed match${foundCount === 1 ? "" : "es"} ready.`,
+          tone: criteriaMessage ? "amber" : foundCount ? "green" : "blue",
         });
       }
     } catch (err) {
@@ -538,6 +543,7 @@ export function ResultsScreen({
           territory.product_id === selectedDiscoveryRun.product_id
           && territory.niche_id === scheduleResolution.niche_id
           && territory.market_key === scheduleResolution.market_key
+          && territory.search_prompt === scheduleResolution.request
         ));
         const scheduled = existing || await territoryApi.createTerritory(scheduleResolution, {
           batch_size: settings.batch_size,

@@ -2,6 +2,7 @@ export type Screen =
   | "overview"
   | "integrations"
   | "product"
+  | "review"
   | "results";
 
 export type LeadWorkflowView = "inbox" | "this_week" | "shortlisted" | "contacted" | "dismissed" | "all";

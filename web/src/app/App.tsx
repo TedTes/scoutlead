@@ -13,6 +13,7 @@ import {
   Pencil,
   Plug,
   Plus,
+  ListChecks,
   Send,
   Settings,
   Star,
@@ -75,6 +76,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [viewMode, setViewMode] = useState<AppViewMode>("auto");
   const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("this_week");
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
+  const [sourceReviewSummary, setSourceReviewSummary] = useState<{ runId: string; count: number } | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [productMenuOpen, setProductMenuOpen] = useState(false);
@@ -144,6 +146,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const workflowCounts = workflowSummary?.runId === selectedDiscoveryRunId
     ? workflowSummary.counts
     : fallbackWorkflowCounts;
+  const sourceReviewCount = sourceReviewSummary?.runId === selectedDiscoveryRunId
+    ? sourceReviewSummary.count
+    : 0;
   const leadWorkflowItems: Array<{ id: LeadWorkflowView; label: string; count: number; icon: ReactNode }> = [
     {
       id: "inbox",
@@ -203,6 +208,17 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       setSelectedDiscoveryRunId(targetRunId);
       void refreshSnapshot(targetRunId);
       selectScreen("results");
+    }
+    setMobileRailOpen(false);
+  };
+
+  const openSourceReview = () => {
+    const targetRunId = selectedRunExists
+      ? selectedDiscoveryRunId
+      : productRunLabels[0]?.run.id;
+    if (targetRunId) {
+      setSelectedDiscoveryRunId(targetRunId);
+      selectScreen("review");
     }
     setMobileRailOpen(false);
   };
@@ -518,6 +534,17 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 <em>{item.count}</em>
               </button>
             ))}
+            <button
+              className={activeScreen === "review" ? "active" : ""}
+              aria-label={`Review queue, ${sourceReviewCount}`}
+              title={`Review queue (${sourceReviewCount})`}
+              type="button"
+              onClick={openSourceReview}
+            >
+              <ListChecks size={17} />
+              <span>Review queue</span>
+              <em>{sourceReviewCount}</em>
+            </button>
           </div>
           <ResizeHandle
             ariaLabel="Resize lead workflow section"
@@ -653,6 +680,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
                 onCountsChange: handleWorkflowCountsChange,
+              },
+              {
+                onCountChange: (runId, count) => setSourceReviewSummary({ runId, count }),
               },
             )
           )}

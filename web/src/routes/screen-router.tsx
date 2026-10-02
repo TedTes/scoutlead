@@ -2,6 +2,7 @@ import { OverviewScreen } from "../screens/OverviewScreen";
 import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
+import { SourceReviewScreen } from "../screens/SourceReviewScreen";
 import type { DiscoveryRun } from "../types/domain";
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 
@@ -28,12 +29,17 @@ export function renderScreen(
     view: "this_week",
     onViewChange: () => undefined,
   },
+  sourceReview: {
+    onCountChange?: (runId: string, count: number) => void;
+  } = {},
 ) {
   switch (screen) {
     case "integrations":
       return <IntegrationsScreen />;
     case "product":
       return <ProductScreen {...productEditor} onNavigate={setActiveScreen} />;
+    case "review":
+      return <SourceReviewScreen onCountChange={sourceReview.onCountChange} />;
     case "results":
       return (
         <ResultsScreen
