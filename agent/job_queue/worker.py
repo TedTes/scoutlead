@@ -7,7 +7,7 @@ from agent_runs.repository import AgentRunRepository
 from app.config import get_settings
 from app.dependencies import AppServices, create_app_services
 from app.service_factory import (
-    business_index_refresh_service,
+    business_index_pipeline_service,
     campaign_service,
     territory_refresh_service,
 )
@@ -80,10 +80,49 @@ def run_once() -> bool:
                     workspace_id=territory.workspace_id,
                 ).refresh(territory_id, scheduled_for=scheduled_for)
             elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
-                business_index_refresh_service(
+                business_index_pipeline_service(
                     session=session,
                     services=services,
-                ).refresh(str(job.payload["segment_id"]), job_id=job.id)
+                ).plan_refresh(str(job.payload["segment_id"]))
+            elif job.type == JobType.SOURCE_FETCH.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).fetch_source(
+                    str(job.payload["segment_id"]),
+                    source_index=int(job.payload["source_index"]),
+                    task_data=dict(job.payload["task"]),
+                    job_id=job.id,
+                )
+            elif job.type == JobType.SOURCE_ITEM_CLASSIFY.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).classify_source_item(
+                    str(job.payload["source_item_id"]),
+                    job_id=job.id,
+                )
+            elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).resolve_identity(str(job.payload["source_item_id"]))
+            elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).audit_opportunity(
+                    str(job.payload["source_item_id"]),
+                    business_id=str(job.payload["business_id"]),
+                )
+            elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).match_eligibility(
+                    str(job.payload["segment_id"]),
+                    job_id=job.id,
+                )
             else:
                 raise ValueError(f"unknown job type: {job.type}")
         except Exception as exc:
@@ -93,6 +132,13 @@ def run_once() -> bool:
                 str(exc),
                 retry_delay_seconds=(3600 if job.type == JobType.TERRITORY_REFRESH.value else None),
             )
+            if failed_job.status == JobStatus.FAILED.value and job.payload.get("source_item_id"):
+                _record_source_item_failure(
+                    session,
+                    source_item_id=str(job.payload["source_item_id"]),
+                    job_type=str(job.type),
+                    reason=str(exc),
+                )
             if (
                 failed_job.status == JobStatus.FAILED.value
                 and job.type == JobType.BUSINESS_INDEX_REFRESH.value
@@ -127,6 +173,13 @@ def _recover_interrupted_jobs() -> None:
     try:
         recovered = QueueRepository(session).recover_stale_running()
         for job in recovered:
+            if job.status == JobStatus.FAILED.value and job.payload.get("source_item_id"):
+                _record_source_item_failure(
+                    session,
+                    source_item_id=str(job.payload["source_item_id"]),
+                    job_type=str(job.type),
+                    reason=job.last_error or "Background stage stopped before completion.",
+                )
             if (
                 job.status == JobStatus.FAILED.value
                 and job.type == JobType.BUSINESS_INDEX_REFRESH.value
@@ -157,6 +210,38 @@ def _fail_expanding_campaigns(session: Session, *, segment_id: str, reason: str)
             commit=False,
         )
     session.commit()
+
+
+def _record_source_item_failure(
+    session: Session,
+    *,
+    source_item_id: str,
+    job_type: str,
+    reason: str,
+) -> None:
+    from source_items.repository import SourceItemRepository
+    from source_items.schemas import (
+        SourceItemDecisionCreate,
+        SourceItemDecisionValue,
+        SourceItemStage,
+        SourceItemState,
+    )
+
+    SourceItemRepository(session).add_decision(
+        source_item_id,
+        SourceItemDecisionCreate(
+            stage={
+                JobType.SOURCE_ITEM_CLASSIFY.value: SourceItemStage.RELEVANCE,
+                JobType.BUSINESS_IDENTITY_RESOLVE.value: SourceItemStage.IDENTITY,
+                JobType.BUSINESS_OPPORTUNITY_AUDIT.value: SourceItemStage.OPPORTUNITY,
+                JobType.SEARCH_ELIGIBILITY_MATCH.value: SourceItemStage.ELIGIBILITY,
+            }.get(job_type, SourceItemStage.IDENTITY),
+            decision=SourceItemDecisionValue.FAILED,
+            reason=reason,
+        ),
+        next_state=SourceItemState.FAILED,
+        error=reason,
+    )
 
 
 def _campaign_service(*, session: Session, services: AppServices) -> CampaignService:

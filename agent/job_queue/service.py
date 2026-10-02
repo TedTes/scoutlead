@@ -42,3 +42,53 @@ class QueueService:
             max_attempts=3,
             commit=commit,
         )
+
+    def enqueue_source_fetch(self, *, segment_id: str, source_index: int, task: dict):
+        return self.queue.enqueue_once(
+            JobType.SOURCE_FETCH,
+            {"segment_id": segment_id, "source_index": source_index, "task": task},
+            dedupe_key=f"{segment_id}:{source_index}",
+            max_attempts=3,
+        )
+
+    def enqueue_source_item_classify(self, *, source_item_id: str, segment_id: str):
+        return self.queue.enqueue_once(
+            JobType.SOURCE_ITEM_CLASSIFY,
+            {"source_item_id": source_item_id, "segment_id": segment_id},
+            dedupe_key=source_item_id,
+            max_attempts=3,
+        )
+
+    def enqueue_business_identity_resolve(self, *, source_item_id: str, segment_id: str):
+        return self.queue.enqueue_once(
+            JobType.BUSINESS_IDENTITY_RESOLVE,
+            {"source_item_id": source_item_id, "segment_id": segment_id},
+            dedupe_key=source_item_id,
+            max_attempts=3,
+        )
+
+    def enqueue_business_opportunity_audit(
+        self,
+        *,
+        source_item_id: str,
+        segment_id: str,
+        business_id: str,
+    ):
+        return self.queue.enqueue_once(
+            JobType.BUSINESS_OPPORTUNITY_AUDIT,
+            {
+                "source_item_id": source_item_id,
+                "segment_id": segment_id,
+                "business_id": business_id,
+            },
+            dedupe_key=f"{source_item_id}:{business_id}",
+            max_attempts=3,
+        )
+
+    def enqueue_search_eligibility_match(self, *, segment_id: str):
+        return self.queue.enqueue_once(
+            JobType.SEARCH_ELIGIBILITY_MATCH,
+            {"segment_id": segment_id},
+            dedupe_key=segment_id,
+            max_attempts=3,
+        )

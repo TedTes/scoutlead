@@ -39,7 +39,7 @@ from messages.service import MessageService
 from products.repository import ProductRepository
 from run_diagnostics.schemas import RunDiagnostics
 from run_diagnostics.service import build_run_diagnostics
-from shared.errors import ConflictError
+from shared.errors import ConflictError, NotFoundError
 from source_requests.schemas import (
     SourceProviderRead,
     SourceRequestCreate,
@@ -47,6 +47,9 @@ from source_requests.schemas import (
 )
 from source_requests.catalog import build_source_catalog
 from source_requests.service import SourceRequestService
+from source_items.repository import SourceItemRepository
+from source_items.schemas import SourceItemRead, SourceItemReview
+from source_items.service import SourceItemReviewService
 
 router = APIRouter(prefix="/discovery-runs", tags=["discovery-runs"])
 
@@ -91,6 +94,43 @@ def rerun_source_request(
     auth: CurrentAuth,
 ):
     return _source_request_service(session, services, auth).rerun(run_id)
+
+
+@router.get("/{run_id}/source-items", response_model=list[SourceItemRead])
+def list_run_source_items(
+    run_id: str,
+    session: DbSession,
+    auth: CurrentAuth,
+) -> list[SourceItemRead]:
+    run = CampaignRepository(session, workspace_id=auth.workspace_id).get(run_id)
+    segment_id = str((run.source_inputs or {}).get("business_index_segment_id") or "")
+    if not segment_id:
+        return []
+    return [
+        SourceItemRead.model_validate(item)
+        for item in SourceItemRepository(session).list_for_segment(segment_id, limit=500)
+    ]
+
+
+@router.post("/{run_id}/source-items/{source_item_id}/review", response_model=SourceItemRead)
+def review_run_source_item(
+    run_id: str,
+    source_item_id: str,
+    review: SourceItemReview,
+    session: DbSession,
+    auth: CurrentAuth,
+) -> SourceItemRead:
+    run = CampaignRepository(session, workspace_id=auth.workspace_id).get(run_id)
+    segment_id = str((run.source_inputs or {}).get("business_index_segment_id") or "")
+    item = SourceItemRepository(session).get(source_item_id)
+    if not segment_id or item.segment_id != segment_id:
+        raise NotFoundError("source item not found", {"source_item_id": source_item_id})
+    reviewed = SourceItemReviewService(session).review(
+        item.id,
+        review,
+        actor_id=auth.user_id,
+    )
+    return SourceItemRead.model_validate(reviewed)
 
 
 def _source_request_service(

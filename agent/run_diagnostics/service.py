@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from campaigns.schemas import CampaignRead
-from db.models import BusinessIndexSegmentModel, QueueJobModel
+from db.models import BusinessIndexSegmentModel, QueueJobModel, SourceItemModel
 from job_queue.schemas import JobType
 from leads.schemas import LeadRead
 from run_diagnostics.repository import RunPipelineEventRepository
@@ -30,7 +30,14 @@ def build_run_diagnostics(
     segment = session.get(BusinessIndexSegmentModel, segment_id) if segment_id else None
     event_models = RunPipelineEventRepository(session).list_by_campaign(run.id)
     events = [RunPipelineEventRead.model_validate(event) for event in event_models]
-    instrumented = any(event.event_type == "request_created" for event in events)
+    source_items = list(
+        session.scalars(
+            select(SourceItemModel).where(SourceItemModel.segment_id == segment_id)
+        )
+    ) if segment_id else []
+    instrumented = bool(source_items) or any(
+        event.event_type == "request_created" for event in events
+    )
     final_by_source = Counter(result.source for result in final_results)
 
     plan = list(segment.source_plan or []) if segment is not None else []
@@ -41,6 +48,7 @@ def build_run_diagnostics(
         events=events,
         final_by_source=final_by_source,
         exact_history=instrumented,
+        source_items=source_items,
     )
     jobs = _jobs_for_run(session, run_id=run.id, segment_id=segment_id)
     fetched_count = sum(source.fetched_count for source in sources)
@@ -64,13 +72,20 @@ def build_run_diagnostics(
     retention = "exact" if instrumented else "aggregate_only"
     if not instrumented:
         caveats.append(
-            "This run predates row-level pipeline retention. Provider totals are the latest segment snapshot; individual rejected rows are unavailable."
+            "This run predates row-level pipeline retention. Provider totals are the latest "
+            "segment snapshot; individual rejected rows are unavailable."
         )
     if segment is None:
         caveats.append("This run is not linked to a business-index segment.")
+    if source_items:
+        caveats.append(
+            "Source rows belong to scheduled refreshes of the shared niche-market segment; "
+            "they are not request-specific live fetches."
+        )
     if any(source.rejected_count is None for source in sources):
         caveats.append(
-            "A written-count difference is not labeled as rejection because older data can also include deduplication."
+            "A written-count difference is not labeled as rejection because older data can "
+            "also include deduplication."
         )
 
     return RunDiagnostics(
@@ -124,6 +139,7 @@ def _source_diagnostics(
     events: list[RunPipelineEventRead],
     final_by_source: Counter[str],
     exact_history: bool,
+    source_items: list[SourceItemModel],
 ) -> list[RunSourceDiagnostic]:
     rows: list[RunSourceDiagnostic] = []
     state_items = list(state.items())
@@ -148,13 +164,43 @@ def _source_diagnostics(
             and event.provider_id == provider_id
             and _text((event.request_payload or {}).get("query")) == query
         ]
+        durable_items = [
+            item
+            for item in source_items
+            if item.provider_id == provider_id and item.query == query
+        ]
         fetched = (
-            _int_value((fetch_event.response_payload or {}).get("fetched_count"))
-            if fetch_event
-            else (0 if exact_history else _int_value(matching_state.get("fetched_count")))
+            len(durable_items)
+            if durable_items
+            else (
+                _int_value((fetch_event.response_payload or {}).get("fetched_count"))
+                if fetch_event
+                else _int_value(matching_state.get("fetched_count"))
+            )
         )
-        accepted = sum(1 for event in decisions if event.status == "accepted") if exact_history else None
-        rejected = sum(1 for event in decisions if event.status == "rejected") if exact_history else None
+        accepted = (
+            sum(
+                1
+                for item in durable_items
+                if item.state
+                in {"relevant", "identity_resolved", "audit_pending", "audited", "eligible"}
+            )
+            if durable_items
+            else (
+                sum(1 for event in decisions if event.status == "accepted")
+                if exact_history
+                else None
+            )
+        )
+        rejected = (
+            sum(1 for item in durable_items if item.state in {"rejected", "excluded", "failed"})
+            if durable_items
+            else (
+                sum(1 for event in decisions if event.status == "rejected")
+                if exact_history
+                else None
+            )
+        )
         failure = (
             fetch_event.reason
             if fetch_event and fetch_event.status == "failed"
@@ -169,7 +215,15 @@ def _source_diagnostics(
                 status=(
                     "failed"
                     if failure
-                    else (fetch_event.status if fetch_event else ("not_run" if exact_history else "snapshot"))
+                    else (
+                        "completed"
+                        if durable_items
+                        else (
+                            fetch_event.status
+                            if fetch_event
+                            else ("not_run" if exact_history else "snapshot")
+                        )
+                    )
                 ),
                 fetched_count=fetched,
                 accepted_count=accepted,
@@ -214,18 +268,25 @@ def _state_for_task(
     return {}
 
 
-def _jobs_for_run(session: Session, *, run_id: str, segment_id: str | None) -> list[RunJobDiagnostic]:
+def _jobs_for_run(
+    session: Session,
+    *,
+    run_id: str,
+    segment_id: str | None,
+) -> list[RunJobDiagnostic]:
+    stage_types = [job_type.value for job_type in JobType]
     candidates = list(
         session.scalars(
             select(QueueJobModel)
-            .where(QueueJobModel.type == JobType.BUSINESS_INDEX_REFRESH.value)
+            .where(QueueJobModel.type.in_(stage_types))
             .order_by(QueueJobModel.created_at.desc())
         )
     )
     exact = [job for job in candidates if job.payload.get("campaign_id") == run_id]
-    selected = exact or [
+    segment_jobs = [
         job for job in candidates if segment_id and job.payload.get("segment_id") == segment_id
-    ][:5]
+    ]
+    selected = list({job.id: job for job in [*exact, *segment_jobs]}.values())[:100]
     return [
         RunJobDiagnostic(
             id=job.id,

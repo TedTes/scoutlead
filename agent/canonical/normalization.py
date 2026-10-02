@@ -64,6 +64,7 @@ _PHONE_KEYS = (
 )
 
 _SOURCE_URL_KEYS = (
+    "source_url",
     "url",
     "website_url",
     "websiteUri",
@@ -71,6 +72,10 @@ _SOURCE_URL_KEYS = (
     "googleMapsUri",
     "listingUrl",
     "adUrl",
+    "profileUrl",
+    "profile_url",
+    "messagingUrl",
+    "messaging_url",
 )
 
 

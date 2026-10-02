@@ -9,6 +9,11 @@ class JobType(StrEnum):
     MESSAGE_SEND = "message.send"
     TERRITORY_REFRESH = "territory.refresh"
     BUSINESS_INDEX_REFRESH = "business_index.refresh"
+    SOURCE_FETCH = "source.fetch"
+    SOURCE_ITEM_CLASSIFY = "source_item.classify"
+    BUSINESS_IDENTITY_RESOLVE = "business.identity_resolve"
+    BUSINESS_OPPORTUNITY_AUDIT = "business.opportunity_audit"
+    SEARCH_ELIGIBILITY_MATCH = "search.eligibility_match"
 
 
 class JobStatus(StrEnum):

@@ -90,17 +90,26 @@ VENDOR_TERMS = (
     "app",
     "apps",
     "platform",
-    "tool",
-    "tools",
     "saas",
     "crm",
     "cpq",
     "automation",
-    "solution",
-    "solutions",
     "online approvals",
     "in seconds",
     "in minutes",
+)
+
+AMBIGUOUS_VENDOR_TERMS = ("tool", "tools", "solution", "solutions")
+VENDOR_CONTEXT_TERMS = (
+    "software",
+    "saas",
+    "platform",
+    "subscription",
+    "workflow",
+    "digital",
+    "online",
+    "crm",
+    "automation",
 )
 
 BUSINESS_TERMS = (
@@ -221,7 +230,11 @@ def _is_vendor_or_competitor(text: str, product: ProductRead) -> bool:
     )
     if any(term in target_customer for term in software_target_terms):
         return False
-    return _contains_any(text, VENDOR_TERMS)
+    if _contains_any(text, VENDOR_TERMS):
+        return True
+    return _contains_any(text, AMBIGUOUS_VENDOR_TERMS) and _contains_any(
+        text, VENDOR_CONTEXT_TERMS
+    )
 
 
 def _business_confidence(text: str, result: SearchResult, product: ProductRead) -> int:

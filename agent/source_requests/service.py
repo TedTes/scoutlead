@@ -20,7 +20,6 @@ from evaluation.digital_opportunity import (
 )
 from products.repository import ProductRepository
 from products.schemas import ProductRead
-from job_queue.service import QueueService
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.errors import ValidationError
 from shared.utils import utcnow
@@ -255,49 +254,44 @@ class SourceRequestService:
                 reason=str(decision["reason"]),
             )
         if deficit and plan.tasks:
-            run = self.campaigns.campaigns.update_status(
-                run.id,
-                CampaignStatus.EXPANDING,
-                commit=False,
-            )
-            job = QueueService(self.products.session).enqueue_business_index_refresh(
-                segment_id=segment.id,
-                campaign_id=run.id,
-                requested_deficit=deficit,
-                commit=False,
-            )
-            self.products.session.commit()
-            self.products.session.refresh(run)
             pipeline_events.create(
                 campaign_id=run.id,
                 segment_id=segment.id,
-                job_id=job.id,
-                stage="background_discovery",
-                event_type="job_queued",
-                status=job.status,
-                request_payload=job.payload,
-                response_payload={"job_id": job.id},
-            )
-            state = CampaignStatus.EXPANDING.value
-        else:
-            run = self.campaigns.campaigns.update_status(run.id, CampaignStatus.COMPLETED)
-            pipeline_events.create(
-                campaign_id=run.id,
-                segment_id=segment.id,
-                stage="final_output",
-                event_type="output_snapshot",
-                status="completed",
-                response_payload={
-                    "result_count": current_count,
-                    "lead_ids": [result.id for result in self.campaigns.results(run.id)],
+                stage="index_demand",
+                event_type="coverage_requested",
+                status="recorded",
+                request_payload={
+                    "niche_id": segment.niche_id,
+                    "market_key": segment.market_key,
+                    "requested_count": plan.max_results,
                 },
+                response_payload={
+                    "current_count": current_count,
+                    "deficit": deficit,
+                    "segment_id": segment.id,
+                    "next_refresh_at": (
+                        segment.next_refresh_at.isoformat() if segment.next_refresh_at else None
+                    ),
+                },
+                reason="Unmet demand was recorded for scheduled business-index refresh.",
             )
-            state = "ready"
+        run = self.campaigns.campaigns.update_status(run.id, CampaignStatus.COMPLETED)
+        pipeline_events.create(
+            campaign_id=run.id,
+            segment_id=segment.id,
+            stage="final_output",
+            event_type="output_snapshot",
+            status="completed",
+            response_payload={
+                "result_count": current_count,
+                "lead_ids": [result.id for result in self.campaigns.results(run.id)],
+            },
+        )
         return SourceRequestRun(
             plan=plan,
             run=CampaignRead.model_validate(run),
             summary=None,
-            state=state,
+            state="ready",
             current_result_count=current_count,
             requested_result_count=plan.max_results,
         )

@@ -21,10 +21,19 @@ from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import SOURCE_NAME as WEBSITE_AUDIT_SOURCE
 from db.models import BusinessModel, CampaignModel, SourceObservationModel
 from discovery.classifier import assess_discovery_candidate
+from discovery.schemas import DiscoveryCandidateType
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.utils import new_id, utcnow
+from source_items.repository import SourceItemRepository
+from source_items.schemas import (
+    SourceItemCreate,
+    SourceItemDecisionCreate,
+    SourceItemDecisionValue,
+    SourceItemStage,
+    SourceItemState,
+)
 from source_requests.schemas import SourceTask
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.schemas import SourceRequestCreate
@@ -64,9 +73,10 @@ class BusinessIndexRefreshService:
         product = ProductRead.model_validate(
             ProductRepository(self.session).get(segment.product_id)
         )
-        self._rebuild_source_plan(segment, product)
+        self.rebuild_source_plan(segment, product)
         campaigns = self._expanding_campaigns(segment.id)
         pipeline_events = RunPipelineEventRepository(self.session)
+        source_items = SourceItemRepository(self.session)
         context_campaign = campaigns[0] if campaigns else self._scheduled_campaign(segment, product)
         canonical = CanonicalRepository(self.session, embedding=self.embedding)
         existing_business_ids = self.segments.business_ids(segment)
@@ -110,8 +120,7 @@ class BusinessIndexRefreshService:
                     },
                     commit=False,
                 )
-                written = 0
-                source_business_ids: list[str] = []
+                persisted_rows = []
                 for row in rows:
                     normalized = _indexed_row(
                         row,
@@ -122,8 +131,55 @@ class BusinessIndexRefreshService:
                         fetched_at=attempted_at,
                     )
                     search_result = SearchResult.model_validate(normalized)
+                    source_item = source_items.ingest(
+                        SourceItemCreate(
+                            segment_id=segment.id,
+                            job_id=job_id,
+                            provider_id=task.provider_id,
+                            external_id=_source_external_id(search_result),
+                            query=task.query,
+                            source_url=search_result.url,
+                            title=search_result.title,
+                            raw_payload=search_result.model_dump(mode="json"),
+                            fetched_at=attempted_at,
+                        ),
+                        commit=False,
+                    )
+                    normalized["raw"]["source_item_id"] = source_item.id
+                    persisted_rows.append((source_item, normalized, search_result))
+                # Preserve provider output even when a later judgment stage fails.
+                self.session.commit()
+
+                written = 0
+                source_business_ids: list[str] = []
+                for source_item, normalized, search_result in persisted_rows:
                     assessment = assess_discovery_candidate(search_result, product)
                     if not assessment.is_promotable:
+                        reviewable = _assessment_needs_review(
+                            assessment.candidate_type,
+                            assessment.confidence,
+                            task.provider_id,
+                        )
+                        source_items.add_decision(
+                            source_item.id,
+                            SourceItemDecisionCreate(
+                                stage=SourceItemStage.RELEVANCE,
+                                decision=(
+                                    SourceItemDecisionValue.NEEDS_REVIEW
+                                    if reviewable
+                                    else SourceItemDecisionValue.REJECTED
+                                ),
+                                reason=assessment.rejection_reason,
+                                confidence=assessment.confidence,
+                                details={"candidate_type": assessment.candidate_type.value},
+                            ),
+                            next_state=(
+                                SourceItemState.NEEDS_REVIEW
+                                if reviewable
+                                else SourceItemState.REJECTED
+                            ),
+                            commit=False,
+                        )
                         self._record_pipeline_events(
                             pipeline_events,
                             campaigns,
@@ -141,6 +197,18 @@ class BusinessIndexRefreshService:
                             commit=False,
                         )
                         continue
+                    source_items.add_decision(
+                        source_item.id,
+                        SourceItemDecisionCreate(
+                            stage=SourceItemStage.RELEVANCE,
+                            decision=SourceItemDecisionValue.ACCEPTED,
+                            reason="Source item has sufficient evidence of a target business.",
+                            confidence=assessment.confidence,
+                            details={"candidate_type": assessment.candidate_type.value},
+                        ),
+                        next_state=SourceItemState.RELEVANT,
+                        commit=False,
+                    )
                     link = canonical.upsert_from_discovery_result(
                         company_name=search_result.title,
                         website_url=_canonical_website_url(
@@ -158,6 +226,18 @@ class BusinessIndexRefreshService:
                         allow_raw_contact_email=False,
                     )
                     if link.business_id:
+                        source_items.add_decision(
+                            source_item.id,
+                            SourceItemDecisionCreate(
+                                stage=SourceItemStage.IDENTITY,
+                                decision=SourceItemDecisionValue.RESOLVED,
+                                reason="Resolved to a canonical business.",
+                                details={"business_id": link.business_id},
+                            ),
+                            next_state=SourceItemState.AUDIT_PENDING,
+                            business_id=link.business_id,
+                            commit=False,
+                        )
                         source_business_ids.append(link.business_id)
                         written += 1
                         self._record_pipeline_events(
@@ -300,7 +380,7 @@ class BusinessIndexRefreshService:
         if campaigns and commit:
             repository.session.commit()
 
-    def _rebuild_source_plan(self, segment, product: ProductRead) -> None:
+    def rebuild_source_plan(self, segment, product: ProductRead) -> None:
         if self.discovery_config is None:
             return
         apify_sources = [
@@ -661,3 +741,35 @@ def _opportunity_policy(source_plan: list[dict[str, Any]]) -> str:
         if isinstance(config, dict) and config.get("website_policy"):
             return str(config["website_policy"])
     return "any"
+
+
+def _source_external_id(result: SearchResult) -> str | None:
+    raw = result.raw or {}
+    provider_payload = raw.get("provider_payload")
+    payload_raw = provider_payload.get("raw") if isinstance(provider_payload, dict) else None
+    candidates = (
+        raw.get("external_id"),
+        raw.get("place_id"),
+        raw.get("placeId"),
+        raw.get("id"),
+        payload_raw.get("id") if isinstance(payload_raw, dict) else None,
+        payload_raw.get("placeId") if isinstance(payload_raw, dict) else None,
+        result.url,
+    )
+    for value in candidates:
+        if value is not None and str(value).strip():
+            return str(value).strip()[:500]
+    return None
+
+
+def _assessment_needs_review(
+    candidate_type: DiscoveryCandidateType,
+    confidence: int,
+    provider_id: str,
+) -> bool:
+    if candidate_type == DiscoveryCandidateType.UNKNOWN and confidence >= 45:
+        return True
+    provider = provider_id.casefold()
+    return candidate_type == DiscoveryCandidateType.VENDOR and any(
+        marketplace in provider for marketplace in ("kijiji", "craigslist", "marketplace")
+    )

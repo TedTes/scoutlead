@@ -22,6 +22,8 @@ from db.models import (
     ProductModel,
     ProductSourceDraftModel,
     QueueJobModel,
+    SourceItemDecisionModel,
+    SourceItemModel,
     ToolCallModel,
     WebhookDeliveryModel,
     WorkspaceModel,
@@ -308,6 +310,19 @@ class ProductRepository:
         self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.product_id == product_id))
         self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.product_id == product_id))
         if business_index_segment_ids:
+            source_item_ids = select(SourceItemModel.id).where(
+                SourceItemModel.segment_id.in_(business_index_segment_ids)
+            )
+            self.session.execute(
+                delete(SourceItemDecisionModel).where(
+                    SourceItemDecisionModel.source_item_id.in_(source_item_ids)
+                )
+            )
+            self.session.execute(
+                delete(SourceItemModel).where(
+                    SourceItemModel.segment_id.in_(business_index_segment_ids)
+                )
+            )
             self.session.execute(
                 delete(QueueJobModel).where(
                     QueueJobModel.payload["segment_id"].as_string().in_(

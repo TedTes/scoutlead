@@ -10,12 +10,21 @@ from business_index.refresh import (
     _observation_has_website,
     _round_robin_unique,
 )
+from business_index.pipeline import BusinessIndexPipelineService
 from business_index.repository import BusinessIndexRepository
 from business_index.scheduler import enqueue_due_business_index_refreshes
 from campaigns.service import CampaignService
 from campaigns.schemas import CampaignRead
-from db.models import NicheModel, QueueJobModel, RunPipelineEventModel
+from db.models import (
+    NicheModel,
+    QueueJobModel,
+    RunPipelineEventModel,
+    SourceItemDecisionModel,
+    SourceItemModel,
+)
 from db.session import create_database
+from job_queue.repository import QueueRepository
+from job_queue.schemas import JobType
 from products.repository import ProductRepository
 from leads.repository import LeadRepository
 from leads.schemas import LeadRead
@@ -162,7 +171,7 @@ def test_audit_prioritizes_google_website_conflicts_for_repair() -> None:
     assert conflict < new_missing < ordinary
 
 
-def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
+def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -225,20 +234,28 @@ def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
             embedding=FakeEmbeddingClient(),
         ).refresh(segment_id)
 
+        next_search = request_service.create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="Independent painters in Toronto without a website",
+                max_results=5,
+            )
+        )
+
         refreshed_run = campaigns.get(created.run.id)
-        leads = LeadRepository(session).list_by_campaign(created.run.id)
+        leads = LeadRepository(session).list_by_campaign(next_search.run.id)
         segment = BusinessIndexRepository(session).get(segment_id)
         job = session.query(QueueJobModel).one()
         scheduled = enqueue_due_business_index_refreshes(session)
         queued_job_count = session.query(QueueJobModel).count()
-        pipeline_events = session.query(RunPipelineEventModel).filter_by(
-            campaign_id=created.run.id
-        ).all()
         diagnostics = build_run_diagnostics(
             session,
             run=CampaignRead.model_validate(refreshed_run),
-            final_results=[LeadRead.model_validate(lead) for lead in leads],
+            final_results=[],
         )
+        source_items = session.query(SourceItemModel).all()
+        source_item_decisions = session.query(SourceItemDecisionModel).all()
 
     assert [call.provider_id for call in registry.calls] == [
         "google_places",
@@ -247,6 +264,7 @@ def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
     ]
     assert all(call.config["limit"] == 25 for call in registry.calls)
     assert summary["successful_source_count"] == 3
+    assert summary["filled_campaign_count"] == 0
     assert refreshed_run.status == "completed"
     assert len(leads) == 2
     assert segment is not None
@@ -256,16 +274,104 @@ def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:
     assert jobs_before_refresh == 1
     assert scheduled == 0
     assert queued_job_count == 1
-    assert len([event for event in pipeline_events if event.event_type == "provider_fetch"]) == 3
-    assert len([event for event in pipeline_events if event.event_type == "candidate_decision"]) == 3
     assert diagnostics.retention == "exact"
-    assert diagnostics.summary["fetched"] == 3
-    assert diagnostics.summary["accepted"] == 2
-    assert diagnostics.summary["rejected"] == 1
-    assert diagnostics.summary["final"] == 2
+    assert diagnostics.summary["final"] == 0
+    assert len(source_items) == 3
+    assert sorted(item.state for item in source_items) == [
+        "audit_pending",
+        "audit_pending",
+        "rejected",
+    ]
+    assert len(source_item_decisions) == 5
 
 
-def test_refresh_audits_existing_seeded_inventory_before_refilling_run() -> None:
+def test_staged_refresh_processes_fetch_identity_audit_and_eligibility_jobs() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+        campaigns = CampaignService(
+            session=session,
+            llm=FakeWorkflowLLM(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            embedding=FakeEmbeddingClient(),
+        )
+        created = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=campaigns,
+            google_places_configured=True,
+            search_configured=True,
+            openstreetmap_enabled=True,
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="Independent painters in Toronto without a website",
+                max_results=5,
+            )
+        )
+        segment_id = created.run.source_inputs["business_index_segment_id"]
+        pipeline = BusinessIndexPipelineService(
+            session=session,
+            registry=RecordingSourceRegistry(),
+            campaigns=campaigns,
+            auditor=BusinessOpportunityAuditor(
+                session=session,
+                verifier=None,
+                search=SearchTool(),
+                timeout_seconds=0.1,
+            ),
+            embedding=FakeEmbeddingClient(),
+        )
+
+        planned = pipeline.plan_refresh(segment_id)
+        processed_types = []
+        queue = QueueRepository(session)
+        for _ in range(30):
+            job = queue.claim_next()
+            if job is None:
+                break
+            processed_types.append(job.type)
+            if job.type == JobType.SOURCE_FETCH.value:
+                pipeline.fetch_source(
+                    segment_id,
+                    source_index=int(job.payload["source_index"]),
+                    task_data=job.payload["task"],
+                    job_id=job.id,
+                )
+            elif job.type == JobType.SOURCE_ITEM_CLASSIFY.value:
+                pipeline.classify_source_item(job.payload["source_item_id"], job_id=job.id)
+            elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
+                pipeline.resolve_identity(job.payload["source_item_id"])
+            elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
+                pipeline.audit_opportunity(
+                    job.payload["source_item_id"],
+                    business_id=job.payload["business_id"],
+                )
+            elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
+                pipeline.match_eligibility(segment_id, job_id=job.id)
+            queue.complete(job.id)
+
+        items = session.query(SourceItemModel).all()
+        segment = BusinessIndexRepository(session).get(segment_id)
+
+    assert planned["source_job_count"] == 3
+    assert set(processed_types) == {
+        JobType.SOURCE_FETCH.value,
+        JobType.SOURCE_ITEM_CLASSIFY.value,
+        JobType.BUSINESS_IDENTITY_RESOLVE.value,
+        JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
+        JobType.SEARCH_ELIGIBILITY_MATCH.value,
+    }
+    assert sorted(item.state for item in items) == ["eligible", "eligible", "rejected"]
+    assert segment is not None
+    assert segment.next_refresh_at > segment.last_refresh_at
+
+
+def test_refresh_audits_existing_inventory_for_the_next_database_search() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -315,6 +421,22 @@ def test_refresh_audits_existing_seeded_inventory_before_refilling_run() -> None
             embedding=FakeEmbeddingClient(),
         ).refresh(segment_id)
 
-        leads = LeadRepository(session).list_by_campaign(created.run.id)
+        next_search = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=campaigns,
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+            google_places_configured=False,
+            search_configured=False,
+            openstreetmap_enabled=True,
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="Independent residential painters in Toronto without a website",
+                max_results=5,
+            )
+        )
+        leads = LeadRepository(session).list_by_campaign(next_search.run.id)
 
     assert [lead.company_name for lead in leads] == ["Example Solo Painting Co."]

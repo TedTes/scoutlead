@@ -445,6 +445,73 @@ class SourceObservationModel(TimestampMixin, Base):
     business: Mapped[BusinessModel] = relationship()
 
 
+class SourceItemModel(TimestampMixin, Base):
+    __tablename__ = "source_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "segment_id",
+            "provider_id",
+            "content_hash",
+            name="uq_source_items_segment_provider_content",
+        ),
+        Index("ix_source_items_segment_state", "segment_id", "state"),
+        Index("ix_source_items_provider_fetched", "provider_id", "fetched_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    segment_id: Mapped[str] = mapped_column(
+        ForeignKey("business_index_segments.id"), nullable=False, index=True
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("queue_jobs.id"), nullable=True, index=True
+    )
+    provider_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    external_id: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    raw_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    business_id: Mapped[str | None] = mapped_column(
+        ForeignKey("businesses.id"), nullable=True, index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    business: Mapped[BusinessModel | None] = relationship()
+    decisions: Mapped[list["SourceItemDecisionModel"]] = relationship(
+        back_populates="source_item",
+        order_by="SourceItemDecisionModel.created_at",
+    )
+
+
+class SourceItemDecisionModel(TimestampMixin, Base):
+    __tablename__ = "source_item_decisions"
+    __table_args__ = (
+        Index(
+            "ix_source_item_decisions_item_stage_created",
+            "source_item_id",
+            "stage",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_item_id: Mapped[str] = mapped_column(
+        ForeignKey("source_items.id"), nullable=False, index=True
+    )
+    stage: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    decision: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    actor_type: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
+    actor_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    source_item: Mapped[SourceItemModel] = relationship(back_populates="decisions")
+
+
 class LeadModel(TimestampMixin, Base):
     __tablename__ = "leads"
 

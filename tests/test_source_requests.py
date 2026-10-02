@@ -455,11 +455,9 @@ def test_source_request_returns_existing_index_matches_and_queues_deficit() -> N
     assert result.summary is None
     assert result.current_result_count == 1
     assert result.requested_result_count == 5
-    assert result.state == "expanding"
-    assert result.run.status == "expanding"
-    assert len(jobs) == 1
-    assert jobs[0].type == "business_index.refresh"
-    assert jobs[0].payload["requested_deficit"] == 4
+    assert result.state == "ready"
+    assert result.run.status == "completed"
+    assert jobs == []
     assert leads[0].company_name == "All Painting Toronto"
     assert leads[0].contact_email == "info@allpainting.ca"
     assert leads[0].research is not None

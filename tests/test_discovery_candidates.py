@@ -210,6 +210,33 @@ def test_google_places_business_without_website_is_classified_from_listing_evide
     assert assessment.rejection_reason is None
 
 
+def test_marketplace_painting_ad_is_not_rejected_for_mentioning_trade_tools() -> None:
+    product_data = product_input().model_dump(mode="json")
+    product_data.update(
+        {
+            "id": "product_marketplace_classifier",
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    assessment = assess_discovery_candidate(
+        SearchResult(
+            title="Professional Framing, Drywall, Taping and Painting Services",
+            url="https://www.kijiji.ca/v-painting/example",
+            snippet=(
+                "Local residential painting contractor using professional-grade tools. "
+                "Contact Serg for interior and exterior painting services."
+            ),
+            geography="Toronto, ON",
+            source="apify_kijiji",
+        ),
+        ProductRead.model_validate(product_data),
+    )
+
+    assert assessment.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS
+    assert assessment.rejection_reason is None
+
+
 def test_lead_review_state_and_shortlist_are_persisted() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

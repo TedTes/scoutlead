@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import AppServices
 from business_index.refresh import BusinessIndexRefreshService
+from business_index.pipeline import BusinessIndexPipelineService
 from campaigns.service import CampaignService
 from territories.opportunity_audit import BusinessOpportunityAuditor
 from territories.refresh import TerritoryRefreshService
@@ -115,6 +116,22 @@ def business_index_refresh_service(
             "apify_sources": settings.apify_source_configs,
             "source_recipes": settings.discovery_source_recipe_configs,
         },
+    )
+
+
+def business_index_pipeline_service(
+    *,
+    session: Session,
+    services: AppServices,
+) -> BusinessIndexPipelineService:
+    refresh = business_index_refresh_service(session=session, services=services)
+    return BusinessIndexPipelineService(
+        session=session,
+        registry=refresh.registry,
+        campaigns=refresh.campaigns,
+        auditor=refresh.auditor,
+        embedding=refresh.embedding,
+        discovery_config=refresh.discovery_config,
     )
 
 
