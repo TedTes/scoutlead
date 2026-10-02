@@ -273,16 +273,24 @@ class BusinessIndexRefreshService:
             for business_id, has_website in google_website_state.items()
             if not has_website
         }
+        conflicting_website_ids = {
+            business_id
+            for business_id in google_missing_ids
+            if businesses.get(business_id) is not None
+            and bool(businesses[business_id].website_url)
+        }
         positions = {business_id: index for index, business_id in enumerate(business_ids)}
         candidates = [
             business_id for business_id in business_ids if business_id in businesses
         ]
         candidates.sort(
-            key=lambda business_id: (
-                business_id not in google_missing_ids,
-                business_id in audited_ids,
-                bool(businesses[business_id].website_url),
-                positions[business_id],
+            key=lambda business_id: _audit_candidate_priority(
+                business_id,
+                google_missing_ids=google_missing_ids,
+                conflicting_website_ids=conflicting_website_ids,
+                audited_ids=audited_ids,
+                has_website=bool(businesses[business_id].website_url),
+                position=positions[business_id],
             )
         )
         limit = min(max(int(segment.target_business_count or 25), 1), 25)
@@ -388,6 +396,24 @@ def _canonical_website_url(value: str | None, *, provider_id: str) -> str | None
     if provider_id not in {"google_places", "openstreetmap"}:
         return None
     return value
+
+
+def _audit_candidate_priority(
+    business_id: str,
+    *,
+    google_missing_ids: set[str],
+    conflicting_website_ids: set[str],
+    audited_ids: set[str],
+    has_website: bool,
+    position: int,
+) -> tuple[bool, bool, bool, bool, int]:
+    return (
+        business_id not in conflicting_website_ids,
+        business_id not in google_missing_ids,
+        business_id in audited_ids,
+        has_website,
+        position,
+    )
 
 
 def _observation_has_website(raw: dict[str, Any]) -> bool:

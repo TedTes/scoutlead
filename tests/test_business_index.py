@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from agent_runs.service import AgentRunService
 from business_index.refresh import (
     BusinessIndexRefreshService,
+    _audit_candidate_priority,
     _canonical_website_url,
     _round_robin_unique,
 )
@@ -88,6 +89,35 @@ def test_only_structured_business_sources_set_canonical_website() -> None:
         )
         == "https://official-painter.example"
     )
+
+
+def test_audit_prioritizes_google_website_conflicts_for_repair() -> None:
+    context = {
+        "google_missing_ids": {"conflict", "new-missing"},
+        "conflicting_website_ids": {"conflict"},
+        "audited_ids": {"conflict"},
+    }
+
+    conflict = _audit_candidate_priority(
+        "conflict",
+        **context,
+        has_website=True,
+        position=2,
+    )
+    new_missing = _audit_candidate_priority(
+        "new-missing",
+        **context,
+        has_website=False,
+        position=1,
+    )
+    ordinary = _audit_candidate_priority(
+        "ordinary",
+        **context,
+        has_website=False,
+        position=0,
+    )
+
+    assert conflict < new_missing < ordinary
     assert (
         _canonical_website_url(
             "https://search.example/unrelated-result",
