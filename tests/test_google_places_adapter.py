@@ -262,6 +262,7 @@ def test_missing_or_unavailable_policy_keeps_sites_for_availability_audit() -> N
         )
         is True
     )
+    assert GooglePlacesDiscoveryAdapter._matches_website_policy(place, "weak_or_missing") is True
 
 
 def test_missing_or_unavailable_policy_paginates_past_prominent_websites(

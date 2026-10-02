@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import re
 from urllib.parse import urlparse
 
 from sqlalchemy import select
@@ -42,13 +43,46 @@ BLOCKED_CONFIRMATION_HOSTS = (
     "linkedin.com",
     "mapquest.",
     "profilecanada.com",
+    "cbinsights.com",
+    "leadiq.com",
+    "trustedpros.ca",
+    "wheree.com",
     "yelp.",
     "yellowpages.",
     "google.com",
     "google.ca",
     "homestars.com",
     "houzz.",
+    "yahoo.com",
 )
+
+GENERIC_BUSINESS_NAME_TOKENS = {
+    "and",
+    "best",
+    "company",
+    "contracting",
+    "contractor",
+    "decor",
+    "decorating",
+    "exterior",
+    "home",
+    "house",
+    "inc",
+    "interior",
+    "local",
+    "ltd",
+    "north",
+    "painting",
+    "painter",
+    "painters",
+    "professional",
+    "scarborough",
+    "service",
+    "services",
+    "the",
+    "toronto",
+    "york",
+}
 
 
 @dataclass
@@ -146,7 +180,12 @@ class BusinessOpportunityAuditor:
             .where(SourceObservationModel.business_id.in_(unique_ids))
             .order_by(SourceObservationModel.observed_at.desc())
         ):
-            observations[observation.business_id].append(observation.raw_payload)
+            observations[observation.business_id].append(
+                {
+                    **observation.raw_payload,
+                    "_observation_source": observation.source,
+                }
+            )
 
         missing = self._audit_missing_business_websites(businesses, observations)
         website_ids = [business.id for business in businesses if business.website_url]
@@ -185,9 +224,13 @@ class BusinessOpportunityAuditor:
         canonical = CanonicalRepository(self.session)
         audit = MissingWebsiteAudit()
         for business in businesses:
-            if business.website_url:
-                continue
             raw_sources = observations.get(business.id, [])
+            google_lists_no_website = _google_lists_no_website(raw_sources)
+            if business.website_url and not google_lists_no_website:
+                continue
+            if google_lists_no_website:
+                business.website_url = None
+                business.domain = None
             status = _raw_text(raw_sources, "businessStatus")
             if status and status != "OPERATIONAL":
                 continue
@@ -364,6 +407,7 @@ class BusinessOpportunityAuditor:
                     result.title,
                     business.display_name,
                     result.snippet,
+                    business.phone,
                 )
                 if not website_url:
                     continue
@@ -523,6 +567,7 @@ def _credible_business_website(
     result_title: str,
     business_name: str,
     result_snippet: str | None = None,
+    business_phone: str | None = None,
 ) -> str | None:
     url = normalize_url(value)
     if not url:
@@ -533,12 +578,37 @@ def _credible_business_website(
     business_tokens = {
         token
         for token in normalize_business_name(business_name).split()
-        if len(token) >= 3
+        if len(token) >= 3 and token not in GENERIC_BUSINESS_NAME_TOKENS
     }
-    result_text = f"{result_title} {result_snippet or ''} {host}".casefold()
-    matching_tokens = sum(token in result_text for token in business_tokens)
-    required_matches = min(2, len(business_tokens))
-    return url if required_matches and matching_tokens >= required_matches else None
+    result_text = f"{result_title} {result_snippet or ''}".casefold()
+    phone = re.sub(r"\D+", "", business_phone or "")[-10:]
+    result_phone_text = re.sub(r"\D+", "", result_text)
+    if phone and len(phone) == 10 and phone in result_phone_text:
+        return url
+    host_text = re.sub(r"[^a-z0-9]+", "", host)
+    title_tokens = set(normalize_business_name(result_title).split())
+    matching_host_tokens = {token for token in business_tokens if token in host_text}
+    matching_title_tokens = business_tokens & title_tokens
+    if matching_host_tokens and matching_title_tokens:
+        return url
+    if len(business_tokens) >= 2 and len(matching_title_tokens) >= 2:
+        return url
+    return None
+
+
+def _google_lists_no_website(sources: list[dict]) -> bool:
+    for source in sources:
+        if source.get("_observation_source") not in {
+            "google_places",
+            "google_places_seed",
+        }:
+            continue
+        google_places = source.get("google_places")
+        listed_url = source.get("website_url")
+        if not listed_url and isinstance(google_places, dict):
+            listed_url = google_places.get("websiteUri")
+        return not bool(normalize_url(listed_url))
+    return False
 
 
 def _website_confirmation_queries(business: BusinessModel) -> list[str]:

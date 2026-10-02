@@ -26,6 +26,8 @@ def select_campaign_results(
         lead
         for lead in leads
         if has_minimum_opportunity(lead.raw_sources, minimum="moderate")
+        and "website_unreachable"
+        not in opportunity_signal_keys_from_sources(lead.raw_sources)
         and _matches_website_policy(lead, website_policy)
         and not _is_disqualified(lead)
     ]
@@ -56,7 +58,6 @@ def _matches_website_policy(lead: LeadRead, website_policy: str) -> bool:
                 "no_website_found",
                 "website_unavailable",
                 "website_parked",
-                "website_unreachable",
             }
         )
     return True

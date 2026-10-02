@@ -3,10 +3,12 @@ from sqlalchemy.orm import sessionmaker
 
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate
+from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import (
     BusinessWebsiteEnrichment,
     EnrichmentSummary,
 )
+from db.models import BusinessModel, SourceObservationModel
 from db.session import create_database
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from leads.repository import LeadRepository
@@ -128,6 +130,16 @@ def test_website_confirmation_accepts_matching_site_and_rejects_directory() -> N
         "ECO Painting Services - Toronto",
         "ECO Painting Services",
     ) == "https://ecopainting.ca/"
+    assert _credible_business_website(
+        "https://www.pinotspalette.com/toronto",
+        "Paint and Sip in Toronto",
+        "Time to paint",
+    ) is None
+    assert _credible_business_website(
+        "https://news.yahoo.com/painting-services-toronto",
+        "Painting Services Toronto",
+        "Painting Services Toronto",
+    ) is None
 
 
 def test_campaign_opportunity_audit_confirms_no_website_found(monkeypatch) -> None:
@@ -157,6 +169,61 @@ def test_campaign_opportunity_audit_confirms_no_website_found(monkeypatch) -> No
         assert opportunity is not None
         assert opportunity["level"] == "high"
         assert opportunity["signals"][0]["key"] == "no_website_found"
+
+
+def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+
+    class EmptySearch:
+        is_configured = True
+
+        def lookup(self, query: str, limit: int = 5):
+            return []
+
+    with session_factory() as session:
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Time to paint",
+            website_url=None,
+            geography="Toronto, ON",
+            source="google_places",
+            raw={
+                "businessStatus": "OPERATIONAL",
+                "nationalPhoneNumber": "(416) 555-0101",
+                "googleMapsUri": "https://maps.google.com/?cid=123",
+                "website_url": None,
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+        business.website_url = "https://www.pinotspalette.com/toronto"
+        business.domain = "pinotspalette.com"
+        session.commit()
+
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            search=EmptySearch(),
+            timeout_seconds=1,
+        ).audit_businesses(
+            [business.id],
+            category="painting",
+            market="Toronto",
+            opportunity_policy="weak_or_missing",
+        )
+
+        session.refresh(business)
+        latest = session.query(SourceObservationModel).filter_by(
+            business_id=business.id,
+            source="website_presence_check",
+        ).one()
+        assert business.website_url is None
+        assert latest.raw_payload["digital_opportunity"]["signals"][0]["key"] == (
+            "no_website_found"
+        )
 
 
 def test_campaign_opportunity_audit_excludes_site_found_during_confirmation(

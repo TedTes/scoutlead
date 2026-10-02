@@ -75,7 +75,7 @@ class GooglePlacesDiscoveryAdapter:
         missing_website_target = min(limit, requested_result_count)
         page_size = (
             20
-            if website_policy == "missing_or_unavailable"
+            if website_policy in {"missing_or_unavailable", "weak_or_missing"}
             else max(1, min(math.ceil(limit / len(queries)), 20))
         )
 
@@ -163,7 +163,7 @@ class GooglePlacesDiscoveryAdapter:
                     search_query,
                     size=(
                         20
-                        if website_policy == "missing_or_unavailable"
+                        if website_policy in {"missing_or_unavailable", "weak_or_missing"}
                         else min(20, max(1, limit - len(places)))
                     ),
                     page_token=token,
@@ -171,7 +171,7 @@ class GooglePlacesDiscoveryAdapter:
                 pages_loaded[search_query] = pages_loaded.get(search_query, 0) + 1
                 if next_token:
                     continuations.append((search_query, next_token))
-            if website_policy == "missing_or_unavailable":
+            if website_policy in {"missing_or_unavailable", "weak_or_missing"}:
                 places.sort(key=self._opportunity_priority)
             return [
                 self._to_search_result(
@@ -266,7 +266,11 @@ class GooglePlacesDiscoveryAdapter:
                         "website_presence_status": "no_website_listed",
                         "website_presence_label": "No website listed",
                     }
-                    if website_policy in {"missing", "missing_or_unavailable"}
+                    if website_policy in {
+                        "missing",
+                        "missing_or_unavailable",
+                        "weak_or_missing",
+                    }
                     and not website_url
                     else {}
                 ),
@@ -275,7 +279,11 @@ class GooglePlacesDiscoveryAdapter:
 
     @staticmethod
     def _matches_website_policy(place: dict[str, Any], website_policy: str) -> bool:
-        if website_policy not in {"missing", "missing_or_unavailable"}:
+        if website_policy not in {
+            "missing",
+            "missing_or_unavailable",
+            "weak_or_missing",
+        }:
             return True
         reachable_business = bool(
             place.get("businessStatus") == "OPERATIONAL"
@@ -293,7 +301,7 @@ class GooglePlacesDiscoveryAdapter:
         limit: int,
         missing_website_target: int,
     ) -> bool:
-        if website_policy != "missing_or_unavailable":
+        if website_policy not in {"missing_or_unavailable", "weak_or_missing"}:
             return len(places) < limit
         missing_count = sum(1 for place, _query in places if not place.get("websiteUri"))
         return missing_count < missing_website_target

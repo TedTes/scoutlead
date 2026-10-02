@@ -150,14 +150,15 @@ def test_opportunity_source_request_preserves_requested_result_limit() -> None:
         assert result.run.source_inputs["requested_result_count"] == 25
         assert result.run.source_inputs["business_index_contract"]["result_count"] == 25
         assert result.run.source_inputs["requires_digital_opportunity"] is True
-        assert result.run.source_inputs["website_policy"] == "missing_or_unavailable"
+        assert result.run.source_inputs["website_policy"] == "weak_or_missing"
+        assert result.run.source_inputs["business_index_contract"]["opportunity_type"] == "any"
         assert result.run.source_inputs["search_queries"][0] == (
             "Independent painters in Scarborough ON"
         )
         assert "Independent painters in Toronto ON" in result.run.source_inputs[
             "search_queries"
         ]
-        assert sources[0].input["website_policy"] == "missing_or_unavailable"
+        assert sources[0].input["website_policy"] == "weak_or_missing"
         assert sources[0].config["search_queries"] == result.run.source_inputs["search_queries"]
 
 

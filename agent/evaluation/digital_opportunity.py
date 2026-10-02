@@ -46,6 +46,20 @@ UNAVAILABLE_WEBSITE_REQUEST_PHRASES = (
     "expired website",
 )
 
+CONVERSION_FLOW_REQUEST_PHRASES = (
+    "no clear quote",
+    "no quote",
+    "missing quote",
+    "without a quote",
+    "no clear contact",
+    "no contact flow",
+    "missing contact",
+    "no clear booking",
+    "no booking",
+    "missing booking",
+    "weak conversion",
+)
+
 
 @dataclass(frozen=True)
 class OpportunitySignal:
@@ -223,12 +237,14 @@ def text_requires_digital_opportunity(text: str | None) -> bool:
 def website_opportunity_policy(product: ProductRead, request_text: str | None) -> str:
     """Choose the evidence lane without letting a broad product profile weaken an explicit request."""
     normalized = (request_text or "").lower()
+    if any(phrase in normalized for phrase in CONVERSION_FLOW_REQUEST_PHRASES):
+        return "weak_or_missing"
     if any(phrase in normalized for phrase in UNAVAILABLE_WEBSITE_REQUEST_PHRASES):
         return "missing_or_unavailable"
     if any(phrase in normalized for phrase in NO_WEBSITE_REQUEST_PHRASES):
         return "missing"
     if product_requires_digital_opportunity(product):
-        return "missing_or_unavailable"
+        return "weak_or_missing"
     return "any"
 
 

@@ -64,8 +64,27 @@ def test_missing_or_unavailable_results_reject_active_website_signals() -> None:
         "confirmed-absent",
         "unavailable",
         "parked",
-        "unreachable",
     }
+
+
+def test_weak_or_missing_results_accept_conversion_gaps_but_not_stale_timeouts() -> None:
+    campaign = _campaign(requested_count=5, website_policy="weak_or_missing")
+    leads = [
+        _lead(
+            "missing-form",
+            opportunity_score=30,
+            level="moderate",
+            signal="missing_quote_or_booking_form",
+        ),
+        _lead(
+            "stale-timeout",
+            opportunity_score=45,
+            level="moderate",
+            signal="website_unreachable",
+        ),
+    ]
+
+    assert [lead.id for lead in select_campaign_results(campaign, leads)] == ["missing-form"]
 
 
 def test_opportunity_results_exclude_disqualified_businesses() -> None:

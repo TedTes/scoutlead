@@ -2,7 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agent_runs.service import AgentRunService
-from business_index.refresh import BusinessIndexRefreshService, _round_robin_unique
+from business_index.refresh import (
+    BusinessIndexRefreshService,
+    _canonical_website_url,
+    _round_robin_unique,
+)
 from business_index.repository import BusinessIndexRepository
 from business_index.scheduler import enqueue_due_business_index_refreshes
 from campaigns.service import CampaignService
@@ -74,6 +78,23 @@ def test_refresh_candidate_order_interleaves_providers_before_existing_inventory
         "osm-2",
         "existing-1",
     ]
+
+
+def test_only_structured_business_sources_set_canonical_website() -> None:
+    assert (
+        _canonical_website_url(
+            "https://official-painter.example",
+            provider_id="google_places",
+        )
+        == "https://official-painter.example"
+    )
+    assert (
+        _canonical_website_url(
+            "https://search.example/unrelated-result",
+            provider_id="configured_search",
+        )
+        is None
+    )
 
 
 def test_live_discovery_runs_every_provider_and_fills_expanding_run() -> None:

@@ -299,6 +299,45 @@ def test_active_website_is_excluded_from_availability_lane(monkeypatch) -> None:
         assert observation.raw_payload["digital_opportunity"]["level"] == "none"
 
 
+def test_weak_or_missing_lane_keeps_active_site_with_no_conversion_form(monkeypatch) -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        BusinessSeedService(session).import_seeds(
+            [
+                painting_seed(
+                    contact_email=None,
+                    contact_name=None,
+                    website_url="https://quiet.example",
+                )
+            ],
+            batch_id="painting-toronto-v1",
+        )
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", fake_no_signal_get)
+
+        enrich_business_pool(
+            session,
+            category="painting",
+            market="toronto",
+            limit=1,
+            timeout_seconds=0.1,
+            max_pages_per_business=1,
+            page_delay_seconds=0,
+            opportunity_policy="weak_or_missing",
+            mark_attempted=True,
+        )
+
+        observation = session.scalar(
+            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+        )
+        assert observation is not None
+        opportunity = observation.raw_payload["digital_opportunity"]
+        assert opportunity["score"] >= 30
+        assert "missing_quote_or_booking_form" in {
+            signal["key"] for signal in opportunity["signals"]
+        }
+
+
 def test_parked_website_is_high_opportunity_in_availability_lane(monkeypatch) -> None:
     session_factory = _session_factory()
 
@@ -368,6 +407,46 @@ def test_timeouts_are_inconclusive_not_dead_website_evidence(monkeypatch) -> Non
             limit=1,
             page_delay_seconds=0,
             opportunity_policy="missing_or_unavailable",
+            mark_attempted=True,
+        )
+
+        observation = session.scalar(
+            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+        )
+        assert observation is not None
+        assert observation.raw_payload["website_enrichment"]["availability_status"] == (
+            "inconclusive"
+        )
+        assert observation.raw_payload["digital_opportunity"]["score"] == 0
+
+
+def test_weak_or_missing_timeout_is_inconclusive(monkeypatch) -> None:
+    session_factory = _session_factory()
+
+    def timeout(url: str, **kwargs):
+        del url, kwargs
+        raise httpx.ReadTimeout("timed out")
+
+    with session_factory() as session:
+        BusinessSeedService(session).import_seeds(
+            [
+                painting_seed(
+                    contact_email=None,
+                    contact_name=None,
+                    website_url="https://slow.example",
+                )
+            ],
+            batch_id="painting-toronto-v1",
+        )
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", timeout)
+
+        enrich_business_pool(
+            session,
+            category="painting",
+            market="toronto",
+            limit=1,
+            page_delay_seconds=0,
+            opportunity_policy="weak_or_missing",
             mark_attempted=True,
         )
 

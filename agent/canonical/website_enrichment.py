@@ -546,6 +546,14 @@ def _process_enrichment(
             enrichment,
             source_url=enrichment.source_url or business.website_url,
         )
+    elif opportunity_policy == "weak_or_missing":
+        assessment = _weak_or_missing_assessment(
+            enrichment,
+            rating=reputation[0],
+            review_count=reputation[1],
+            reviews_source_url=reputation[2],
+            website_source_url=enrichment.source_url or business.website_url,
+        )
     else:
         assessment = assess_digital_opportunity(
             website_reachable=bool(enrichment.inspected_urls),
@@ -821,6 +829,34 @@ def _availability_assessment(
         )
         return DigitalOpportunityAssessment(score=65, level="high", signals=(signal,))
     return DigitalOpportunityAssessment(score=0, level="none", signals=())
+
+
+def _weak_or_missing_assessment(
+    enrichment: BusinessWebsiteEnrichment,
+    *,
+    rating: float | None,
+    review_count: int | None,
+    reviews_source_url: str | None,
+    website_source_url: str | None,
+) -> DigitalOpportunityAssessment:
+    availability = _availability_assessment(
+        enrichment,
+        source_url=website_source_url,
+    )
+    if availability.score > 0:
+        return availability
+    if enrichment.availability_status != "active":
+        return DigitalOpportunityAssessment(score=0, level="none", signals=())
+    return assess_digital_opportunity(
+        website_reachable=True,
+        uses_https=enrichment.uses_https,
+        has_mobile_viewport=enrichment.has_mobile_viewport,
+        has_quote_or_booking_form=enrichment.has_quote_form or enrichment.has_booking_form,
+        rating=rating,
+        review_count=review_count,
+        website_source_url=website_source_url,
+        reviews_source_url=reviews_source_url,
+    )
 
 
 def _raw_payload(

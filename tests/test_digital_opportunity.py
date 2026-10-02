@@ -5,6 +5,7 @@ from evaluation.digital_opportunity import (
     opportunity_score_from_sources,
     product_requires_digital_opportunity,
     source_inputs_require_digital_opportunity,
+    website_opportunity_policy,
 )
 from products.schemas import ProductRead, QualificationCriterion
 from datetime import UTC, datetime
@@ -133,3 +134,33 @@ def test_saved_search_prompt_can_require_digital_opportunity() -> None:
             )
         }
     ) is True
+
+
+def test_mixed_website_request_uses_weak_or_missing_policy() -> None:
+    product = _web_growth_product()
+
+    assert website_opportunity_policy(
+        product,
+        (
+            "Independent painters in Toronto with no website, a broken or inactive "
+            "website, or no clear quote/contact flow."
+        ),
+    ) == "weak_or_missing"
+
+
+def _web_growth_product() -> ProductRead:
+    now = datetime.now(UTC)
+    return ProductRead(
+        id="product_web_growth",
+        product_name="Local Service Website Growth",
+        product_description="Website and conversion improvements for local businesses.",
+        target_customer="Independent home-service businesses",
+        problem_being_solved="Weak websites and missing quote or booking flows.",
+        value_proposition="Generate more qualified inquiries.",
+        target_geography="Toronto",
+        validation_goal="Find sales opportunities.",
+        qualification_criteria=[QualificationCriterion(label="Local service business")],
+        ideal_customer_signals=["Low review count"],
+        created_at=now,
+        updated_at=now,
+    )

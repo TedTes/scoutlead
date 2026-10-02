@@ -383,6 +383,6 @@ def _opportunity_type(
     website_policy = _string_value(plan.source_inputs.get("website_policy"))
     if website_policy == "missing":
         return OpportunityType.MISSING_WEBSITE
-    if website_policy in {"missing_or_unavailable", "weak_or_missing"}:
+    if website_policy == "missing_or_unavailable":
         return OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE
     return OpportunityType.ANY

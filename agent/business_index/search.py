@@ -103,6 +103,10 @@ class BusinessIndexSearchService:
             ):
                 continue
             opportunity_sources = [opportunity_observation.raw_payload]
+            if "website_unreachable" in opportunity_signal_keys_from_sources(
+                opportunity_sources
+            ):
+                continue
             if not _matches_opportunity_type(opportunity_sources, request.opportunity_type):
                 continue
             listing_observation = latest_listings.get(
@@ -160,7 +164,6 @@ def _matches_opportunity_type(sources: list[dict], opportunity_type: Opportunity
             "no_website_found",
             "website_unavailable",
             "website_parked",
-            "website_unreachable",
         }
     )
 

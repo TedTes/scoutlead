@@ -107,7 +107,10 @@ class BusinessIndexRefreshService:
                         continue
                     link = canonical.upsert_from_discovery_result(
                         company_name=search_result.title,
-                        website_url=search_result.url,
+                        website_url=_canonical_website_url(
+                            search_result.url,
+                            provider_id=task.provider_id,
+                        ),
                         contact_email=search_result.contact_email,
                         geography=search_result.geography,
                         description=search_result.snippet,
@@ -236,22 +239,47 @@ class BusinessIndexRefreshService:
                 select(BusinessModel).where(BusinessModel.id.in_(business_ids))
             )
         }
-        audited_ids = set(
+        observations = list(
             self.session.scalars(
-                select(SourceObservationModel.business_id).where(
+                select(SourceObservationModel).where(
                     SourceObservationModel.business_id.in_(business_ids),
                     SourceObservationModel.source.in_(
-                        [WEBSITE_AUDIT_SOURCE, WEBSITE_PRESENCE_SOURCE]
+                        [
+                            WEBSITE_AUDIT_SOURCE,
+                            WEBSITE_PRESENCE_SOURCE,
+                            "google_places",
+                            "google_places_seed",
+                        ]
                     ),
                 )
+                .order_by(SourceObservationModel.observed_at.desc())
             )
         )
+        audited_ids = {
+            observation.business_id
+            for observation in observations
+            if observation.source in {WEBSITE_AUDIT_SOURCE, WEBSITE_PRESENCE_SOURCE}
+        }
+        google_website_state: dict[str, bool] = {}
+        for observation in observations:
+            if observation.source not in {"google_places", "google_places_seed"}:
+                continue
+            google_website_state.setdefault(
+                observation.business_id,
+                _observation_has_website(observation.raw_payload),
+            )
+        google_missing_ids = {
+            business_id
+            for business_id, has_website in google_website_state.items()
+            if not has_website
+        }
         positions = {business_id: index for index, business_id in enumerate(business_ids)}
         candidates = [
             business_id for business_id in business_ids if business_id in businesses
         ]
         candidates.sort(
             key=lambda business_id: (
+                business_id not in google_missing_ids,
                 business_id in audited_ids,
                 bool(businesses[business_id].website_url),
                 positions[business_id],
@@ -354,6 +382,22 @@ def _round_robin_unique(
             ordered.append(business_id)
             seen.add(business_id)
     return ordered
+
+
+def _canonical_website_url(value: str | None, *, provider_id: str) -> str | None:
+    if provider_id not in {"google_places", "openstreetmap"}:
+        return None
+    return value
+
+
+def _observation_has_website(raw: dict[str, Any]) -> bool:
+    direct = raw.get("website_url")
+    if direct:
+        return True
+    google_places = raw.get("google_places")
+    return bool(
+        isinstance(google_places, dict) and google_places.get("websiteUri")
+    )
 
 
 def _indexed_row(
