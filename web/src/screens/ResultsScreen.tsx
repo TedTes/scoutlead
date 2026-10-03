@@ -1992,7 +1992,7 @@ function ContactDrawer({
   const verificationDetails = verificationDetailChips(contact.verification_details);
   const activityItems = contactActivityItems(contact, message);
   const opportunity = contactOpportunityAssessment(contact);
-  const opportunityReasons = opportunity.level === "unknown" ? [] : opportunity.signals;
+  const opportunityReasons = opportunity.signals;
   const contacted = Boolean(contact.last_contacted_at || contact.latest_outcome === "contacted");
   const evidenceCount = new Set([
     ...signals,
@@ -3062,11 +3062,23 @@ function canShortlistContact(contact: DiscoveryResult) {
 }
 
 function searchMatchStatus(contact: DiscoveryResult): "matched" | "not_matched" | "unknown" | "" {
+  return contactSearchMatch(contact).status;
+}
+
+function contactSearchMatch(contact: DiscoveryResult): {
+  status: "matched" | "not_matched" | "unknown" | "";
+  reason: string;
+} {
   for (const raw of getRawObjects(contact)) {
     const status = rawValueToString(getRawValue(raw, "search_match.status"));
-    if (status === "matched" || status === "not_matched" || status === "unknown") return status;
+    if (status === "matched" || status === "not_matched" || status === "unknown") {
+      return {
+        status,
+        reason: rawValueToString(getRawValue(raw, "search_match.reason")),
+      };
+    }
   }
-  return "";
+  return { status: "", reason: "" };
 }
 
 function displayReviewDecision(contact: DiscoveryResult): { label: string; className: string } | null {
@@ -3078,6 +3090,9 @@ function displayReviewDecision(contact: DiscoveryResult): { label: string; class
 }
 
 function displayAgentFitStatus(contact: DiscoveryResult): { label: string; className: string } {
+  if (searchMatchStatus(contact) === "unknown") {
+    return { label: "Needs verification", className: "fit-neutral" };
+  }
   const assessment = getAgentAssessment(contact);
   if (assessment?.fitStatus === "good_fit") return { label: "Strong fit", className: "fit-good" };
   if (assessment?.fitStatus === "maybe") return { label: "Possible fit", className: "fit-maybe" };
@@ -3265,13 +3280,10 @@ function contactListPrimarySignal(contact: DiscoveryResult) {
 }
 
 function contactWebsitePresenceLabel(contact: DiscoveryResult) {
-  for (const raw of getRawObjects(contact).reverse()) {
-    const value = getRawValue(raw, "website_presence.label")
-      ?? getRawValue(raw, "website_presence_label")
-      ?? getRawValue(raw, "raw_payload.website_presence.label");
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "No website listed";
+  const status = contactResolvedWebsiteStatus(contact);
+  if (status === "unavailable") return "Website unavailable";
+  if (status === "parked") return "Parked website recorded";
+  return "Website not verified";
 }
 
 function contactDrawerSummary(contact: DiscoveryResult) {
@@ -3666,6 +3678,18 @@ type ContactOpportunity = {
 };
 
 function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportunity {
+  const searchMatch = contactSearchMatch(contact);
+  if (searchMatch.status === "unknown") {
+    return {
+      label: "Needs verification",
+      level: "unknown",
+      score: 0,
+      signals: [
+        searchMatch.reason || "Current evidence is still being checked against the search criteria.",
+      ],
+    };
+  }
+  const websiteStatus = contactResolvedWebsiteStatus(contact);
   for (const raw of getRawObjects(contact).reverse()) {
     const value = getRawValue(raw, "digital_opportunity")
       ?? getRawValue(raw, "raw_payload.digital_opportunity")
@@ -3675,14 +3699,48 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
     const levelValue = typeof value.level === "string" ? value.level.toLowerCase() : "unknown";
     const level = (["high", "moderate", "low", "none"] as const).find((item) => item === levelValue) || "unknown";
     const score = typeof value.score === "number" && Number.isFinite(value.score) ? value.score : 0;
-    const signals = Array.isArray(value.signals)
+    const signalRecords = Array.isArray(value.signals)
       ? value.signals
-          .map((signal) => (isRecord(signal) && typeof signal.message === "string" ? signal.message.trim() : ""))
-          .filter(Boolean)
+          .filter(isRecord)
       : [];
+    const noWebsiteSignals = signalRecords.filter((signal) =>
+      ["no_website_found", "no_website_listed"].includes(rawValueToString(signal.key)),
+    );
+    const signals = signalRecords
+      .filter(
+        (signal) =>
+          websiteStatus !== "present"
+          || !["no_website_found", "no_website_listed"].includes(rawValueToString(signal.key)),
+      )
+      .map((signal) => (typeof signal.message === "string" ? signal.message.trim() : ""))
+      .filter(Boolean);
+    if (websiteStatus === "present" && noWebsiteSignals.length && !signals.length) {
+      return { label: "No clear signal", level: "none", score: 0, signals: [] };
+    }
+    if (
+      websiteStatus !== "present"
+      && noWebsiteSignals.length > 0
+      && noWebsiteSignals.length === signalRecords.length
+    ) {
+      return {
+        label: "Needs verification",
+        level: "unknown",
+        score: 0,
+        signals: ["No website is recorded in the checked sources; verify before outreach."],
+      };
+    }
     return { label: opportunityLabel(level), level, score, signals };
   }
   return { label: "Not audited", level: "unknown", score: 0, signals: [] };
+}
+
+function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
+  if (contact.website_url || contact.research?.website_url) return "present";
+  for (const raw of getRawObjects(contact)) {
+    const status = rawValueToString(getRawValue(raw, "business_facts.website_status.value"));
+    if (status) return status;
+  }
+  return "unknown";
 }
 
 function opportunityLabel(level: ContactOpportunity["level"]) {
