@@ -4,8 +4,9 @@ from datetime import timedelta
 from typing import Any
 
 from business_index.repository import BusinessIndexRepository
-from business_index.contracts import compile_search_contract
+from business_index.contracts import compile_search_contract, search_contract_hash
 from business_index.schemas import BusinessIndexSearch, OpportunityType, SearchContract
+from business_facts.repository import BusinessFactKey
 from business_index.search import BusinessIndexSearchService
 from campaign_sources.schemas import CampaignSourceSlot
 from campaigns.schemas import (
@@ -15,22 +16,25 @@ from campaigns.schemas import (
     CampaignStatus,
 )
 from campaigns.service import CampaignService
-from evaluation.digital_opportunity import (
-    product_requires_digital_opportunity,
-    text_requires_digital_opportunity,
-)
+from job_queue.service import QueueService
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.errors import ValidationError
 from shared.utils import utcnow
 from source_requests.compiler import SourceRequestCompiler
+from source_requests.intent import (
+    SearchIntentInterpreter,
+    normalize_search_intent,
+    search_intent_request_hash,
+)
 from source_requests.schemas import (
     AUTO_PROVIDER_ID,
     GOOGLE_PLACES_PROVIDER_ID,
     SourceRequestCreate,
     SourceRequestPlan,
     SourceRequestRun,
+    SourceRequestIntent,
 )
 
 
@@ -52,7 +56,9 @@ class SourceRequestService:
     ) -> None:
         self.products = products
         self.campaigns = campaigns
-        del agent_runs, llm
+        del agent_runs
+        self.llm = llm or campaigns.llm
+        self.intent_interpreter = SearchIntentInterpreter(self.llm)
         self.compiler = SourceRequestCompiler()
         self.apify_source_provider_id = apify_source_provider_id
         self.apify_source_label = apify_source_label
@@ -75,7 +81,16 @@ class SourceRequestService:
         )
 
     def plan(self, request: SourceRequestCreate) -> SourceRequestPlan:
-        product = ProductRead.model_validate(self.products.get(request.product_id))
+        return self._prepare(request)[4]
+
+    def _compile_plan(
+        self,
+        request: SourceRequestCreate,
+        *,
+        product: ProductRead,
+        intent: SourceRequestIntent,
+        website_policy: str,
+    ) -> SourceRequestPlan:
         source = request.source.strip()
         if source == AUTO_PROVIDER_ID:
             return self.compiler.compile_auto(
@@ -90,15 +105,23 @@ class SourceRequestService:
                     if _apify_source_is_configured(config)
                 ],
                 source_recipes=self.source_recipes,
+                intent=intent,
+                website_policy=website_policy,
             )
         if source == GOOGLE_PLACES_PROVIDER_ID:
-            return self.compiler.compile_google_places(request=request, product=product)
+            return self.compiler.compile_google_places(
+                request=request,
+                product=product,
+                intent=intent,
+                website_policy=website_policy,
+            )
         source_config = self.apify_sources.get(source)
         if source_config is not None:
             return self.compiler.compile_apify_source(
                 request=request,
                 product=product,
                 source_config=source_config,
+                intent=intent,
             )
         supported_sources = [
             AUTO_PROVIDER_ID,
@@ -111,20 +134,16 @@ class SourceRequestService:
         )
 
     def create(self, request: SourceRequestCreate) -> SourceRequestRun:
-        plan = self.plan(request)
-        opportunity_type = _opportunity_type(request, plan)
-        search_contract = compile_search_contract(
-            request.prompt,
-            opportunity_type=opportunity_type,
-        )
-        product = ProductRead.model_validate(self.products.get(request.product_id))
-        requires_digital_opportunity = (
-            product_requires_digital_opportunity(product)
-            or text_requires_digital_opportunity(request.prompt)
-        )
-        intent = plan.intent
-        if intent is None:
-            raise ValidationError("source request could not be interpreted")
+        (
+            product,
+            intent,
+            search_contract,
+            contract_hash,
+            plan,
+            intent_request_hash,
+        ) = self._prepare(request)
+        opportunity_type = _opportunity_type(search_contract)
+        requires_digital_opportunity = opportunity_type != OpportunityType.ANY
         segment = BusinessIndexRepository(self.products.session).resolve_or_create_segment(
             product_id=product.id,
             business_category=intent.business_category,
@@ -154,6 +173,9 @@ class SourceRequestService:
                     "source_request_intent": (
                         plan.intent.model_dump(mode="json") if plan.intent else None
                     ),
+                    "search_intent": intent.model_dump(mode="json"),
+                    "search_intent_request_hash": intent_request_hash,
+                    "search_contract_hash": contract_hash,
                     "requested_result_count": plan.max_results,
                     "business_index_segment_id": segment.id,
                     "business_index_contract": {
@@ -204,10 +226,13 @@ class SourceRequestService:
                 state="ready",
                 current_result_count=0,
                 requested_result_count=plan.max_results,
+                contract_hash=contract_hash,
+                interpreted_intent=intent,
                 unsupported_criteria=list(search_contract.unsupported),
                 unresolved_criteria=[],
             )
 
+        evidence_fresh_after = utcnow() - timedelta(days=request.evidence_max_age_days)
         matches, index_decisions = BusinessIndexSearchService(
             self.products.session
         ).search_with_diagnostics(
@@ -215,10 +240,10 @@ class SourceRequestService:
                 niche_id=segment.niche_id,
                 market_key=segment.market_key,
                 opportunity_type=opportunity_type,
-                evidence_fresh_after=utcnow()
-                - timedelta(days=request.evidence_max_age_days),
+                evidence_fresh_after=evidence_fresh_after,
                 result_count=plan.max_results,
                 contract=search_contract,
+                contract_hash=contract_hash,
             )
         )
         self.campaigns.materialize_existing_matches(run.id, matches)
@@ -264,6 +289,14 @@ class SourceRequestService:
                 response_payload=decision,
                 reason=str(decision["reason"]),
             )
+            if decision["status"] == "pending":
+                QueueService(self.products.session).enqueue_business_search_evaluation(
+                    business_id=str(decision["business_id"]),
+                    contract_hash=contract_hash,
+                    contract=search_contract.as_dict(),
+                    campaign_id=run.id,
+                    evidence_fresh_after=evidence_fresh_after.isoformat(),
+                )
         if deficit and plan.tasks:
             pipeline_events.create(
                 campaign_id=run.id,
@@ -305,6 +338,8 @@ class SourceRequestService:
             state="ready",
             current_result_count=current_count,
             requested_result_count=plan.max_results,
+            contract_hash=contract_hash,
+            interpreted_intent=intent,
             unsupported_criteria=list(search_contract.unsupported),
             unresolved_criteria=_unresolved_criteria(
                 index_decisions,
@@ -380,7 +415,64 @@ class SourceRequestService:
             evidence_max_age_days=(
                 _positive_int(index_contract.get("evidence_max_age_days")) or 30
             ),
+            intent_override=(
+                SourceRequestIntent.model_validate(source_inputs["search_intent"])
+                if isinstance(source_inputs.get("search_intent"), dict)
+                else None
+            ),
         )
+
+    def _prepare(self, request: SourceRequestCreate):
+        product = ProductRead.model_validate(self.products.get(request.product_id))
+        intent_request_hash = search_intent_request_hash(request)
+        intent = self._resolve_intent(
+            request,
+            product=product,
+            request_hash=intent_request_hash,
+        )
+        search_contract = compile_search_contract(intent)
+        contract_hash = search_contract_hash(
+            intent,
+            search_contract,
+            evidence_max_age_days=request.evidence_max_age_days,
+        )
+        website_policy = _website_policy(search_contract)
+        plan = self._compile_plan(
+            request,
+            product=product,
+            intent=intent,
+            website_policy=website_policy,
+        )
+        return (
+            product,
+            intent,
+            search_contract,
+            contract_hash,
+            plan,
+            intent_request_hash,
+        )
+
+    def _resolve_intent(
+        self,
+        request: SourceRequestCreate,
+        *,
+        product: ProductRead,
+        request_hash: str,
+    ) -> SourceRequestIntent:
+        if request.intent_override is not None:
+            return normalize_search_intent(
+                request.intent_override,
+                explicit_category=request.business_category,
+                explicit_geography=request.geography,
+            )
+        for campaign in self.campaigns.campaigns.list_by_product(product.id):
+            source_inputs = campaign.source_inputs or {}
+            if source_inputs.get("search_intent_request_hash") != request_hash:
+                continue
+            saved = source_inputs.get("search_intent")
+            if isinstance(saved, dict):
+                return normalize_search_intent(SourceRequestIntent.model_validate(saved))
+        return self.intent_interpreter.interpret(request=request, product=product)
 
     @staticmethod
     def _apify_source_map(
@@ -481,6 +573,10 @@ def _unresolved_criteria(
     marker = "Current facts are unavailable for: "
     for decision in decisions:
         reason = str(decision.get("reason") or "")
+        if decision.get("status") == "pending":
+            unresolved.update(search_contract.semantic_all_of)
+            unresolved.update(search_contract.semantic_any_of)
+            unresolved.update(search_contract.semantic_exclusions)
         if marker not in reason:
             continue
         values = reason.split(marker, 1)[1].rstrip(".")
@@ -493,27 +589,33 @@ def _unresolved_criteria(
     return sorted(unresolved)
 
 
-def _opportunity_type(
-    request: SourceRequestCreate,
-    plan: SourceRequestPlan,
-) -> OpportunityType:
-    explicit = _string_value(request.opportunity_type)
-    if explicit:
-        try:
-            return OpportunityType(explicit)
-        except ValueError as exc:
-            raise ValidationError(
-                "unsupported opportunity type",
-                {
-                    "opportunity_type": explicit,
-                    "supported": [item.value for item in OpportunityType],
-                },
-            ) from exc
-    website_policy = _string_value(plan.source_inputs.get("website_policy"))
-    if website_policy == "missing":
-        return OpportunityType.MISSING_WEBSITE
-    if website_policy == "missing_or_unavailable":
-        return OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE
-    if website_policy == "weak_or_missing":
+def _opportunity_type(contract: SearchContract) -> OpportunityType:
+    website_values: set[str] = set()
+    conversion_gap = False
+    for predicate in (*contract.all_of, *contract.any_of):
+        if predicate.key == BusinessFactKey.WEBSITE_STATUS.value:
+            values = predicate.value if isinstance(predicate.value, tuple) else (predicate.value,)
+            website_values.update(str(value) for value in values)
+        if predicate.key in {
+            BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
+            BusinessFactKey.CONTACT_FORM_PRESENT.value,
+        } and predicate.value is False:
+            conversion_gap = True
+    if conversion_gap:
         return OpportunityType.WEAK_OR_MISSING_WEBSITE
+    if website_values == {"missing"}:
+        return OpportunityType.MISSING_WEBSITE
+    if website_values and website_values <= {"missing", "not_listed", "unavailable", "parked"}:
+        return OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE
     return OpportunityType.ANY
+
+
+def _website_policy(contract: SearchContract) -> str:
+    opportunity_type = _opportunity_type(contract)
+    if opportunity_type == OpportunityType.MISSING_WEBSITE:
+        return "missing"
+    if opportunity_type == OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE:
+        return "missing_or_unavailable"
+    if opportunity_type == OpportunityType.WEAK_OR_MISSING_WEBSITE:
+        return "weak_or_missing"
+    return "any"

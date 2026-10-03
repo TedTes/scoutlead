@@ -1,186 +1,153 @@
 from __future__ import annotations
 
-import re
+import hashlib
+import json
+from typing import Any
 
 from business_facts.repository import BusinessFactKey
-from business_index.schemas import (
-    FactOperator,
-    FactPredicate,
-    OpportunityType,
-    SearchContract,
+from business_index.schemas import FactOperator, FactPredicate, SearchContract
+from source_requests.schemas import (
+    SearchCriterionMode,
+    SearchIntentCriterion,
+    SourceRequestIntent,
 )
 
 
-NO_WEBSITE_PHRASES = ("no website", "without a website", "missing website")
-UNAVAILABLE_WEBSITE_PHRASES = (
-    "broken website",
-    "dead website",
-    "inactive website",
-    "unavailable website",
-    "parked website",
-    "expired website",
-)
-QUOTE_FLOW_PHRASES = (
-    "no quote",
-    "missing quote",
-    "without a quote",
-    "no booking",
-    "missing booking",
-    "no clear quote",
-    "no clear booking",
-)
-CONTACT_FLOW_PHRASES = ("no contact form", "missing contact form", "no clear contact flow")
+SUPPORTED_FACTS: dict[str, dict[str, Any]] = {
+    BusinessFactKey.WEBSITE_STATUS.value: {
+        "type": "enum",
+        "values": ["present", "missing", "not_listed", "unavailable", "parked", "unknown"],
+        "operators": ["equals", "in"],
+    },
+    BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value: {
+        "type": "boolean",
+        "operators": ["equals"],
+    },
+    BusinessFactKey.CONTACT_FORM_PRESENT.value: {
+        "type": "boolean",
+        "operators": ["equals"],
+    },
+    BusinessFactKey.GOOGLE_RATING.value: {
+        "type": "number",
+        "operators": ["less_than", "less_than_or_equal", "greater_than", "greater_than_or_equal"],
+    },
+    BusinessFactKey.GOOGLE_REVIEW_COUNT.value: {
+        "type": "number",
+        "operators": ["less_than", "less_than_or_equal", "greater_than", "greater_than_or_equal"],
+    },
+    BusinessFactKey.BUSINESS_OPERATIONAL.value: {
+        "type": "boolean",
+        "operators": ["equals"],
+    },
+}
+
+SUPPORTED_CONTACT_REQUIREMENTS = {"email", "phone", "website", "any_contact"}
 
 
-def compile_search_contract(
-    prompt: str | None,
-    *,
-    opportunity_type: OpportunityType,
-) -> SearchContract:
-    text = (prompt or "").casefold()
+def compile_search_contract(intent: SourceRequestIntent) -> SearchContract:
     all_of: list[FactPredicate] = []
     any_of: list[FactPredicate] = []
+    semantic_all_of: list[str] = []
+    semantic_any_of: list[str] = []
+    semantic_exclusions: list[str] = []
     unsupported: list[str] = []
 
-    if "no website listed" in text or "website not listed" in text:
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.WEBSITE_STATUS.value,
-                FactOperator.IN,
-                ("missing", "not_listed"),
-            )
-        )
-    elif any(phrase in text for phrase in NO_WEBSITE_PHRASES):
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.WEBSITE_STATUS.value,
-                FactOperator.EQUALS,
-                "missing",
-            )
-        )
-    if any(phrase in text for phrase in UNAVAILABLE_WEBSITE_PHRASES):
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.WEBSITE_STATUS.value,
-                FactOperator.IN,
-                ("unavailable", "parked"),
-            )
-        )
-    if any(phrase in text for phrase in QUOTE_FLOW_PHRASES):
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
-                FactOperator.EQUALS,
-                False,
-            )
-        )
-    if any(phrase in text for phrase in CONTACT_FLOW_PHRASES):
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.CONTACT_FORM_PRESENT.value,
-                FactOperator.EQUALS,
-                False,
-            )
-        )
+    for criterion in intent.criteria:
+        predicate = _known_fact_predicate(criterion)
+        if predicate is not None:
+            if criterion.mode == SearchCriterionMode.ALTERNATIVE:
+                any_of.append(predicate)
+            elif criterion.mode == SearchCriterionMode.REQUIRED:
+                all_of.append(predicate)
+            else:
+                semantic_exclusions.append(criterion.description)
+            continue
+        if criterion.fact_key:
+            unsupported.append(f"{criterion.description} ({criterion.fact_key})")
+        if criterion.mode == SearchCriterionMode.REQUIRED:
+            semantic_all_of.append(criterion.description)
+        elif criterion.mode == SearchCriterionMode.ALTERNATIVE:
+            semantic_any_of.append(criterion.description)
+        else:
+            semantic_exclusions.append(criterion.description)
 
-    review_limit = _number_before(text, r"(?:fewer than|less than|under)\s+(\d+)\s+reviews?")
-    if review_limit is not None:
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.GOOGLE_REVIEW_COUNT.value,
-                FactOperator.LESS_THAN,
-                float(review_limit),
-            )
-        )
-    elif "low review count" in text or "few reviews" in text:
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.GOOGLE_REVIEW_COUNT.value,
-                FactOperator.LESS_THAN,
-                20.0,
-            )
-        )
-
-    rating_limit = _number_before(
-        text,
-        r"(?:rating|rated)\s+(?:below|under|less than)\s+(\d+(?:\.\d+)?)",
-        decimal=True,
-    )
-    if rating_limit is not None:
-        any_of.append(
-            FactPredicate(
-                BusinessFactKey.GOOGLE_RATING.value,
-                FactOperator.LESS_THAN,
-                float(rating_limit),
-            )
-        )
-    if "active business" in text or "active businesses" in text:
-        all_of.append(
-            FactPredicate(
-                BusinessFactKey.BUSINESS_OPERATIONAL.value,
-                FactOperator.EQUALS,
-                True,
-            )
-        )
-
-    if not any_of:
-        any_of.extend(_fallback_opportunity_predicates(opportunity_type))
-
-    if "independent" in text or "exclude chains" in text or "exclude franchises" in text:
-        unsupported.append("independent_or_chain_status")
-    if "director" in text and "exclude" in text:
-        unsupported.append("directory_exclusion")
-    if "exclude" in text and ("marketing agenc" in text or "web agenc" in text):
-        unsupported.append("business_model_exclusion")
+    contacts = []
+    for requirement in intent.contact_requirements:
+        normalized = requirement.strip().lower()
+        if normalized in SUPPORTED_CONTACT_REQUIREMENTS:
+            contacts.append(normalized)
+        else:
+            unsupported.append(f"contact requirement: {requirement}")
 
     return SearchContract(
         all_of=tuple(_unique_predicates(all_of)),
         any_of=tuple(_unique_predicates(any_of)),
+        semantic_all_of=tuple(dict.fromkeys(semantic_all_of)),
+        semantic_any_of=tuple(dict.fromkeys(semantic_any_of)),
+        semantic_exclusions=tuple(dict.fromkeys(semantic_exclusions)),
+        contact_requirements=tuple(dict.fromkeys(contacts)),
         unsupported=tuple(dict.fromkeys(unsupported)),
     )
 
 
-def _fallback_opportunity_predicates(
-    opportunity_type: OpportunityType,
-) -> list[FactPredicate]:
-    if opportunity_type == OpportunityType.MISSING_WEBSITE:
-        statuses = ("missing",)
-    elif opportunity_type == OpportunityType.MISSING_OR_UNAVAILABLE_WEBSITE:
-        statuses = ("missing", "unavailable", "parked")
-    elif opportunity_type == OpportunityType.WEAK_OR_MISSING_WEBSITE:
-        return [
-            FactPredicate(
-                BusinessFactKey.WEBSITE_STATUS.value,
-                FactOperator.IN,
-                ("missing", "unavailable", "parked"),
-            ),
-            FactPredicate(
-                BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
-                FactOperator.EQUALS,
-                False,
-            ),
-            FactPredicate(
-                BusinessFactKey.GOOGLE_REVIEW_COUNT.value,
-                FactOperator.LESS_THAN,
-                20.0,
-            ),
-        ]
-    else:
-        return []
-    return [
-        FactPredicate(
-            BusinessFactKey.WEBSITE_STATUS.value,
-            FactOperator.IN,
-            statuses,
-        )
-    ]
+def search_contract_hash(
+    intent: SourceRequestIntent,
+    contract: SearchContract,
+    *,
+    evidence_max_age_days: int = 30,
+) -> str:
+    payload = {
+        "intent_schema_version": intent.schema_version,
+        "business_category": intent.business_category.strip().casefold(),
+        "location": intent.location.strip().casefold(),
+        "included_subcategories": sorted(
+            value.strip().casefold() for value in intent.included_subcategories if value.strip()
+        ),
+        "evidence_max_age_days": evidence_max_age_days,
+        "contract": contract.as_dict(),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
-def _number_before(text: str, pattern: str, *, decimal: bool = False) -> float | int | None:
-    match = re.search(pattern, text)
-    if match is None:
+def fact_catalog_for_prompt() -> dict[str, dict[str, Any]]:
+    return SUPPORTED_FACTS
+
+
+def _known_fact_predicate(criterion: SearchIntentCriterion) -> FactPredicate | None:
+    if not criterion.fact_key or criterion.fact_key not in SUPPORTED_FACTS:
         return None
-    return float(match.group(1)) if decimal else int(match.group(1))
+    definition = SUPPORTED_FACTS[criterion.fact_key]
+    operator_value = (criterion.operator or "").strip().lower()
+    if operator_value not in definition["operators"]:
+        return None
+    try:
+        operator = FactOperator(operator_value)
+    except ValueError:
+        return None
+    value = criterion.value
+    if operator == FactOperator.IN:
+        if not isinstance(value, list) or not value:
+            return None
+        normalized_value: str | float | bool | tuple[str, ...] = tuple(str(item) for item in value)
+    elif definition["type"] == "boolean":
+        if not isinstance(value, bool):
+            return None
+        normalized_value = value
+    elif definition["type"] == "number":
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        normalized_value = float(value)
+    else:
+        if not isinstance(value, str):
+            return None
+        normalized_value = value
+    if definition["type"] == "enum":
+        allowed = set(definition.get("values") or [])
+        values = normalized_value if isinstance(normalized_value, tuple) else (normalized_value,)
+        if any(item not in allowed for item in values):
+            return None
+    return FactPredicate(criterion.fact_key, operator, normalized_value)
 
 
 def _unique_predicates(values: list[FactPredicate]) -> list[FactPredicate]:

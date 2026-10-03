@@ -141,6 +141,7 @@ def _source_request_service(
     return SourceRequestService(
         products=ProductRepository(session, workspace_id=auth.workspace_id),
         campaigns=_service(session, services, auth),
+        llm=services.llm,
         apify_source_provider_id=services.settings.apify_source_provider_id,
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,

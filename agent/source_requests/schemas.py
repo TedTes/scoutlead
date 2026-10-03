@@ -25,6 +25,38 @@ class SourceProviderKind(StrEnum):
     CLASSIFIED_SEARCH_URL = "classified_search_url"
 
 
+class SearchCriterionMode(StrEnum):
+    REQUIRED = "required"
+    ALTERNATIVE = "alternative"
+    EXCLUDED = "excluded"
+
+
+class SearchIntentCriterion(BaseModel):
+    id: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    mode: SearchCriterionMode
+    fact_key: str | None = None
+    operator: str | None = None
+    value: str | float | bool | list[str] | None = None
+    evidence_requirement: str = Field(default="Public business evidence", min_length=1)
+
+
+class SourceRequestIntent(BaseModel):
+    schema_version: int = Field(default=1, ge=1)
+    business_category: str = Field(min_length=1)
+    location: str = ""
+    country: str = ""
+    included_subcategories: list[str] = Field(default_factory=list)
+    criteria: list[SearchIntentCriterion] = Field(default_factory=list)
+    contact_requirements: list[str] = Field(default_factory=list)
+    required_signals: list[str] = Field(default_factory=list)
+    excluded_result_types: list[str] = Field(default_factory=list)
+    search_query: str = Field(min_length=1)
+    search_url: str = ""
+    confidence: int = Field(default=0, ge=0, le=100)
+    rationale: str = Field(min_length=1)
+
+
 class SourceRequestCreate(BaseModel):
     product_id: str = Field(min_length=1)
     source: str = Field(default=AUTO_PROVIDER_ID, min_length=1)
@@ -36,18 +68,7 @@ class SourceRequestCreate(BaseModel):
     geography: str | None = None
     opportunity_type: str | None = None
     evidence_max_age_days: int = Field(default=30, ge=1, le=365)
-
-
-class SourceRequestIntent(BaseModel):
-    business_category: str = Field(min_length=1)
-    location: str = ""
-    country: str = ""
-    required_signals: list[str] = Field(default_factory=list)
-    excluded_result_types: list[str] = Field(default_factory=list)
-    search_query: str = Field(min_length=1)
-    search_url: str = ""
-    confidence: int = Field(default=0, ge=0, le=100)
-    rationale: str = Field(min_length=1)
+    intent_override: SourceRequestIntent | None = None
 
 
 class SourceTask(BaseModel):
@@ -88,5 +109,7 @@ class SourceRequestRun(BaseModel):
     state: str = "ready"
     current_result_count: int = 0
     requested_result_count: int = 0
+    contract_hash: str = ""
+    interpreted_intent: SourceRequestIntent | None = None
     unsupported_criteria: list[str] = Field(default_factory=list)
     unresolved_criteria: list[str] = Field(default_factory=list)

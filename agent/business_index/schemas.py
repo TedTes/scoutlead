@@ -47,14 +47,22 @@ class FactPredicate:
 class SearchContract:
     all_of: tuple[FactPredicate, ...] = ()
     any_of: tuple[FactPredicate, ...] = ()
+    semantic_all_of: tuple[str, ...] = ()
+    semantic_any_of: tuple[str, ...] = ()
+    semantic_exclusions: tuple[str, ...] = ()
+    contact_requirements: tuple[str, ...] = ()
     unsupported: tuple[str, ...] = ()
-    version: int = 1
+    version: int = 2
 
     def as_dict(self) -> dict:
         return {
             "version": self.version,
             "all_of": [predicate.as_dict() for predicate in self.all_of],
             "any_of": [predicate.as_dict() for predicate in self.any_of],
+            "semantic_all_of": list(self.semantic_all_of),
+            "semantic_any_of": list(self.semantic_any_of),
+            "semantic_exclusions": list(self.semantic_exclusions),
+            "contact_requirements": list(self.contact_requirements),
             "unsupported": list(self.unsupported),
         }
 
@@ -70,8 +78,22 @@ class SearchContract:
                 FactPredicate.from_dict(predicate)
                 for predicate in raw.get("any_of", [])
             ),
+            semantic_all_of=tuple(str(item) for item in raw.get("semantic_all_of", [])),
+            semantic_any_of=tuple(str(item) for item in raw.get("semantic_any_of", [])),
+            semantic_exclusions=tuple(
+                str(item) for item in raw.get("semantic_exclusions", [])
+            ),
+            contact_requirements=tuple(
+                str(item) for item in raw.get("contact_requirements", [])
+            ),
             unsupported=tuple(str(item) for item in raw.get("unsupported", [])),
             version=int(raw.get("version") or 1),
+        )
+
+    @property
+    def requires_semantic_evaluation(self) -> bool:
+        return bool(
+            self.semantic_all_of or self.semantic_any_of or self.semantic_exclusions
         )
 
 
@@ -83,3 +105,4 @@ class BusinessIndexSearch:
     evidence_fresh_after: datetime
     result_count: int
     contract: SearchContract = field(default_factory=SearchContract)
+    contract_hash: str = ""

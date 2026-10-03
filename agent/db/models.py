@@ -231,6 +231,42 @@ class BusinessFactModel(TimestampMixin, Base):
     source_observation: Mapped["SourceObservationModel | None"] = relationship()
 
 
+class BusinessSearchEvaluationModel(TimestampMixin, Base):
+    __tablename__ = "business_search_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "contract_hash",
+            "evidence_fingerprint",
+            name="uq_business_search_evaluations_evidence",
+        ),
+        Index(
+            "ix_business_search_evaluations_contract_status",
+            "contract_hash",
+            "status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    contract_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    criterion_results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    missing_evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    business: Mapped[BusinessModel] = relationship()
+
+
 class NicheModel(TimestampMixin, Base):
     __tablename__ = "niches"
 

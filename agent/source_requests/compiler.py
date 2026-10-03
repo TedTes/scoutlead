@@ -3,11 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from evaluation.digital_opportunity import (
-    product_requires_digital_opportunity,
-    text_requires_digital_opportunity,
-    website_opportunity_policy,
-)
 from products.discovery_policy import (
     build_local_business_queries,
     normalize_places_region_code,
@@ -36,41 +31,20 @@ URL_INPUT_KINDS = {
 }
 DEFAULT_SOURCE_RESULT_QUOTA = 25
 
-_REQUEST_PREFIX_RE = re.compile(
-    r"^(?:please\s+)?(?:find|list|show|search\s+for|look\s+for)\s+",
-    flags=re.IGNORECASE,
-)
-_CONTACT_SUFFIX_RE = re.compile(
-    r"\s+(?:business|businesses|company|companies|contacts?|leads?)\s*$",
-    flags=re.IGNORECASE,
-)
-_REQUEST_QUALIFIER_RE = re.compile(
-    r"\s+(?:with|without|that\s+have|that\s+do\s+not\s+have)\s+.+$",
-    flags=re.IGNORECASE,
-)
-
-
 class SourceRequestCompiler:
     def compile_google_places(
         self,
         *,
         request: SourceRequestCreate,
         product: ProductRead,
-        intent: SourceRequestIntent | None = None,
+        intent: SourceRequestIntent,
+        website_policy: str = "any",
     ) -> SourceRequestPlan:
-        intent = intent or self._interpret(
-            request=request, product=product, source=GOOGLE_PLACES_PROVIDER_ID
-        )
-        requires_digital_opportunity = (
-            product_requires_digital_opportunity(product)
-            or text_requires_digital_opportunity(request.prompt)
-        )
-        website_policy = website_opportunity_policy(product, request.prompt)
         queries = build_local_business_queries(
             business_category=intent.business_category,
             location=intent.location,
             fallback_query=intent.search_query,
-            expand_local_market=requires_digital_opportunity,
+            expand_local_market=website_policy != "any",
         )
         query = queries[0]
         region_code = normalize_places_region_code(intent.country or product.target_geography)
@@ -125,11 +99,10 @@ class SourceRequestCompiler:
         request: SourceRequestCreate,
         product: ProductRead,
         source_config: dict[str, Any],
-        intent: SourceRequestIntent | None = None,
+        intent: SourceRequestIntent,
     ) -> SourceRequestPlan:
         source_id = str(source_config.get("id") or request.source).strip()
         source_label = str(source_config.get("label") or source_id)
-        intent = intent or self._interpret(request=request, product=product, source=source_id)
         quota_request = request.model_copy(
             update={"max_results": min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA)}
         )
@@ -195,14 +168,15 @@ class SourceRequestCompiler:
         openstreetmap_enabled: bool,
         apify_sources: list[dict[str, Any]],
         source_recipes: list[dict[str, Any]],
+        intent: SourceRequestIntent,
+        website_policy: str = "any",
     ) -> SourceRequestPlan:
-        intent = self._interpret(request=request, product=product, source=AUTO_PROVIDER_ID)
         google_plan = self.compile_google_places(
             request=request,
             product=product,
             intent=intent,
+            website_policy=website_policy,
         )
-        website_policy = str(google_plan.source_inputs.get("website_policy") or "any")
         queries = list(google_plan.source_inputs.get("search_queries") or [google_plan.query])
         tasks: list[SourceTask] = []
         if google_places_configured:
@@ -304,32 +278,6 @@ class SourceRequestCompiler:
                 "discovery_tasks": [task.model_dump(mode="json") for task in tasks],
             },
             tasks=tasks,
-        )
-
-    def _interpret(
-        self,
-        *,
-        request: SourceRequestCreate,
-        product: ProductRead,
-        source: str,
-    ) -> SourceRequestIntent:
-        category, location = _deterministic_request_scope(
-            prompt=request.prompt,
-            explicit_category=request.business_category,
-            explicit_geography=request.geography,
-            default_category=product.target_customer,
-            default_geography=product.target_geography,
-        )
-        search_query = normalize_text(f"{category} in {location}")
-        return SourceRequestIntent(
-            business_category=category,
-            location=location,
-            country=_country_hint(location or product.target_geography),
-            required_signals=_required_signals(request.prompt),
-            excluded_result_types=["directories", "closed businesses", "national chains"],
-            search_query=search_query,
-            confidence=90 if request.business_category and request.geography else 75,
-            rationale="Deterministically parsed from structured fields and the request text.",
         )
 
     @staticmethod
@@ -443,66 +391,6 @@ def _render_search_recipe(
         "domain": normalize_text(recipe.get("domain")),
     }
     return normalize_text(_render_template(str(recipe.get("query_template") or ""), values))
-
-
-def _deterministic_request_scope(
-    *,
-    prompt: str,
-    explicit_category: str | None,
-    explicit_geography: str | None,
-    default_category: str,
-    default_geography: str,
-) -> tuple[str, str]:
-    normalized = normalize_text(prompt)
-    category_part = normalized
-    location_part = ""
-    match = re.match(r"^(?P<category>.+?)\s+in\s+(?P<location>.+)$", normalized, flags=re.I)
-    if match:
-        category_part = normalize_text(match.group("category"))
-        location_part = normalize_text(match.group("location"))
-    category = normalize_text(explicit_category) or _clean_category(category_part)
-    location = normalize_text(explicit_geography) or _clean_location(location_part)
-    if not category:
-        category = _clean_category(default_category) or "local businesses"
-    if not location:
-        location = normalize_text(default_geography)
-    if not location:
-        raise ValidationError(
-            "search request needs a geography",
-            {"user_message": "Add a city or region to the search."},
-        )
-    return category, location
-
-
-def _clean_category(value: str) -> str:
-    cleaned = _REQUEST_PREFIX_RE.sub("", normalize_text(value))
-    cleaned = re.sub(
-        r"\b(?:contact|lead)\s+(?:details|information|info)\b",
-        "",
-        cleaned,
-        flags=re.I,
-    )
-    cleaned = _CONTACT_SUFFIX_RE.sub("", cleaned)
-    return normalize_text(cleaned.strip(" ,.-"))
-
-
-def _clean_location(value: str) -> str:
-    cleaned = _REQUEST_QUALIFIER_RE.sub("", normalize_text(value))
-    return normalize_text(cleaned.strip(" ,.-"))
-
-
-def _required_signals(prompt: str) -> list[str]:
-    lower = prompt.lower()
-    signals = []
-    if any(term in lower for term in ("no website", "without a website", "missing website")):
-        signals.append("no website")
-    if any(term in lower for term in ("dead website", "inactive website", "broken website")):
-        signals.append("unavailable website")
-    if "phone" in lower:
-        signals.append("phone")
-    if "email" in lower:
-        signals.append("email")
-    return signals
 
 
 def _country_hint(value: str) -> str:

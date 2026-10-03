@@ -13,6 +13,7 @@ class JobType(StrEnum):
     SOURCE_ITEM_CLASSIFY = "source_item.classify"
     BUSINESS_IDENTITY_RESOLVE = "business.identity_resolve"
     BUSINESS_OPPORTUNITY_AUDIT = "business.opportunity_audit"
+    BUSINESS_SEARCH_EVALUATE = "business.search_evaluate"
     SEARCH_ELIGIBILITY_MATCH = "search.eligibility_match"
 
 

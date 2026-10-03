@@ -36,7 +36,7 @@ from source_items.schemas import (
 )
 from source_requests.schemas import SourceTask
 from source_requests.compiler import SourceRequestCompiler
-from source_requests.schemas import SourceRequestCreate
+from source_requests.schemas import SourceRequestCreate, SourceRequestIntent
 from territories.opportunity_audit import (
     WEBSITE_PRESENCE_SOURCE,
     BusinessOpportunityAuditor,
@@ -414,6 +414,17 @@ class BusinessIndexRefreshService:
             ),
             apify_sources=apify_sources,
             source_recipes=list(self.discovery_config.get("source_recipes", [])),
+            intent=SourceRequestIntent(
+                business_category=segment.niche.category or segment.niche.label,
+                location=segment.market_label,
+                search_query=(
+                    f"{segment.niche.category or segment.niche.label} "
+                    f"in {segment.market_label}"
+                ),
+                confidence=100,
+                rationale="Reused the stored business-index segment scope.",
+            ),
+            website_policy="any",
         )
         segment.source_plan = [task.model_dump(mode="json") for task in plan.tasks]
         self.session.commit()
@@ -525,6 +536,9 @@ class BusinessIndexRefreshService:
                     evidence_fresh_after=utcnow() - timedelta(days=max_age_days),
                     result_count=campaign.max_leads,
                     contract=SearchContract.from_dict(contract.get("search_contract")),
+                    contract_hash=str(
+                        (campaign.source_inputs or {}).get("search_contract_hash") or ""
+                    ),
                 )
             )
             if complete and pipeline_events is not None:

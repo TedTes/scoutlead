@@ -4,7 +4,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
-from business_index.contracts import compile_search_contract
 from business_index.schemas import BusinessIndexSearch, OpportunityType, SearchContract
 from business_index.search import BusinessIndexSearchService
 from campaigns.schemas import CampaignCreate, CampaignGoalType
@@ -23,6 +22,7 @@ from leads.schemas import (
 from leads.approach_service import LeadApproachService
 from products.repository import ProductRepository
 from products.schemas import ProductRead
+from search_evaluations.service import SearchEvaluationService
 from shared.errors import ConflictError
 from shared.logger import get_logger
 from shared.utils import new_id, utcnow
@@ -104,6 +104,7 @@ class TerritoryRefreshService:
                         "result_count": territory.batch_size,
                         "search_contract": search_contract.as_dict(),
                     },
+                    "search_contract_hash": _territory_contract_hash(territory),
                 },
                 max_leads=territory.batch_size,
                 channels=["email"],
@@ -129,17 +130,30 @@ class TerritoryRefreshService:
             self.session.add(delivery)
         self.session.commit()
         try:
-            rows = BusinessIndexSearchService(self.session).search(
-                BusinessIndexSearch(
-                    niche_id=territory.niche_id,
-                    market_key=territory.market_key,
-                    opportunity_type=opportunity_type,
-                    evidence_fresh_after=utcnow()
-                    - timedelta(days=territory.evidence_max_age_days),
-                    result_count=territory.batch_size * 3,
-                    contract=search_contract,
-                )
+            index_request = BusinessIndexSearch(
+                niche_id=territory.niche_id,
+                market_key=territory.market_key,
+                opportunity_type=opportunity_type,
+                evidence_fresh_after=utcnow()
+                - timedelta(days=territory.evidence_max_age_days),
+                result_count=territory.batch_size * 3,
+                contract=search_contract,
+                contract_hash=_territory_contract_hash(territory),
             )
+            index_search = BusinessIndexSearchService(self.session)
+            rows, decisions = index_search.search_with_diagnostics(index_request)
+            if search_contract.requires_semantic_evaluation and self.llm is not None:
+                evaluator = SearchEvaluationService(session=self.session, llm=self.llm)
+                for decision in decisions:
+                    if decision["status"] != "pending":
+                        continue
+                    evaluator.evaluate(
+                        business_id=str(decision["business_id"]),
+                        contract_hash=index_request.contract_hash,
+                        contract=search_contract,
+                        evidence_fresh_after=index_request.evidence_fresh_after,
+                    )
+                rows = index_search.search(index_request)
             rows = exclude_previously_delivered_rows(
                 self.session,
                 campaign_id=campaign.id,
@@ -260,22 +274,19 @@ def _territory_contract(
     except ValueError:
         opportunity_type = OpportunityType.ANY
     contract = SearchContract.from_dict(stored.get("search_contract"))
-    if contract.all_of or contract.any_of:
+    if (
+        contract.all_of
+        or contract.any_of
+        or contract.requires_semantic_evaluation
+        or contract.contact_requirements
+    ):
         return opportunity_type, contract
-    product_text = " ".join(
-        str(value or "")
-        for value in (
-            product.product_description,
-            product.problem_being_solved,
-            " ".join(product.ideal_customer_signals or []),
-        )
-    ).casefold()
-    if any(term in product_text for term in ("website", "quote form", "booking flow", "reviews")):
-        opportunity_type = OpportunityType.WEAK_OR_MISSING_WEBSITE
-    return opportunity_type, compile_search_contract(
-        query,
-        opportunity_type=opportunity_type,
-    )
+    return opportunity_type, SearchContract()
+
+
+def _territory_contract_hash(territory) -> str:
+    stored = territory.search_contract or {}
+    return str(stored.get("contract_hash") or territory.criteria_hash)
 
 
 def _is_business_index_match(lead: LeadRead) -> bool:

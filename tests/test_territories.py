@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaigns.repository import CampaignRepository
+from business_index.schemas import SearchContract
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import LeadModel, LeadOutcomeModel, NicheModel, QueueJobModel, TerritoryModel
@@ -84,6 +85,38 @@ def test_confirmed_territory_creation_can_create_a_new_niche() -> None:
         assert territory.market_key == "hamilton"
         assert territory.workspace_id == "workspace:first"
         assert territory.niche.slug == "mobile_bicycle_mechanics"
+
+
+def test_territory_preserves_the_saved_semantic_search_contract() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        contract = SearchContract(
+            semantic_all_of=("Owner-operated business",),
+            semantic_exclusions=("National franchises",),
+        )
+        stored = {
+            "opportunity_type": "any",
+            "search_contract": contract.as_dict(),
+            "contract_hash": "saved-contract-hash",
+        }
+
+        territory = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                request="Owner-operated HVAC contractors in Toronto, excluding franchises",
+                search_contract=stored,
+                confirmed=True,
+            )
+        )
+
+        assert territory.search_contract == stored
+        assert territory.criteria_hash == "saved-contract-hash"
 
 
 def test_territory_creation_requires_confirmation_and_rejects_duplicates() -> None:

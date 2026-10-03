@@ -28,7 +28,11 @@ from products.schemas import (
     QualificationCriterion,
 )
 from shared.errors import ConflictError, ValidationError
-from source_requests.schemas import SourceRequestIntent
+from source_requests.schemas import (
+    SearchCriterionMode,
+    SearchIntentCriterion,
+    SourceRequestIntent,
+)
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
@@ -48,11 +52,38 @@ class FakeWorkflowLLM:
         if response_model is SourceRequestIntent:
             request = context["request"]
             prompt = request["prompt"]
+            lower = prompt.lower()
             location = "Toronto ON" if "Toronto" in prompt else ""
+            criteria = []
+            if "no website" in lower or "without a website" in lower:
+                criteria.append(
+                    SearchIntentCriterion(
+                        id="website_missing",
+                        description="Website is missing or not listed",
+                        mode=SearchCriterionMode.REQUIRED,
+                        fact_key="website_status",
+                        operator="equals",
+                        value="missing",
+                        evidence_requirement="Current website-presence evidence",
+                    )
+                )
+            elif "with website" in lower or "with a website" in lower:
+                criteria.append(
+                    SearchIntentCriterion(
+                        id="website_present",
+                        description="Business has a website",
+                        mode=SearchCriterionMode.REQUIRED,
+                        fact_key="website_status",
+                        operator="equals",
+                        value="present",
+                        evidence_requirement="Current website-presence evidence",
+                    )
+                )
             return SourceRequestIntent(
                 business_category="painting service",
                 location=location,
                 country="Canada",
+                criteria=criteria,
                 required_signals=["contact details"],
                 excluded_result_types=["directories", "marketplaces"],
                 search_query="painting service in Toronto ON",

@@ -18,7 +18,11 @@ from products.schemas import (
     QualificationCriterion,
 )
 from shared.errors import ValidationError
-from source_requests.schemas import GOOGLE_PLACES_PROVIDER_ID, SourceRequestCreate
+from source_requests.schemas import (
+    GOOGLE_PLACES_PROVIDER_ID,
+    SourceRequestCreate,
+    SourceRequestIntent,
+)
 from source_requests.service import SourceRequestService
 from tests.test_smoke_campaign import FakeWorkflowLLM
 from tools.browser import DirectHttpBrowserTool
@@ -63,6 +67,40 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert sources[0].provider_id == "google_places"
         assert sources[0].input["source_request_prompt"] == request.prompt
         assert sources[0].input["source_request_action"] == "list_contacts"
+
+
+def test_identical_new_search_reuses_saved_intent_without_another_llm_call() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+        llm = CountingIntentLLM()
+        service = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=llm,
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            llm=llm,
+        )
+        request = SourceRequestCreate(
+            product_id=product.id,
+            source=GOOGLE_PLACES_PROVIDER_ID,
+            prompt="List painting service contacts in Toronto ON",
+            run_immediately=False,
+        )
+
+        first = service.create(request)
+        second = service.create(request)
+        rerun = service.rerun(first.run.id, run_immediately=False)
+
+        assert llm.intent_calls == 1
+        assert first.contract_hash == second.contract_hash == rerun.contract_hash
+        assert first.interpreted_intent == second.interpreted_intent
 
 
 def test_auto_source_request_expands_ranked_discovery_tasks() -> None:
@@ -149,16 +187,11 @@ def test_opportunity_source_request_preserves_requested_result_limit() -> None:
         assert result.run.max_leads == 25
         assert result.run.source_inputs["requested_result_count"] == 25
         assert result.run.source_inputs["business_index_contract"]["result_count"] == 25
-        assert result.run.source_inputs["requires_digital_opportunity"] is True
-        assert result.run.source_inputs["website_policy"] == "weak_or_missing"
-        assert result.run.source_inputs["business_index_contract"]["opportunity_type"] == "weak_or_missing_website"
-        assert result.run.source_inputs["search_queries"][0] == (
-            "Independent painters in Scarborough ON"
-        )
-        assert "Independent painters in Toronto ON" in result.run.source_inputs[
-            "search_queries"
-        ]
-        assert sources[0].input["website_policy"] == "weak_or_missing"
+        assert result.run.source_inputs["requires_digital_opportunity"] is False
+        assert result.run.source_inputs["website_policy"] == "any"
+        assert result.run.source_inputs["business_index_contract"]["opportunity_type"] == "any"
+        assert result.run.source_inputs["search_queries"] == ["painting service Toronto ON"]
+        assert sources[0].input["website_policy"] == "any"
         assert sources[0].config["search_queries"] == result.run.source_inputs["search_queries"]
 
 
@@ -197,6 +230,53 @@ def test_explicit_no_website_request_uses_strict_missing_policy() -> None:
         )
 
         assert result.run.source_inputs["website_policy"] == "missing"
+
+
+def test_explicit_present_website_request_overrides_product_opportunity_default() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            _product().model_copy(
+                update={
+                    "product_name": "Local Service Website Growth",
+                    "problem_being_solved": "Weak websites and missing quote flows.",
+                }
+            )
+        )
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=FakeWorkflowLLM(),
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            agent_runs=AgentRunService(session),
+            llm=FakeWorkflowLLM(),
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source=GOOGLE_PLACES_PROVIDER_ID,
+                prompt="Independent painters in Toronto with website",
+                max_results=25,
+                run_immediately=False,
+            )
+        )
+
+        contract = result.run.source_inputs["business_index_contract"]
+        assert result.run.source_inputs["website_policy"] == "any"
+        assert contract["opportunity_type"] == "any"
+        assert contract["search_contract"]["all_of"] == [
+            {
+                "key": "website_status",
+                "operator": "equals",
+                "value": "present",
+            }
+        ]
+        assert contract["search_contract"]["any_of"] == []
 
 
 def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -> None:
@@ -367,7 +447,7 @@ def test_source_request_rejects_unconfigured_source_adapter() -> None:
             )
 
 
-def test_source_request_rejects_existing_business_without_a_matching_current_fact() -> None:
+def test_broad_source_request_returns_existing_category_and_market_match() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -453,12 +533,12 @@ def test_source_request_rejects_existing_business_without_a_matching_current_fac
 
     assert search_tool.calls == 0
     assert result.summary is None
-    assert result.current_result_count == 0
+    assert result.current_result_count == 1
     assert result.requested_result_count == 5
     assert result.state == "ready"
     assert result.run.status == "completed"
     assert jobs == []
-    assert leads == []
+    assert [lead.company_name for lead in leads] == ["All Painting Toronto"]
 
 
 def test_contact_listing_run_does_not_create_outreach_drafts() -> None:
@@ -574,6 +654,16 @@ class CountingSearchTool(SearchTool):
     def search(self, *args, **kwargs):
         self.calls += 1
         return []
+
+
+class CountingIntentLLM(FakeWorkflowLLM):
+    def __init__(self) -> None:
+        self.intent_calls = 0
+
+    def generate_object(self, **kwargs):
+        if kwargs["response_model"] is SourceRequestIntent:
+            self.intent_calls += 1
+        return super().generate_object(**kwargs)
 
 
 class FakeEmbeddingClient:

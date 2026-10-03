@@ -22,6 +22,7 @@ from db.models import (
     SourceObservationModel,
 )
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
+from search_evaluations.repository import SearchEvaluationRepository
 
 
 class BusinessIndexSearchService:
@@ -98,6 +99,7 @@ class BusinessIndexSearchService:
             latest_listings.setdefault(observation.business_id, observation)
 
         ranked: list[tuple[tuple, dict]] = []
+        evaluations = SearchEvaluationRepository(self.session)
         for membership in memberships:
             business = businesses.get(membership.business_id)
             if business is None:
@@ -126,6 +128,49 @@ class BusinessIndexSearchService:
                     )
                 )
                 continue
+            business_contacts = contacts.get(business.id, [])
+            if not _contacts_match(
+                request.contract.contact_requirements,
+                business=business,
+                contacts=business_contacts,
+            ):
+                decisions.append(
+                    _decision(
+                        business.id,
+                        business.display_name,
+                        "rejected",
+                        "Current contacts do not satisfy the requested contact requirements.",
+                    )
+                )
+                continue
+            semantic_evaluation = None
+            if request.contract.requires_semantic_evaluation:
+                semantic_evaluation = evaluations.current(
+                    business_id=business.id,
+                    contract_hash=request.contract_hash,
+                )
+                if semantic_evaluation is None:
+                    decisions.append(
+                        _decision(
+                            business.id,
+                            business.display_name,
+                            "pending",
+                            "Nuanced criteria require an evidence-backed worker evaluation.",
+                        )
+                    )
+                    continue
+                if semantic_evaluation.status != "matched":
+                    decisions.append(
+                        _decision(
+                            business.id,
+                            business.display_name,
+                            "rejected",
+                            semantic_evaluation.rationale,
+                        )
+                    )
+                    continue
+                if matched_at is None or _aware(semantic_evaluation.evaluated_at) > _aware(matched_at):
+                    matched_at = _aware(semantic_evaluation.evaluated_at)
             opportunity_observation = next(
                 (
                     observation
@@ -138,7 +183,7 @@ class BusinessIndexSearchService:
                 business.id,
                 opportunity_observation,
             )
-            contact = _best_contact(contacts.get(business.id, []))
+            contact = _best_contact(business_contacts)
             raw = {
                 **(listing_observation.raw_payload or {} if listing_observation else {}),
                 "match_origin": "business_index",
@@ -154,6 +199,20 @@ class BusinessIndexSearchService:
                 ),
                 "business_facts": _serialize_facts(business_facts),
                 "search_contract": request.contract.as_dict(),
+                "search_contract_hash": request.contract_hash,
+                "search_evaluation": (
+                    {
+                        "status": semantic_evaluation.status,
+                        "confidence": semantic_evaluation.confidence,
+                        "rationale": semantic_evaluation.rationale,
+                        "criteria": semantic_evaluation.criterion_results,
+                        "evidence": semantic_evaluation.evidence,
+                        "missing_evidence": semantic_evaluation.missing_evidence,
+                        "evaluated_at": semantic_evaluation.evaluated_at.isoformat(),
+                    }
+                    if semantic_evaluation is not None
+                    else None
+                ),
                 "niche_membership": {
                     "id": membership.id,
                     "niche_id": membership.niche_id,
@@ -172,6 +231,7 @@ class BusinessIndexSearchService:
             }
             rank = (
                 opportunity_score,
+                semantic_evaluation.confidence if semantic_evaluation is not None else 100,
                 _contact_rank(contact, business),
                 membership.confidence,
                 matched_at.timestamp() if matched_at is not None else 0,
@@ -205,8 +265,6 @@ def _evaluate_contract(
     request: BusinessIndexSearch,
 ) -> tuple[bool, str, int, datetime | None]:
     contract = request.contract
-    if not contract.all_of and not contract.any_of:
-        contract = _fallback_contract(request.opportunity_type)
     fresh_facts = {
         key: fact
         for key, fact in facts.items()
@@ -231,10 +289,6 @@ def _evaluate_contract(
                 None,
             )
         return False, "Current business facts do not match the requested criteria.", 0, None
-    if not contract.any_of and request.opportunity_type == OpportunityType.ANY:
-        score = _opportunity_score(fresh_facts)
-        if score < 25:
-            return False, "No current supported opportunity fact was found.", 0, None
     score = _opportunity_score(fresh_facts)
     matched_facts = [
         fresh_facts[predicate.key]
@@ -249,12 +303,6 @@ def _evaluate_contract(
         else "Matched current business facts."
     )
     return True, warning, score, matched_at
-
-
-def _fallback_contract(opportunity_type: OpportunityType) -> SearchContract:
-    from business_index.contracts import compile_search_contract
-
-    return compile_search_contract(None, opportunity_type=opportunity_type)
 
 
 def _predicate_matches(fact, predicate: FactPredicate) -> bool:
@@ -317,6 +365,25 @@ def _serialize_facts(facts: dict) -> dict:
         }
         for key, fact in facts.items()
     }
+
+
+def _contacts_match(
+    requirements: tuple[str, ...],
+    *,
+    business: BusinessModel,
+    contacts: list[ContactModel],
+) -> bool:
+    if not requirements:
+        return True
+    has_email = any(bool(contact.email) for contact in contacts)
+    has_phone = bool(business.phone) or any(bool(contact.phone) for contact in contacts)
+    values = {
+        "email": has_email,
+        "phone": has_phone,
+        "website": bool(business.website_url),
+        "any_contact": has_email or has_phone,
+    }
+    return all(values.get(requirement, False) for requirement in requirements)
 
 
 def _decision(

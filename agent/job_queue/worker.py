@@ -20,6 +20,8 @@ from db.models import CampaignModel, TerritoryModel
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
 from messages.service import MessageService
+from search_evaluations.service import SearchEvaluationService
+from business_index.schemas import SearchContract
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
@@ -120,6 +122,20 @@ def run_once() -> bool:
                     business_id=str(job.payload["business_id"]),
                     segment_id=str(job.payload["segment_id"]),
                     job_id=job.id,
+                )
+            elif job.type == JobType.BUSINESS_SEARCH_EVALUATE.value:
+                SearchEvaluationService(
+                    session=session,
+                    llm=services.llm,
+                ).evaluate(
+                    business_id=str(job.payload["business_id"]),
+                    contract_hash=str(job.payload["contract_hash"]),
+                    contract=SearchContract.from_dict(dict(job.payload["contract"])),
+                    evidence_fresh_after=(
+                        datetime.fromisoformat(str(job.payload["evidence_fresh_after"]))
+                        if job.payload.get("evidence_fresh_after")
+                        else None
+                    ),
                 )
             elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
                 business_index_pipeline_service(
