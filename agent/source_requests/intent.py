@@ -12,6 +12,7 @@ from source_requests.schemas import SourceRequestCreate, SourceRequestIntent
 
 
 SEARCH_INTENT_SCHEMA_VERSION = 1
+CONTACT_REQUIREMENTS = {"email", "phone", "any_contact"}
 
 
 class SearchIntentInterpreter:
@@ -31,10 +32,14 @@ class SearchIntentInterpreter:
                 "The user's request has priority over product defaults. Preserve nuanced criteria "
                 "as plain-language criteria with fact_key=null. Use a fact_key only when the "
                 "criterion exactly matches a supported fact definition. Do not invent facts, "
-                "business categories, locations, thresholds, or exclusions. Put every condition "
+                "business categories, locations, thresholds, or exclusions. Business category and "
+                "location define candidate scope and must not be repeated as criteria. A contact "
+                "requirement is only a required outreach channel: email, phone, or any_contact; a "
+                "website is business evidence, not a contact channel. Put every other condition "
                 "that decides whether a business is returned in criteria. Group required, "
                 "alternative, and excluded criteria using the criterion mode. Use required_signals "
-                "and excluded_result_types only as source-discovery hints, not as substitutes for criteria."
+                "and excluded_result_types only as source-discovery hints, not as substitutes "
+                "for criteria."
             ),
             prompt=request.prompt,
             response_model=SourceRequestIntent,
@@ -45,7 +50,6 @@ class SearchIntentInterpreter:
                 "supported_contact_requirements": [
                     "email",
                     "phone",
-                    "website",
                     "any_contact",
                 ],
                 "schema_version": SEARCH_INTENT_SCHEMA_VERSION,
@@ -82,8 +86,16 @@ def normalize_search_intent(
             "business_category": category,
             "location": location,
             "included_subcategories": _clean_values(intent.included_subcategories),
-            "criteria": intent.criteria[:12],
-            "contact_requirements": _clean_values(intent.contact_requirements),
+            "criteria": _normalize_criteria(
+                intent.criteria,
+                category=category,
+                location=location,
+            )[:12],
+            "contact_requirements": [
+                value
+                for value in _clean_values(intent.contact_requirements)
+                if value.casefold() in CONTACT_REQUIREMENTS
+            ],
             "required_signals": _clean_values(intent.required_signals),
             "excluded_result_types": _clean_values(intent.excluded_result_types),
             "search_query": normalize_text(f"{category} in {location}"),
@@ -105,3 +117,40 @@ def search_intent_request_hash(request: SourceRequestCreate) -> str:
 
 def _clean_values(values: list[str]) -> list[str]:
     return list(dict.fromkeys(normalize_text(value) for value in values if normalize_text(value)))
+
+
+def _normalize_criteria(criteria, *, category: str, location: str):
+    """Remove criteria that merely repeat the candidate scope.
+
+    This is token based rather than tied to a registry of industries or cities, so it
+    works for arbitrary categories and markets returned by the intent model.
+    """
+    scope_tokens = _meaningful_tokens(f"{category} {location}")
+    normalized = []
+    seen: set[tuple] = set()
+    for criterion in criteria:
+        description_tokens = _meaningful_tokens(criterion.description)
+        if not criterion.fact_key and description_tokens and description_tokens <= scope_tokens:
+            continue
+        key = (
+            criterion.mode.value,
+            normalize_text(criterion.description).casefold(),
+            criterion.fact_key,
+            criterion.operator,
+            json.dumps(criterion.value, sort_keys=True),
+        )
+        if key not in seen:
+            seen.add(key)
+            normalized.append(criterion)
+    return normalized
+
+
+def _meaningful_tokens(value: str) -> set[str]:
+    ignored = {"a", "an", "the", "business", "businesses", "is", "are", "in", "located"}
+    return {
+        token[:-1] if len(token) > 3 and token.endswith("s") else token
+        for token in "".join(
+            character if character.isalnum() else " " for character in value.casefold()
+        ).split()
+        if token not in ignored
+    }

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from business_facts.repository import BusinessFactRepository, fact_value
+from business_facts.service import reconcile_business_facts
 from business_index.schemas import (
     BusinessIndexSearch,
     FactOperator,
@@ -39,6 +40,22 @@ class BusinessIndexSearchService:
         self,
         request: BusinessIndexSearch,
     ) -> tuple[list[dict], list[dict]]:
+        rows, decisions = self._search(request, include_unknown=False)
+        return rows, decisions
+
+    def search_candidates_with_diagnostics(
+        self,
+        request: BusinessIndexSearch,
+    ) -> tuple[list[dict], list[dict]]:
+        """Return matched and unresolved candidates for one user-visible run."""
+        return self._search(request, include_unknown=True)
+
+    def _search(
+        self,
+        request: BusinessIndexSearch,
+        *,
+        include_unknown: bool,
+    ) -> tuple[list[dict], list[dict]]:
         decisions: list[dict] = []
         memberships = list(
             self.session.scalars(
@@ -58,9 +75,6 @@ class BusinessIndexSearchService:
         if not memberships:
             return [], decisions
         business_ids = list(dict.fromkeys(item.business_id for item in memberships))
-        facts_by_business = BusinessFactRepository(self.session).map_for_businesses(
-            business_ids
-        )
         businesses = {
             business.id: business
             for business in self.session.scalars(
@@ -70,6 +84,13 @@ class BusinessIndexSearchService:
                 )
             )
         }
+        # Older indexed businesses may predate the fact table. Reconciliation is
+        # database-only and makes the canonical record and observations queryable.
+        for business_id in businesses:
+            reconcile_business_facts(self.session, business_id)
+        facts_by_business = BusinessFactRepository(self.session).map_for_businesses(
+            business_ids
+        )
         contacts: dict[str, list[ContactModel]] = defaultdict(list)
         for contact in self.session.scalars(
             select(ContactModel).where(ContactModel.business_id.in_(business_ids))
@@ -99,6 +120,7 @@ class BusinessIndexSearchService:
             latest_listings.setdefault(observation.business_id, observation)
 
         ranked: list[tuple[tuple, dict]] = []
+        unresolved: list[tuple[tuple, dict]] = []
         evaluations = SearchEvaluationRepository(self.session)
         for membership in memberships:
             business = businesses.get(membership.business_id)
@@ -114,11 +136,11 @@ class BusinessIndexSearchService:
                 continue
             business_observations = observations.get(business.id, [])
             business_facts = facts_by_business.get(business.id, {})
-            matched, match_reason, opportunity_score, matched_at = _evaluate_contract(
+            contract_status, match_reason, opportunity_score, matched_at = _evaluate_contract(
                 business_facts,
                 request=request,
             )
-            if not matched:
+            if contract_status == "not_matched":
                 decisions.append(
                     _decision(
                         business.id,
@@ -143,34 +165,6 @@ class BusinessIndexSearchService:
                     )
                 )
                 continue
-            semantic_evaluation = None
-            if request.contract.requires_semantic_evaluation:
-                semantic_evaluation = evaluations.current(
-                    business_id=business.id,
-                    contract_hash=request.contract_hash,
-                )
-                if semantic_evaluation is None:
-                    decisions.append(
-                        _decision(
-                            business.id,
-                            business.display_name,
-                            "pending",
-                            "Nuanced criteria require an evidence-backed worker evaluation.",
-                        )
-                    )
-                    continue
-                if semantic_evaluation.status != "matched":
-                    decisions.append(
-                        _decision(
-                            business.id,
-                            business.display_name,
-                            "rejected",
-                            semantic_evaluation.rationale,
-                        )
-                    )
-                    continue
-                if matched_at is None or _aware(semantic_evaluation.evaluated_at) > _aware(matched_at):
-                    matched_at = _aware(semantic_evaluation.evaluated_at)
             opportunity_observation = next(
                 (
                     observation
@@ -184,6 +178,34 @@ class BusinessIndexSearchService:
                 opportunity_observation,
             )
             contact = _best_contact(business_contacts)
+            semantic_evaluation = None
+            candidate_status = contract_status
+            evaluation_required = False
+            if request.contract.requires_semantic_evaluation:
+                semantic_evaluation = evaluations.current(
+                    business_id=business.id,
+                    contract_hash=request.contract_hash,
+                )
+                if semantic_evaluation is None:
+                    candidate_status = "unknown"
+                    evaluation_required = True
+                elif semantic_evaluation.status == "rejected":
+                    decisions.append(
+                        _decision(
+                            business.id,
+                            business.display_name,
+                            "rejected",
+                            semantic_evaluation.rationale,
+                        )
+                    )
+                    continue
+                elif semantic_evaluation.status == "unknown":
+                    candidate_status = "unknown"
+                if semantic_evaluation is not None and (
+                    matched_at is None
+                    or _aware(semantic_evaluation.evaluated_at) > _aware(matched_at)
+                ):
+                    matched_at = _aware(semantic_evaluation.evaluated_at)
             raw = {
                 **(listing_observation.raw_payload or {} if listing_observation else {}),
                 "match_origin": "business_index",
@@ -200,6 +222,14 @@ class BusinessIndexSearchService:
                 "business_facts": _serialize_facts(business_facts),
                 "search_contract": request.contract.as_dict(),
                 "search_contract_hash": request.contract_hash,
+                "search_match": {
+                    "status": candidate_status,
+                    "reason": (
+                        match_reason
+                        if candidate_status == "unknown"
+                        else "Matched current evidence."
+                    ),
+                },
                 "search_evaluation": (
                     {
                         "status": semantic_evaluation.status,
@@ -236,8 +266,27 @@ class BusinessIndexSearchService:
                 membership.confidence,
                 matched_at.timestamp() if matched_at is not None else 0,
             )
-            ranked.append((rank, row))
+            if candidate_status == "unknown":
+                decisions.append(
+                    _decision(
+                        business.id,
+                        business.display_name,
+                        "pending" if evaluation_required else "unknown",
+                        (
+                            "Nuanced criteria are waiting for evidence-backed evaluation."
+                            if evaluation_required
+                            else (
+                                "Current evidence is incomplete for one or more "
+                                "requested criteria."
+                            )
+                        ),
+                    )
+                )
+                unresolved.append((rank, row))
+            else:
+                ranked.append((rank, row))
         ranked.sort(key=lambda item: item[0], reverse=True)
+        unresolved.sort(key=lambda item: item[0], reverse=True)
         selected = ranked[: request.result_count]
         selected_ids = {row["raw"]["canonical_business_id"] for _, row in selected}
         for rank, row in ranked:
@@ -256,39 +305,48 @@ class BusinessIndexSearchService:
                     "rank": list(rank),
                 }
             )
-        return [row for _, row in selected], decisions
+        rows = [row for _, row in selected]
+        if include_unknown and len(rows) < request.result_count:
+            rows.extend(row for _, row in unresolved[: request.result_count - len(rows)])
+        return rows, decisions
 
 
 def _evaluate_contract(
     facts: dict,
     *,
     request: BusinessIndexSearch,
-) -> tuple[bool, str, int, datetime | None]:
+) -> tuple[str, str, int, datetime | None]:
     contract = request.contract
     fresh_facts = {
         key: fact
         for key, fact in facts.items()
         if _aware(fact.observed_at) >= _aware(request.evidence_fresh_after)
-        and (fact.expires_at is None or _aware(fact.expires_at) >= _aware(request.evidence_fresh_after))
+        and (
+            fact.expires_at is None
+            or _aware(fact.expires_at) >= _aware(request.evidence_fresh_after)
+        )
     }
     for predicate in contract.all_of:
+        if predicate.key not in fresh_facts:
+            return "unknown", _predicate_failure(predicate, fresh_facts), 0, None
         if not _predicate_matches(fresh_facts.get(predicate.key), predicate):
-            return False, _predicate_failure(predicate, fresh_facts), 0, None
-    if contract.any_of and not any(
-        _predicate_matches(fresh_facts.get(predicate.key), predicate)
-        for predicate in contract.any_of
-    ):
-        missing = sorted(
-            {predicate.key for predicate in contract.any_of if predicate.key not in fresh_facts}
-        )
-        if missing:
+            return "not_matched", _predicate_failure(predicate, fresh_facts), 0, None
+    if contract.any_of:
+        known = [predicate for predicate in contract.any_of if predicate.key in fresh_facts]
+        if any(_predicate_matches(fresh_facts[predicate.key], predicate) for predicate in known):
+            pass
+        elif len(known) < len(contract.any_of):
+            missing = sorted(
+                {predicate.key for predicate in contract.any_of if predicate.key not in fresh_facts}
+            )
+            return "unknown", f"Current facts are unavailable for: {', '.join(missing)}.", 0, None
+        else:
             return (
-                False,
-                f"Current facts are unavailable for: {', '.join(missing)}.",
+                "not_matched",
+                "Current business facts do not match the requested criteria.",
                 0,
                 None,
             )
-        return False, "Current business facts do not match the requested criteria.", 0, None
     score = _opportunity_score(fresh_facts)
     matched_facts = [
         fresh_facts[predicate.key]
@@ -302,7 +360,7 @@ def _evaluate_contract(
         if contract.unsupported
         else "Matched current business facts."
     )
-    return True, warning, score, matched_at
+    return "matched", warning, score, matched_at
 
 
 def _predicate_matches(fact, predicate: FactPredicate) -> bool:
@@ -380,7 +438,6 @@ def _contacts_match(
     values = {
         "email": has_email,
         "phone": has_phone,
-        "website": bool(business.website_url),
         "any_contact": has_email or has_phone,
     }
     return all(values.get(requirement, False) for requirement in requirements)

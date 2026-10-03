@@ -14,6 +14,7 @@ class JobType(StrEnum):
     BUSINESS_IDENTITY_RESOLVE = "business.identity_resolve"
     BUSINESS_OPPORTUNITY_AUDIT = "business.opportunity_audit"
     BUSINESS_SEARCH_EVALUATE = "business.search_evaluate"
+    BUSINESS_SEARCH_EVALUATE_BATCH = "business.search_evaluate_batch"
     SEARCH_ELIGIBILITY_MATCH = "search.eligibility_match"
 
 

@@ -233,9 +233,9 @@ class SourceRequestService:
             )
 
         evidence_fresh_after = utcnow() - timedelta(days=request.evidence_max_age_days)
-        matches, index_decisions = BusinessIndexSearchService(
+        candidates, index_decisions = BusinessIndexSearchService(
             self.products.session
-        ).search_with_diagnostics(
+        ).search_candidates_with_diagnostics(
             BusinessIndexSearch(
                 niche_id=segment.niche_id,
                 market_key=segment.market_key,
@@ -246,7 +246,7 @@ class SourceRequestService:
                 contract_hash=contract_hash,
             )
         )
-        self.campaigns.materialize_existing_matches(run.id, matches)
+        self.campaigns.materialize_index_candidates(run.id, candidates)
         current_count = len(self.campaigns.results(run.id))
         deficit = max(0, plan.max_results - current_count)
         pipeline_events.create(
@@ -268,11 +268,12 @@ class SourceRequestService:
                 "deficit": deficit,
                 "business_ids": [
                     business_id
-                    for match in matches
+                    for match in candidates
                     if (business_id := _match_business_id(match))
                 ],
             },
         )
+        pending_business_ids: list[str] = []
         for decision in index_decisions:
             pipeline_events.create(
                 campaign_id=run.id,
@@ -290,13 +291,18 @@ class SourceRequestService:
                 reason=str(decision["reason"]),
             )
             if decision["status"] == "pending":
-                QueueService(self.products.session).enqueue_business_search_evaluation(
-                    business_id=str(decision["business_id"]),
-                    contract_hash=contract_hash,
-                    contract=search_contract.as_dict(),
-                    campaign_id=run.id,
-                    evidence_fresh_after=evidence_fresh_after.isoformat(),
-                )
+                pending_business_ids.append(str(decision["business_id"]))
+        evaluation_pending = bool(
+            pending_business_ids and search_contract.requires_semantic_evaluation
+        )
+        if evaluation_pending:
+            QueueService(self.products.session).enqueue_business_search_evaluation_batch(
+                business_ids=pending_business_ids,
+                contract_hash=contract_hash,
+                contract=search_contract.as_dict(),
+                campaign_id=run.id,
+                evidence_fresh_after=evidence_fresh_after.isoformat(),
+            )
         if deficit and plan.tasks:
             pipeline_events.create(
                 campaign_id=run.id,
@@ -319,13 +325,16 @@ class SourceRequestService:
                 },
                 reason="Unmet demand was recorded for scheduled business-index refresh.",
             )
-        run = self.campaigns.campaigns.update_status(run.id, CampaignStatus.COMPLETED)
+        run = self.campaigns.campaigns.update_status(
+            run.id,
+            CampaignStatus.EXPANDING if evaluation_pending else CampaignStatus.COMPLETED,
+        )
         pipeline_events.create(
             campaign_id=run.id,
             segment_id=segment.id,
             stage="final_output",
             event_type="output_snapshot",
-            status="completed",
+            status="pending" if evaluation_pending else "completed",
             response_payload={
                 "result_count": current_count,
                 "lead_ids": [result.id for result in self.campaigns.results(run.id)],
@@ -335,7 +344,7 @@ class SourceRequestService:
             plan=plan,
             run=CampaignRead.model_validate(run),
             summary=None,
-            state="ready",
+            state="expanding" if evaluation_pending else "ready",
             current_result_count=current_count,
             requested_result_count=plan.max_results,
             contract_hash=contract_hash,
@@ -347,6 +356,68 @@ class SourceRequestService:
                 has_matches=bool(current_count),
             ),
         )
+
+    def finalize_search_evaluations(self, campaign_id: str) -> CampaignRead:
+        run = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        source_inputs = run.source_inputs or {}
+        index_contract = source_inputs.get("business_index_contract") or {}
+        contract = SearchContract.from_dict(index_contract.get("search_contract"))
+        evidence_days = int(index_contract.get("evidence_max_age_days") or 30)
+        request = BusinessIndexSearch(
+            niche_id=str(index_contract["niche_id"]),
+            market_key=str(index_contract["market_key"]),
+            opportunity_type=OpportunityType(
+                str(index_contract.get("opportunity_type") or OpportunityType.ANY.value)
+            ),
+            evidence_fresh_after=utcnow() - timedelta(days=evidence_days),
+            result_count=int(index_contract.get("result_count") or run.max_leads),
+            contract=contract,
+            contract_hash=str(source_inputs.get("search_contract_hash") or ""),
+        )
+        candidates, decisions = BusinessIndexSearchService(
+            self.products.session
+        ).search_candidates_with_diagnostics(request)
+        self.campaigns.materialize_index_candidates(campaign_id, candidates)
+        selected_ids = {
+            business_id
+            for candidate in candidates
+            if (business_id := _match_business_id(candidate))
+        }
+        self.campaigns.reject_absent_index_candidates(
+            campaign_id,
+            selected_business_ids=selected_ids,
+        )
+        if run.status == CampaignStatus.EXPANDING:
+            run = CampaignRead.model_validate(
+                self.campaigns.campaigns.update_status(
+                    campaign_id,
+                    CampaignStatus.COMPLETED,
+                )
+            )
+        RunPipelineEventRepository(self.products.session).create(
+            campaign_id=campaign_id,
+            segment_id=_string_value(source_inputs.get("business_index_segment_id")) or None,
+            stage="final_output",
+            event_type="evaluation_completed",
+            status="completed",
+            response_payload={
+                "result_count": len(self.campaigns.results(campaign_id)),
+                "matched_count": sum(
+                    1
+                    for candidate in candidates
+                    if ((candidate.get("raw") or {}).get("search_match") or {}).get("status")
+                    == "matched"
+                ),
+                "needs_verification_count": sum(
+                    1
+                    for candidate in candidates
+                    if ((candidate.get("raw") or {}).get("search_match") or {}).get("status")
+                    == "unknown"
+                ),
+                "decision_count": len(decisions),
+            },
+        )
+        return run
 
     def rerun(self, run_id: str, *, run_immediately: bool = True) -> SourceRequestRun:
         run = CampaignRead.model_validate(self.campaigns.get(run_id))

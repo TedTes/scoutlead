@@ -208,6 +208,44 @@ class LeadRepository:
         """Compatibility alias for callers that still use the old cache name."""
         return self.create_from_existing_match(campaign_id, product_id, result)
 
+    def sync_search_match(self, lead_id: str, result: dict[str, Any]) -> LeadModel:
+        """Update the run-specific match state without changing canonical business facts."""
+        model = self.get(lead_id)
+        business_id = (result.get("raw") or {}).get("canonical_business_id")
+        retained = [
+            source
+            for source in model.raw_sources or []
+            if (source.get("raw") or {}).get("canonical_business_id") != business_id
+        ]
+        model.raw_sources = [*retained, result]
+        match = (result.get("raw") or {}).get("search_match") or {}
+        if match.get("status") == "unknown":
+            model.status = LeadStatus.RESEARCHING.value
+        elif match.get("status") == "not_matched":
+            model.status = LeadStatus.DISQUALIFIED.value
+        elif model.status == LeadStatus.RESEARCHING.value:
+            model.status = LeadStatus.QUALIFIED.value
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
+    def mark_search_not_matched(self, lead_id: str, *, reason: str) -> LeadModel:
+        model = self.get(lead_id)
+        updated_sources = []
+        for source in model.raw_sources or []:
+            if isinstance(source, dict) and isinstance(source.get("raw"), dict):
+                source = {**source, "raw": {**source["raw"]}}
+                source["raw"]["search_match"] = {
+                    "status": "not_matched",
+                    "reason": reason,
+                }
+            updated_sources.append(source)
+        model.raw_sources = updated_sources
+        model.status = LeadStatus.DISQUALIFIED.value
+        self.session.commit()
+        self.session.refresh(model)
+        return model
+
     def create_from_candidate(self, candidate: DiscoveryCandidateModel) -> LeadModel:
         self._assert_product_in_scope(candidate.product_id)
         existing = self.find_existing(candidate.campaign_id, candidate.title, candidate.url)

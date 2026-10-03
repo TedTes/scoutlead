@@ -64,6 +64,7 @@ class RemoteJsonLLMClient:
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max(1, max_attempts)
         self.retry_backoff_seconds = max(0, retry_backoff_seconds)
+        self.last_usage: dict[str, Any] = {}
 
     def generate_object(
         self,
@@ -98,6 +99,11 @@ class RemoteJsonLLMClient:
                 ),
             )
             payload = response.json()
+            self.last_usage = (
+                payload.get("usage")
+                if isinstance(payload, dict) and isinstance(payload.get("usage"), dict)
+                else {}
+            )
             output = payload.get("output", payload) if isinstance(payload, dict) else payload
             return response_model.model_validate(output)
         except Exception as exc:
@@ -120,6 +126,7 @@ class OpenAIStructuredLLMClient:
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max(1, max_attempts)
         self.retry_backoff_seconds = max(0, retry_backoff_seconds)
+        self.last_usage: dict[str, Any] = {}
 
     def generate_object(
         self,
@@ -171,6 +178,7 @@ class OpenAIStructuredLLMClient:
                 ),
             )
             payload = response.json()
+            self.last_usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
             output_text = self._extract_output_text(payload)
             parsed = safe_json_loads(output_text)
             if parsed is None:

@@ -23,3 +23,11 @@ class SearchEvaluationResult(BaseModel):
     criteria: list[SearchCriterionEvaluation] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
+
+
+class BusinessSearchEvaluationResult(SearchEvaluationResult):
+    business_id: str = Field(min_length=1)
+
+
+class SearchEvaluationBatchResult(BaseModel):
+    results: list[BusinessSearchEvaluationResult] = Field(default_factory=list)

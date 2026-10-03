@@ -22,6 +22,8 @@ from job_queue.schemas import JobStatus, JobType
 from messages.service import MessageService
 from search_evaluations.service import SearchEvaluationService
 from business_index.schemas import SearchContract
+from products.repository import ProductRepository
+from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
@@ -137,6 +139,27 @@ def run_once() -> bool:
                         else None
                     ),
                 )
+                if job.payload.get("campaign_id"):
+                    _source_request_service(session, services).finalize_search_evaluations(
+                        str(job.payload["campaign_id"])
+                    )
+            elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
+                SearchEvaluationService(
+                    session=session,
+                    llm=services.llm,
+                ).evaluate_batch(
+                    business_ids=[str(value) for value in job.payload.get("business_ids", [])],
+                    contract_hash=str(job.payload["contract_hash"]),
+                    contract=SearchContract.from_dict(dict(job.payload["contract"])),
+                    evidence_fresh_after=(
+                        datetime.fromisoformat(str(job.payload["evidence_fresh_after"]))
+                        if job.payload.get("evidence_fresh_after")
+                        else None
+                    ),
+                )
+                _source_request_service(session, services).finalize_search_evaluations(
+                    str(job.payload["campaign_id"])
+                )
             elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
                 business_index_pipeline_service(
                     session=session,
@@ -170,6 +193,16 @@ def run_once() -> bool:
                     segment_id=str(job.payload["segment_id"]),
                     reason=str(exc),
                 )
+            if (
+                failed_job.status == JobStatus.FAILED.value
+                and job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
+                and job.payload.get("campaign_id")
+            ):
+                _fail_campaign(
+                    session,
+                    campaign_id=str(job.payload["campaign_id"]),
+                    reason=str(exc),
+                )
             return True
         queue.complete(job.id)
         return True
@@ -183,6 +216,24 @@ def run() -> None:
         did_work = run_once()
         if not did_work:
             sleep(2)
+
+
+def _source_request_service(
+    session: Session,
+    services: AppServices,
+) -> SourceRequestService:
+    return SourceRequestService(
+        products=ProductRepository(session),
+        campaigns=_campaign_service(session=session, services=services),
+        llm=services.llm,
+        google_places_configured=bool(services.settings.google_places_api_key),
+        search_configured=services.search.is_configured,
+        openstreetmap_enabled=services.settings.openstreetmap_enabled,
+        apify_source_provider_id=services.settings.apify_source_provider_id,
+        apify_source_label=services.settings.apify_source_label,
+        apify_sources=services.settings.apify_source_configs,
+        source_recipes=services.settings.discovery_source_recipe_configs,
+    )
 
 
 def _recover_interrupted_jobs() -> None:
@@ -211,6 +262,16 @@ def _recover_interrupted_jobs() -> None:
                     segment_id=str(job.payload["segment_id"]),
                     reason=job.last_error or "Background discovery stopped before completion.",
                 )
+            if (
+                job.status == JobStatus.FAILED.value
+                and job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
+                and job.payload.get("campaign_id")
+            ):
+                _fail_campaign(
+                    session,
+                    campaign_id=str(job.payload["campaign_id"]),
+                    reason=job.last_error or "Search evaluation stopped before completion.",
+                )
         if recovered:
             logger.warning("recovered_stale_jobs count=%s", len(recovered))
     finally:
@@ -232,6 +293,17 @@ def _fail_expanding_campaigns(session: Session, *, segment_id: str, reason: str)
             commit=False,
         )
     session.commit()
+
+
+def _fail_campaign(session: Session, *, campaign_id: str, reason: str) -> None:
+    campaigns = CampaignRepository(session)
+    campaign = campaigns.get(campaign_id)
+    if campaign.status == CampaignStatus.EXPANDING.value:
+        campaigns.update_status(
+            campaign_id,
+            CampaignStatus.FAILED,
+            failure_reason=reason,
+        )
 
 
 def _record_source_item_failure(

@@ -18,6 +18,7 @@ def select_campaign_results(
 ) -> list[LeadRead]:
     """Apply a run's delivery policy without deleting its underlying evidence."""
     source_inputs = campaign.source_inputs or {}
+    leads = [lead for lead in leads if not _is_search_rejected(lead)]
     if not source_inputs_require_digital_opportunity(source_inputs):
         return leads
 
@@ -67,6 +68,15 @@ def _is_disqualified(lead: LeadRead) -> bool:
     if lead.status == LeadStatus.DISQUALIFIED:
         return True
     return lead.qualification is not None and not lead.qualification.qualified
+
+
+def _is_search_rejected(lead: LeadRead) -> bool:
+    for source in lead.raw_sources:
+        raw = source.get("raw") if isinstance(source, dict) else None
+        match = raw.get("search_match") if isinstance(raw, dict) else None
+        if isinstance(match, dict) and match.get("status") == "not_matched":
+            return True
+    return False
 
 
 def _contact_readiness(lead: LeadRead) -> int:

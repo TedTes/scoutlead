@@ -41,7 +41,7 @@ SUPPORTED_FACTS: dict[str, dict[str, Any]] = {
     },
 }
 
-SUPPORTED_CONTACT_REQUIREMENTS = {"email", "phone", "website", "any_contact"}
+SUPPORTED_CONTACT_REQUIREMENTS = {"email", "phone", "any_contact"}
 
 
 def compile_search_contract(intent: SourceRequestIntent) -> SearchContract:

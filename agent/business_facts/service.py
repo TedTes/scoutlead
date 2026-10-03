@@ -85,16 +85,32 @@ def _website_status_fact(
             ),
             None,
         )
-        candidates.append(
-            BusinessFactValue(
-                key=BusinessFactKey.WEBSITE_STATUS,
-                value="present",
-                observed_at=(evidence.observed_at if evidence else business.updated_at),
-                source_observation_id=evidence.id if evidence else None,
-                confidence=100,
-                resolver_version=RESOLVER_VERSION,
-            )
+        present = BusinessFactValue(
+            key=BusinessFactKey.WEBSITE_STATUS,
+            value="present",
+            observed_at=(evidence.observed_at if evidence else business.updated_at),
+            source_observation_id=evidence.id if evidence else None,
+            confidence=100,
+            resolver_version=RESOLVER_VERSION,
         )
+        # A provider omitting websiteUri does not invalidate a URL already attached to
+        # the canonical business. Only a direct availability check can supersede it.
+        direct_failure = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate.value in {"unavailable", "parked"}
+                and candidate.source_observation_id
+                and any(
+                    observation.id == candidate.source_observation_id
+                    and observation.source == "website_presence_check"
+                    for observation in observations
+                )
+                and _aware(candidate.observed_at) > _aware(present.observed_at)
+            ),
+            None,
+        )
+        return direct_failure or present
     if not candidates:
         latest_observation = observations[0] if observations else None
         return BusinessFactValue(

@@ -291,6 +291,41 @@ class CampaignService:
             assessed_rows=assessed_rows,
         )
 
+    def materialize_index_candidates(
+        self,
+        campaign_id: str,
+        rows: list[dict[str, Any]],
+    ) -> list[LeadRead]:
+        """Materialize matched and unresolved index candidates into the same run."""
+        self.materialize_existing_matches(campaign_id, rows)
+        by_business_id = {
+            lead.business_id: lead
+            for lead in self.leads.list_by_campaign(campaign_id)
+            if lead.business_id
+        }
+        synced: list[LeadRead] = []
+        for row in rows:
+            business_id = (row.get("raw") or {}).get("canonical_business_id")
+            lead = by_business_id.get(business_id)
+            if lead is not None:
+                synced.append(
+                    LeadRead.model_validate(self.leads.sync_search_match(lead.id, row))
+                )
+        return synced
+
+    def reject_absent_index_candidates(
+        self,
+        campaign_id: str,
+        *,
+        selected_business_ids: set[str],
+    ) -> None:
+        for lead in self.leads.list_by_campaign(campaign_id):
+            if lead.business_id and lead.business_id not in selected_business_ids:
+                self.leads.mark_search_not_matched(
+                    lead.id,
+                    reason="Current evidence does not satisfy the saved search contract.",
+                )
+
     def update(self, campaign_id: str, update: CampaignUpdate) -> CampaignModel:
         return self.campaigns.update(campaign_id, update)
 

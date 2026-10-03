@@ -116,3 +116,25 @@ class QueueService:
             dedupe_key=f"{business_id}:{contract_hash}",
             max_attempts=3,
         )
+
+    def enqueue_business_search_evaluation_batch(
+        self,
+        *,
+        business_ids: list[str],
+        contract_hash: str,
+        contract: dict,
+        campaign_id: str,
+        evidence_fresh_after: str,
+    ):
+        return self.queue.enqueue_once(
+            JobType.BUSINESS_SEARCH_EVALUATE_BATCH,
+            {
+                "business_ids": list(dict.fromkeys(business_ids))[:25],
+                "contract_hash": contract_hash,
+                "contract": contract,
+                "campaign_id": campaign_id,
+                "evidence_fresh_after": evidence_fresh_after,
+            },
+            dedupe_key=f"{campaign_id}:{contract_hash}",
+            max_attempts=3,
+        )
