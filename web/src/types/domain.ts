@@ -191,7 +191,7 @@ export type SourceRequestRun = {
   };
   run: DiscoveryRun;
   summary?: DiscoveryRunSummary | null;
-  state: "ready";
+  state: "ready" | "expanding";
   current_result_count: number;
   requested_result_count: number;
   contract_hash: string;

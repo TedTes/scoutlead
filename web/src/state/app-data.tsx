@@ -372,6 +372,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   }, [refreshAll]);
 
   useEffect(() => {
+    if (selectedDiscoveryRun?.status !== "expanding") return;
+    const timer = window.setInterval(() => {
+      void refreshSnapshot(selectedDiscoveryRun.id);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [refreshSnapshot, selectedDiscoveryRun?.id, selectedDiscoveryRun?.status]);
+
+  useEffect(() => {
     void refreshProductContacts(selectedProductIdState, discoveryRuns);
   }, [discoveryRuns, refreshProductContacts, selectedProductIdState]);
 

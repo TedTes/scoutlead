@@ -62,7 +62,7 @@ import {
 import { formatDate } from "../utils/format";
 import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
 
-type ResultAttributeFilter = "good_fit" | "verified" | "not_fit" | "has_draft";
+type ResultAttributeFilter = "matched" | "needs_verification" | "good_fit" | "verified" | "not_fit" | "has_draft";
 type ResultSort = "contact" | "score" | "name";
 type DrawerTab = "overview" | "evidence";
 type ContactActivityTone = "done" | "pending" | "warning" | "blocked";
@@ -215,6 +215,10 @@ export function ResultsScreen({
   const notFitContacts = contacts.filter((contact) => reviewStatus(contact) === "not_fit").length;
   const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
   const draftedContacts = contacts.filter((contact) => draftedLeadIds.has(contact.id)).length;
+  const matchedContacts = contacts.filter((contact) => searchMatchStatus(contact) === "matched").length;
+  const needsVerificationContacts = contacts.filter(
+    (contact) => searchMatchStatus(contact) === "unknown",
+  ).length;
   const approvedShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && approvedLeadIds.has(contact.id),
   );
@@ -228,6 +232,8 @@ export function ResultsScreen({
   const outreachReadyContacts = contacts.filter(isBulkOutreachReadyContact);
   const outreachSkippedContacts = contacts.filter((contact) => !isBulkOutreachReadyContact(contact));
   const attributeFilterOptions: Array<{ id: ResultAttributeFilter; label: string; count: number }> = [
+    { id: "matched", label: "Matched criteria", count: matchedContacts },
+    { id: "needs_verification", label: "Needs verification", count: needsVerificationContacts },
     { id: "good_fit", label: "Good fit", count: goodFitContacts },
     { id: "verified", label: "Verified", count: verifiedContacts },
     { id: "has_draft", label: "Has draft", count: draftedContacts },
@@ -270,6 +276,8 @@ export function ResultsScreen({
     })
     .filter((contact) => {
       if (attributeFilter === "verified") return isVerifiedContact(contact);
+      if (attributeFilter === "matched") return searchMatchStatus(contact) === "matched";
+      if (attributeFilter === "needs_verification") return searchMatchStatus(contact) === "unknown";
       if (attributeFilter === "good_fit") return canShortlistContact(contact);
       if (attributeFilter === "not_fit") return reviewStatus(contact) === "not_fit";
       if (attributeFilter === "has_draft") return draftedLeadIds.has(contact.id);
@@ -1824,6 +1832,7 @@ function ContactCard({
   const opportunityReason = contactListPrimarySignal(contact);
   const category = contactListCategoryLabel(contact);
   const geography = contact.geography || contact.research?.geography || "";
+  const needsVerification = searchMatchStatus(contact) === "unknown";
   const cardClass = [
     "contact-card",
     isReachableContact(contact) ? "" : "no-contact",
@@ -1861,7 +1870,11 @@ function ContactCard({
                 </>
               ) : null}
             </small>
-            {opportunityReason ? <span className="contact-evidence-line">{opportunityReason}</span> : null}
+            {needsVerification ? (
+              <span className="contact-evidence-line">Needs verification against search criteria</span>
+            ) : opportunityReason ? (
+              <span className="contact-evidence-line">{opportunityReason}</span>
+            ) : null}
           </span>
         </div>
         <div className="contact-actions" aria-label="Contact availability">
@@ -1869,6 +1882,8 @@ function ContactCard({
           <button
             aria-label={contact.shortlisted_at ? "Remove from shortlist" : "Add to shortlist"}
             className={contact.shortlisted_at ? "lead-star active" : "lead-star"}
+            disabled={needsVerification}
+            title={needsVerification ? "Resolve search criteria before shortlisting" : undefined}
             type="button"
             onClick={(event) => {
               event.stopPropagation();
@@ -3038,11 +3053,20 @@ function deriveAgentFitStatus(qualified: boolean, score: number, nextStep?: stri
 }
 
 function canShortlistContact(contact: DiscoveryResult) {
+  if (searchMatchStatus(contact) === "unknown") return false;
   const status = reviewStatus(contact);
   if (status === "not_fit") return false;
   if (status === "good_fit" || status === "maybe") return true;
   const assessment = getAgentAssessment(contact);
   return assessment?.fitStatus === "good_fit" || assessment?.fitStatus === "maybe";
+}
+
+function searchMatchStatus(contact: DiscoveryResult): "matched" | "not_matched" | "unknown" | "" {
+  for (const raw of getRawObjects(contact)) {
+    const status = rawValueToString(getRawValue(raw, "search_match.status"));
+    if (status === "matched" || status === "not_matched" || status === "unknown") return status;
+  }
+  return "";
 }
 
 function displayReviewDecision(contact: DiscoveryResult): { label: string; className: string } | null {
