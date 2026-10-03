@@ -141,6 +141,35 @@ export type SourceRequestInput = {
   geography?: string;
   opportunity_type?: "any" | "missing_website" | "missing_or_unavailable_website" | "weak_or_missing_website";
   evidence_max_age_days?: number;
+  intent_override?: SearchIntent;
+};
+
+export type SearchCriterionMode = "required" | "alternative" | "excluded";
+
+export type SearchIntentCriterion = {
+  id: string;
+  description: string;
+  mode: SearchCriterionMode;
+  fact_key?: string | null;
+  operator?: string | null;
+  value?: string | number | boolean | string[] | null;
+  evidence_requirement: string;
+};
+
+export type SearchIntent = {
+  schema_version: number;
+  business_category: string;
+  location: string;
+  country?: string;
+  included_subcategories: string[];
+  criteria: SearchIntentCriterion[];
+  contact_requirements: string[];
+  required_signals: string[];
+  excluded_result_types: string[];
+  search_query: string;
+  search_url?: string;
+  confidence: number;
+  rationale: string;
 };
 
 export type SourceRequestRun = {
@@ -165,6 +194,8 @@ export type SourceRequestRun = {
   state: "ready";
   current_result_count: number;
   requested_result_count: number;
+  contract_hash: string;
+  interpreted_intent?: SearchIntent | null;
   unsupported_criteria: string[];
   unresolved_criteria: string[];
 };

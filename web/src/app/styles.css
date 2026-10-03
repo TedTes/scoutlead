@@ -9944,3 +9944,65 @@ button.bulk-recipient-select:hover {
     animation: none;
   }
 }
+.search-intent-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.results-intentbar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 0 10px 12px;
+}
+
+.results-intentbar .search-intent-strip {
+  flex: 1;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.results-intentbar > button {
+  flex: 0 0 auto;
+}
+
+.search-intent-chip {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  background: #fff;
+  color: #4f5b6b;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.search-intent-chip.is-scope {
+  background: #f2f0ff;
+  border-color: #dcd6ff;
+  color: #5541c7;
+  font-weight: 600;
+}
+
+.search-intent-chip.is-excluded {
+  background: #fff5f5;
+  border-color: #f1d0d0;
+  color: #9f3232;
+}
+
+.search-intent-chip button {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}

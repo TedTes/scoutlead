@@ -30,6 +30,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { OverviewScreen } from "./OverviewScreen";
+import { SearchIntentChips, searchIntentFromRun } from "../components/SearchIntentChips";
 import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
@@ -46,6 +47,7 @@ import type {
   Message,
   Product,
   SenderProfile,
+  SearchIntent,
   Territory,
   TerritoryDelivery,
   TerritoryMetrics,
@@ -155,6 +157,8 @@ export function ResultsScreen({
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1160px)").matches : false,
   );
   const [draftPrompt, setDraftPrompt] = useState("");
+  const [searchIntent, setSearchIntent] = useState<SearchIntent | null>(null);
+  const [editedSearchIntent, setEditedSearchIntent] = useState<SearchIntent | null>(null);
   const [attributeFilter, setAttributeFilter] = useState<ResultAttributeFilter | null>(null);
   const [sort, setSort] = useState<ResultSort>("score");
   const [running, setRunning] = useState(false);
@@ -285,6 +289,11 @@ export function ResultsScreen({
     ? contacts.find((contact) => contact.id === selectedContactId)
     : undefined;
   const selectedMessage = selectedContact ? messageByLeadId.get(selectedContact.id) : undefined;
+  const searchIntentChanged = Boolean(
+    searchIntent
+    && editedSearchIntent
+    && JSON.stringify(searchIntent) !== JSON.stringify(editedSearchIntent),
+  );
 
   useEffect(() => {
     if (!selectedDiscoveryRunId || !onWorkflowCountsChange) return;
@@ -317,6 +326,9 @@ export function ResultsScreen({
 
   useEffect(() => {
     setDraftPrompt(runPrompt);
+    const savedIntent = searchIntentFromRun(selectedDiscoveryRun);
+    setSearchIntent(savedIntent);
+    setEditedSearchIntent(savedIntent);
     setSelectedContactId("");
     setDetailPanelOpen(true);
     setLeadSearch("");
@@ -447,6 +459,7 @@ export function ResultsScreen({
         prompt: request,
         max_results: requestedResultCount(selectedDiscoveryRun),
         run_immediately: true,
+        intent_override: editedSearchIntent || undefined,
       });
       if (result) {
         setRerunPromptOpen(false);
@@ -539,15 +552,19 @@ export function ResultsScreen({
       if (selectedTerritory) {
         await territoryApi.updateTerritory(selectedTerritory.id, settings);
       } else if (scheduleResolution) {
+        const contractHash = storedSearchContractHash(selectedDiscoveryRun);
         const existing = territories.find((territory) => (
           territory.product_id === selectedDiscoveryRun.product_id
           && territory.niche_id === scheduleResolution.niche_id
           && territory.market_key === scheduleResolution.market_key
           && territory.search_prompt === scheduleResolution.request
+          && (!contractHash || territory.criteria_hash === contractHash)
         ));
         const scheduled = existing || await territoryApi.createTerritory(scheduleResolution, {
           batch_size: settings.batch_size,
           min_fit: settings.min_fit,
+          search_contract: storedSearchContract(selectedDiscoveryRun),
+          evidence_max_age_days: storedEvidenceMaxAge(selectedDiscoveryRun),
         });
         if (existing) await territoryApi.updateTerritory(existing.id, settings);
         await territoryApi.updateDiscoveryRun(selectedDiscoveryRun.id, { territory_id: scheduled.id });
@@ -1050,6 +1067,17 @@ export function ResultsScreen({
         </div>
       </div>
 
+      {editedSearchIntent ? (
+        <div className="results-intentbar">
+          <SearchIntentChips intent={editedSearchIntent} onChange={setEditedSearchIntent} />
+          {searchIntentChanged ? (
+            <button className="secondary" disabled={running} type="button" onClick={() => void updateSearch()}>
+              {running ? "Applying..." : "Apply criteria"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className={selectedContact ? "results-body has-detail" : "results-body"}>
         <section className="lead-feed-pane" aria-label="Lead list">
           <header className="lead-feed-header">
@@ -1147,7 +1175,10 @@ export function ResultsScreen({
           prompt={draftPrompt}
           running={running}
           ready={Boolean(selectedProductId && draftPrompt.trim().length >= 4)}
-          onChange={setDraftPrompt}
+          onChange={(value) => {
+            setDraftPrompt(value);
+            setEditedSearchIntent(null);
+          }}
           onClose={() => setRerunPromptOpen(false)}
           onSubmit={updateSearch}
         />
@@ -2798,6 +2829,31 @@ function requestedResultCount(
   const value = run?.source_inputs?.requested_result_count;
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   return run?.max_leads || 25;
+}
+
+function storedSearchContract(
+  run: { source_inputs?: Record<string, unknown> } | undefined,
+): Record<string, unknown> {
+  const raw = run?.source_inputs?.business_index_contract;
+  const contract = isRecord(raw) ? { ...raw } : {};
+  const contractHash = storedSearchContractHash(run);
+  if (contractHash) contract.contract_hash = contractHash;
+  return contract;
+}
+
+function storedSearchContractHash(
+  run: { source_inputs?: Record<string, unknown> } | undefined,
+): string {
+  const value = run?.source_inputs?.search_contract_hash;
+  return typeof value === "string" ? value : "";
+}
+
+function storedEvidenceMaxAge(
+  run: { source_inputs?: Record<string, unknown> } | undefined,
+): number {
+  const contract = run?.source_inputs?.business_index_contract;
+  const value = isRecord(contract) ? contract.evidence_max_age_days : undefined;
+  return typeof value === "number" && value > 0 ? value : 30;
 }
 
 function isReachableContact(contact: DiscoveryResult) {

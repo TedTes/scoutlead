@@ -116,7 +116,12 @@ export class ApiClient {
 
   createTerritory(
     resolution: TerritoryResolution,
-    settings: Partial<Pick<Territory, "label" | "batch_size" | "min_fit">> = {},
+    settings: Partial<
+      Pick<
+        Territory,
+        "label" | "batch_size" | "min_fit" | "search_contract" | "evidence_max_age_days"
+      >
+    > = {},
   ) {
     return this.request<Territory>("/territories", {
       method: "POST",

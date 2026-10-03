@@ -2,8 +2,9 @@ import { ArrowRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAppData } from "../state/app-data";
 import { useToast } from "../shared-ui";
-import type { DiscoveryRun } from "../types/domain";
+import type { DiscoveryRun, SearchIntent } from "../types/domain";
 import { searchDiscoveryTemplates } from "../utils/template-search";
+import { SearchIntentChips, searchIntentFromRun } from "../components/SearchIntentChips";
 
 export function OverviewScreen({
   draftRunName,
@@ -23,6 +24,7 @@ export function OverviewScreen({
   } = useAppData();
   const { showToast } = useToast();
   const [prompt, setPrompt] = useState("");
+  const [intentOverride, setIntentOverride] = useState<SearchIntent | null>(null);
   const [running, setRunning] = useState(false);
   const promptValue = prompt.trim();
   const currentQuery = promptValue || getRunPrompt(selectedDiscoveryRun) || "";
@@ -35,6 +37,9 @@ export function OverviewScreen({
 
   useEffect(() => {
     setPrompt(selectedDiscoveryRunId ? getRunPrompt(selectedDiscoveryRun) : "");
+    setIntentOverride(
+      selectedDiscoveryRunId ? searchIntentFromRun(selectedDiscoveryRun) : null,
+    );
   }, [selectedDiscoveryRunId, selectedDiscoveryRun]);
 
   const submitSourceRequest = async (nextPrompt = prompt) => {
@@ -63,6 +68,7 @@ export function OverviewScreen({
         prompt: request,
         max_results: 25,
         run_immediately: true,
+        intent_override: intentOverride || undefined,
       });
       if (result) {
         const foundCount = result.current_result_count;
@@ -108,7 +114,10 @@ export function OverviewScreen({
               aria-label={`Find contacts for ${selectedProduct?.product_name || "selected product"}`}
               placeholder="Independent residential painters in Toronto with a website, quote form, and owner contact"
               value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                setIntentOverride(null);
+              }}
             />
           </label>
           <div className="composer-submit-group">
@@ -140,12 +149,23 @@ export function OverviewScreen({
         ) : null}
       </form>
 
+      {intentOverride ? (
+        <SearchIntentChips intent={intentOverride} onChange={setIntentOverride} />
+      ) : null}
+
       {emptyMessage ? <p className="empty-run-note">{emptyMessage}</p> : null}
 
       <p className="prompt-template-kicker">Or start from an example</p>
       <section className="prompt-template-grid" aria-label="Search templates">
         {promptTemplates.map((template) => (
-          <button key={template.id} type="button" onClick={() => setPrompt(template.query)}>
+          <button
+            key={template.id}
+            type="button"
+            onClick={() => {
+              setPrompt(template.query);
+              setIntentOverride(null);
+            }}
+          >
             <strong>
               {template.label}
               <span>{template.tag}</span>
