@@ -15,7 +15,7 @@ from db.models import BusinessModel, SourceObservationModel
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 
 
-RESOLVER_VERSION = 1
+RESOLVER_VERSION = 2
 
 
 def reconcile_business_facts(session: Session, business_id: str) -> dict[str, Any]:
@@ -169,8 +169,10 @@ def _map_website_status(value: str) -> tuple[str, int] | None:
         "active": ("present", 100),
         "available": ("present", 100),
         "website_found_during_confirmation": ("present", 100),
-        "no_website_found": ("missing", 95),
+        # A failed search is negative evidence, not proof that a site does not exist.
+        "no_website_found": ("not_listed", 65),
         "no_website_listed": ("not_listed", 55),
+        "missing": ("missing", 95),
         "unavailable": ("unavailable", 95),
         "website_unavailable": ("unavailable", 95),
         "parked": ("parked", 95),

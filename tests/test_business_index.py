@@ -266,7 +266,11 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert summary["successful_source_count"] == 3
     assert summary["filled_campaign_count"] == 0
     assert refreshed_run.status == "completed"
-    assert len(leads) == 0
+    assert len(leads) == 2
+    assert all(
+        lead.raw_sources[0]["raw"]["search_match"]["status"] == "unknown"
+        for lead in leads
+    )
     assert segment is not None
     assert len(segment.source_state) == 3
     assert job.type == "business_index.refresh"
@@ -370,7 +374,7 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
     assert segment.next_refresh_at > segment.last_refresh_at
 
 
-def test_unconfirmed_missing_listing_is_not_returned_as_missing_website() -> None:
+def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -438,4 +442,10 @@ def test_unconfirmed_missing_listing_is_not_returned_as_missing_website() -> Non
         )
         leads = LeadRepository(session).list_by_campaign(next_search.run.id)
 
-    assert leads == []
+    assert len(leads) == 1
+    raw = leads[0].raw_sources[0]["raw"]
+    assert raw["search_match"] == {
+        "status": "unknown",
+        "reason": "Website presence has not been verified.",
+    }
+    assert raw["business_facts"]["website_status"]["value"] == "not_listed"

@@ -329,17 +329,28 @@ def _evaluate_contract(
     for predicate in contract.all_of:
         if predicate.key not in fresh_facts:
             return "unknown", _predicate_failure(predicate, fresh_facts), 0, None
-        if not _predicate_matches(fresh_facts.get(predicate.key), predicate):
+        predicate_status = _predicate_status(fresh_facts.get(predicate.key), predicate)
+        if predicate_status == "unknown":
+            return "unknown", _predicate_unknown_reason(predicate), 0, None
+        if predicate_status == "not_matched":
             return "not_matched", _predicate_failure(predicate, fresh_facts), 0, None
     if contract.any_of:
         known = [predicate for predicate in contract.any_of if predicate.key in fresh_facts]
-        if any(_predicate_matches(fresh_facts[predicate.key], predicate) for predicate in known):
+        statuses = [
+            _predicate_status(fresh_facts[predicate.key], predicate) for predicate in known
+        ]
+        if "matched" in statuses:
             pass
-        elif len(known) < len(contract.any_of):
+        elif len(known) < len(contract.any_of) or "unknown" in statuses:
             missing = sorted(
                 {predicate.key for predicate in contract.any_of if predicate.key not in fresh_facts}
             )
-            return "unknown", f"Current facts are unavailable for: {', '.join(missing)}.", 0, None
+            reason = (
+                f"Current facts are unavailable for: {', '.join(missing)}."
+                if missing
+                else "Current facts are inconclusive for the requested criteria."
+            )
+            return "unknown", reason, 0, None
         else:
             return (
                 "not_matched",
@@ -386,10 +397,29 @@ def _predicate_matches(fact, predicate: FactPredicate) -> bool:
     return numeric >= target
 
 
+def _predicate_status(fact, predicate: FactPredicate) -> str:
+    value = fact_value(fact)
+    if value is None or value == "unknown":
+        return "unknown"
+    if (
+        predicate.key == "website_status"
+        and value == "not_listed"
+        and predicate.value != "not_listed"
+    ):
+        return "unknown"
+    return "matched" if _predicate_matches(fact, predicate) else "not_matched"
+
+
 def _predicate_failure(predicate: FactPredicate, facts: dict) -> str:
     if predicate.key not in facts:
         return f"Current fact is unavailable: {predicate.key}."
     return f"Current fact does not match: {predicate.key}."
+
+
+def _predicate_unknown_reason(predicate: FactPredicate) -> str:
+    if predicate.key == "website_status":
+        return "Website presence has not been verified."
+    return f"Current fact is inconclusive: {predicate.key}."
 
 
 def _opportunity_score(facts: dict) -> int:

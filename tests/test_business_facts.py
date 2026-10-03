@@ -107,7 +107,7 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
             raw={"website_presence": {"status": "no_website_found"}},
         )
         facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
-        assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "missing"
+        assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "not_listed"
 
         canonical.upsert_from_discovery_result(
             company_name="Test Painter",
@@ -129,7 +129,7 @@ def test_search_contract_matches_only_current_supported_facts() -> None:
             company_name="Alpha Brushworks",
             geography="Toronto",
             source="google_places",
-            raw=_source_payload("no_website_found", external_id="places/missing"),
+            raw=_source_payload("missing", external_id="places/missing"),
         )
         canonical.upsert_from_discovery_result(
             company_name="Beta Coatings",
@@ -352,6 +352,53 @@ def test_explicit_present_website_contract_returns_current_present_website() -> 
         assert [row["raw"]["canonical_business_id"] for row in rows] == [
             present.business_id
         ]
+
+
+def test_unconfirmed_website_absence_is_unknown_not_rejected() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        niche = _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        unresolved = canonical.upsert_from_discovery_result(
+            company_name="Alpha Brushworks",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("no_website_found", external_id="places/unresolved"),
+        )
+        contract = compile_search_contract(
+            _intent(
+                SearchIntentCriterion(
+                    id="website_present",
+                    description="Business has a website",
+                    mode=SearchCriterionMode.REQUIRED,
+                    fact_key="website_status",
+                    operator="equals",
+                    value="present",
+                )
+            )
+        )
+
+        rows, decisions = BusinessIndexSearchService(
+            session
+        ).search_candidates_with_diagnostics(
+            BusinessIndexSearch(
+                niche_id=niche.id,
+                market_key="toronto",
+                opportunity_type=OpportunityType.ANY,
+                evidence_fresh_after=utcnow() - timedelta(days=30),
+                result_count=10,
+                contract=contract,
+            )
+        )
+
+        assert [row["raw"]["canonical_business_id"] for row in rows] == [
+            unresolved.business_id
+        ]
+        assert rows[0]["raw"]["search_match"] == {
+            "status": "unknown",
+            "reason": "Website presence has not been verified.",
+        }
+        assert decisions[0]["status"] == "unknown"
 
 
 def _intent(*criteria: SearchIntentCriterion) -> SourceRequestIntent:

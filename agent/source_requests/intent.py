@@ -146,7 +146,18 @@ def _normalize_criteria(criteria, *, category: str, location: str):
 
 
 def _meaningful_tokens(value: str) -> set[str]:
-    ignored = {"a", "an", "the", "business", "businesses", "is", "are", "in", "located"}
+    ignored = {
+        "a",
+        "an",
+        "the",
+        "business",
+        "businesses",
+        "is",
+        "are",
+        "in",
+        "located",
+        "location",
+    }
     return {
         token[:-1] if len(token) > 3 and token.endswith("s") else token
         for token in "".join(
