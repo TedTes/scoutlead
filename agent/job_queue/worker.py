@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timezone
 from time import monotonic, sleep
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agent_runs.repository import AgentRunRepository
@@ -16,9 +17,10 @@ from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
 from db.session import create_database
-from db.models import CampaignModel, TerritoryModel
+from db.models import CampaignModel, QueueJobModel, TerritoryModel
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
+from job_queue.service import QueueService
 from messages.service import MessageService
 from search_evaluations.service import SearchEvaluationService
 from business_index.schemas import SearchContract
@@ -126,22 +128,21 @@ def run_once() -> bool:
                     job_id=job.id,
                 )
             elif job.type == JobType.BUSINESS_SEARCH_EVALUATE.value:
-                SearchEvaluationService(
-                    session=session,
-                    llm=services.llm,
-                ).evaluate(
-                    business_id=str(job.payload["business_id"]),
-                    contract_hash=str(job.payload["contract_hash"]),
-                    contract=SearchContract.from_dict(dict(job.payload["contract"])),
-                    evidence_fresh_after=(
-                        datetime.fromisoformat(str(job.payload["evidence_fresh_after"]))
-                        if job.payload.get("evidence_fresh_after")
-                        else None
-                    ),
-                )
                 if job.payload.get("campaign_id"):
-                    _source_request_service(session, services).finalize_search_evaluations(
-                        str(job.payload["campaign_id"])
+                    _consolidate_legacy_search_evaluations(session, job)
+                else:
+                    SearchEvaluationService(
+                        session=session,
+                        llm=services.llm,
+                    ).evaluate(
+                        business_id=str(job.payload["business_id"]),
+                        contract_hash=str(job.payload["contract_hash"]),
+                        contract=SearchContract.from_dict(dict(job.payload["contract"])),
+                        evidence_fresh_after=(
+                            datetime.fromisoformat(str(job.payload["evidence_fresh_after"]))
+                            if job.payload.get("evidence_fresh_after")
+                            else None
+                        ),
                     )
             elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
                 SearchEvaluationService(
@@ -233,6 +234,57 @@ def _source_request_service(
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,
         source_recipes=services.settings.discovery_source_recipe_configs,
+    )
+
+
+def _consolidate_legacy_search_evaluations(
+    session: Session,
+    current_job: QueueJobModel,
+) -> None:
+    """Convert pre-batch evaluation jobs left in the queue by an older deployment."""
+    campaign_id = str(current_job.payload["campaign_id"])
+    contract_hash = str(current_job.payload["contract_hash"])
+    active = list(
+        session.scalars(
+            select(QueueJobModel).where(
+                QueueJobModel.type == JobType.BUSINESS_SEARCH_EVALUATE.value,
+                QueueJobModel.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
+            )
+        )
+    )
+    legacy_jobs = [
+        job
+        for job in active
+        if str(job.payload.get("campaign_id") or "") == campaign_id
+        and str(job.payload.get("contract_hash") or "") == contract_hash
+    ]
+    business_ids = [
+        str(job.payload["business_id"])
+        for job in legacy_jobs
+        if job.payload.get("business_id")
+    ]
+    if not business_ids:
+        business_ids = [str(current_job.payload["business_id"])]
+    QueueService(session).enqueue_business_search_evaluation_batch(
+        business_ids=business_ids,
+        contract_hash=contract_hash,
+        contract=dict(current_job.payload["contract"]),
+        campaign_id=campaign_id,
+        evidence_fresh_after=str(current_job.payload.get("evidence_fresh_after") or ""),
+    )
+    completed_at = datetime.now(timezone.utc)
+    for job in legacy_jobs:
+        if job.id == current_job.id:
+            continue
+        job.status = JobStatus.COMPLETED.value
+        job.completed_at = completed_at
+        job.last_error = "Consolidated into a batch evaluation job."
+    session.commit()
+    logger.info(
+        "legacy_search_evaluations_consolidated campaign_id=%s job_count=%s business_count=%s",
+        campaign_id,
+        len(legacy_jobs),
+        len(set(business_ids)),
     )
 
 

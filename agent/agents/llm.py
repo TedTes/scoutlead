@@ -216,7 +216,11 @@ def _post_with_retry(
         except Exception as exc:
             if attempt >= max_attempts or not _retryable_request_error(exc):
                 raise
-            delay = backoff_seconds * (2 ** (attempt - 1))
+            delay = _retry_delay_seconds(
+                exc,
+                fallback=backoff_seconds * (2 ** (attempt - 1)),
+                attempt=attempt,
+            )
             logger.warning(
                 "%s_llm_retry task=%s attempt=%s max_attempts=%s delay_seconds=%s error=%s",
                 provider,
@@ -235,5 +239,30 @@ def _retryable_request_error(exc: Exception) -> bool:
     if isinstance(exc, httpx.TransportError):
         return True
     if isinstance(exc, httpx.HTTPStatusError):
+        if _openai_error_code(exc) in {"insufficient_quota", "billing_hard_limit_reached"}:
+            return False
         return exc.response.status_code == 429 or exc.response.status_code >= 500
     return False
+
+
+def _retry_delay_seconds(exc: Exception, *, fallback: float, attempt: int) -> float:
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return fallback
+    if exc.response.status_code == 429:
+        fallback = max(fallback, 5.0 * attempt)
+    value = exc.response.headers.get("retry-after")
+    try:
+        return max(fallback, float(value)) if value else fallback
+    except ValueError:
+        return fallback
+
+
+def _openai_error_code(exc: httpx.HTTPStatusError) -> str:
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        return ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return ""
+    return str(error.get("code") or error.get("type") or "")
