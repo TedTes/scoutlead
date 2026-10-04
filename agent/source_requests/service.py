@@ -25,6 +25,7 @@ from shared.utils import utcnow
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.intent import (
     SearchIntentInterpreter,
+    merge_product_defaults,
     normalize_search_intent,
     search_intent_request_hash,
 )
@@ -141,6 +142,7 @@ class SourceRequestService:
             contract_hash,
             plan,
             intent_request_hash,
+            base_intent,
         ) = self._prepare(request)
         opportunity_type = _opportunity_type(search_contract)
         requires_digital_opportunity = opportunity_type != OpportunityType.ANY
@@ -174,7 +176,9 @@ class SourceRequestService:
                         plan.intent.model_dump(mode="json") if plan.intent else None
                     ),
                     "search_intent": intent.model_dump(mode="json"),
+                    "search_intent_base": base_intent.model_dump(mode="json"),
                     "search_intent_request_hash": intent_request_hash,
+                    "apply_product_defaults": request.apply_product_defaults,
                     "search_contract_hash": contract_hash,
                     "requested_result_count": plan.max_results,
                     "business_index_segment_id": segment.id,
@@ -486,9 +490,17 @@ class SourceRequestService:
             evidence_max_age_days=(
                 _positive_int(index_contract.get("evidence_max_age_days")) or 30
             ),
+            apply_product_defaults=source_inputs.get("apply_product_defaults") is not False,
             intent_override=(
-                SourceRequestIntent.model_validate(source_inputs["search_intent"])
-                if isinstance(source_inputs.get("search_intent"), dict)
+                SourceRequestIntent.model_validate(
+                    source_inputs.get("search_intent_base")
+                    or source_inputs.get("search_intent")
+                )
+                if isinstance(
+                    source_inputs.get("search_intent_base")
+                    or source_inputs.get("search_intent"),
+                    dict,
+                )
                 else None
             ),
         )
@@ -496,10 +508,15 @@ class SourceRequestService:
     def _prepare(self, request: SourceRequestCreate):
         product = ProductRead.model_validate(self.products.get(request.product_id))
         intent_request_hash = search_intent_request_hash(request)
-        intent = self._resolve_intent(
+        base_intent = self._resolve_intent(
             request,
             product=product,
             request_hash=intent_request_hash,
+        )
+        intent = merge_product_defaults(
+            base_intent,
+            product,
+            enabled=request.apply_product_defaults,
         )
         search_contract = compile_search_contract(intent)
         contract_hash = search_contract_hash(
@@ -521,6 +538,7 @@ class SourceRequestService:
             contract_hash,
             plan,
             intent_request_hash,
+            base_intent,
         )
 
     def _resolve_intent(
@@ -540,7 +558,7 @@ class SourceRequestService:
             source_inputs = campaign.source_inputs or {}
             if source_inputs.get("search_intent_request_hash") != request_hash:
                 continue
-            saved = source_inputs.get("search_intent")
+            saved = source_inputs.get("search_intent_base") or source_inputs.get("search_intent")
             if isinstance(saved, dict):
                 return normalize_search_intent(SourceRequestIntent.model_validate(saved))
         return self.intent_interpreter.interpret(request=request, product=product)

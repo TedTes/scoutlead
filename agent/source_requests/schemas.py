@@ -68,6 +68,7 @@ class SourceRequestCreate(BaseModel):
     geography: str | None = None
     opportunity_type: str | None = None
     evidence_max_age_days: int = Field(default=30, ge=1, le=365)
+    apply_product_defaults: bool = True
     intent_override: SourceRequestIntent | None = None
 
 

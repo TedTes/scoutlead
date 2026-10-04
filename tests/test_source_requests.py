@@ -115,6 +115,124 @@ def test_identical_new_search_reuses_saved_intent_without_another_llm_call() -> 
         assert first.interpreted_intent == second.interpreted_intent
 
 
+def test_structured_search_bypasses_intent_llm_and_merges_product_defaults() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            _product().model_copy(
+                update={
+                    "ideal_customer_signals": ["Missing a clear quote flow"],
+                    "exclusions": ["National chains"],
+                }
+            )
+        )
+        llm = CountingIntentLLM()
+        intent = SourceRequestIntent(
+            business_category="residential painting contractors",
+            location="Toronto",
+            criteria=[
+                SearchIntentCriterion(
+                    id="user_active",
+                    description="Currently operating",
+                    mode=SearchCriterionMode.REQUIRED,
+                )
+            ],
+            contact_requirements=["phone"],
+            search_query="residential painting contractors in Toronto",
+            confidence=100,
+            rationale="User supplied structured controls.",
+        )
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=llm,
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            llm=llm,
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="residential painting contractors in Toronto",
+                business_category="residential painting contractors",
+                geography="Toronto",
+                intent_override=intent,
+                run_immediately=False,
+            )
+        )
+
+        saved = result.run.source_inputs
+
+    assert llm.intent_calls == 0
+    assert result.interpreted_intent is not None
+    assert result.interpreted_intent.required_signals == ["Missing a clear quote flow"]
+    assert [criterion.id for criterion in result.interpreted_intent.criteria] == [
+        "user_active",
+        "product_exclusion_1",
+    ]
+    assert saved["apply_product_defaults"] is True
+    assert [criterion["id"] for criterion in saved["search_intent_base"]["criteria"]] == [
+        "user_active"
+    ]
+
+
+def test_structured_search_can_disable_product_defaults() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(
+            _product().model_copy(
+                update={
+                    "ideal_customer_signals": ["Missing a clear quote flow"],
+                    "exclusions": ["National chains"],
+                }
+            )
+        )
+        llm = CountingIntentLLM()
+        intent = SourceRequestIntent(
+            business_category="residential painting contractors",
+            location="Toronto",
+            search_query="residential painting contractors in Toronto",
+            confidence=100,
+            rationale="User supplied structured controls.",
+        )
+        result = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=CampaignService(
+                session=session,
+                llm=llm,
+                search_tool=SearchTool(),
+                browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            ),
+            llm=llm,
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="residential painting contractors in Toronto",
+                business_category="residential painting contractors",
+                geography="Toronto",
+                apply_product_defaults=False,
+                intent_override=intent,
+                run_immediately=False,
+            )
+        )
+
+    assert llm.intent_calls == 0
+    assert result.interpreted_intent is not None
+    assert result.interpreted_intent.criteria == []
+    assert result.interpreted_intent.required_signals == []
+    assert result.interpreted_intent.excluded_result_types == []
+    assert result.run.source_inputs["apply_product_defaults"] is False
+
+
 def test_auto_source_request_expands_ranked_discovery_tasks() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

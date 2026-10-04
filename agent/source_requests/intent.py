@@ -8,7 +8,12 @@ from business_index.contracts import fact_catalog_for_prompt
 from products.schemas import ProductRead
 from shared.errors import ValidationError
 from shared.utils import normalize_text
-from source_requests.schemas import SourceRequestCreate, SourceRequestIntent
+from source_requests.schemas import (
+    SearchCriterionMode,
+    SearchIntentCriterion,
+    SourceRequestCreate,
+    SourceRequestIntent,
+)
 
 
 SEARCH_INTENT_SCHEMA_VERSION = 1
@@ -103,6 +108,64 @@ def normalize_search_intent(
     )
 
 
+def merge_product_defaults(
+    intent: SourceRequestIntent,
+    product: ProductRead,
+    *,
+    enabled: bool = True,
+) -> SourceRequestIntent:
+    """Apply stable product policy without asking the intent model to repeat it.
+
+    Product opportunity signals guide source discovery but do not become hard
+    eligibility gates. Product exclusions are policy and therefore remain hard
+    filters unless the request explicitly disables product defaults.
+    """
+    criteria = [
+        criterion
+        for criterion in intent.criteria
+        if not criterion.id.startswith("product_exclusion_")
+    ]
+    if not enabled:
+        return intent.model_copy(update={"criteria": criteria})
+    seen = {
+        (criterion.mode.value, normalize_text(criterion.description).casefold())
+        for criterion in criteria
+    }
+
+    def add(description: str, mode: SearchCriterionMode, criterion_id: str) -> None:
+        normalized = normalize_text(description)
+        key = (mode.value, normalized.casefold())
+        if not normalized or key in seen:
+            return
+        seen.add(key)
+        criteria.append(
+            SearchIntentCriterion(
+                id=criterion_id,
+                description=normalized,
+                mode=mode,
+                evidence_requirement="Current public business evidence",
+            )
+        )
+
+    opportunity_signals = [
+        normalize_text(value) for value in product.ideal_customer_signals if normalize_text(value)
+    ]
+    for index, exclusion in enumerate(product.exclusions):
+        add(exclusion, SearchCriterionMode.EXCLUDED, f"product_exclusion_{index + 1}")
+
+    return intent.model_copy(
+        update={
+            "criteria": criteria,
+            "required_signals": list(
+                dict.fromkeys([*intent.required_signals, *opportunity_signals])
+            ),
+            "excluded_result_types": list(
+                dict.fromkeys([*intent.excluded_result_types, *product.exclusions])
+            ),
+        }
+    )
+
+
 def search_intent_request_hash(request: SourceRequestCreate) -> str:
     payload = {
         "schema_version": SEARCH_INTENT_SCHEMA_VERSION,
@@ -110,6 +173,12 @@ def search_intent_request_hash(request: SourceRequestCreate) -> str:
         "prompt": normalize_text(request.prompt).casefold(),
         "business_category": normalize_text(request.business_category).casefold(),
         "geography": normalize_text(request.geography).casefold(),
+        "apply_product_defaults": request.apply_product_defaults,
+        "intent_override": (
+            request.intent_override.model_dump(mode="json")
+            if request.intent_override is not None
+            else None
+        ),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
