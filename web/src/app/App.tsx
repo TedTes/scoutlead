@@ -36,7 +36,13 @@ import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
-import type { DiscoveryResult, DiscoveryRun, Product, Territory } from "../types/domain";
+import type {
+  DiscoveryResult,
+  DiscoveryRun,
+  Product,
+  ProductProfileInput,
+  Territory,
+} from "../types/domain";
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 import {
   baseExportFileName,
@@ -109,7 +115,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     productContacts,
     territories,
     gmailConnectionStatus,
-    createProductFromDescription,
+    createProductFromProfile,
     deleteProduct,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
@@ -694,7 +700,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           products={products}
           onClose={() => setIsCreatingProduct(false)}
           onCreate={async (input) => {
-            const created = await createProductFromDescription(input);
+            const created = await createProductFromProfile(input);
             if (created) {
               setSelectedProductId(created.id);
               setSelectedDiscoveryRunId("");
@@ -1154,11 +1160,15 @@ function AddProductDialog({
 }: {
   products: Product[];
   onClose: () => void;
-  onCreate: (input: { product_name: string; description: string }) => Promise<Product | null>;
+  onCreate: (input: ProductProfileInput) => Promise<Product | null>;
 }) {
   const { showToast } = useToast();
   const [productName, setProductName] = useState("");
-  const [description, setDescription] = useState("");
+  const [offerSummary, setOfferSummary] = useState("");
+  const [targetCustomer, setTargetCustomer] = useState("");
+  const [problemBeingSolved, setProblemBeingSolved] = useState("");
+  const [opportunitySignals, setOpportunitySignals] = useState("");
+  const [exclusions, setExclusions] = useState("");
   const [creating, setCreating] = useState(false);
   const [localError, setLocalError] = useState("");
   const normalizedProductName = productName.trim().toLowerCase();
@@ -1167,7 +1177,9 @@ function AddProductDialog({
     products.some((product) => product.product_name.trim().toLowerCase() === normalizedProductName);
   const canCreateProduct =
     productName.trim().length > 0 &&
-    description.trim().length >= 20 &&
+    offerSummary.trim().length > 0 &&
+    targetCustomer.trim().length > 0 &&
+    problemBeingSolved.trim().length > 0 &&
     !hasDuplicateProductName &&
     !creating;
 
@@ -1178,7 +1190,11 @@ function AddProductDialog({
     try {
       const created = await onCreate({
         product_name: productName.trim(),
-        description: description.trim(),
+        offer_summary: offerSummary.trim(),
+        target_customer: targetCustomer.trim(),
+        problem_being_solved: problemBeingSolved.trim(),
+        ideal_customer_signals: parseProfileValues(opportunitySignals),
+        exclusions: parseProfileValues(exclusions),
       });
       if (!created) {
         showToast({ title: "Product was not created", message: "Check the product details and try again.", tone: "red" });
@@ -1186,7 +1202,7 @@ function AddProductDialog({
       }
       showToast({
         title: "Product created",
-        message: "Complete the product profile, then create its first search.",
+        message: "The product profile is ready for its first search.",
         tone: "green",
       });
       onClose();
@@ -1200,7 +1216,7 @@ function AddProductDialog({
   };
 
   return (
-    <Modal title="New product" onClose={onClose}>
+    <Modal className="add-product-modal" title="New product" onClose={onClose}>
       <form
         className="add-product-form"
         onSubmit={(event) => {
@@ -1208,25 +1224,71 @@ function AddProductDialog({
           void submit();
         }}
       >
-        <label className="field">
-          <span>Product name</span>
-          <input
-            autoFocus
-            placeholder="Product name"
-            value={productName}
-            onChange={(event) => setProductName(event.target.value)}
-          />
-          {hasDuplicateProductName ? <em>A product with this name already exists.</em> : null}
-        </label>
-        <label className="field">
-          <span>Product description</span>
-          <textarea
-            placeholder="Describe what the product does, who it is for, and any search context that matters."
-            rows={4}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </label>
+        <div className="add-product-fields">
+          <label className="field add-product-name-field">
+            <span>Product name</span>
+            <input
+              autoFocus
+              placeholder="Local Service Website Growth"
+              value={productName}
+              onChange={(event) => setProductName(event.target.value)}
+            />
+            {hasDuplicateProductName ? <em>A product with this name already exists.</em> : null}
+          </label>
+          <label className="field add-product-offer-field">
+            <span>What you sell</span>
+            <textarea
+              placeholder="Website and conversion improvements for local businesses."
+              rows={3}
+              value={offerSummary}
+              onChange={(event) => setOfferSummary(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Ideal customer</span>
+            <textarea
+              placeholder="Independent home-service businesses."
+              rows={3}
+              value={targetCustomer}
+              onChange={(event) => setTargetCustomer(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Problem solved</span>
+            <textarea
+              placeholder="Weak websites and missing quote or booking flows."
+              rows={3}
+              value={problemBeingSolved}
+              onChange={(event) => setProblemBeingSolved(event.target.value)}
+            />
+          </label>
+        </div>
+        <details className="add-product-advanced">
+          <summary>
+            <span>Advanced criteria</span>
+            <ChevronDown size={15} />
+          </summary>
+          <div className="add-product-advanced-fields">
+            <label className="field">
+              <span>Opportunity signals</span>
+              <textarea
+                placeholder="Active business, weak conversion flow, low review count"
+                rows={3}
+                value={opportunitySignals}
+                onChange={(event) => setOpportunitySignals(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Exclude</span>
+              <textarea
+                placeholder="Agencies, directories, national chains"
+                rows={3}
+                value={exclusions}
+                onChange={(event) => setExclusions(event.target.value)}
+              />
+            </label>
+          </div>
+        </details>
         {localError ? <p className="form-error">{localError}</p> : null}
         <div className="dialog-actions">
           <button className="secondary" type="button" onClick={onClose}>
@@ -1239,6 +1301,15 @@ function AddProductDialog({
       </form>
     </Modal>
   );
+}
+
+function parseProfileValues(value: string) {
+  return [...new Set(
+    value
+      .split(/[\n,;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )];
 }
 
 function displayProductName(product: Product) {

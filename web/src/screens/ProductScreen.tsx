@@ -31,6 +31,7 @@ export function ProductScreen({
   const { showToast } = useToast();
   const [name, setName] = useState("");
   const [offerSummary, setOfferSummary] = useState("");
+  const [problemBeingSolved, setProblemBeingSolved] = useState("");
   const [targetCustomer, setTargetCustomer] = useState("");
   const [targetGeography, setTargetGeography] = useState(DEFAULT_TARGET_GEOGRAPHY);
   const [idealCustomerSignals, setIdealCustomerSignals] = useState<string[]>([]);
@@ -43,6 +44,7 @@ export function ProductScreen({
     const draft = productProfileDraft(selectedProduct);
     setName(selectedProduct?.product_name || "");
     setOfferSummary(draft.offerSummary);
+    setProblemBeingSolved(draft.problemBeingSolved);
     setTargetCustomer(draft.targetCustomer);
     setTargetGeography(selectedProduct?.target_geography || DEFAULT_TARGET_GEOGRAPHY);
     setIdealCustomerSignals(draft.idealCustomerSignals);
@@ -67,6 +69,7 @@ export function ProductScreen({
     selectedProduct &&
       (name.trim() !== selectedProduct.product_name.trim() ||
         offerSummary.trim() !== (selectedProduct.offer_summary || selectedProduct.product_description || "").trim() ||
+        problemBeingSolved.trim() !== (selectedProduct.problem_being_solved || "").trim() ||
         targetCustomer.trim() !== selectedProduct.target_customer.trim() ||
         targetGeography.trim() !== selectedProduct.target_geography.trim() ||
         !sameList(normalizedSignals, normalizeList(selectedProduct.ideal_customer_signals || [])) ||
@@ -76,6 +79,7 @@ export function ProductScreen({
     selectedProduct &&
       name.trim() &&
       offerSummary.trim().length >= 20 &&
+      problemBeingSolved.trim() &&
       targetCustomer.trim() &&
       targetGeography.trim() &&
       hasChanges &&
@@ -100,7 +104,10 @@ export function ProductScreen({
     try {
       await autoSaveProduct(selectedProduct.id, {
         product_name: name.trim(),
+        product_description: offerSummary.trim(),
         offer_summary: offerSummary.trim(),
+        value_proposition: offerSummary.trim(),
+        problem_being_solved: problemBeingSolved.trim(),
         target_customer: targetCustomer.trim(),
         target_geography: targetGeography.trim(),
         ideal_customer_signals: normalizedSignals,
@@ -124,6 +131,7 @@ export function ProductScreen({
     normalizedExclusions,
     normalizedSignals,
     offerSummary,
+    problemBeingSolved,
     selectedProduct,
     showToast,
     targetCustomer,
@@ -225,6 +233,20 @@ export function ProductScreen({
                 />
                 <small className="product-settings-copy-hint">
                   State the service and the practical result a customer receives.
+                </small>
+              </label>
+
+              <label className="product-settings-field">
+                <span className="product-settings-label">Problem solved</span>
+                <textarea
+                  className="product-settings-textarea is-compact"
+                  rows={3}
+                  value={problemBeingSolved}
+                  onChange={(event) => setProblemBeingSolved(event.target.value)}
+                  onBlur={() => void saveProduct()}
+                />
+                <small className="product-settings-copy-hint">
+                  Describe the customer problem that creates demand for this offer.
                 </small>
               </label>
             </div>
@@ -333,6 +355,7 @@ function productProfileDraft(product: Product | undefined) {
   if (!product) {
     return {
       offerSummary: "",
+      problemBeingSolved: "",
       targetCustomer: "",
       idealCustomerSignals: [] as string[],
       exclusions: [] as string[],
@@ -344,6 +367,7 @@ function productProfileDraft(product: Product | undefined) {
   const savedTarget = product.target_customer.trim();
   return {
     offerSummary: labeled.offer || rawSummary,
+    problemBeingSolved: labeled.problemSolved || product.problem_being_solved || "",
     targetCustomer:
       labeled.targetCustomer || (/^define target customer/i.test(savedTarget) ? "" : savedTarget),
     idealCustomerSignals: normalizeList(
@@ -369,6 +393,7 @@ function parseLabeledProductSummary(value: string) {
   });
   return {
     offer: fields.offer || "",
+    problemSolved: fields["problem solved"] || "",
     targetCustomer: fields["target customer"] || "",
     positiveSignals: fields["positive signals"] || "",
     disqualifiers: fields.disqualifiers || "",

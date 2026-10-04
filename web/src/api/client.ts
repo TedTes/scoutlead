@@ -22,6 +22,7 @@ import type {
   Metrics,
   Product,
   ProductDescriptionInput,
+  ProductProfileInput,
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
@@ -59,6 +60,10 @@ export class ApiClient {
 
   createProductFromDescription(input: ProductDescriptionInput) {
     return this.request<Product>("/products/from-description", { method: "POST", body: input });
+  }
+
+  createProductFromProfile(input: ProductProfileInput) {
+    return this.request<Product>("/products/from-profile", { method: "POST", body: input });
   }
 
   updateProduct(id: string, product: unknown) {

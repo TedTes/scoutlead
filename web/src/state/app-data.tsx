@@ -18,6 +18,7 @@ import type {
   Metrics,
   Product,
   ProductDescriptionInput,
+  ProductProfileInput,
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
@@ -54,6 +55,7 @@ type AppDataContextValue = {
   disconnectGmail: (productId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<Product | null>;
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
+  createProductFromProfile: (input: ProductProfileInput) => Promise<Product | null>;
   deleteProduct: (productId?: string) => Promise<void>;
   discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
@@ -435,6 +437,16 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         let created: Product | null = null;
         await mutate(async () => {
           const product = await api.createProductFromDescription(input);
+          localStorage.setItem("selectedProductId", product.id);
+          localStorage.setItem("selectedDiscoveryRunId", "");
+          created = product;
+        });
+        return created;
+      },
+      createProductFromProfile: async (input) => {
+        let created: Product | null = null;
+        await mutate(async () => {
+          const product = await api.createProductFromProfile(input);
           localStorage.setItem("selectedProductId", product.id);
           localStorage.setItem("selectedDiscoveryRunId", "");
           created = product;

@@ -32,6 +32,16 @@ export type ProductDescriptionInput = {
   target_geography?: string;
 };
 
+export type ProductProfileInput = {
+  product_name: string;
+  offer_summary: string;
+  target_customer: string;
+  problem_being_solved: string;
+  target_geography?: string;
+  ideal_customer_signals: string[];
+  exclusions: string[];
+};
+
 export type QualificationCriterion = {
   id?: string | null;
   label: string;

@@ -8425,6 +8425,82 @@ button.bulk-recipient-select:hover {
   padding: 12px 18px 18px;
 }
 
+.add-product-modal {
+  max-height: min(760px, calc(100vh - 32px));
+  width: min(640px, calc(100vw - 32px));
+}
+
+.add-product-modal .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.add-product-form {
+  display: grid;
+  gap: 14px;
+}
+
+.add-product-fields,
+.add-product-advanced-fields {
+  display: grid;
+  gap: 13px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.add-product-form .field {
+  margin: 0;
+  min-width: 0;
+}
+
+.add-product-name-field,
+.add-product-offer-field {
+  grid-column: 1 / -1;
+}
+
+.add-product-form textarea {
+  line-height: 1.45;
+  min-height: 82px;
+  resize: vertical;
+}
+
+.add-product-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.add-product-advanced summary {
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 650;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 30px;
+}
+
+.add-product-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.add-product-advanced summary svg {
+  color: var(--faint);
+  transition: transform 150ms ease;
+}
+
+.add-product-advanced[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.add-product-advanced-fields {
+  padding-top: 12px;
+}
+
+.add-product-form .dialog-actions {
+  margin-top: 0;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -9926,6 +10002,16 @@ button.bulk-recipient-select:hover {
 
   .modal-card {
     width: calc(100vw - 20px);
+  }
+
+  .add-product-fields,
+  .add-product-advanced-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .add-product-name-field,
+  .add-product-offer-field {
+    grid-column: auto;
   }
 
   .toast-stack {

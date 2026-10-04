@@ -69,18 +69,20 @@ export function useToast() {
 export function Modal({
   title,
   children,
+  className = "",
   footer,
   onClose,
 }: {
   title: string;
   children: ReactNode;
+  className?: string;
   footer?: ReactNode;
   onClose: () => void;
 }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="modal-card"
+        className={`modal-card ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
