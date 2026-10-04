@@ -553,6 +553,8 @@ class SourceRequestService:
                 request.intent_override,
                 explicit_category=request.business_category,
                 explicit_geography=request.geography,
+                default_category=product.target_customer,
+                default_geography=product.target_geography,
             )
         for campaign in self.campaigns.campaigns.list_by_product(product.id):
             source_inputs = campaign.source_inputs or {}
@@ -560,7 +562,11 @@ class SourceRequestService:
                 continue
             saved = source_inputs.get("search_intent_base") or source_inputs.get("search_intent")
             if isinstance(saved, dict):
-                return normalize_search_intent(SourceRequestIntent.model_validate(saved))
+                return normalize_search_intent(
+                    SourceRequestIntent.model_validate(saved),
+                    default_category=product.target_customer,
+                    default_geography=product.target_geography,
+                )
         return self.intent_interpreter.interpret(request=request, product=product)
 
     @staticmethod

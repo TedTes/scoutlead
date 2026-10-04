@@ -445,6 +445,22 @@ def test_search_intent_keeps_scope_out_of_criteria_and_website_out_of_contacts()
     assert normalized.contact_requirements == []
 
 
+def test_search_intent_inherits_product_geography_when_request_omits_it() -> None:
+    normalized = normalize_search_intent(
+        SourceRequestIntent(
+            business_category="residential painting contractors",
+            location="",
+            search_query="residential painting contractors",
+            confidence=90,
+            rationale="Parsed request",
+        ),
+        default_geography="Canada",
+    )
+
+    assert normalized.location == "Canada"
+    assert normalized.search_query == "residential painting contractors in Canada"
+
+
 def test_dynamic_website_search_returns_existing_business_without_semantic_gate() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

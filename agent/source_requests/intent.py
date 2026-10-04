@@ -37,8 +37,10 @@ class SearchIntentInterpreter:
                 "The user's request has priority over product defaults. Preserve nuanced criteria "
                 "as plain-language criteria with fact_key=null. Use a fact_key only when the "
                 "criterion exactly matches a supported fact definition. Do not invent facts, "
-                "business categories, locations, thresholds, or exclusions. Business category and "
-                "location define candidate scope and must not be repeated as criteria. A contact "
+                "business categories, locations, thresholds, or exclusions. When the request omits "
+                "a business category or location, inherit it from the product target customer or "
+                "target geography. Business category and location define candidate scope and must "
+                "not be repeated as criteria. A contact "
                 "requirement is only a required outreach channel: email, phone, or any_contact; a "
                 "website is business evidence, not a contact channel. Put every other condition "
                 "that decides whether a business is returned in criteria. Group required, "
@@ -64,6 +66,8 @@ class SearchIntentInterpreter:
             interpreted,
             explicit_category=request.business_category,
             explicit_geography=request.geography,
+            default_category=product.target_customer,
+            default_geography=product.target_geography,
         )
 
 
@@ -72,9 +76,19 @@ def normalize_search_intent(
     *,
     explicit_category: str | None = None,
     explicit_geography: str | None = None,
+    default_category: str | None = None,
+    default_geography: str | None = None,
 ) -> SourceRequestIntent:
-    category = normalize_text(explicit_category) or normalize_text(intent.business_category)
-    location = normalize_text(explicit_geography) or normalize_text(intent.location)
+    category = (
+        normalize_text(explicit_category)
+        or normalize_text(intent.business_category)
+        or normalize_text(default_category)
+    )
+    location = (
+        normalize_text(explicit_geography)
+        or normalize_text(intent.location)
+        or normalize_text(default_geography)
+    )
     if not category:
         raise ValidationError(
             "search intent needs a business category",
