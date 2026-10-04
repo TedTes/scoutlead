@@ -25,7 +25,7 @@ export function SearchIntentChips({
       {intent.criteria.map((criterion) => (
         <span className={`search-intent-chip is-${criterion.mode}`} key={criterion.id}>
           {criterion.description}
-          {onChange ? (
+          {onChange && !criterion.id.startsWith("product_") ? (
             <button
               aria-label={`Remove ${criterion.description}`}
               onClick={() => removeCriterion(criterion.id)}
@@ -34,6 +34,8 @@ export function SearchIntentChips({
             >
               <X size={12} />
             </button>
+          ) : criterion.id.startsWith("product_") ? (
+            <small>Product default</small>
           ) : null}
         </span>
       ))}

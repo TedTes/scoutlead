@@ -151,6 +151,7 @@ export type SourceRequestInput = {
   geography?: string;
   opportunity_type?: "any" | "missing_website" | "missing_or_unavailable_website" | "weak_or_missing_website";
   evidence_max_age_days?: number;
+  apply_product_defaults?: boolean;
   intent_override?: SearchIntent;
 };
 
