@@ -23,6 +23,7 @@ from products.schemas import (
     ProductDescriptionCreate,
     ProductDiscoveryPlan,
     ProductInferenceRead,
+    ProductProfileCreate,
     ProductRead,
     ProductSourceCreate,
     ProductSourceEvidence,
@@ -54,6 +55,50 @@ class ProductService:
 
     def create_from_description(self, request: ProductDescriptionCreate) -> ProductModel:
         return self.products.create(self.product_from_description(request))
+
+    def create_from_profile(self, request: ProductProfileCreate) -> ProductModel:
+        offer = normalize_text(request.offer_summary)
+        target_customer = normalize_text(request.target_customer)
+        problem = normalize_text(request.problem_being_solved)
+        product = ProductCreate(
+            product_name=normalize_text(request.product_name),
+            product_description=offer,
+            target_customer=target_customer,
+            problem_being_solved=problem,
+            value_proposition=offer,
+            target_geography=(
+                normalize_text(request.target_geography) or "United States, Canada"
+            ),
+            validation_goal="Find businesses that match the product's customer profile.",
+            qualification_criteria=[
+                {
+                    "label": "Target customer fit",
+                    "description": target_customer,
+                    "weight": 1,
+                    "required": True,
+                    "evidence_required": True,
+                },
+                {
+                    "label": "Problem fit",
+                    "description": problem,
+                    "weight": 1,
+                    "required": True,
+                    "evidence_required": True,
+                },
+            ],
+            preferred_discovery_sources=[],
+            outreach_objective="Start a relevant business conversation.",
+            constraints=["Human approval required before outbound messages are sent."],
+            offer_summary=offer,
+            ideal_customer_signals=request.ideal_customer_signals,
+            exclusions=request.exclusions,
+            source_evidence={
+                "source": "structured_profile",
+                "config_generated_by": "user",
+                "profile_status": "ready",
+            },
+        )
+        return self.products.create(product)
 
     def product_from_description(self, request: ProductDescriptionCreate) -> ProductCreate:
         description = normalize_text(request.description)

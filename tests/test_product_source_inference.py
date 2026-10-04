@@ -13,6 +13,7 @@ from products.schemas import (
     ProductDescriptionCreate,
     ProductDiscoveryPlan,
     ProductDiscoveryStart,
+    ProductProfileCreate,
     ProductSourceCreate,
     ProductSourceEvidence,
     QualificationCriterion,
@@ -512,6 +513,39 @@ def test_product_can_be_created_from_description_without_llm_or_scraping() -> No
         assert product.qualification_criteria
         assert product.preferred_discovery_sources == []
         assert product.source_evidence["config_generated_by"] == "deterministic_draft"
+
+
+def test_product_can_be_created_from_structured_profile() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductService(session).create_from_profile(
+            ProductProfileCreate(
+                product_name="Local Service Website Growth",
+                offer_summary="Website and conversion improvements for local businesses.",
+                target_customer="Independent home-service businesses.",
+                problem_being_solved="Weak websites and missing quote or booking flows.",
+                ideal_customer_signals=["Active local business", "Weak conversion flow"],
+                exclusions=["National chains", "Marketing agencies"],
+            )
+        )
+
+        assert product.product_name == "Local Service Website Growth"
+        assert product.offer_summary.startswith("Website and conversion")
+        assert product.target_customer == "Independent home-service businesses."
+        assert product.problem_being_solved.startswith("Weak websites")
+        assert product.ideal_customer_signals == [
+            "Active local business",
+            "Weak conversion flow",
+        ]
+        assert product.exclusions == ["National chains", "Marketing agencies"]
+        assert [criterion["label"] for criterion in product.qualification_criteria] == [
+            "Target customer fit",
+            "Problem fit",
+        ]
+        assert product.source_evidence["profile_status"] == "ready"
 
 
 def test_product_discovery_plan_is_generated_from_saved_description() -> None:

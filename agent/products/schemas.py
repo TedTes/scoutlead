@@ -73,6 +73,21 @@ class ProductDescriptionCreate(BaseModel):
     target_geography: str = Field(default="United States, Canada", min_length=1)
 
 
+class ProductProfileCreate(BaseModel):
+    product_name: str = Field(min_length=1)
+    offer_summary: str = Field(min_length=1)
+    target_customer: str = Field(min_length=1)
+    problem_being_solved: str = Field(min_length=1)
+    target_geography: str = Field(default="United States, Canada", min_length=1)
+    ideal_customer_signals: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+
+    @field_validator("ideal_customer_signals", "exclusions")
+    @classmethod
+    def non_empty_profile_values(cls, values: list[str]) -> list[str]:
+        return [value.strip() for value in values if value.strip()]
+
+
 class ProductSourceCreate(BaseModel):
     source: str = Field(min_length=1)
     context: str | None = Field(default=None, min_length=1)

@@ -11,6 +11,7 @@ from products.schemas import (
     ProductCreate,
     ProductDescriptionCreate,
     ProductDiscoveryStart,
+    ProductProfileCreate,
     ProductRead,
     ProductUpdate,
 )
@@ -92,6 +93,16 @@ def create_product_from_description(
     auth: CurrentAuth,
 ):
     return _service(session, services, auth).create_from_description(request)
+
+
+@router.post("/from-profile", response_model=ProductRead)
+def create_product_from_profile(
+    request: ProductProfileCreate,
+    session: DbSession,
+    services: Annotated[AppServices, Depends(get_services)],
+    auth: CurrentAuth,
+):
+    return _service(session, services, auth).create_from_profile(request)
 
 
 @router.post("/{product_id}/discover", response_model=CampaignRunSummary)
