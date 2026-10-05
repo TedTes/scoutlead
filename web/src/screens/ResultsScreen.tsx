@@ -127,6 +127,7 @@ export function ResultsScreen({
     selectedProduct,
     selectedProductId,
     selectedProfileId,
+    profileBatch,
     setSelectedDiscoveryRunId,
     setSelectedProfileId,
     deleteDiscoveryRuns,
@@ -199,6 +200,11 @@ export function ResultsScreen({
   const selectedDelivery = selectedTerritory
     ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
     : undefined;
+  const visibleProfileBatch =
+    profileBatch?.profile.id === selectedProfileId
+    && (!selectedDelivery || profileBatch.delivery?.id === selectedDelivery.id)
+      ? profileBatch
+      : null;
   const sourceContacts = selectedDiscoveryRunId
     ? selectedDelivery && deliveryContacts ? deliveryContacts : snapshot.results
     : [];
@@ -1162,12 +1168,8 @@ export function ResultsScreen({
             </ul>
           ) : (
             <section className="result-empty-card">
-              <strong>No leads match this view.</strong>
-              <p>
-                {contacts.length
-                  ? "Change the search or filter to inspect the leads in this run."
-                  : "This run has no leads yet."}
-              </p>
+              <strong>{emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).title}</strong>
+              <p>{emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
             </section>
           )}
         </section>
@@ -3605,6 +3607,46 @@ function deliveryDate(delivery: TerritoryDelivery) {
 function deliveryLabel(delivery: TerritoryDelivery) {
   const date = deliveryDate(delivery);
   return date ? `${date} · ${delivery.new_contact_count}` : `${delivery.new_contact_count} contacts`;
+}
+
+function emptyBatchCopy(
+  contactCount: number,
+  state?: "setup" | "scoring" | "retrying" | "ready" | "empty" | "partial" | "failed",
+  failureClass?: "rate_limit" | "quota" | "other" | null,
+) {
+  if (contactCount) {
+    return {
+      title: "No leads match this view.",
+      detail: "Change the search or filter to inspect the leads in this batch.",
+    };
+  }
+  if (state === "retrying") {
+    return {
+      title: "Retrying this lead batch.",
+      detail: "The previous attempt failed. The worker has queued an automatic retry.",
+    };
+  }
+  if (state === "scoring" || state === "setup") {
+    return {
+      title: "Building this lead batch.",
+      detail: "Candidate evaluation is still running. Results will appear automatically.",
+    };
+  }
+  if (state === "failed") {
+    const cause = failureClass === "rate_limit"
+      ? "The scoring worker hit a provider rate limit."
+      : failureClass === "quota"
+        ? "The scoring worker has no remaining provider quota."
+        : "The scoring worker exhausted its retries.";
+    return {
+      title: "This lead batch could not be completed.",
+      detail: `${cause} Check the worker logs before trying again.`,
+    };
+  }
+  return {
+    title: "No eligible leads in this batch.",
+    detail: "No indexed business passed the audience criteria for this delivery.",
+  };
 }
 
 function formatCompactDate(value?: string | null) {

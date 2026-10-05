@@ -449,12 +449,22 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   }, [refreshSnapshot, selectedDiscoveryRun?.id, selectedDiscoveryRun?.status]);
 
   useEffect(() => {
-    if (profileBatch?.state !== "scoring" || !selectedProfileIdState) return;
+    if (
+      !profileBatch
+      || !["scoring", "retrying"].includes(profileBatch.state)
+      || !selectedProfileIdState
+    ) return;
+    const delay = profileBatch.state === "retrying" ? 15_000 : 2_500;
     const timer = window.setInterval(() => {
       void refreshProfileBatch(selectedProfileIdState);
-    }, 2500);
+    }, delay);
     return () => window.clearInterval(timer);
-  }, [profileBatch?.state, refreshProfileBatch, selectedProfileIdState]);
+  }, [
+    profileBatch?.delivery?.status,
+    profileBatch?.state,
+    refreshProfileBatch,
+    selectedProfileIdState,
+  ]);
 
   useEffect(() => {
     void refreshProductContacts(selectedProductIdState, discoveryRuns);

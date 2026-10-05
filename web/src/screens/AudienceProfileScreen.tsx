@@ -79,7 +79,7 @@ export function AudienceProfileScreen() {
   const businessTypes = profileOptions?.business_types || [];
 
   if (selectedProfile) {
-    const scoring = activeBatch?.state === "scoring";
+    const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
     const tradeLabel = selectedProfile.trade_keys
       .map((key) => businessTypes.find((trade) => trade.key === key)?.label || key)
       .join(", ");
@@ -382,7 +382,9 @@ function capitalize(value: string) {
 
 function batchStateLabel(state: string | undefined) {
   if (state === "scoring") return "Scoring batch";
+  if (state === "retrying") return "Retrying batch";
   if (state === "ready") return "Batch ready";
+  if (state === "empty") return "No matches";
   if (state === "partial") return "Partial batch";
   if (state === "failed") return "Batch failed";
   return "Setting up";

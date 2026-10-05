@@ -405,10 +405,12 @@ export type ProfileBatch = {
   profile: Territory;
   delivery?: TerritoryDelivery | null;
   leads: DiscoveryResult[];
-  state: "setup" | "scoring" | "ready" | "partial" | "failed";
+  state: "setup" | "scoring" | "retrying" | "ready" | "empty" | "partial" | "failed";
   requested_count: number;
   result_count: number;
   remaining_count: number;
+  failure_class?: "rate_limit" | "quota" | "other" | null;
+  retry_at?: string | null;
 };
 
 export type TerritoryResolution = {
@@ -434,7 +436,7 @@ export type TerritoryDelivery = {
   delivered_at?: string | null;
   viewed_at?: string | null;
   new_contact_count: number;
-  status: "scheduled" | "running" | "ready" | "partial" | "failed";
+  status: "scheduled" | "running" | "ready" | "empty" | "partial" | "failed";
   failure_reason?: string | null;
 };
 
