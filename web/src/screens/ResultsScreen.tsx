@@ -3780,6 +3780,8 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
       ],
     };
   }
+  const profileOpportunity = contactProfileMatchOpportunity(contact);
+  if (profileOpportunity) return profileOpportunity;
   const websiteStatus = contactResolvedWebsiteStatus(contact);
   for (const raw of getRawObjects(contact).reverse()) {
     const value = getRawValue(raw, "digital_opportunity")
@@ -3823,6 +3825,50 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
     return { label: opportunityLabel(level), level, score, signals };
   }
   return { label: "Not audited", level: "unknown", score: 0, signals: [] };
+}
+
+function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpportunity | null {
+  for (const raw of getRawObjects(contact).reverse()) {
+    const profileMatch = getRawValue(raw, "profile_match");
+    if (!isRecord(profileMatch)) continue;
+    const evidence = isRecord(profileMatch.signals) ? profileMatch.signals : {};
+    const selectedSignals = Object.entries(evidence).flatMap(([key, value]) =>
+      isRecord(value) ? [[key, value] as const] : [],
+    );
+    if (!selectedSignals.length) {
+      return { label: "Not requested", level: "unknown", score: 0, signals: [] };
+    }
+    const matchedSignals = selectedSignals.filter(([, value]) => value.matched === true);
+    if (!matchedSignals.length) {
+      return { label: "No clear signal", level: "none", score: 0, signals: [] };
+    }
+    return {
+      label: "Confirmed",
+      level: "high",
+      score: Math.min(100, 70 + (matchedSignals.length - 1) * 10),
+      signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
+    };
+  }
+  return null;
+}
+
+function profileSignalMessage(signalKey: string, evidence: Record<string, unknown>) {
+  const value = evidence.value;
+  if (signalKey === "website_unavailable") {
+    return `Website status is confirmed as ${rawValueToString(value) || "unavailable"}.`;
+  }
+  if (signalKey === "no_quote_flow") {
+    return "No quote or booking flow was found in the stored inspection.";
+  }
+  if (signalKey === "no_contact_form") {
+    return "No contact form was found in the stored inspection.";
+  }
+  if (signalKey === "reviews_under_15") {
+    const count = typeof value === "number" && Number.isFinite(value) ? value : 0;
+    return `The business has ${count} public review${count === 1 ? "" : "s"}.`;
+  }
+  const factKey = rawValueToString(evidence.fact_key) || signalKey;
+  return `${factKey}: ${rawValueToString(value) || String(value)}`;
 }
 
 function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
