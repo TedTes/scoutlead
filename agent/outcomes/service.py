@@ -23,6 +23,7 @@ from outcomes.schemas import (
 from products.repository import DEFAULT_WORKSPACE_ID
 from shared.errors import NotFoundError
 from shared.utils import new_id, utcnow
+from territories.refill import enqueue_refill_if_depleted
 
 
 class OutcomeService:
@@ -71,6 +72,7 @@ class OutcomeService:
         self._apply_objective_quality_update(lead, data.outcome, occurred_at)
         self.session.commit()
         self.session.refresh(model)
+        enqueue_refill_if_depleted(self.session, territory_id)
         self._recompute_learning_model_if_due(model)
         return model
 

@@ -9,16 +9,36 @@ from campaigns.repository import CampaignRepository
 from business_index.schemas import SearchContract
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
-from db.models import LeadModel, LeadOutcomeModel, NicheModel, QueueJobModel, TerritoryModel
+from db.models import (
+    CampaignModel,
+    LeadModel,
+    LeadOutcomeModel,
+    NicheModel,
+    QueueJobModel,
+    TerritoryDeliveryModel,
+    TerritoryModel,
+)
 from db.session import create_database
 from products.repository import ProductRepository
 from products.schemas import ProductCreate, QualificationCriterion
 from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id
-from territories.schemas import TerritoryCreate, TerritoryResolveRequest
+from territories.routes import create_profile as create_profile_route
+from territories.schemas import (
+    ProfileCreate,
+    TerritoryCreate,
+    TerritoryRefillPolicy,
+    TerritoryResolveRequest,
+    TerritoryUpdate,
+)
 from territories.service import TerritoryService
 from territories.dedupe import exclude_previously_delivered_rows
-from territories.refresh import TerritoryRefreshService
+from territories.refresh import (
+    TerritoryRefreshService,
+    _merge_niche_rows,
+    _territory_contract,
+)
+from territories.refill import enqueue_refill_if_depleted
 from territories.scheduler import enqueue_due_territories
 from leads.repository import LeadRepository
 from leads.schemas import AgentFitStatus, QualificationResult
@@ -87,6 +107,163 @@ def test_confirmed_territory_creation_can_create_a_new_niche() -> None:
         assert territory.niche.slug == "mobile_bicycle_mechanics"
 
 
+def test_profile_creation_only_persists_configuration_and_queues_initial_batch() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+
+        result = create_profile_route(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["website_unavailable"],
+                exclude=["franchises"],
+            ),
+            session,
+            SimpleNamespace(workspace_id="workspace:first"),
+        )
+
+        assert result.profile.product_id == offer.id
+        assert result.profile.city == "Toronto"
+        assert result.profile.trade_keys == ["painters"]
+        assert result.profile.customer_kind.value == "residential"
+        assert result.profile.signal_keys == ["website_unavailable"]
+        assert result.profile.exclusion_keys == ["franchises"]
+        assert result.profile.batch_size == 25
+        assert result.profile.refill_policy.value == "when_depleted"
+        assert result.job.status.value == "queued"
+        assert result.job.payload["territory_id"] == result.profile.id
+        assert session.scalar(select(func.count()).select_from(CampaignModel)) == 0
+        assert (
+            session.scalar(select(func.count()).select_from(TerritoryDeliveryModel))
+            == 0
+        )
+
+
+def test_profile_contract_rejects_missing_or_unsupported_batch_fields() -> None:
+    valid = {
+        "product_id": "product_1",
+        "trades": ["painters"],
+        "customer_kind": "residential",
+        "market": {"city": "Toronto", "radius_km": 25},
+    }
+
+    with pytest.raises(ValueError):
+        ProfileCreate.model_validate({**valid, "trades": []})
+    with pytest.raises(ValueError):
+        ProfileCreate.model_validate({**valid, "trades": ["dentists"]})
+    with pytest.raises(ValueError):
+        ProfileCreate.model_validate(
+            {**valid, "market": {"city": "Toronto", "radius_km": 100}}
+        )
+    with pytest.raises(ValueError):
+        ProfileCreate.model_validate(
+            {**valid, "market": {"city": "United States, Canada", "radius_km": 25}}
+        )
+    with pytest.raises(ValueError):
+        ProfileCreate.model_validate({**valid, "limit": 10})
+
+
+def test_profile_options_come_from_backend_capabilities_and_hide_disabled_niches() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        service = TerritoryService(session, workspace_id="workspace:first")
+        initial = service.profile_options()
+
+        assert [option["key"] for option in initial] == [
+            "painters",
+            "hvac",
+            "roofers",
+            "plumbers",
+            "electricians",
+        ]
+
+        disabled = _niche(
+            session,
+            slug="home_service_plumbing",
+            label="Plumbing contractors",
+        )
+        disabled.active = False
+        session.commit()
+
+        assert "plumbers" not in {
+            option["key"] for option in service.profile_options()
+        }
+
+
+def test_profile_persists_multiple_mapped_trades_and_default_policy() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        profile = TerritoryService(
+            session, workspace_id="workspace:first"
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters", "hvac"],
+                customer_kind="commercial",
+                market={"city": "Toronto", "radius_km": 50},
+                limit=40,
+            )
+        )
+
+        assert profile.trade_keys == ["painters", "hvac"]
+        assert profile.customer_kind == "commercial"
+        assert profile.radius_km == 50
+        assert profile.batch_size == 40
+        assert profile.refill_policy == "when_depleted"
+        assert profile.label == "Painters + HVAC · Toronto"
+        assert set(
+            session.scalars(
+                select(NicheModel.slug).where(
+                    NicheModel.slug.in_(["home_service_painting", "home_service_hvac"])
+                )
+            )
+        ) == {"home_service_painting", "home_service_hvac"}
+
+
+def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        service = TerritoryService(session, workspace_id="workspace:first")
+        profile = service.create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+            )
+        )
+        previous_hash = profile.criteria_hash
+
+        updated = service.update(
+            profile.id,
+            TerritoryUpdate(
+                radius_km=40,
+                signal_keys=["No quote flow", "No quote flow"],
+            ),
+        )
+
+        assert updated.criteria_version == 2
+        assert updated.criteria_hash != previous_hash
+        assert updated.radius_km == 40
+        assert updated.signal_keys == ["no_quote_flow"]
+
+        scheduled = service.update(
+            profile.id,
+            TerritoryUpdate(refill_policy=TerritoryRefillPolicy.WEEKLY),
+        )
+        assert scheduled.next_run_at is not None
+        manual = service.update(
+            profile.id,
+            TerritoryUpdate(refill_policy=TerritoryRefillPolicy.MANUAL),
+        )
+        assert manual.next_run_at is None
+
+
 def test_territory_preserves_the_saved_semantic_search_contract() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -117,6 +294,61 @@ def test_territory_preserves_the_saved_semantic_search_contract() -> None:
 
         assert territory.search_contract == stored
         assert territory.criteria_hash == "saved-contract-hash"
+
+
+def test_profile_signals_rank_without_becoming_contact_requirements() -> None:
+    _, contract = _territory_contract(
+        SimpleNamespace(
+            search_contract={},
+            signal_keys=["website unavailable", "no quote flow"],
+            exclusion_keys=["closed business", "chains"],
+        )
+    )
+
+    assert {predicate.key for predicate in contract.ranking} == {
+        "website_status",
+        "quote_or_booking_form_present",
+    }
+    assert [predicate.key for predicate in contract.all_of] == ["business_operational"]
+    assert contract.semantic_exclusions == ("Business is a chain or national brand",)
+    assert contract.contact_requirements == ()
+
+
+def test_profile_signal_threshold_and_agency_exclusion_match_saved_keys() -> None:
+    _, contract = _territory_contract(
+        SimpleNamespace(
+            search_contract={},
+            signal_keys=["reviews_under_15"],
+            exclusion_keys=["agencies"],
+        )
+    )
+
+    assert contract.ranking[0].key == "google_review_count"
+    assert contract.ranking[0].value == 15.0
+    assert contract.semantic_exclusions == (
+        "Business is a marketing or web agency",
+    )
+
+
+def test_multi_trade_rows_are_interleaved_and_deduplicated() -> None:
+    def row(business_id: str) -> dict:
+        return {
+            "title": business_id,
+            "url": None,
+            "raw": {"canonical_business_id": business_id},
+        }
+
+    merged = _merge_niche_rows(
+        [[row("paint-1"), row("shared"), row("paint-2")], [row("hvac-1"), row("shared")]],
+        limit=5,
+    )
+
+    assert [item["title"] for item in merged] == [
+        "paint-1",
+        "hvac-1",
+        "shared",
+        "paint-2",
+    ]
 
 
 def test_territory_creation_requires_confirmation_and_rejects_duplicates() -> None:
@@ -206,7 +438,35 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
         )
 
 
-def test_delivery_requires_audited_opportunity_and_usable_contact() -> None:
+def test_monthly_profile_schedules_next_batch_from_delivery_time() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        territory = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                refill_policy=TerritoryRefillPolicy.MONTHLY,
+                confirmed=True,
+            )
+        )
+        scheduled = datetime(2026, 9, 28, 15, 30, tzinfo=timezone.utc)
+
+        TerritoryRefreshService(
+            session=session,
+            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
+            workspace_id="workspace:first",
+        ).refresh(territory.id, scheduled_for=scheduled)
+
+        assert territory.next_run_at == datetime(2026, 10, 28, 15, 30, tzinfo=timezone.utc)
+
+
+def test_delivery_requires_opportunity_but_not_contact_readiness() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -246,7 +506,47 @@ def test_delivery_requires_audited_opportunity_and_usable_contact() -> None:
         ]
         session.commit()
 
-        assert refresh.contacts(delivery, min_fit=territory.min_fit) == []
+        contacts = refresh.contacts(delivery, min_fit=territory.min_fit)
+        assert [contact.id for contact in contacts] == [leads[1].id]
+        assert contacts[0].contact_email is None
+
+
+def test_when_depleted_profile_enqueues_one_replacement_batch() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        territory = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                batch_size=2,
+                refill_policy=TerritoryRefillPolicy.WHEN_DEPLETED,
+                confirmed=True,
+            )
+        )
+        delivery = TerritoryRefreshService(
+            session=session,
+            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
+            workspace_id="workspace:first",
+        ).refresh(territory.id)
+        first_lead = session.scalar(
+            select(LeadModel).where(LeadModel.campaign_id == delivery.campaign_id).limit(1)
+        )
+        assert first_lead is not None
+        first_lead.review_status = "not_fit"
+        session.commit()
+
+        assert enqueue_refill_if_depleted(session, territory.id) is True
+        assert enqueue_refill_if_depleted(session, territory.id) is True
+
+        jobs = list(session.scalars(select(QueueJobModel)))
+        assert len(jobs) == 1
+        assert jobs[0].payload["territory_id"] == territory.id
 
 
 def test_failed_refresh_reuses_delivery_on_retry() -> None:
@@ -360,13 +660,86 @@ def test_previous_territory_business_is_excluded_from_future_rows() -> None:
         rows = exclude_previously_delivered_rows(
             session,
             campaign_id=next_campaign.id,
-            product_id=offer.id,
+            territory_id=territory.id,
             rows=[
                 {"raw": {"canonical_business_id": lead.business_id}, "title": "Delivered"},
                 {"raw": {"canonical_business_id": "business:new"}, "title": "New"},
             ],
         )
         assert [row["title"] for row in rows] == ["New"]
+
+
+def test_business_delivered_to_one_profile_remains_available_to_another() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        first_territory = TerritoryService(
+            session, workspace_id="workspace:first"
+        ).create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                label="Toronto HVAC",
+                confirmed=True,
+            )
+        )
+        second_territory = TerritoryService(
+            session, workspace_id="workspace:first"
+        ).create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Mississauga",
+                label="Mississauga HVAC",
+                confirmed=True,
+            )
+        )
+        campaigns = CampaignRepository(session, workspace_id="workspace:first")
+        first_campaign = campaigns.create(
+            CampaignCreate(
+                product_id=offer.id,
+                territory_id=first_territory.id,
+                name="First profile batch",
+                max_leads=2,
+            )
+        )
+        lead = LeadRepository(session, workspace_id="workspace:first").create_from_seed(
+            first_campaign.id,
+            offer.id,
+            LeadSeedInput(
+                company_name="Shared HVAC",
+                website_url="https://shared.example",
+                geography="Greater Toronto Area",
+            ),
+        )
+        second_campaign = campaigns.create(
+            CampaignCreate(
+                product_id=offer.id,
+                territory_id=second_territory.id,
+                name="Second profile batch",
+                max_leads=2,
+            )
+        )
+
+        rows = exclude_previously_delivered_rows(
+            session,
+            campaign_id=second_campaign.id,
+            territory_id=second_territory.id,
+            rows=[
+                {
+                    "raw": {"canonical_business_id": lead.business_id},
+                    "title": "Shared HVAC",
+                }
+            ],
+        )
+
+        assert [row["title"] for row in rows] == ["Shared HVAC"]
 
 
 def test_existing_search_can_be_attached_to_territory() -> None:

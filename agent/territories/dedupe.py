@@ -10,20 +10,20 @@ def exclude_previously_delivered_rows(
     session: Session,
     *,
     campaign_id: str,
-    product_id: str,
+    territory_id: str | None,
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     campaign = session.get(CampaignModel, campaign_id)
-    if campaign is None or not campaign.territory_id:
+    resolved_territory_id = territory_id or (campaign.territory_id if campaign else None)
+    if campaign is None or not resolved_territory_id:
         return rows
     delivered_ids = set(
         session.scalars(
             select(LeadModel.business_id)
             .join(CampaignModel, LeadModel.campaign_id == CampaignModel.id)
             .where(
-                LeadModel.product_id == product_id,
                 LeadModel.business_id.is_not(None),
-                CampaignModel.territory_id.is_not(None),
+                CampaignModel.territory_id == resolved_territory_id,
                 CampaignModel.id != campaign_id,
             )
         )

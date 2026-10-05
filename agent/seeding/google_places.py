@@ -52,6 +52,16 @@ NICHE_QUERY_TEMPLATES = {
         "heating and cooling companies {city}",
         "furnace and air conditioning service {city}",
     ],
+    "home_service_plumbing": [
+        "plumbers {city}",
+        "plumbing contractors {city}",
+        "residential plumbing services {city}",
+    ],
+    "home_service_electrical": [
+        "electricians {city}",
+        "electrical contractors {city}",
+        "residential electrical services {city}",
+    ],
     "home_service_landscaping": [
         "landscaping companies {city}",
         "residential landscapers {city}",
@@ -68,6 +78,8 @@ NICHE_INCLUDED_TYPES = {
     "home_service_painting": "painter",
     "home_service_roofing": "roofing_contractor",
     "home_service_hvac": "hvac_contractor",
+    "home_service_plumbing": "plumber",
+    "home_service_electrical": "electrician",
     "home_service_landscaping": "landscaper",
     "home_service_cleaning": "cleaning_service",
 }

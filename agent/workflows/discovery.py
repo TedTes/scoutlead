@@ -125,7 +125,7 @@ class DiscoveryWorkflow:
                 exclude_previously_delivered_rows(
                     self.leads.session,
                     campaign_id=campaign.id,
-                    product_id=product.id,
+                    territory_id=campaign.territory_id,
                     rows=_rows_with_semantic_context(semantic_rows),
                 )
             )
@@ -147,7 +147,7 @@ class DiscoveryWorkflow:
                         exclude_previously_delivered_rows(
                             self.leads.session,
                             campaign_id=campaign.id,
-                            product_id=product.id,
+                            territory_id=campaign.territory_id,
                             rows=_rows_with_source_context(
                                 rows=cached_rows,
                                 source=source,
@@ -211,7 +211,7 @@ class DiscoveryWorkflow:
             enriched_rows = exclude_previously_delivered_rows(
                 self.leads.session,
                 campaign_id=campaign.id,
-                product_id=product.id,
+                territory_id=campaign.territory_id,
                 rows=enriched_rows,
             )
             merged_rows = _merge_unique_rows(state["results"], enriched_rows)

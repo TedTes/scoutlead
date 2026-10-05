@@ -1,9 +1,10 @@
-from typing import Annotated
+from fastapi import APIRouter, Response, status
+from sqlalchemy import select
 
-from fastapi import APIRouter, Depends, Response, status
-
-from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
-from app.service_factory import territory_refresh_service
+from app.dependencies import CurrentAuth, DbSession
+from db.models import LeadModel, QueueJobModel
+from job_queue.schemas import JobStatus, JobType
+from job_queue.service import QueueService
 from leads.schemas import LeadRead
 from leads.export import leads_csv
 from shared.utils import utcnow
@@ -13,6 +14,11 @@ from territories.metrics import (
     territory_metrics_csv,
 )
 from territories.schemas import (
+    ProfileBatchRead,
+    ProfileBatchState,
+    ProfileCreate,
+    ProfileOptionsRead,
+    ProfileQueuedRead,
     TerritoryCreate,
     TerritoryDeliveryRead,
     TerritoryMinFit,
@@ -21,10 +27,12 @@ from territories.schemas import (
     TerritoryResolutionRead,
     TerritoryUpdate,
 )
+from territories.refresh import eligible_delivery_leads
 from territories.service import TerritoryService
 
 
 router = APIRouter(prefix="/territories", tags=["territories"])
+profiles_router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 
 def _service(session: DbSession, auth: CurrentAuth) -> TerritoryService:
@@ -109,19 +117,24 @@ def export_territory_metrics(
     )
 
 
-@router.post("/{territory_id}/refresh", response_model=TerritoryDeliveryRead)
+@router.post(
+    "/{territory_id}/refresh",
+    response_model=ProfileQueuedRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def refresh_territory(
     territory_id: str,
     session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
     auth: CurrentAuth,
 ):
-    territory = _service(session, auth).get(territory_id)
-    return territory_refresh_service(
-        session=session,
-        services=services,
-        workspace_id=territory.workspace_id,
-    ).refresh(territory_id)
+    service = _service(session, auth)
+    territory = service.get(territory_id)
+    job = QueueService(session).enqueue_territory_refresh(
+        territory.id,
+        utcnow().replace(microsecond=0).isoformat(),
+        criteria_version=territory.criteria_version,
+    )
+    return ProfileQueuedRead(profile=service.get_read(territory.id), job=job)
 
 
 @router.get(
@@ -132,7 +145,6 @@ def list_delivery_contacts(
     territory_id: str,
     delivery_id: str,
     session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
     auth: CurrentAuth,
 ):
     territory_service = _service(session, auth)
@@ -141,11 +153,11 @@ def list_delivery_contacts(
     if delivery.viewed_at is None:
         delivery.viewed_at = utcnow()
         session.commit()
-    return territory_refresh_service(
-        session=session,
-        services=services,
-        workspace_id=territory.workspace_id,
-    ).contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
+    return _delivery_contacts(
+        session,
+        campaign_id=delivery.campaign_id,
+        min_fit=TerritoryMinFit(territory.min_fit),
+    )
 
 
 @router.get("/{territory_id}/deliveries/{delivery_id}/export.csv")
@@ -153,17 +165,16 @@ def export_delivery_contacts(
     territory_id: str,
     delivery_id: str,
     session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
     auth: CurrentAuth,
 ):
     territory_service = _service(session, auth)
     territory = territory_service.get(territory_id)
     delivery = territory_service.territories.get_delivery(territory_id, delivery_id)
-    contacts = territory_refresh_service(
-        session=session,
-        services=services,
-        workspace_id=territory.workspace_id,
-    ).contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
+    contacts = _delivery_contacts(
+        session,
+        campaign_id=delivery.campaign_id,
+        min_fit=TerritoryMinFit(territory.min_fit),
+    )
     return Response(
         content=leads_csv(
             contacts,
@@ -174,3 +185,143 @@ def export_delivery_contacts(
             "Content-Disposition": f'attachment; filename="{territory_id}-{delivery_id}.csv"'
         },
     )
+
+
+@profiles_router.post(
+    "",
+    response_model=ProfileQueuedRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_profile(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
+    service = _service(session, auth)
+    profile = service.create_profile(data, commit=False)
+    scheduled_for = utcnow().replace(microsecond=0).isoformat()
+    job = QueueService(session).enqueue_territory_refresh(
+        profile.id,
+        scheduled_for,
+        criteria_version=profile.criteria_version,
+        commit=False,
+    )
+    session.commit()
+    session.refresh(job)
+    return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
+
+
+@profiles_router.get("", response_model=list[TerritoryRead])
+def list_profiles(session: DbSession, auth: CurrentAuth):
+    return _service(session, auth).list()
+
+
+@profiles_router.get("/options", response_model=ProfileOptionsRead)
+def profile_options(session: DbSession, auth: CurrentAuth):
+    return ProfileOptionsRead(
+        business_types=_service(session, auth).profile_options(),
+    )
+
+
+@profiles_router.get("/{profile_id}", response_model=TerritoryRead)
+def get_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
+    return _service(session, auth).get_read(profile_id)
+
+
+@profiles_router.patch("/{profile_id}", response_model=TerritoryRead)
+def update_profile(
+    profile_id: str,
+    update: TerritoryUpdate,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    service = _service(session, auth)
+    service.update(profile_id, update)
+    return service.get_read(profile_id)
+
+
+@profiles_router.post(
+    "/{profile_id}/refill",
+    response_model=ProfileQueuedRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def refill_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
+    service = _service(session, auth)
+    profile = service.get(profile_id)
+    job = QueueService(session).enqueue_territory_refresh(
+        profile.id,
+        utcnow().replace(microsecond=0).isoformat(),
+        criteria_version=profile.criteria_version,
+    )
+    return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
+
+
+@profiles_router.get("/{profile_id}/current-batch", response_model=ProfileBatchRead)
+def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth):
+    service = _service(session, auth)
+    profile = service.get(profile_id)
+    delivery = service.territories.latest_delivery(profile.id)
+    active_job = _active_profile_job(session, profile.id)
+    leads: list[LeadRead] = []
+    if delivery is not None:
+        models = list(
+            session.scalars(
+                select(LeadModel).where(LeadModel.campaign_id == delivery.campaign_id)
+            )
+        )
+        leads = eligible_delivery_leads(
+            models,
+            min_fit=TerritoryMinFit(profile.min_fit),
+        )
+    remaining = sum(
+        not lead.shortlisted_at
+        and not lead.last_contacted_at
+        and lead.review_status != "not_fit"
+        for lead in leads
+    )
+    if active_job is not None:
+        state = ProfileBatchState.SCORING
+    elif delivery is None:
+        state = ProfileBatchState.SETUP
+    elif delivery.status == "failed":
+        state = ProfileBatchState.FAILED
+    elif delivery.status == "ready":
+        state = ProfileBatchState.READY
+    else:
+        state = ProfileBatchState.PARTIAL
+    return ProfileBatchRead(
+        profile=service.get_read(profile.id),
+        delivery=delivery,
+        leads=leads,
+        state=state,
+        requested_count=profile.batch_size,
+        result_count=len(leads),
+        remaining_count=remaining,
+    )
+
+
+def _active_profile_job(session: DbSession, profile_id: str) -> QueueJobModel | None:
+    jobs = list(
+        session.scalars(
+            select(QueueJobModel)
+            .where(
+                QueueJobModel.type == JobType.TERRITORY_REFRESH.value,
+                QueueJobModel.status.in_(
+                    [JobStatus.QUEUED.value, JobStatus.RUNNING.value]
+                ),
+            )
+            .order_by(QueueJobModel.created_at.desc())
+        )
+    )
+    return next(
+        (job for job in jobs if job.payload.get("territory_id") == profile_id),
+        None,
+    )
+
+
+def _delivery_contacts(
+    session: DbSession,
+    *,
+    campaign_id: str,
+    min_fit: TerritoryMinFit,
+) -> list[LeadRead]:
+    leads = list(
+        session.scalars(select(LeadModel).where(LeadModel.campaign_id == campaign_id))
+    )
+    return eligible_delivery_leads(leads, min_fit=min_fit)

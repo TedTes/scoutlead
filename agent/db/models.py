@@ -305,9 +305,23 @@ class TerritoryModel(TimestampMixin, Base):
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
     market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    city: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    radius_km: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    trade_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    customer_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="residential", index=True
+    )
+    signal_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    exclusion_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
     cadence: Mapped[str] = mapped_column(String(32), nullable=False, default="weekly")
+    refill_policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="when_depleted", index=True
+    )
+    criteria_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     batch_size: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
     min_fit: Mapped[str] = mapped_column(String(32), nullable=False, default="maybe")
     search_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)

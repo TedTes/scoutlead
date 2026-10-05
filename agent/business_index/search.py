@@ -358,10 +358,20 @@ def _evaluate_contract(
                 0,
                 None,
             )
-    score = _opportunity_score(fresh_facts)
+    ranking_matches = [
+        predicate
+        for predicate in contract.ranking
+        if predicate.key in fresh_facts
+        and _predicate_matches(fresh_facts[predicate.key], predicate)
+    ]
+    score = (
+        min(100, 60 + (len(ranking_matches) - 1) * 15)
+        if ranking_matches
+        else (0 if contract.ranking else _opportunity_score(fresh_facts))
+    )
     matched_facts = [
         fresh_facts[predicate.key]
-        for predicate in (*contract.all_of, *contract.any_of)
+        for predicate in (*contract.all_of, *contract.any_of, *ranking_matches)
         if predicate.key in fresh_facts
         and _predicate_matches(fresh_facts[predicate.key], predicate)
     ]

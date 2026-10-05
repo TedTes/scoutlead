@@ -16,7 +16,13 @@ class TerritoryRepository:
         self.session = session
         self.workspace_id = workspace_id
 
-    def create(self, data: TerritoryCreate, *, niche_id: str) -> TerritoryModel:
+    def create(
+        self,
+        data: TerritoryCreate,
+        *,
+        niche_id: str,
+        commit: bool = True,
+    ) -> TerritoryModel:
         existing = self.session.scalar(
             self._scope(
                 select(TerritoryModel).where(
@@ -38,9 +44,19 @@ class TerritoryRepository:
             product_id=data.product_id,
             niche_id=niche_id,
             market_key=data.market_key,
+            city=data.city or data.market_key,
+            latitude=data.latitude,
+            longitude=data.longitude,
+            radius_km=data.radius_km,
+            trade_keys=data.trade_keys,
+            customer_kind=data.customer_kind.value,
+            signal_keys=data.signal_keys,
+            exclusion_keys=data.exclusion_keys,
             label=data.label or f"{data.niche_label} · {data.market_key}",
             status=data.status.value,
             cadence=data.cadence.value,
+            refill_policy=data.refill_policy.value,
+            criteria_version=data.criteria_version,
             batch_size=data.batch_size,
             min_fit=data.min_fit.value,
             search_prompt=data.request,
@@ -50,7 +66,10 @@ class TerritoryRepository:
             next_run_at=utcnow(),
         )
         self.session.add(model)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(model)
         return model
 
@@ -69,13 +88,24 @@ class TerritoryRepository:
             raise NotFoundError("territory not found", {"territory_id": territory_id})
         return model
 
-    def update(self, territory_id: str, update: TerritoryUpdate) -> TerritoryModel:
+    def update(
+        self,
+        territory_id: str,
+        update: TerritoryUpdate,
+        *,
+        commit: bool = True,
+    ) -> TerritoryModel:
         model = self.get(territory_id)
         for field, value in update.model_dump(mode="python", exclude_unset=True).items():
+            if isinstance(value, list):
+                value = [item.value if hasattr(item, "value") else item for item in value]
             setattr(model, field, value.value if hasattr(value, "value") else value)
         model.updated_at = utcnow()
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
     def delete(self, territory_id: str) -> None:
@@ -104,6 +134,18 @@ class TerritoryRepository:
             .order_by(TerritoryDeliveryModel.created_at.desc())
         )
         return list(self.session.scalars(statement))
+
+    def latest_delivery(self, territory_id: str) -> TerritoryDeliveryModel | None:
+        self.get(territory_id)
+        return self.session.scalar(
+            select(TerritoryDeliveryModel)
+            .where(
+                TerritoryDeliveryModel.workspace_id == self.workspace_id,
+                TerritoryDeliveryModel.territory_id == territory_id,
+            )
+            .order_by(TerritoryDeliveryModel.created_at.desc())
+            .limit(1)
+        )
 
     def get_delivery(self, territory_id: str, delivery_id: str) -> TerritoryDeliveryModel:
         self.get(territory_id)

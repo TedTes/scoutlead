@@ -75,11 +75,31 @@ def run_once() -> bool:
                 territory = session.get(TerritoryModel, territory_id)
                 if territory is None:
                     raise ValueError(f"territory not found: {territory_id}")
-                scheduled_for = datetime.combine(
-                    date.fromisoformat(str(job.payload["scheduled_date"])),
-                    time.min,
-                    tzinfo=timezone.utc,
+                queued_version = int(
+                    job.payload.get("criteria_version", territory.criteria_version)
                 )
+                if queued_version != territory.criteria_version:
+                    logger.info(
+                        "territory_refresh_skipped_stale_criteria territory_id=%s queued_version=%s current_version=%s",
+                        territory_id,
+                        queued_version,
+                        territory.criteria_version,
+                    )
+                    queue.complete(job.id)
+                    return True
+                if job.payload.get("scheduled_for"):
+                    scheduled_for = datetime.fromisoformat(
+                        str(job.payload["scheduled_for"])
+                    )
+                    if scheduled_for.tzinfo is None:
+                        scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+                else:
+                    # Backward compatibility for jobs queued before timestamped batches.
+                    scheduled_for = datetime.combine(
+                        date.fromisoformat(str(job.payload["scheduled_date"])),
+                        time.min,
+                        tzinfo=timezone.utc,
+                    )
                 territory_refresh_service(
                     session=session,
                     services=services,

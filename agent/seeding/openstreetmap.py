@@ -52,6 +52,22 @@ NICHE_PLANS = {
         ),
         excluded_tag_terms=("doityourself",),
     ),
+    "home_service_plumbing": OpenStreetMapNichePlan(
+        seed_niche="home_service_plumbing",
+        query_label="plumbing contractors",
+        name_pattern="plumb|drain service",
+        tag_filters=(("craft", "plumber"),),
+        required_name_terms=("plumb", "drain service"),
+        excluded_name_terms=("supply", "supplies", "wholesale"),
+    ),
+    "home_service_electrical": OpenStreetMapNichePlan(
+        seed_niche="home_service_electrical",
+        query_label="electrical contractors",
+        name_pattern="electric|electrical",
+        tag_filters=(("craft", "electrician"),),
+        required_name_terms=("electric", "electrical"),
+        excluded_name_terms=("supply", "supplies", "utility", "wholesale"),
+    ),
     "home_service_landscaping": OpenStreetMapNichePlan(
         seed_niche="home_service_landscaping",
         query_label="landscaping and lawn care companies",

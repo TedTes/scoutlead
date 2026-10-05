@@ -18,7 +18,7 @@ from outcomes.routes import router as outcomes_router
 from products.routes import router as products_router
 from shared.errors import SoutleadError
 from shared.logger import configure_logging
-from territories.routes import router as territories_router
+from territories.routes import profiles_router, router as territories_router
 from unsubscribe.routes import router as unsubscribe_router
 from webhooks.routes import router as webhooks_router
 from workspaces.routes import router as workspaces_router
@@ -64,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(outcomes_router)
     app.include_router(territories_router)
+    app.include_router(profiles_router)
     app.include_router(webhooks_router)
     app.include_router(workspaces_router)
     app.include_router(unsubscribe_router)

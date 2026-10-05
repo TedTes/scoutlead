@@ -22,7 +22,11 @@ def enqueue_due_territories(session: Session, *, now: datetime | None = None) ->
     queue = QueueService(session)
     for territory in territories:
         scheduled = _aware(territory.next_run_at or now)
-        queue.enqueue_territory_refresh(territory.id, scheduled.date().isoformat())
+        queue.enqueue_territory_refresh(
+            territory.id,
+            scheduled.replace(microsecond=0).isoformat(),
+            criteria_version=territory.criteria_version,
+        )
     return len(territories)
 
 

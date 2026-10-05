@@ -47,18 +47,20 @@ class FactPredicate:
 class SearchContract:
     all_of: tuple[FactPredicate, ...] = ()
     any_of: tuple[FactPredicate, ...] = ()
+    ranking: tuple[FactPredicate, ...] = ()
     semantic_all_of: tuple[str, ...] = ()
     semantic_any_of: tuple[str, ...] = ()
     semantic_exclusions: tuple[str, ...] = ()
     contact_requirements: tuple[str, ...] = ()
     unsupported: tuple[str, ...] = ()
-    version: int = 2
+    version: int = 3
 
     def as_dict(self) -> dict:
         return {
             "version": self.version,
             "all_of": [predicate.as_dict() for predicate in self.all_of],
             "any_of": [predicate.as_dict() for predicate in self.any_of],
+            "ranking": [predicate.as_dict() for predicate in self.ranking],
             "semantic_all_of": list(self.semantic_all_of),
             "semantic_any_of": list(self.semantic_any_of),
             "semantic_exclusions": list(self.semantic_exclusions),
@@ -77,6 +79,10 @@ class SearchContract:
             any_of=tuple(
                 FactPredicate.from_dict(predicate)
                 for predicate in raw.get("any_of", [])
+            ),
+            ranking=tuple(
+                FactPredicate.from_dict(predicate)
+                for predicate in raw.get("ranking", [])
             ),
             semantic_all_of=tuple(str(item) for item in raw.get("semantic_all_of", [])),
             semantic_any_of=tuple(str(item) for item in raw.get("semantic_any_of", [])),

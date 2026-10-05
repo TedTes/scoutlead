@@ -723,7 +723,7 @@ class CampaignService:
                 rows = exclude_previously_delivered_rows(
                     self.session,
                     campaign_id=campaign.id,
-                    product_id=product.id,
+                    territory_id=campaign.territory_id,
                     rows=_rows_with_semantic_context(semantic_rows),
                 )
                 if campaign.territory_id and len(rows) < campaign.max_leads:
@@ -749,7 +749,7 @@ class CampaignService:
         cached_results = exclude_previously_delivered_rows(
             self.session,
             campaign_id=campaign.id,
-            product_id=product.id,
+            territory_id=campaign.territory_id,
             rows=cached_results,
         )
         if len(cached_results) < min_results:

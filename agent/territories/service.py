@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,9 +16,15 @@ from outcomes.schemas import LeadOutcome
 from niches.resolver import resolve_niche
 from products.repository import DEFAULT_WORKSPACE_ID, ProductRepository
 from shared.errors import NotFoundError, ValidationError
-from shared.utils import new_id, normalize_text
+from shared.utils import new_id, normalize_text, utcnow
+from territories.profile_catalog import (
+    PROFILE_TRADE_CATALOG,
+    profile_trade_label,
+    profile_trade_spec,
+)
 from territories.repository import TerritoryRepository
 from territories.schemas import (
+    ProfileCreate,
     TerritoryCreate,
     TerritoryResolveRequest,
     TerritoryResolutionRead,
@@ -83,7 +90,7 @@ class TerritoryService:
             existing_niche=False,
         )
 
-    def create(self, data: TerritoryCreate):
+    def create(self, data: TerritoryCreate, *, commit: bool = True):
         if not data.confirmed:
             raise ValidationError("territory resolution must be confirmed before creation")
         niche = self._confirmed_niche(data)
@@ -97,11 +104,101 @@ class TerritoryService:
                 "niche_slug": niche.slug,
                 "niche_label": niche.label,
                 "market_key": semantic_key(data.market_key) or "unknown",
+                "city": normalize_text(data.city or data.market_key),
+                "signal_keys": (
+                    _clean_profile_keys(data.signal_keys)
+                    if data.trade_keys
+                    else _clean_keys(data.signal_keys)
+                ),
+                "exclusion_keys": (
+                    _clean_profile_keys(data.exclusion_keys)
+                    if data.trade_keys
+                    else _clean_keys(data.exclusion_keys)
+                ),
                 "search_contract": contract_payload,
-                "criteria_hash": stored_contract_hash or _criteria_hash(contract_payload),
+                "criteria_hash": (
+                    stored_contract_hash
+                    or (
+                        data.criteria_hash
+                        if data.criteria_hash != "default"
+                        else _criteria_hash(contract_payload)
+                    )
+                ),
             }
         )
-        return self.territories.create(normalized, niche_id=niche.id)
+        return self.territories.create(normalized, niche_id=niche.id, commit=commit)
+
+    def create_profile(self, data: ProfileCreate, *, commit: bool = True):
+        trade_keys = list(dict.fromkeys(trade.value for trade in data.trades))
+        city = normalize_text(data.market.city)
+        niches = [self._ensure_profile_niche(key, city=city) for key in trade_keys]
+        trade_label = profile_trade_label(trade_keys)
+        customer_kind = data.customer_kind.value
+        signals = [signal.value for signal in data.signals]
+        exclusions = [exclusion.value for exclusion in data.exclude]
+        contract = SearchContract(
+            semantic_all_of=(f"Business serves {customer_kind} customers",),
+        )
+        contract_payload = {
+            "opportunity_type": OpportunityType.ANY.value,
+            "search_contract": contract.as_dict(),
+        }
+        criteria = {
+            "trades": trade_keys,
+            "customer_kind": customer_kind,
+            "city": semantic_key(city),
+            "radius_km": data.market.radius_km,
+            "signals": signals,
+            "exclude": exclusions,
+            "limit": data.limit,
+            "exclude_already_delivered": True,
+        }
+        contract_payload["contract_hash"] = _criteria_hash(criteria)
+        profile = self.create(
+            TerritoryCreate(
+                product_id=data.product_id,
+                niche_id=niches[0].id,
+                niche_slug=niches[0].slug,
+                niche_label=niches[0].label,
+                niche_category=niches[0].category,
+                market_key=city,
+                city=city,
+                radius_km=data.market.radius_km,
+                trade_keys=trade_keys,
+                customer_kind=data.customer_kind,
+                signal_keys=signals,
+                exclusion_keys=exclusions,
+                label=data.name or f"{trade_label} · {city}",
+                refill_policy="when_depleted",
+                batch_size=data.limit,
+                request=f"{customer_kind} {trade_label} in {city}",
+                search_contract=contract_payload,
+                criteria_hash=_criteria_hash(criteria),
+                confirmed=True,
+            ),
+            commit=commit,
+        )
+        profile.next_run_at = None
+        if commit:
+            self.session.commit()
+            self.session.refresh(profile)
+        else:
+            self.session.flush()
+        return profile
+
+    def profile_options(self) -> list[dict[str, str]]:
+        slugs = [spec.niche_slug for spec in PROFILE_TRADE_CATALOG.values()]
+        stored = {
+            niche.slug: niche
+            for niche in self.session.scalars(
+                select(NicheModel).where(NicheModel.slug.in_(slugs))
+            )
+        }
+        return [
+            {"key": spec.key, "label": spec.label}
+            for spec in PROFILE_TRADE_CATALOG.values()
+            if spec.niche_slug not in stored or stored[spec.niche_slug].active
+        ]
 
     def list(self):
         return [self._read(model) for model in self.territories.list()]
@@ -109,8 +206,83 @@ class TerritoryService:
     def get(self, territory_id: str):
         return self.territories.get(territory_id)
 
+    def get_read(self, territory_id: str) -> TerritoryRead:
+        return self._read(self.territories.get(territory_id))
+
     def update(self, territory_id: str, update: TerritoryUpdate):
-        return self.territories.update(territory_id, update)
+        model = self.territories.get(territory_id)
+        values = update.model_dump(mode="python", exclude_unset=True)
+        if "city" in values:
+            values["city"] = normalize_text(values["city"])
+            values["market_key"] = semantic_key(values["city"]) or model.market_key
+        if "signal_keys" in values:
+            values["signal_keys"] = (
+                _clean_profile_keys(values["signal_keys"])
+                if model.trade_keys
+                else _clean_keys(values["signal_keys"])
+            )
+        if "exclusion_keys" in values:
+            values["exclusion_keys"] = (
+                _clean_profile_keys(values["exclusion_keys"])
+                if model.trade_keys
+                else _clean_keys(values["exclusion_keys"])
+            )
+        if "trade_keys" in values:
+            values["trade_keys"] = list(
+                dict.fromkeys(
+                    value.value if hasattr(value, "value") else str(value)
+                    for value in values["trade_keys"]
+                )
+            )
+        if "customer_kind" in values and hasattr(values["customer_kind"], "value"):
+            values["customer_kind"] = values["customer_kind"].value
+        criteria_fields = {
+            "city",
+            "radius_km",
+            "trade_keys",
+            "customer_kind",
+            "signal_keys",
+            "exclusion_keys",
+            "batch_size",
+            "min_fit",
+        }
+        criteria_changed = bool(criteria_fields & values.keys())
+        normalized = TerritoryUpdate.model_validate(
+            {key: value for key, value in values.items() if key != "market_key"}
+        )
+        model = self.territories.update(territory_id, normalized, commit=False)
+        if "market_key" in values:
+            model.market_key = values["market_key"]
+        if criteria_changed:
+            model.criteria_version += 1
+            model.criteria_hash = _criteria_hash(
+                {
+                    "niche_id": model.niche_id,
+                    "city": model.city,
+                    "radius_km": model.radius_km,
+                    "trade_keys": model.trade_keys,
+                    "customer_kind": model.customer_kind,
+                    "signal_keys": model.signal_keys,
+                    "exclusion_keys": model.exclusion_keys,
+                    "batch_size": model.batch_size,
+                    "min_fit": model.min_fit,
+                }
+            )
+        if "refill_policy" in values:
+            policy = (
+                values["refill_policy"].value
+                if hasattr(values["refill_policy"], "value")
+                else str(values["refill_policy"])
+            )
+            interval_days = {"weekly": 7, "biweekly": 14, "monthly": 30}.get(policy)
+            model.next_run_at = (
+                utcnow() + timedelta(days=interval_days)
+                if interval_days is not None
+                else None
+            )
+        self.session.commit()
+        self.session.refresh(model)
+        return model
 
     def delete(self, territory_id: str) -> None:
         self.territories.delete(territory_id)
@@ -152,6 +324,30 @@ class TerritoryService:
                 ),
             }
         )
+
+    def _ensure_profile_niche(self, trade_key: str, *, city: str) -> NicheModel:
+        spec = profile_trade_spec(trade_key)
+        niche = self.session.scalar(
+            select(NicheModel).where(NicheModel.slug == spec.niche_slug).limit(1)
+        )
+        if niche is not None:
+            if not niche.active:
+                raise ValidationError(
+                    "selected business type is not available",
+                    {"trade": trade_key},
+                )
+            return niche
+        niche = NicheModel(
+            id=new_id("niche"),
+            slug=spec.niche_slug,
+            label=spec.niche_label,
+            category=spec.niche_category,
+            default_query=f"{spec.niche_label} in {city}",
+            active=True,
+        )
+        self.session.add(niche)
+        self.session.flush()
+        return niche
 
     def _confirmed_niche(self, data: TerritoryCreate) -> NicheModel:
         if data.niche_id:
@@ -208,3 +404,17 @@ def _title_label(value: str) -> str:
 def _criteria_hash(value: dict) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _clean_keys(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(semantic_key(value) for value in values if semantic_key(value)))
+
+
+def _clean_profile_keys(values: list[str]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            key.replace(" ", "_")
+            for value in values
+            if (key := semantic_key(value))
+        )
+    )

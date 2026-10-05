@@ -14,13 +14,26 @@ class QueueService:
     def enqueue_message_send(self, message_id: str):
         return self.queue.enqueue(JobType.MESSAGE_SEND, {"message_id": message_id})
 
-    def enqueue_territory_refresh(self, territory_id: str, scheduled_date: str):
-        key = f"{territory_id}:{scheduled_date}"
+    def enqueue_territory_refresh(
+        self,
+        territory_id: str,
+        scheduled_for: str,
+        *,
+        criteria_version: int = 1,
+        dedupe_key: str | None = None,
+        commit: bool = True,
+    ):
+        key = dedupe_key or f"{territory_id}:{criteria_version}:{scheduled_for}"
         return self.queue.enqueue_once(
             JobType.TERRITORY_REFRESH,
-            {"territory_id": territory_id, "scheduled_date": scheduled_date},
+            {
+                "territory_id": territory_id,
+                "scheduled_for": scheduled_for,
+                "criteria_version": criteria_version,
+            },
             dedupe_key=key,
             max_attempts=2,
+            commit=commit,
         )
 
     def enqueue_business_index_refresh(
