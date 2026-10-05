@@ -52,7 +52,8 @@ export function AudienceProfileScreen() {
   const [signals, setSignals] = useState<ProfileSignal[]>([]);
   const [exclusions, setExclusions] = useState<ProfileExclusion[]>(EXCLUSIONS.map((item) => item.value));
   const [saving, setSaving] = useState(false);
-  const valid = Boolean(selectedProductId && trades.length && city.trim().length >= 2);
+  const audienceDefined = Boolean(trades.length && city.trim().length >= 2);
+  const valid = Boolean(selectedProductId && audienceDefined);
 
   const activeBatch = useMemo(
     () => profileBatch?.profile.id === selectedProfile?.id ? profileBatch : null,
@@ -135,13 +136,31 @@ export function AudienceProfileScreen() {
     }
   };
 
+  const formHint = getFormHint(trades, city);
+
   return (
     <section className="audience-setup-screen">
       <header className="audience-page-heading">
         <div>
           <span>{selectedProduct?.product_name || "Product"}</span>
-          <h1>New audience</h1>
-          <p>Create a separate lead stream under this product.</p>
+          <h1>
+            Define your <em>next</em> audience
+          </h1>
+          <p className="audience-brief">
+            {audienceDefined ? (
+              <>
+                <span className="audience-brief-value">{capitalize(customerKind)}</span>{" "}
+                <span className="audience-brief-value">
+                  {joinLabels(trades.map((key) => businessTypes.find((trade) => trade.key === key)?.label || key))}
+                </span>
+                {" in "}
+                <span className="audience-brief-value">{city.trim()}</span>
+                {`, within ${radiusKm} km. First batch: ${batchSize} leads.`}
+              </>
+            ) : (
+              <>Set the business type and market for this product.</>
+            )}
+          </p>
         </div>
       </header>
 
@@ -152,108 +171,174 @@ export function AudienceProfileScreen() {
           void submit();
         }}
       >
-        <div className="audience-name-row">
-          <label>
-            <span>Name · optional</span>
-            <input autoFocus type="text" placeholder={defaultAudienceName(trades, city, businessTypes)} value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-        </div>
-
-        <fieldset>
-          <legend>Business type <em>*</em></legend>
-          <div className="audience-chip-options" aria-label="Business types">
-            {businessTypes.map((trade) => {
-              const selected = trades.includes(trade.key);
-              return (
-                <button
-                  aria-pressed={selected}
-                  className={selected ? "is-selected" : ""}
-                  key={trade.key}
-                  type="button"
-                  onClick={() => setTrades(toggleValue(trades, trade.key))}
-                >
-                  {selected ? <Check size={13} /> : null}
-                  {trade.label}
-                </button>
-              );
-            })}
-            {!profileOptions && !optionsError ? <LoaderCircle className="sl-spin" size={15} /> : null}
-            {optionsError ? <span className="audience-options-error">Business types unavailable.</span> : null}
+        <section className="audience-form-row" aria-labelledby="audience-name-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-name-title">Name</h2>
+            <p>Optional. Leave blank to use the business type and city.</p>
           </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Customer kind <em>*</em></legend>
-          <div className="audience-radio-options">
-            {(["residential", "commercial"] as ProfileCustomerKind[]).map((value) => (
-              <label key={value}>
-                <input type="radio" name="customer-kind" value={value} checked={customerKind === value} onChange={() => setCustomerKind(value)} />
-                <span>{capitalize(value)}</span>
-              </label>
-            ))}
+          <div className="audience-row-control">
+            <input
+              aria-label="Audience name"
+              autoFocus
+              className="audience-input"
+              placeholder={defaultAudienceName(trades, city, businessTypes)}
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
           </div>
-        </fieldset>
+        </section>
 
-        <div className="audience-location-section">
-          <label>
-            <span>City <em>*</em></span>
-            <div className="audience-city-control">
-              <MapPin aria-hidden="true" size={15} />
-              <input list="audience-city-options" type="text" placeholder="Toronto" value={city} onChange={(event) => setCity(event.target.value)} />
-              {city ? (
-                <button aria-label="Clear city" title="Clear city" type="button" onClick={() => setCity("")}>
-                  <X size={14} />
-                </button>
-              ) : null}
+        <section className="audience-form-row" aria-labelledby="audience-trade-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-trade-title">Business type <em>*</em></h2>
+            <p>Choose one or more.</p>
+          </div>
+          <div className="audience-row-control">
+            <div className="audience-chip-options" role="group" aria-labelledby="audience-trade-title">
+              {businessTypes.map((trade) => {
+                const selected = trades.includes(trade.key);
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={selected ? "is-selected" : ""}
+                    key={trade.key}
+                    type="button"
+                    onClick={() => setTrades(toggleValue(trades, trade.key))}
+                  >
+                    {selected ? <Check size={13} /> : null}
+                    {trade.label}
+                  </button>
+                );
+              })}
             </div>
-            <datalist id="audience-city-options">
-              {CITY_SUGGESTIONS.map((value) => <option key={value} value={value} />)}
-            </datalist>
-          </label>
-          <div className="audience-location-grid">
-            {city.trim() ? (
-              <label>
-                <span>Radius</span>
-                <select value={radiusKm} onChange={(event) => setRadiusKm(Number(event.target.value) as 10 | 25 | 50)}>
-                  {[10, 25, 50].map((value) => <option key={value} value={value}>{value} km</option>)}
-                </select>
-              </label>
-            ) : <span />}
-            <label>
+            {!profileOptions && !optionsError ? (
+              <p className="audience-row-status">
+                <LoaderCircle className="sl-spin" size={14} />
+                Loading business types
+              </p>
+            ) : null}
+            {optionsError ? <p className="audience-row-error">Business types unavailable.</p> : null}
+          </div>
+        </section>
+
+        <section className="audience-form-row" aria-labelledby="audience-kind-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-kind-title">Customer kind <em>*</em></h2>
+            <p>Who these businesses serve.</p>
+          </div>
+          <div className="audience-row-control">
+            <div className="audience-segmented" role="radiogroup" aria-labelledby="audience-kind-title">
+              {(["residential", "commercial"] as ProfileCustomerKind[]).map((value) => (
+                <label key={value}>
+                  <input type="radio" name="customer-kind" value={value} checked={customerKind === value} onChange={() => setCustomerKind(value)} />
+                  <span>{capitalize(value)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="audience-form-row" aria-labelledby="audience-market-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-market-title">Market <em>*</em></h2>
+            <p>Where these businesses are located.</p>
+          </div>
+          <div className="audience-market-fields">
+            <label className="audience-field">
+              <span>City</span>
+              <div className="audience-city-control">
+                <MapPin aria-hidden="true" size={15} />
+                <input
+                  className="audience-city-input"
+                  list="audience-city-options"
+                  minLength={2}
+                  placeholder="Enter a city"
+                  required
+                  type="text"
+                  value={city}
+                  onChange={(event) => setCity(event.target.value)}
+                />
+                {city ? (
+                  <button aria-label="Clear city" title="Clear city" type="button" onClick={() => setCity("")}>
+                    <X size={14} />
+                  </button>
+                ) : null}
+              </div>
+              <datalist id="audience-city-options">
+                {CITY_SUGGESTIONS.map((value) => <option key={value} value={value} />)}
+              </datalist>
+            </label>
+            <label className="audience-field">
+              <span>Radius</span>
+              <select
+                className="audience-input"
+                disabled={!city.trim()}
+                value={radiusKm}
+                onChange={(event) => setRadiusKm(Number(event.target.value) as 10 | 25 | 50)}
+              >
+                {[10, 25, 50].map((value) => <option key={value} value={value}>{value} km</option>)}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section className="audience-form-row" aria-labelledby="audience-delivery-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-delivery-title">Delivery</h2>
+            <p>How many leads to include in the first batch.</p>
+          </div>
+          <div className="audience-delivery-fields">
+            <label className="audience-field">
               <span>Batch size</span>
-              <select value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value) as 15 | 25 | 40)}>
+              <select
+                className="audience-input"
+                value={batchSize}
+                onChange={(event) => setBatchSize(Number(event.target.value) as 15 | 25 | 40)}
+              >
                 {[15, 25, 40].map((value) => <option key={value} value={value}>{value} leads</option>)}
               </select>
             </label>
           </div>
-        </div>
+        </section>
 
-        <fieldset>
-          <legend>Opportunity signals</legend>
-          <div className="audience-option-grid">
-            {SIGNALS.map((signal) => (
-              <label key={signal.value}>
-                <input type="checkbox" checked={signals.includes(signal.value)} onChange={() => setSignals(toggleValue(signals, signal.value))} />
-                <span>{signal.label}</span>
-              </label>
-            ))}
+        <section className="audience-form-row" aria-labelledby="audience-signals-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-signals-title">Opportunity signals</h2>
+            <p>Optional. Gaps to look for in each business.</p>
           </div>
-        </fieldset>
+          <div className="audience-row-control">
+            <div className="audience-option-grid">
+              {SIGNALS.map((signal) => (
+                <label key={signal.value}>
+                  <input type="checkbox" checked={signals.includes(signal.value)} onChange={() => setSignals(toggleValue(signals, signal.value))} />
+                  <span>{signal.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
 
-        <fieldset>
-          <legend>Exclude</legend>
-          <div className="audience-option-grid">
-            {EXCLUSIONS.map((exclusion) => (
-              <label key={exclusion.value}>
-                <input type="checkbox" checked={exclusions.includes(exclusion.value)} onChange={() => setExclusions(toggleValue(exclusions, exclusion.value))} />
-                <span>{exclusion.label}</span>
-              </label>
-            ))}
+        <section className="audience-form-row" aria-labelledby="audience-exclude-title">
+          <div className="audience-row-copy">
+            <h2 id="audience-exclude-title">Exclude</h2>
+            <p>Left out of every batch.</p>
           </div>
-        </fieldset>
+          <div className="audience-row-control">
+            <div className="audience-option-grid">
+              {EXCLUSIONS.map((exclusion) => (
+                <label key={exclusion.value}>
+                  <input type="checkbox" checked={exclusions.includes(exclusion.value)} onChange={() => setExclusions(toggleValue(exclusions, exclusion.value))} />
+                  <span>{exclusion.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
 
         <div className="audience-form-footer">
-          <button className="primary audience-create-button" disabled={!valid || saving} type="submit">
+          <p className="audience-form-hint" aria-live="polite">{formHint}</p>
+          <button className="runbtn audience-create-button" disabled={!valid || saving} type="submit">
             {saving ? <LoaderCircle className="sl-spin" size={15} /> : null}
             <span>Create audience</span>
             {!saving ? <ArrowRight size={15} /> : null}
@@ -273,11 +358,22 @@ function defaultAudienceName(
   city: string,
   businessTypes: ProfileOptions["business_types"],
 ) {
-  const tradeLabel = trades
-    .map((key) => businessTypes.find((trade) => trade.key === key)?.label)
-    .filter(Boolean)
-    .join(" + ");
-  return [tradeLabel, city.trim()].filter(Boolean).join(" · ") || "Painters · Toronto";
+  const tradeLabel = joinLabels(trades.map((key) => businessTypes.find((trade) => trade.key === key)?.label || key));
+  return [tradeLabel, city.trim()].filter(Boolean).join(" · ") || "Local businesses";
+}
+
+function joinLabels(labels: string[]) {
+  if (labels.length <= 2) return labels.join(" and ");
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+function getFormHint(trades: ProfileTrade[], city: string) {
+  const needsBusinessType = trades.length === 0;
+  const needsCity = city.trim().length < 2;
+  if (needsBusinessType && needsCity) return "Choose a business type and enter a city to continue.";
+  if (needsBusinessType) return "Choose a business type to continue.";
+  if (needsCity) return "Enter a city to continue.";
+  return "Ready to create this audience.";
 }
 
 function capitalize(value: string) {
