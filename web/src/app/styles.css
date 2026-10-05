@@ -2775,12 +2775,14 @@ a {
 }
 
 .lead-workflow-links {
+  align-content: start;
   display: grid;
-  flex: 0 0 var(--workflow-section-height, 247px);
+  flex: 0 0 var(--workflow-section-height, 190px);
   gap: 3px;
+  grid-auto-rows: 38px;
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 13px;
+  padding-bottom: 20px;
   scrollbar-color: var(--line-strong) transparent;
   scrollbar-width: thin;
 }
@@ -2885,7 +2887,7 @@ a {
   padding-top: 4px;
 }
 
-.lead-workspace-list button > span:last-child {
+.lead-workspace-list button > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2898,6 +2900,16 @@ a {
 }
 
 .lead-workspace-list button.active .lead-workspace-icon {
+  color: #6f51df;
+}
+
+.lead-workspace-chevron {
+  color: var(--faint);
+  flex: 0 0 14px;
+  margin-left: auto;
+}
+
+.lead-workspace-list button.active .lead-workspace-chevron {
   color: #6f51df;
 }
 
@@ -5156,6 +5168,361 @@ body.is-resizing-navigation .rail {
   }
 }
 
+.audience-setup-screen,
+.audience-status-screen {
+  margin: 0 auto;
+  max-width: 880px;
+  padding: 40px 0 72px;
+  width: 100%;
+}
+
+.audience-page-heading {
+  align-items: flex-end;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.audience-page-heading > div {
+  min-width: 0;
+}
+
+.audience-page-heading span,
+.audience-setup-form label > span,
+.audience-setup-form legend {
+  color: var(--faint);
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.audience-page-heading h1 {
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 5px 0 0;
+}
+
+.audience-page-heading p,
+.audience-setup-form fieldset > p,
+.audience-status-panel p {
+  color: var(--muted);
+  margin: 6px 0 0;
+}
+
+.audience-setup-form legend em,
+.audience-setup-form label > span em {
+  color: #6f47e8;
+  font-style: normal;
+}
+
+.audience-setup-form,
+.audience-status-panel {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.audience-setup-form {
+  display: grid;
+  gap: 0;
+}
+
+.audience-name-row {
+  padding: 16px 18px;
+}
+
+.audience-name-row label {
+  max-width: 460px;
+}
+
+.audience-field-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 130px 130px;
+  padding: 18px;
+}
+
+.audience-setup-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.audience-setup-form input[type="text"],
+.audience-setup-form input:not([type]),
+.audience-setup-form select {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  height: 38px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.audience-setup-form fieldset {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0;
+  padding: 14px 18px 16px;
+}
+
+.audience-chip-options {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.audience-options-error {
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.audience-chip-options button {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--muted);
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: center;
+  min-height: 36px;
+  min-width: 112px;
+  padding: 0 13px;
+}
+
+.audience-chip-options button:hover {
+  border-color: var(--faint);
+  color: var(--text);
+}
+
+.audience-chip-options button.is-selected {
+  background: #6f47e8;
+  border-color: #6f47e8;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.audience-radio-options {
+  display: flex;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.audience-radio-options label {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.audience-radio-options label > span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.audience-radio-options input {
+  accent-color: #6f47e8;
+  margin: 0;
+}
+
+.audience-location-section {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding: 14px 18px 16px;
+}
+
+.audience-city-control {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  display: flex;
+  height: 38px;
+  padding: 0 9px;
+}
+
+.audience-city-control:focus-within {
+  border-color: #8063e8;
+  box-shadow: 0 0 0 2px rgba(111, 71, 232, 0.12);
+}
+
+.audience-city-control > svg {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.audience-city-control input[type="text"] {
+  border: 0;
+  flex: 1 1 auto;
+  height: 36px;
+  min-width: 0;
+  outline: 0;
+  padding: 0 9px;
+  width: auto;
+}
+
+.audience-city-control button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  display: inline-flex;
+  flex: 0 0 26px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+}
+
+.audience-location-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.audience-setup-form fieldset > p {
+  font-size: 11px;
+}
+
+.audience-option-grid {
+  display: grid;
+  gap: 8px 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.audience-option-grid label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.audience-option-grid label > span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.audience-option-grid input {
+  accent-color: #6f47e8;
+  margin: 0;
+}
+
+.audience-form-footer {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 12px 18px;
+}
+
+.audience-form-footer label {
+  margin-right: auto;
+  width: 190px;
+}
+
+.audience-create-button {
+  background: #6f47e8;
+  border-color: #6f47e8;
+  min-height: 38px;
+  min-width: 158px;
+  padding: 0 14px;
+}
+
+.audience-create-button:hover:not(:disabled) {
+  background: #5f39d5;
+  border-color: #5f39d5;
+}
+
+.audience-create-button:disabled {
+  background: #a9a1bf;
+  border-color: #a9a1bf;
+}
+
+.audience-form-footer button,
+.audience-refill-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
+}
+
+.audience-status-panel {
+  padding: 22px;
+}
+
+.audience-status-panel strong {
+  display: block;
+  font-size: 16px;
+  margin-top: 18px;
+}
+
+.audience-state {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.audience-state.is-ready,
+.audience-state.is-partial {
+  color: var(--green);
+}
+
+.audience-state.is-failed {
+  color: var(--red);
+}
+
+@media (max-width: 900px) {
+  .audience-setup-screen,
+  .audience-status-screen {
+    padding: 24px 14px 56px;
+  }
+
+  .audience-field-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+}
+
+@media (max-width: 620px) {
+  .audience-field-grid,
+  .audience-option-grid,
+  .audience-location-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audience-chip-options button {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  .audience-page-heading,
+  .audience-form-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audience-form-footer label {
+    width: 100%;
+  }
+}
+
 .discovery-workspace {
   display: flex;
   flex-direction: column;
@@ -5835,6 +6202,37 @@ body.is-resizing-navigation .rail {
   border-radius: 9px;
   height: 32px;
   width: 32px;
+}
+
+.results-audience-select {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  display: inline-flex;
+  height: 32px;
+  min-width: 190px;
+  overflow: hidden;
+}
+
+.results-audience-select > span {
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 700;
+  padding-left: 9px;
+  text-transform: uppercase;
+}
+
+.results-audience-select select {
+  background: transparent;
+  border: 0;
+  flex: 1;
+  font-size: 11px;
+  font-weight: 650;
+  height: 100%;
+  min-width: 0;
+  outline: 0;
+  padding: 0 8px;
 }
 
 .outreach-toolbar-button {
@@ -8903,7 +9301,8 @@ button.bulk-recipient-select:hover {
   .lead-workflow-links button span,
   .lead-workflow-links button em,
   .lead-workspace-heading > span,
-  .lead-workspace-list button > span:last-child,
+  .lead-workspace-list button > span,
+  .lead-workspace-chevron,
   .lead-workspace-list .workspace-more,
   .lead-workspace-empty,
   .mng-label,

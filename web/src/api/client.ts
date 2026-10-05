@@ -23,6 +23,10 @@ import type {
   Product,
   ProductDescriptionInput,
   ProductProfileInput,
+  ProfileBatch,
+  ProfileCreateInput,
+  ProfileOptions,
+  ProfileQueued,
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
@@ -112,6 +116,30 @@ export class ApiClient {
     return this.request<Territory[]>("/territories");
   }
 
+  getProfiles() {
+    return this.request<Territory[]>("/profiles");
+  }
+
+  getProfileOptions() {
+    return this.request<ProfileOptions>("/profiles/options");
+  }
+
+  createProfile(input: ProfileCreateInput) {
+    return this.request<ProfileQueued>("/profiles", { method: "POST", body: input });
+  }
+
+  updateProfile(id: string, update: Partial<Territory>) {
+    return this.request<Territory>(`/profiles/${id}`, { method: "PATCH", body: update });
+  }
+
+  refillProfile(id: string) {
+    return this.request<ProfileQueued>(`/profiles/${id}/refill`, { method: "POST" });
+  }
+
+  getProfileBatch(id: string) {
+    return this.request<ProfileBatch>(`/profiles/${id}/current-batch`);
+  }
+
   resolveTerritory(productId: string, request: string) {
     return this.request<TerritoryResolution>("/territories/resolve", {
       method: "POST",
@@ -124,7 +152,7 @@ export class ApiClient {
     settings: Partial<
       Pick<
         Territory,
-        "label" | "batch_size" | "min_fit" | "search_contract" | "evidence_max_age_days"
+        "label" | "batch_size" | "min_fit" | "refill_policy" | "search_contract" | "evidence_max_age_days"
       >
     > = {},
   ) {
@@ -134,7 +162,7 @@ export class ApiClient {
     });
   }
 
-  updateTerritory(id: string, update: Partial<Pick<Territory, "label" | "status" | "batch_size" | "min_fit">>) {
+  updateTerritory(id: string, update: Partial<Pick<Territory, "label" | "status" | "batch_size" | "min_fit" | "refill_policy">>) {
     return this.request<Territory>(`/territories/${id}`, { method: "PATCH", body: update });
   }
 
@@ -143,7 +171,7 @@ export class ApiClient {
   }
 
   refreshTerritory(id: string) {
-    return this.request<TerritoryDelivery>(`/territories/${id}/refresh`, { method: "POST" });
+    return this.request<ProfileQueued>(`/territories/${id}/refresh`, { method: "POST" });
   }
 
   getTerritoryDeliveries(id: string) {

@@ -327,9 +327,19 @@ export type Territory = {
   product_id: string;
   niche_id: string;
   market_key: string;
+  city: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  radius_km: number;
+  trade_keys: ProfileTrade[];
+  customer_kind: ProfileCustomerKind;
+  signal_keys: string[];
+  exclusion_keys: string[];
   label: string;
   status: "active" | "paused";
   cadence: "weekly";
+  refill_policy: "manual" | "when_depleted" | "weekly" | "biweekly" | "monthly";
+  criteria_version: number;
   batch_size: number;
   min_fit: "good_fit" | "maybe";
   search_prompt?: string | null;
@@ -343,6 +353,62 @@ export type Territory = {
   positive_outcome_rate: number;
   created_at: string;
   updated_at: string;
+};
+
+export type ProfileTrade = "painters" | "hvac" | "roofers" | "plumbers" | "electricians";
+export type ProfileCustomerKind = "residential" | "commercial";
+export type ProfileSignal = "website_unavailable" | "no_quote_flow" | "no_contact_form" | "reviews_under_15";
+export type ProfileExclusion = "closed" | "chains" | "franchises" | "directories" | "agencies";
+
+export type ProfileOptions = {
+  business_types: Array<{
+    key: ProfileTrade;
+    label: string;
+  }>;
+};
+
+export type ProfileCreateInput = {
+  product_id: string;
+  name?: string;
+  trades: ProfileTrade[];
+  customer_kind: ProfileCustomerKind;
+  market: {
+    city: string;
+    radius_km: 10 | 25 | 50;
+  };
+  signals: ProfileSignal[];
+  exclude: ProfileExclusion[];
+  limit: 15 | 25 | 40;
+  exclude_already_delivered: true;
+};
+
+export type QueueJob = {
+  id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  status: "queued" | "running" | "completed" | "failed";
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  last_error?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProfileQueued = {
+  profile: Territory;
+  job: QueueJob;
+};
+
+export type ProfileBatch = {
+  profile: Territory;
+  delivery?: TerritoryDelivery | null;
+  leads: DiscoveryResult[];
+  state: "setup" | "scoring" | "ready" | "partial" | "failed";
+  requested_count: number;
+  result_count: number;
+  remaining_count: number;
 };
 
 export type TerritoryResolution = {

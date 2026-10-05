@@ -1,4 +1,4 @@
-import { OverviewScreen } from "../screens/OverviewScreen";
+import { AudienceProfileScreen } from "../screens/AudienceProfileScreen";
 import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
@@ -49,6 +49,6 @@ export function renderScreen(
         />
       );
     default:
-      return <OverviewScreen {...discoveryDraft} />;
+      return <AudienceProfileScreen />;
   }
 }

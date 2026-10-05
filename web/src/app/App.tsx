@@ -2,23 +2,21 @@ import {
   CalendarClock,
   Check,
   ChevronDown,
+  ChevronRight,
   CircleX,
   Download,
-  FilePlus2,
-  Folder,
-  Inbox,
   List,
   Menu,
   Package,
   Pencil,
   Plug,
   Plus,
-  ListChecks,
   Send,
   Settings,
   Star,
   Trash2,
   User,
+  Users,
 } from "lucide-react";
 import {
   useCallback,
@@ -62,8 +60,9 @@ type AppViewMode = "auto" | Screen;
 const RAIL_WIDTH_DEFAULT = 244;
 const RAIL_WIDTH_MIN = 220;
 const RAIL_WIDTH_MAX = 420;
-const WORKFLOW_HEIGHT_DEFAULT = 247;
-const WORKFLOW_HEIGHT_MIN = 150;
+const WORKFLOW_HEIGHT_DEFAULT = 190;
+const WORKFLOW_HEIGHT_MIN = 190;
+const WORKFLOW_HEIGHT_MAX = 220;
 const MANAGE_HEIGHT_DEFAULT = 151;
 const MANAGE_HEIGHT_MIN = 112;
 const RAIL_FIXED_HEIGHT_BUDGET = 330;
@@ -80,7 +79,7 @@ export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {})
 
 function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [viewMode, setViewMode] = useState<AppViewMode>("auto");
-  const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("this_week");
+  const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
   const [sourceReviewSummary, setSourceReviewSummary] = useState<{ runId: string; count: number } | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
@@ -95,7 +94,12 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     readStoredDimension("scoutlead:rail-width", RAIL_WIDTH_DEFAULT, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX),
   );
   const [workflowSectionHeight, setWorkflowSectionHeight] = useState(() =>
-    readStoredDimension("scoutlead:workflow-height", WORKFLOW_HEIGHT_DEFAULT, WORKFLOW_HEIGHT_MIN, 360),
+    readStoredDimension(
+      "scoutlead:workflow-height",
+      WORKFLOW_HEIGHT_DEFAULT,
+      WORKFLOW_HEIGHT_MIN,
+      WORKFLOW_HEIGHT_MAX,
+    ),
   );
   const [manageSectionHeight, setManageSectionHeight] = useState(() =>
     readStoredDimension("scoutlead:manage-height", MANAGE_HEIGHT_DEFAULT, MANAGE_HEIGHT_MIN, 280),
@@ -111,6 +115,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setSelectedProductId,
     selectedDiscoveryRunId,
     setSelectedDiscoveryRunId,
+    selectedProfileId,
+    setSelectedProfileId,
+    profileBatch,
     productDiscoveryRuns,
     productContacts,
     territories,
@@ -135,8 +142,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const selectedRunExists = Boolean(
     selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
   );
+  const productProfiles = territories.filter((profile) => profile.product_id === selectedProductId);
+  const selectedProfileRun = productDiscoveryRuns.find(
+    (run) => run.territory_id === selectedProfileId,
+  );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists);
-  const shouldShowDraftRun = draftRunName !== null;
   const currentRunContacts = selectedDiscoveryRunId
     ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
     : productContacts;
@@ -152,17 +162,13 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const workflowCounts = workflowSummary?.runId === selectedDiscoveryRunId
     ? workflowSummary.counts
     : fallbackWorkflowCounts;
-  const sourceReviewCount = sourceReviewSummary?.runId === selectedDiscoveryRunId
-    ? sourceReviewSummary.count
-    : 0;
   const leadWorkflowItems: Array<{ id: LeadWorkflowView; label: string; count: number; icon: ReactNode }> = [
     {
       id: "inbox",
-      label: "Inbox",
+      label: "Leads",
       count: workflowCounts.inbox,
-      icon: <Inbox size={17} />,
+      icon: <List size={17} />,
     },
-    { id: "this_week", label: "This week", count: workflowCounts.this_week, icon: <CalendarClock size={17} /> },
     {
       id: "shortlisted",
       label: "Shortlisted",
@@ -181,15 +187,14 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       count: workflowCounts.dismissed,
       icon: <CircleX size={17} />,
     },
-    { id: "all", label: "All leads", count: workflowCounts.all, icon: <List size={17} /> },
   ];
-  const visibleWorkspaceLabels = useMemo(() => {
-    if (workspaceExpanded || productRunLabels.length <= 5) return productRunLabels;
-    const recent = productRunLabels.slice(0, 5);
-    const selected = productRunLabels.find((item) => item.runIds.includes(selectedDiscoveryRunId));
+  const visibleProfiles = useMemo(() => {
+    if (workspaceExpanded || productProfiles.length <= 5) return productProfiles;
+    const recent = productProfiles.slice(0, 5);
+    const selected = productProfiles.find((item) => item.id === selectedProfileId);
     if (!selected || recent.some((item) => item === selected)) return recent;
     return [...recent.slice(0, 4), selected];
-  }, [productRunLabels, selectedDiscoveryRunId, workspaceExpanded]);
+  }, [productProfiles, selectedProfileId, workspaceExpanded]);
   const handleWorkflowCountsChange = useCallback((runId: string, counts: LeadWorkflowCounts) => {
     setWorkflowSummary((current) => {
       if (current?.runId === runId && Object.keys(counts).every((key) => current.counts[key as LeadWorkflowView] === counts[key as LeadWorkflowView])) {
@@ -209,22 +214,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setLeadWorkflowView(nextView);
     const targetRunId = selectedRunExists
       ? selectedDiscoveryRunId
-      : productRunLabels[0]?.run.id;
+      : selectedProfileRun?.id || productDiscoveryRuns[0]?.id;
     if (targetRunId) {
       setSelectedDiscoveryRunId(targetRunId);
       void refreshSnapshot(targetRunId);
       selectScreen("results");
-    }
-    setMobileRailOpen(false);
-  };
-
-  const openSourceReview = () => {
-    const targetRunId = selectedRunExists
-      ? selectedDiscoveryRunId
-      : productRunLabels[0]?.run.id;
-    if (targetRunId) {
-      setSelectedDiscoveryRunId(targetRunId);
-      selectScreen("review");
     }
     setMobileRailOpen(false);
   };
@@ -245,19 +239,12 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setRoutePath("/app");
   };
 
-  const startNewList = () => {
+  const startNewAudience = () => {
     if (isTraceRoute) returnToApp();
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
     setViewMode("overview");
-    const existingNames = productRunLabels.map((item) => item.title);
-    const savedDraftName = readDraftRunName(selectedProductId);
-    setDraftRunName((current) => {
-      const reusableName = [current, savedDraftName].find(
-        (name): name is string => Boolean(name && !isPlaceholderRunName(name)),
-      );
-      return reusableName ?? uniqueListName("New search", existingNames);
-    });
+    setSelectedProfileId("");
     setSelectedDiscoveryRunId("");
   };
 
@@ -273,8 +260,10 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     if (productId === selectedProductId) return;
 
     setSelectedProductId(productId);
+    const firstProfile = territories.find((profile) => profile.product_id === productId);
+    setSelectedProfileId(firstProfile?.id || "");
     setSelectedDiscoveryRunId("");
-    setLeadWorkflowView("this_week");
+    setLeadWorkflowView("inbox");
     setWorkflowSummary(null);
     setWorkspaceExpanded(false);
     setDraftRunNameState(readDraftRunName(productId));
@@ -371,6 +360,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, [selectedProductId]);
 
   useEffect(() => {
+    if (!profileBatch?.delivery?.campaign_id || profileBatch.profile.id !== selectedProfileId) return;
+    setViewMode("auto");
+  }, [profileBatch?.delivery?.campaign_id, profileBatch?.profile.id, selectedProfileId]);
+
+  useEffect(() => {
     if (!productMenuOpen) return;
 
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -391,6 +385,12 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   useEffect(() => {
     writeStoredDimension("scoutlead:rail-width", railWidth);
   }, [railWidth]);
+
+  useEffect(() => {
+    setWorkflowSectionHeight((current) =>
+      Math.min(WORKFLOW_HEIGHT_MAX, Math.max(WORKFLOW_HEIGHT_MIN, current)),
+    );
+  }, []);
 
   useEffect(() => {
     writeStoredDimension("scoutlead:workflow-height", workflowSectionHeight);
@@ -540,76 +540,66 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 <em>{item.count}</em>
               </button>
             ))}
-            <button
-              className={activeScreen === "review" ? "active" : ""}
-              aria-label={`Review queue, ${sourceReviewCount}`}
-              title={`Review queue (${sourceReviewCount})`}
-              type="button"
-              onClick={openSourceReview}
-            >
-              <ListChecks size={17} />
-              <span>Review queue</span>
-              <em>{sourceReviewCount}</em>
-            </button>
           </div>
           <ResizeHandle
             ariaLabel="Resize lead workflow section"
             axis="y"
             defaultValue={WORKFLOW_HEIGHT_DEFAULT}
-            max={() => Math.max(WORKFLOW_HEIGHT_MIN, availableResizableHeight() - manageSectionHeight)}
+            max={() =>
+              Math.min(
+                WORKFLOW_HEIGHT_MAX,
+                Math.max(WORKFLOW_HEIGHT_MIN, availableResizableHeight() - manageSectionHeight),
+              )
+            }
             min={WORKFLOW_HEIGHT_MIN}
             onChange={setWorkflowSectionHeight}
             value={workflowSectionHeight}
           />
           <div className="lead-workspace-heading">
-            <span>Workspaces</span>
-            <button type="button" aria-label="New search" title="New search" onClick={startNewList}>
+            <span>Audiences</span>
+            <button type="button" aria-label="New audience" title="New audience" onClick={startNewAudience}>
               <Plus size={15} />
             </button>
           </div>
           <div className="lead-workspace-list">
-            {shouldShowDraftRun ? (
+            {visibleProfiles.map((profile) => (
               <button
-                className={activeScreen === "overview" && !selectedDiscoveryRunId ? "active is-draft" : "is-draft"}
-                aria-label={draftRunName || "New search"}
-                title={draftRunName || "New search"}
-                type="button"
-                onClick={startNewList}
-              >
-                <FilePlus2 className="lead-workspace-icon" size={15} />
-                <span>{draftRunName || "New search"}</span>
-              </button>
-            ) : null}
-            {visibleWorkspaceLabels.map(({ run, runIds, territory, title }) => (
-              <button
-                className={activeScreen === "results" && runIds.includes(selectedDiscoveryRunId) ? "active" : ""}
-                key={territory?.id || run.id}
-                aria-label={title}
-                title={title}
+                className={profile.id === selectedProfileId ? "active" : ""}
+                key={profile.id}
+                aria-label={profile.label}
+                title={profile.label}
                 type="button"
                 onClick={() => {
-                  setSelectedDiscoveryRunId(run.id);
-                  setLeadWorkflowView("this_week");
-                  void refreshSnapshot(run.id);
-                  selectScreen("results");
+                  setSelectedProfileId(profile.id);
+                  const run = productDiscoveryRuns.find((item) => item.territory_id === profile.id);
+                  setLeadWorkflowView("inbox");
+                  if (run) {
+                    setSelectedDiscoveryRunId(run.id);
+                    void refreshSnapshot(run.id);
+                    selectScreen("results");
+                  } else {
+                    setSelectedDiscoveryRunId("");
+                    selectScreen("overview");
+                  }
                   setMobileRailOpen(false);
                 }}
               >
-                <Folder className="lead-workspace-icon" size={15} />
-                <span>{title}</span>
+                <Users className="lead-workspace-icon" size={15} />
+                <span>{profile.label}</span>
+                <ChevronRight className="lead-workspace-chevron" size={14} />
               </button>
             ))}
-            {productRunLabels.length > 5 ? (
+            {productProfiles.length > 5 ? (
               <button
                 className="workspace-more"
                 type="button"
                 onClick={() => setWorkspaceExpanded((expanded) => !expanded)}
               >
-                <span>{workspaceExpanded ? "Show recent" : `View all (${productRunLabels.length})`}</span>
+                <span>{workspaceExpanded ? "Show recent" : `View all (${productProfiles.length})`}</span>
               </button>
             ) : null}
-            {!shouldShowDraftRun && !productRunLabels.length ? (
-              <p className="lead-workspace-empty">Create a search to start finding leads.</p>
+            {!productProfiles.length ? (
+              <p className="lead-workspace-empty">Create an audience to start receiving leads.</p>
             ) : null}
           </div>
         </nav>

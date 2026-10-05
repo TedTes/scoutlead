@@ -19,6 +19,9 @@ import type {
   Product,
   ProductDescriptionInput,
   ProductProfileInput,
+  ProfileBatch,
+  ProfileCreateInput,
+  ProfileQueued,
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
@@ -36,8 +39,11 @@ type AppDataContextValue = {
   discoveryRuns: DiscoveryRun[];
   selectedProductId: string;
   selectedDiscoveryRunId: string;
+  selectedProfileId: string;
   selectedProduct?: Product;
   selectedDiscoveryRun?: DiscoveryRun;
+  selectedProfile?: Territory;
+  profileBatch: ProfileBatch | null;
   productDiscoveryRuns: DiscoveryRun[];
   productContacts: DiscoveryResult[];
   territories: Territory[];
@@ -47,15 +53,19 @@ type AppDataContextValue = {
   activeSourceIds: SourceRequestSource[];
   setSelectedProductId: (productId: string) => void;
   setSelectedDiscoveryRunId: (runId: string) => void;
+  setSelectedProfileId: (profileId: string) => void;
   setActiveSourceIds: (sourceIds: SourceRequestSource[]) => void;
   refreshAll: (options?: RefreshAllOptions) => Promise<void>;
   refreshSnapshot: (runId?: string) => Promise<void>;
+  refreshProfileBatch: (profileId?: string) => Promise<ProfileBatch | null>;
   refreshGmailConnection: (productId?: string) => Promise<void>;
   getGmailAuthorizationUrl: (productId?: string) => Promise<GmailAuthorizationUrl | null>;
   disconnectGmail: (productId?: string) => Promise<void>;
   createProduct: (input: unknown) => Promise<Product | null>;
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
   createProductFromProfile: (input: ProductProfileInput) => Promise<Product | null>;
+  createProfile: (input: ProfileCreateInput) => Promise<ProfileQueued | null>;
+  refillProfile: (profileId?: string) => Promise<ProfileQueued | null>;
   deleteProduct: (productId?: string) => Promise<void>;
   discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
@@ -165,10 +175,15 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   const [selectedDiscoveryRunIdState, setSelectedDiscoveryRunIdState] = useState(
     localStorage.getItem("selectedDiscoveryRunId") || "",
   );
+  const [selectedProfileIdState, setSelectedProfileIdState] = useState(
+    localStorage.getItem("selectedProfileId") || "",
+  );
+  const selectedProfileIdRef = useRef(selectedProfileIdState);
   const selectedDiscoveryRunIdRef = useRef(selectedDiscoveryRunIdState);
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
+  const [profileBatch, setProfileBatch] = useState<ProfileBatch | null>(null);
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
   const [gmailConnectionStatus, setGmailConnectionStatus] = useState<GmailConnectionStatus | null>(null);
   const [activeSourceIds, setActiveSourceIdsState] = useState<SourceRequestSource[]>(readStoredActiveSourceIds);
@@ -186,19 +201,27 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       ? snapshot.run
       : discoveryRuns.find((run) => run.id === selectedDiscoveryRunIdState)
     : undefined;
+  const selectedProfile = territories.find((profile) => profile.id === selectedProfileIdState);
 
   const persistSelectedProductId = useCallback(
     (productId: string, nextRuns = discoveryRuns) => {
       localStorage.setItem("selectedProductId", productId);
       setSelectedProductIdState(productId);
 
-      const firstRunForProduct = nextRuns.find((run) => run.product_id === productId);
+      const firstProfile = territories.find((profile) => profile.product_id === productId);
+      const nextProfileId = firstProfile?.id || "";
+      localStorage.setItem("selectedProfileId", nextProfileId);
+      selectedProfileIdRef.current = nextProfileId;
+      setSelectedProfileIdState(nextProfileId);
+      const firstRunForProduct = nextRuns.find(
+        (run) => run.product_id === productId && (!nextProfileId || run.territory_id === nextProfileId),
+      );
       const nextRunId = firstRunForProduct?.id || "";
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
       selectedDiscoveryRunIdRef.current = nextRunId;
       setSelectedDiscoveryRunIdState(nextRunId);
     },
-    [discoveryRuns],
+    [discoveryRuns, territories],
   );
 
   const persistSelectedDiscoveryRunId = useCallback((runId: string) => {
@@ -206,6 +229,13 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     selectedDiscoveryRunIdRef.current = runId;
     setSelectedDiscoveryRunIdState(runId);
     if (!runId) setSnapshot(emptySnapshot);
+  }, []);
+
+  const persistSelectedProfileId = useCallback((profileId: string) => {
+    localStorage.setItem("selectedProfileId", profileId);
+    selectedProfileIdRef.current = profileId;
+    setSelectedProfileIdState(profileId);
+    if (!profileId) setProfileBatch(null);
   }, []);
 
   const persistActiveSourceIds = useCallback(
@@ -280,6 +310,31 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     [api],
   );
 
+  const refreshProfileBatch = useCallback(
+    async (profileId?: string) => {
+      const targetProfileId = profileId ?? selectedProfileIdRef.current;
+      if (!targetProfileId) {
+        setProfileBatch(null);
+        return null;
+      }
+      const batch = await api.getProfileBatch(targetProfileId);
+      setProfileBatch(batch);
+      if (
+        batch.delivery?.campaign_id
+        && targetProfileId === selectedProfileIdRef.current
+      ) {
+        const run = await api.getDiscoveryRun(batch.delivery.campaign_id);
+        setDiscoveryRuns((current) => upsertDiscoveryRun(current, run));
+        localStorage.setItem("selectedDiscoveryRunId", run.id);
+        selectedDiscoveryRunIdRef.current = run.id;
+        setSelectedDiscoveryRunIdState(run.id);
+        await refreshSnapshot(run.id);
+      }
+      return batch;
+    },
+    [api, refreshSnapshot],
+  );
+
   const refreshGmailConnection = useCallback(
     async (productId?: string) => {
       const targetProductId = productId ?? localStorage.getItem("selectedProductId") ?? "";
@@ -333,6 +388,17 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       setSelectedProductIdState(nextProductId);
       if (nextProductId) localStorage.setItem("selectedProductId", nextProductId);
 
+      const productProfiles = nextTerritories.filter(
+        (profile) => profile.product_id === nextProductId,
+      );
+      const storedProfileId = localStorage.getItem("selectedProfileId") || "";
+      const nextProfileId = productProfiles.some((profile) => profile.id === storedProfileId)
+        ? storedProfileId
+        : productProfiles[0]?.id || "";
+      setSelectedProfileIdState(nextProfileId);
+      selectedProfileIdRef.current = nextProfileId;
+      localStorage.setItem("selectedProfileId", nextProfileId);
+
       const storedRunIdValue = localStorage.getItem("selectedDiscoveryRunId");
       const storedRunId = storedRunIdValue || "";
       const productRunList = nextRuns.filter((run) => run.product_id === nextProductId);
@@ -348,13 +414,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
 
       await refreshProductContacts(nextProductId, nextRuns);
       await refreshSnapshot(nextRunId);
+      await refreshProfileBatch(nextProfileId).catch(() => setProfileBatch(null));
       await refreshGmailConnection(nextProductId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [api, refreshGmailConnection, refreshProductContacts, refreshSnapshot]);
+  }, [api, refreshGmailConnection, refreshProductContacts, refreshProfileBatch, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -382,6 +449,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   }, [refreshSnapshot, selectedDiscoveryRun?.id, selectedDiscoveryRun?.status]);
 
   useEffect(() => {
+    if (profileBatch?.state !== "scoring" || !selectedProfileIdState) return;
+    const timer = window.setInterval(() => {
+      void refreshProfileBatch(selectedProfileIdState);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [profileBatch?.state, refreshProfileBatch, selectedProfileIdState]);
+
+  useEffect(() => {
     void refreshProductContacts(selectedProductIdState, discoveryRuns);
   }, [discoveryRuns, refreshProductContacts, selectedProductIdState]);
 
@@ -399,8 +474,11 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       discoveryRuns,
       selectedProductId: selectedProductIdState,
       selectedDiscoveryRunId: selectedDiscoveryRunIdState,
+      selectedProfileId: selectedProfileIdState,
       selectedProduct,
       selectedDiscoveryRun,
+      selectedProfile,
+      profileBatch,
       productDiscoveryRuns,
       productContacts,
       territories,
@@ -410,9 +488,11 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       gmailConnectionStatus,
       setSelectedProductId: persistSelectedProductId,
       setSelectedDiscoveryRunId: persistSelectedDiscoveryRunId,
+      setSelectedProfileId: persistSelectedProfileId,
       setActiveSourceIds: persistActiveSourceIds,
       refreshAll,
       refreshSnapshot,
+      refreshProfileBatch,
       refreshGmailConnection,
       getGmailAuthorizationUrl: async (productId = selectedProductIdState) => {
         if (!productId) return null;
@@ -452,6 +532,35 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           created = product;
         });
         return created;
+      },
+      createProfile: async (input) => {
+        let created: ProfileQueued | null = null;
+        setError("");
+        try {
+          created = await api.createProfile(input);
+          persistSelectedProfileId(created.profile.id);
+          setTerritories((current) => [
+            created!.profile,
+            ...current.filter((profile) => profile.id !== created!.profile.id),
+          ]);
+          await refreshProfileBatch(created.profile.id);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
+        return created;
+      },
+      refillProfile: async (profileId = selectedProfileIdState) => {
+        if (!profileId) return null;
+        setError("");
+        try {
+          const queued = await api.refillProfile(profileId);
+          await refreshProfileBatch(profileId);
+          return queued;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
       },
       deleteProduct: (productId = selectedProductIdState) =>
         mutate(async () => {
@@ -665,6 +774,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       loading,
       mutate,
       persistSelectedDiscoveryRunId,
+      persistSelectedProfileId,
       persistSelectedProductId,
       persistActiveSourceIds,
       productDiscoveryRuns,
@@ -673,15 +783,19 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       products,
       refreshAll,
       refreshGmailConnection,
+      refreshProfileBatch,
       refreshSnapshot,
       selectedDiscoveryRun,
       selectedDiscoveryRunIdState,
+      selectedProfile,
+      selectedProfileIdState,
       selectedProduct,
       selectedProductIdState,
       sourceProviders,
       gmailConnectionStatus,
       activeSourceIds,
       snapshot,
+      profileBatch,
     ],
   );
 

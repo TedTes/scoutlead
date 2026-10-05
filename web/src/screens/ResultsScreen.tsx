@@ -126,7 +126,9 @@ export function ResultsScreen({
     selectedDiscoveryRunId,
     selectedProduct,
     selectedProductId,
+    selectedProfileId,
     setSelectedDiscoveryRunId,
+    setSelectedProfileId,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
     qualifyLead,
@@ -191,6 +193,9 @@ export function ResultsScreen({
   const selectedTerritory = selectedDiscoveryRun?.territory_id
     ? territories.find((territory) => territory.id === selectedDiscoveryRun.territory_id)
     : undefined;
+  const productProfiles = territories.filter(
+    (territory) => territory.product_id === selectedProductId,
+  );
   const selectedDelivery = selectedTerritory
     ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
     : undefined;
@@ -553,7 +558,11 @@ export function ResultsScreen({
     }
   };
 
-  const saveSchedule = async (settings: { batch_size: number; min_fit: Territory["min_fit"] }) => {
+  const saveSchedule = async (settings: {
+    batch_size: number;
+    min_fit: Territory["min_fit"];
+    refill_policy: Territory["refill_policy"];
+  }) => {
     if (!selectedDiscoveryRun || scheduleBusy) return;
     setScheduleBusy(true);
     try {
@@ -571,6 +580,7 @@ export function ResultsScreen({
         const scheduled = existing || await territoryApi.createTerritory(scheduleResolution, {
           batch_size: settings.batch_size,
           min_fit: settings.min_fit,
+          refill_policy: settings.refill_policy,
           search_contract: storedSearchContract(selectedDiscoveryRun),
           evidence_max_age_days: storedEvidenceMaxAge(selectedDiscoveryRun),
         });
@@ -581,7 +591,7 @@ export function ResultsScreen({
       }
       await refreshAll({ showLoading: false });
       setScheduleDialogOpen(false);
-      showToast({ title: selectedTerritory ? "Schedule updated" : "Weekly search scheduled", tone: "green" });
+      showToast({ title: selectedTerritory ? "Audience updated" : "Audience schedule created", tone: "green" });
     } catch (err) {
       showToast({
         title: "Schedule update failed",
@@ -601,7 +611,7 @@ export function ResultsScreen({
       await territoryApi.updateTerritory(selectedTerritory.id, { status });
       await refreshAll({ showLoading: false });
       setRunMenuOpen(false);
-      showToast({ title: status === "active" ? "Weekly search resumed" : "Weekly search paused", tone: "green" });
+      showToast({ title: status === "active" ? "Audience resumed" : "Audience paused", tone: "green" });
     } catch (err) {
       showToast({ title: "Schedule update failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
     } finally {
@@ -613,18 +623,15 @@ export function ResultsScreen({
     if (!selectedTerritory || selectedTerritory.status !== "active" || scheduleBusy) return;
     setScheduleBusy(true);
     try {
-      const delivery = await territoryApi.refreshTerritory(selectedTerritory.id);
-      await refreshAll({ showLoading: false });
-      setSelectedDiscoveryRunId(delivery.campaign_id);
-      await refreshSnapshot(delivery.campaign_id);
+      await territoryApi.refreshTerritory(selectedTerritory.id);
       setRunMenuOpen(false);
       showToast({
-        title: delivery.status === "ready" ? "New delivery ready" : "Scheduled search completed",
-        message: `${delivery.new_contact_count} new contact${delivery.new_contact_count === 1 ? "" : "s"}.`,
-        tone: delivery.status === "failed" ? "red" : "green",
+        title: "Batch queued",
+        message: "Scoring runs in the background. New leads will appear when the batch is ready.",
+        tone: "blue",
       });
     } catch (err) {
-      showToast({ title: "Scheduled search failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
+      showToast({ title: "Batch request failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
     } finally {
       setScheduleBusy(false);
     }
@@ -760,6 +767,27 @@ export function ResultsScreen({
     <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
       <div className="results-controlbar">
         <div className="results-control-actions">
+          {productProfiles.length ? (
+            <label className="results-audience-select">
+              <span>Audience</span>
+              <select
+                aria-label="Audience profile"
+                value={selectedProfileId || selectedTerritory?.id || ""}
+                onChange={async (event) => {
+                  const profileId = event.target.value;
+                  setSelectedProfileId(profileId);
+                  const batch = await territoryApi.getProfileBatch(profileId);
+                  if (!batch.delivery?.campaign_id) return;
+                  setSelectedDiscoveryRunId(batch.delivery.campaign_id);
+                  await refreshSnapshot(batch.delivery.campaign_id);
+                }}
+              >
+                {productProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.label}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {selectedTerritory && deliveries.length ? (
             <div className="delivery-menu-control" ref={deliveryMenuRef}>
               <button
@@ -962,7 +990,7 @@ export function ResultsScreen({
                 <div className="action-menu-divider" />
                 {selectedTerritory ? (
                   <div className="run-menu-summary">
-                    <strong>Weekly search · {selectedTerritory.status}</strong>
+                    <strong>{refillPolicyLabel(selectedTerritory.refill_policy)} · {selectedTerritory.status}</strong>
                     <span>
                       Next {formatCompactDate(selectedTerritory.next_run_at)}
                       {territoryMetrics ? ` · ${territoryMetrics.totals.delivered} delivered · ${territoryMetrics.totals.meetings} meetings` : ""}
@@ -977,15 +1005,15 @@ export function ResultsScreen({
                       onClick={() => void runScheduledSearchNow()}
                     >
                       <Play size={14} />
-                      {scheduleBusy ? "Running..." : "Run weekly search now"}
+                      {scheduleBusy ? "Queueing..." : "Refill now"}
                     </button>
                     <button type="button" disabled={scheduleBusy} onClick={() => void toggleSchedule()}>
                       {selectedTerritory.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-                      {selectedTerritory.status === "active" ? "Pause weekly search" : "Resume weekly search"}
+                      {selectedTerritory.status === "active" ? "Pause audience" : "Resume audience"}
                     </button>
                     <button type="button" disabled={scheduleBusy} onClick={() => void openScheduleDialog()}>
                       <CalendarClock size={14} />
-                      Weekly settings
+                      Audience settings
                     </button>
                     <div className="action-menu-divider" />
                   </>
@@ -993,7 +1021,7 @@ export function ResultsScreen({
                   <>
                     <button type="button" disabled={scheduleBusy || !runPrompt.trim()} onClick={() => void openScheduleDialog()}>
                       <CalendarClock size={14} />
-                      {scheduleBusy ? "Checking search..." : "Schedule weekly"}
+                      {scheduleBusy ? "Checking search..." : "Create audience schedule"}
                     </button>
                     <div className="action-menu-divider" />
                   </>
@@ -1266,30 +1294,35 @@ function ScheduleSearchDialog({
 }: {
   busy: boolean;
   onClose: () => void;
-  onSave: (settings: { batch_size: number; min_fit: Territory["min_fit"] }) => Promise<void>;
+  onSave: (settings: {
+    batch_size: number;
+    min_fit: Territory["min_fit"];
+    refill_policy: Territory["refill_policy"];
+  }) => Promise<void>;
   resolution: TerritoryResolution | null;
   territory?: Territory;
 }) {
   const [batchSize, setBatchSize] = useState(territory?.batch_size || 25);
   const [minFit, setMinFit] = useState<Territory["min_fit"]>(territory?.min_fit || "maybe");
+  const [refillPolicy, setRefillPolicy] = useState<Territory["refill_policy"]>(territory?.refill_policy || "weekly");
   const label = territory?.label || (
-    resolution ? `${resolution.niche_label} · ${resolution.market_label}` : "Weekly search"
+    resolution ? `${resolution.niche_label} · ${resolution.market_label}` : "Audience"
   );
 
   return (
-    <Modal title={territory ? "Weekly settings" : "Schedule weekly"} onClose={onClose}>
+    <Modal title={territory ? "Audience settings" : "Schedule audience"} onClose={onClose}>
       <form
         className="schedule-search-form"
         onSubmit={(event) => {
           event.preventDefault();
-          void onSave({ batch_size: batchSize, min_fit: minFit });
+          void onSave({ batch_size: batchSize, min_fit: minFit, refill_policy: refillPolicy });
         }}
       >
         <div className="schedule-search-summary">
           <CalendarClock size={17} />
           <span>
             <strong>{label}</strong>
-            <small>ScoutLead will find a new batch each week and exclude businesses already delivered.</small>
+            <small>Each batch excludes businesses already delivered to this audience.</small>
           </span>
         </div>
         <div className="schedule-search-fields">
@@ -1304,6 +1337,16 @@ function ScheduleSearchDialog({
             />
           </label>
           <label className="field">
+            <span>Refill</span>
+            <select value={refillPolicy} onChange={(event) => setRefillPolicy(event.target.value as Territory["refill_policy"])}>
+              <option value="when_depleted">When depleted</option>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Every two weeks</option>
+              <option value="monthly">Monthly</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+          <label className="field">
             <span>Minimum fit</span>
             <select value={minFit} onChange={(event) => setMinFit(event.target.value as Territory["min_fit"])}>
               <option value="maybe">Good and possible fit</option>
@@ -1314,7 +1357,7 @@ function ScheduleSearchDialog({
         <div className="dialog-actions">
           <button className="secondary" disabled={busy} type="button" onClick={onClose}>Cancel</button>
           <button className="runbtn" disabled={busy} type="submit">
-            {busy ? "Saving..." : territory ? "Save settings" : "Schedule weekly"}
+            {busy ? "Saving..." : territory ? "Save settings" : "Create schedule"}
           </button>
         </div>
       </form>
@@ -3576,12 +3619,18 @@ function outcomeLabel(value: string) {
 }
 
 function workflowViewLabel(view: LeadWorkflowView) {
-  if (view === "inbox") return "Inbox";
+  if (view === "inbox") return "Leads";
   if (view === "this_week") return "This week";
   if (view === "shortlisted") return "Shortlisted";
   if (view === "contacted") return "Contacted";
   if (view === "dismissed") return "Dismissed";
   return "All leads";
+}
+
+function refillPolicyLabel(value: Territory["refill_policy"]) {
+  if (value === "when_depleted") return "Refill when depleted";
+  if (value === "biweekly") return "Every two weeks";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function matchesWorkflowView(
