@@ -244,6 +244,10 @@ class CampaignService:
             self.campaign_sources.create_many(sources)
         return campaign_model
 
+    def create_profile_delivery(self, campaign: CampaignCreate) -> CampaignModel:
+        """Create a delivery container without configuring discovery sources."""
+        return self.campaigns.create(campaign)
+
     @staticmethod
     def _apply_source_preset_policy(campaign: CampaignCreate) -> CampaignCreate:
         if campaign.source_preset_id or not campaign.source_input:
@@ -333,7 +337,9 @@ class CampaignService:
                     signal_tags=matched_signals,
                 ),
             )
+            lead.rank_score = rank_score
             created.append(LeadRead.model_validate(lead))
+        self.session.commit()
         return created
 
     def materialize_index_candidates(

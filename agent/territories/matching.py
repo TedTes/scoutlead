@@ -175,10 +175,11 @@ class ProfileMatchService:
                     if item["distance_km"] is not None
                     else None
                 ),
+                rank_position=rank_position,
                 profile=profile,
                 cutoff=cutoff,
             )
-            for item in ranked
+            for rank_position, item in enumerate(ranked, start=1)
         ]
 
     def _result_row(
@@ -187,6 +188,7 @@ class ProfileMatchService:
         business_id: str,
         score: float,
         distance_km: float | None,
+        rank_position: int,
         profile,
         cutoff: datetime,
     ) -> dict[str, Any]:
@@ -245,6 +247,7 @@ class ProfileMatchService:
             "profile_match": {
                 "status": "matched",
                 "score": score,
+                "rank_position": rank_position,
                 "distance_km": round(distance_km, 2) if distance_km is not None else None,
                 "location_evidence": (
                     "coordinates" if distance_km is not None else "market_key"

@@ -95,11 +95,29 @@ class TerritoryService:
         if not data.confirmed:
             raise ValidationError("territory resolution must be confirmed before creation")
         niche = self._confirmed_niche(data)
-        contract_payload = data.search_contract or {
-            "opportunity_type": OpportunityType.ANY.value,
-            "search_contract": SearchContract().as_dict(),
-        }
+        is_profile = bool(data.trade_keys)
+        contract_payload = (
+            {}
+            if is_profile
+            else data.search_contract
+            or {
+                "opportunity_type": OpportunityType.ANY.value,
+                "search_contract": SearchContract().as_dict(),
+            }
+        )
         stored_contract_hash = str(contract_payload.get("contract_hash") or "").strip()
+        if is_profile:
+            criteria_hash = (
+                data.criteria_hash
+                if data.criteria_hash != "default"
+                else _criteria_hash(_structured_profile_criteria(data))
+            )
+        else:
+            criteria_hash = stored_contract_hash or (
+                data.criteria_hash
+                if data.criteria_hash != "default"
+                else _criteria_hash(contract_payload)
+            )
         normalized = data.model_copy(
             update={
                 "niche_slug": niche.slug,
@@ -117,14 +135,7 @@ class TerritoryService:
                     else _clean_keys(data.exclusion_keys)
                 ),
                 "search_contract": contract_payload,
-                "criteria_hash": (
-                    stored_contract_hash
-                    or (
-                        data.criteria_hash
-                        if data.criteria_hash != "default"
-                        else _criteria_hash(contract_payload)
-                    )
-                ),
+                "criteria_hash": criteria_hash,
             }
         )
         return self.territories.create(normalized, niche_id=niche.id, commit=commit)
@@ -146,11 +157,6 @@ class TerritoryService:
             )
         signals = [signal.value for signal in data.signals]
         exclusions = [exclusion.value for exclusion in data.exclude]
-        contract = SearchContract()
-        contract_payload = {
-            "opportunity_type": OpportunityType.ANY.value,
-            "search_contract": contract.as_dict(),
-        }
         criteria = {
             "trades": trade_keys,
             "customer_kind": customer_kind,
@@ -161,7 +167,6 @@ class TerritoryService:
             "limit": data.limit,
             "exclude_already_delivered": True,
         }
-        contract_payload["contract_hash"] = _criteria_hash(criteria)
         profile = self.create(
             TerritoryCreate(
                 product_id=data.product_id,
@@ -181,8 +186,6 @@ class TerritoryService:
                 label=data.name or f"{trade_label} · {city}",
                 refill_policy="when_depleted",
                 batch_size=data.limit,
-                request=f"{customer_kind} {trade_label} in {city}",
-                search_contract=contract_payload,
                 criteria_hash=_criteria_hash(criteria),
                 confirmed=True,
             ),
@@ -276,19 +279,19 @@ class TerritoryService:
             model.market_key = values["market_key"]
         if criteria_changed:
             model.criteria_version += 1
-            model.criteria_hash = _criteria_hash(
-                {
-                    "niche_id": model.niche_id,
-                    "city": model.city,
-                    "radius_km": model.radius_km,
-                    "trade_keys": model.trade_keys,
-                    "customer_kind": model.customer_kind,
-                    "signal_keys": model.signal_keys,
-                    "exclusion_keys": model.exclusion_keys,
-                    "batch_size": model.batch_size,
-                    "min_fit": model.min_fit,
-                }
-            )
+            criteria = {
+                "city": model.city,
+                "radius_km": model.radius_km,
+                "trade_keys": model.trade_keys,
+                "customer_kind": model.customer_kind,
+                "signal_keys": model.signal_keys,
+                "exclusion_keys": model.exclusion_keys,
+                "batch_size": model.batch_size,
+                "min_fit": model.min_fit,
+            }
+            if not model.trade_keys:
+                criteria["niche_id"] = model.niche_id
+            model.criteria_hash = _criteria_hash(criteria)
         if "refill_policy" in values:
             policy = (
                 values["refill_policy"].value
@@ -425,6 +428,19 @@ def _title_label(value: str) -> str:
 def _criteria_hash(value: dict) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _structured_profile_criteria(data: TerritoryCreate) -> dict:
+    return {
+        "trades": list(data.trade_keys),
+        "customer_kind": data.customer_kind.value,
+        "city": semantic_key(data.city or data.market_key),
+        "radius_km": data.radius_km,
+        "signals": list(data.signal_keys),
+        "exclude": list(data.exclusion_keys),
+        "limit": data.batch_size,
+        "exclude_already_delivered": True,
+    }
 
 
 def _clean_keys(values: list[str]) -> list[str]:

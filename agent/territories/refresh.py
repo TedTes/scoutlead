@@ -3,12 +3,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_index.schemas import (
-    FactOperator,
-    FactPredicate,
-    OpportunityType,
-    SearchContract,
-)
 from campaigns.schemas import CampaignCreate, CampaignGoalType
 from campaigns.service import CampaignService
 from db.models import (
@@ -57,31 +51,24 @@ class TerritoryRefreshService:
         if existing and existing.status != "failed":
             return existing
         niches = _territory_niches(self.session, territory)
-        niche = niches[0] if niches else self.session.get(NicheModel, territory.niche_id)
-        niche_label = ", ".join(item.label for item in niches) or territory.label
-        query = territory.search_prompt or (
-            f"{territory.customer_kind} {niche_label} in {territory.city}"
-        )
-        opportunity_type, search_contract = _territory_contract(
-            territory,
-        )
-        campaign = self.campaigns.create(
+        if not niches:
+            raise ConflictError(
+                "profile trades do not resolve to active niches",
+                {"profile_id": territory.id, "trade_keys": territory.trade_keys},
+            )
+        niche_ids = [item.id for item in niches]
+        campaign = self.campaigns.create_profile_delivery(
             CampaignCreate(
                 product_id=territory.product_id,
                 territory_id=territory.id,
                 name=f"{territory.label} · {scheduled_for.date().isoformat()}",
                 goal_type=CampaignGoalType.SELL,
-                source_preset_id="google-places-local-business",
-                source_input=query,
                 source_inputs={
-                    "niche_id": territory.niche_id,
-                    "niche_ids": [item.id for item in niches],
-                    "trade_keys": list(territory.trade_keys or []),
-                    "customer_kind": territory.customer_kind,
-                    "niche_slug": niche.slug if niche else None,
-                    "profile_request": {
+                    "profile_match": {
+                        "version": 1,
                         "product_id": territory.product_id,
                         "profile_id": territory.id,
+                        "niche_ids": niche_ids,
                         "trades": list(territory.trade_keys or []),
                         "customer_kind": territory.customer_kind,
                         "market": {
@@ -93,21 +80,6 @@ class TerritoryRefreshService:
                         "limit": territory.batch_size,
                         "exclude_already_delivered": True,
                     },
-                    "source_request_intent": {
-                        "business_category": niche_label,
-                        "location": territory.market_key,
-                        "search_query": query,
-                        "niche_id": territory.niche_id,
-                    },
-                    "business_index_contract": {
-                        "niche_id": territory.niche_id,
-                        "market_key": territory.market_key,
-                        "opportunity_type": opportunity_type.value,
-                        "evidence_max_age_days": territory.evidence_max_age_days,
-                        "result_count": territory.batch_size,
-                        "search_contract": search_contract.as_dict(),
-                    },
-                    "search_contract_hash": _territory_contract_hash(territory),
                 },
                 max_leads=territory.batch_size,
                 channels=["email"],
@@ -135,7 +107,7 @@ class TerritoryRefreshService:
         try:
             rows = ProfileMatchService(self.session).match(
                 profile=territory,
-                niche_ids=[item.id for item in niches] or [territory.niche_id],
+                niche_ids=niche_ids,
                 limit=territory.batch_size,
             )
             self.campaigns.materialize_profile_matches(campaign.id, rows)
@@ -210,15 +182,45 @@ def eligible_delivery_leads(
         eligible.append(lead)
     return sorted(
         eligible,
-        key=lambda lead: (
-            opportunity_score_from_sources(lead.raw_sources),
-            lead.rank_score
-            if lead.rank_score is not None
-            else float(lead.qualification.score if lead.qualification else 0),
-            lead.created_at.timestamp(),
-        ),
+        key=_delivery_sort_key,
         reverse=True,
     )
+
+
+def _delivery_sort_key(lead: LeadRead) -> tuple[float, float, float, float]:
+    profile_match = _profile_match(lead)
+    if profile_match is not None:
+        rank_position = float(profile_match.get("rank_position") or 1_000_000)
+        distance = profile_match.get("distance_km")
+        return (
+            2.0,
+            float(profile_match.get("score") or 0),
+            -float(distance) if isinstance(distance, (int, float)) else float("-inf"),
+            -rank_position,
+        )
+    return (
+        1.0,
+        float(opportunity_score_from_sources(lead.raw_sources)),
+        lead.rank_score
+        if lead.rank_score is not None
+        else float(lead.qualification.score if lead.qualification else 0),
+        lead.created_at.timestamp(),
+    )
+
+
+def _profile_match(lead: LeadRead) -> dict | None:
+    stack: list[object] = list(lead.raw_sources)
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            profile_match = value.get("profile_match")
+            if isinstance(profile_match, dict) and profile_match.get("status") == "matched":
+                return profile_match
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return None
+
 
 def _schedule_time(value: datetime) -> datetime:
     aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -236,147 +238,16 @@ def _next_run_at(value: datetime, *, refill_policy: str) -> datetime | None:
 
 def _territory_niches(session: Session, territory) -> list[NicheModel]:
     keys = list(territory.trade_keys or [])
-    slugs = [profile_trade_spec(key).niche_slug for key in keys]
-    niches = list(
-        session.scalars(select(NicheModel).where(NicheModel.slug.in_(slugs)))
-    ) if slugs else []
-    by_slug = {niche.slug: niche for niche in niches if niche.active}
-    ordered = [by_slug[slug] for slug in slugs if slug in by_slug]
+    if keys:
+        slugs = [profile_trade_spec(key).niche_slug for key in keys]
+        niches = list(
+            session.scalars(select(NicheModel).where(NicheModel.slug.in_(slugs)))
+        )
+        by_slug = {niche.slug: niche for niche in niches if niche.active}
+        return [by_slug[slug] for slug in slugs if slug in by_slug]
+
     primary = session.get(NicheModel, territory.niche_id)
-    if primary is not None and primary.active and primary.id not in {item.id for item in ordered}:
-        ordered.insert(0, primary)
-    return ordered
-
-
-def _merge_niche_rows(rows_by_niche: list[list[dict]], *, limit: int) -> list[dict]:
-    merged: list[dict] = []
-    seen: set[str] = set()
-    depth = 0
-    while len(merged) < limit and any(depth < len(rows) for rows in rows_by_niche):
-        for rows in rows_by_niche:
-            if depth >= len(rows):
-                continue
-            row = rows[depth]
-            business_id = str(row.get("raw", {}).get("canonical_business_id") or "")
-            key = business_id or f"{row.get('title')}|{row.get('url')}"
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(row)
-            if len(merged) >= limit:
-                break
-        depth += 1
-    return merged
-
-
-def _territory_contract(
-    territory,
-) -> tuple[OpportunityType, SearchContract]:
-    stored = territory.search_contract or {}
-    try:
-        opportunity_type = OpportunityType(
-            stored.get("opportunity_type") or OpportunityType.ANY.value
-        )
-    except ValueError:
-        opportunity_type = OpportunityType.ANY
-    contract = SearchContract.from_dict(stored.get("search_contract"))
-    return opportunity_type, _profile_contract(territory, contract)
-
-
-def _profile_contract(territory, contract: SearchContract) -> SearchContract:
-    ranking = list(contract.ranking)
-    all_of = list(contract.all_of)
-    semantic_exclusions = list(contract.semantic_exclusions)
-    for signal in territory.signal_keys or []:
-        predicate = _signal_predicate(signal)
-        if predicate is not None:
-            ranking.append(predicate)
-    for exclusion in territory.exclusion_keys or []:
-        key = _normalized_key(exclusion)
-        if key in {"closed", "closed business", "inactive business"}:
-            all_of.append(
-                FactPredicate(
-                    "business_operational",
-                    FactOperator.EQUALS,
-                    True,
-                )
-            )
-            continue
-        description = {
-            "chain": "Business is a chain or national brand",
-            "chains": "Business is a chain or national brand",
-            "franchise": "Business is a franchise",
-            "franchises": "Business is a franchise",
-            "directory": "Result is a directory rather than an operating business",
-            "directories": "Result is a directory rather than an operating business",
-            "marketing agency": "Business is a marketing or web agency",
-            "marketing agencies": "Business is a marketing or web agency",
-            "agencies": "Business is a marketing or web agency",
-        }.get(key)
-        if description:
-            semantic_exclusions.append(description)
-    return SearchContract(
-        all_of=tuple(_unique_predicates(all_of)),
-        any_of=contract.any_of,
-        ranking=tuple(_unique_predicates(ranking)),
-        semantic_all_of=contract.semantic_all_of,
-        semantic_any_of=contract.semantic_any_of,
-        semantic_exclusions=tuple(dict.fromkeys(semantic_exclusions)),
-        contact_requirements=(),
-        unsupported=contract.unsupported,
-    )
-
-
-def _signal_predicate(value: str) -> FactPredicate | None:
-    key = _normalized_key(value)
-    if key in {"website missing", "website unavailable", "missing or broken website"}:
-        return FactPredicate(
-            "website_status",
-            FactOperator.IN,
-            ("missing", "unavailable", "parked"),
-        )
-    if key in {"quote flow missing", "no quote flow", "missing quote form"}:
-        return FactPredicate(
-            "quote_or_booking_form_present",
-            FactOperator.EQUALS,
-            False,
-        )
-    if key in {"contact form missing", "no contact form"}:
-        return FactPredicate(
-            "contact_form_present",
-            FactOperator.EQUALS,
-            False,
-        )
-    if key in {"low review count", "few reviews", "reviews under 15"}:
-        return FactPredicate(
-            "google_review_count",
-            FactOperator.LESS_THAN,
-            15.0,
-        )
-    if key in {"low rating", "rating under 4 3"}:
-        return FactPredicate(
-            "google_rating",
-            FactOperator.LESS_THAN,
-            4.3,
-        )
-    return None
-
-
-def _unique_predicates(values: list[FactPredicate]) -> list[FactPredicate]:
-    unique: dict[tuple, FactPredicate] = {}
-    for value in values:
-        raw = value.value if isinstance(value.value, tuple) else (value.value,)
-        unique[(value.key, value.operator.value, *raw)] = value
-    return list(unique.values())
-
-
-def _normalized_key(value: str) -> str:
-    return " ".join(value.strip().lower().replace("_", " ").replace("-", " ").split())
-
-
-def _territory_contract_hash(territory) -> str:
-    stored = territory.search_contract or {}
-    return str(stored.get("contract_hash") or territory.criteria_hash)
+    return [primary] if primary is not None and primary.active else []
 
 
 def _is_business_index_match(lead: LeadRead) -> bool:
