@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaigns.repository import CampaignRepository
+from campaigns.service import CampaignService
 from business_facts.repository import (
     BusinessFactKey,
     BusinessFactRepository,
@@ -706,7 +707,7 @@ def test_profile_match_excludes_only_explicit_true_classifications() -> None:
         assert rows[0]["raw"]["profile_match"]["classifications"]["is_chain"] is None
 
 
-def test_profile_signals_rank_known_matches_without_rejecting_null_facts() -> None:
+def test_profile_signals_deliver_only_confirmed_matches() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -746,18 +747,20 @@ def test_profile_signals_rank_known_matches_without_rejecting_null_facts() -> No
             limit=25,
         )
 
-        assert [row["title"] for row in rows] == [
-            businesses[1].display_name,
-            businesses[0].display_name,
-        ]
-        assert [
-            row["raw"]["profile_match"]["rank_position"] for row in rows
-        ] == [1, 2]
+        assert [row["title"] for row in rows] == [businesses[1].display_name]
+        assert rows[0]["raw"]["profile_match"]["rank_position"] == 1
+        assert rows[0]["raw"]["profile_match"]["matched_signal_count"] == 1
         assert rows[0]["raw"]["profile_match"]["signals"]["no_quote_flow"]["matched"] is True
-        assert rows[1]["raw"]["profile_match"]["signals"]["no_quote_flow"]["value"] is None
+        assert rows[0]["raw"]["profile_match"]["matched_signals"] == [
+            {
+                "signal_key": "no_quote_flow",
+                "fact_key": "quote_or_booking_form_present",
+                "value": False,
+            }
+        ]
 
 
-def test_profile_stale_signal_fact_remains_eligible_without_score() -> None:
+def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -797,13 +800,216 @@ def test_profile_stale_signal_fact_remains_eligible_without_score() -> None:
             limit=25,
         )
 
-        assert len(rows) == 2
-        stale = next(row for row in rows if row["title"] == businesses[0].display_name)
-        assert stale["raw"]["profile_match"]["signals"]["no_quote_flow"] == {
-            "fact_key": "quote_or_booking_form_present",
-            "value": None,
-            "matched": False,
-        }
+        assert rows == []
+
+
+def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        facts = BusinessFactRepository(session)
+        for business in businesses:
+            facts.upsert(
+                business.id,
+                BusinessFactValue(
+                    key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                    value=False,
+                    observed_at=utcnow(),
+                    source_observation_id=None,
+                ),
+            )
+        facts.upsert(
+            businesses[1].id,
+            BusinessFactValue(
+                key=BusinessFactKey.CONTACT_FORM_PRESENT,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_quote_flow", "no_contact_form"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [
+            businesses[1].display_name,
+            businesses[0].display_name,
+        ]
+        assert [
+            row["raw"]["profile_match"]["matched_signal_count"] for row in rows
+        ] == [2, 1]
+
+
+def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        business = session.scalar(
+            select(BusinessModel).order_by(BusinessModel.display_name).limit(1)
+        )
+        assert business is not None
+        BusinessFactRepository(session).upsert(
+            business.id,
+            BusinessFactValue(
+                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_quote_flow"],
+                exclude=[],
+                limit=25,
+            )
+        )
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+        campaign = CampaignRepository(
+            session,
+            workspace_id="workspace:first",
+        ).create(
+            CampaignCreate(
+                product_id=offer.id,
+                territory_id=profile.id,
+                name="Confirmed signal delivery",
+                max_leads=25,
+            )
+        )
+        service = CampaignService.__new__(CampaignService)
+        service.session = session
+        service.campaigns = CampaignRepository(
+            session,
+            workspace_id="workspace:first",
+        )
+        service.leads = LeadRepository(
+            session,
+            workspace_id="workspace:first",
+        )
+
+        leads = service.materialize_profile_matches(campaign.id, rows)
+
+        assert len(leads) == 1
+        assert leads[0].qualification is not None
+        assert leads[0].qualification.qualified is True
+        assert leads[0].qualification.fit_status == AgentFitStatus.GOOD_FIT
+        assert leads[0].qualification.positive_signals == [
+            "no_quote_flow: quote_or_booking_form_present=false"
+        ]
+
+        general_profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=25,
+            )
+        )
+        general_rows = ProfileMatchService(session).match(
+            profile=general_profile,
+            niche_ids=[general_profile.niche_id],
+            limit=25,
+        )
+        general_campaign = service.campaigns.create(
+            CampaignCreate(
+                product_id=offer.id,
+                territory_id=general_profile.id,
+                name="General business delivery",
+                max_leads=25,
+            )
+        )
+
+        general_leads = service.materialize_profile_matches(
+            general_campaign.id,
+            general_rows,
+        )
+
+        assert len(general_leads) == 2
+        assert all(
+            lead.qualification is not None
+            and lead.qualification.qualified is False
+            and lead.qualification.fit_status == AgentFitStatus.MAYBE
+            for lead in general_leads
+        )
+
+
+def test_profile_delivery_is_empty_when_no_selected_signal_is_confirmed() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_contact_form"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        delivery = TerritoryRefreshService(
+            session=session,
+            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
+            workspace_id="workspace:first",
+        ).refresh(profile.id)
+
+        assert delivery.status == "empty"
+        assert delivery.new_contact_count == 0
+        assert session.scalar(
+            select(func.count())
+            .select_from(LeadModel)
+            .where(LeadModel.campaign_id == delivery.campaign_id)
+        ) == 0
 
 
 def test_profile_closed_filter_uses_canonical_business_status() -> None:

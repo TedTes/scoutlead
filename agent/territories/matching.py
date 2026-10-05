@@ -50,7 +50,8 @@ class ProfileMatchService:
         if not niche_ids or limit <= 0:
             return []
         cutoff = utcnow() - timedelta(days=profile.evidence_max_age_days)
-        score = literal(0.0)
+        matched_signal_count = literal(0)
+        signal_conditions: list[Any] = []
         signal_aliases: dict[str, Any] = {}
         statement = (
             select(
@@ -82,10 +83,6 @@ class ProfileMatchService:
                     BusinessModel.customer_kind.is_(None),
                 )
             )
-            score += case(
-                (BusinessModel.customer_kind == profile.customer_kind, 2.0),
-                else_=0.0,
-            )
 
         exclusions = set(profile.exclusion_keys or [])
         if "closed" in exclusions:
@@ -94,9 +91,9 @@ class ProfileMatchService:
             if exclusion not in exclusions:
                 continue
             statement = statement.where(or_(field.is_(False), field.is_(None)))
-            score += case((field.is_(False), 1.0), else_=0.0)
 
-        for signal in profile.signal_keys or []:
+        selected_signals = list(dict.fromkeys(profile.signal_keys or []))
+        for signal in selected_signals:
             fact_key = SIGNAL_FACTS.get(signal)
             if fact_key is None:
                 continue
@@ -111,7 +108,14 @@ class ProfileMatchService:
                     or_(fact.expires_at.is_(None), fact.expires_at >= utcnow()),
                 ),
             )
-            score += case((_signal_condition(signal, fact), 10.0), else_=0.0)
+            condition = _signal_condition(signal, fact)
+            signal_conditions.append(condition)
+            matched_signal_count += case((condition, 1), else_=0)
+
+        if selected_signals:
+            statement = statement.where(
+                or_(*signal_conditions) if signal_conditions else literal(False)
+            )
 
         distance_sq = None
         if profile.latitude is not None and profile.longitude is not None:
@@ -151,7 +155,9 @@ class ProfileMatchService:
         )
         if distance_sq is not None:
             group_columns.extend([BusinessModel.latitude, BusinessModel.longitude])
-        statement = statement.add_columns(score.label("profile_score"))
+        statement = statement.add_columns(
+            matched_signal_count.label("matched_signal_count")
+        )
         if distance_sq is not None:
             statement = statement.add_columns(
                 func.sqrt(distance_sq).label("distance_km")
@@ -159,7 +165,7 @@ class ProfileMatchService:
         else:
             statement = statement.add_columns(literal(None).label("distance_km"))
         statement = statement.group_by(*group_columns).order_by(
-            score.desc(),
+            matched_signal_count.desc(),
             literal_column_nulls_last("distance_km"),
             func.max(BusinessNicheMembershipModel.confidence).desc(),
             BusinessModel.id,
@@ -169,7 +175,7 @@ class ProfileMatchService:
         return [
             self._result_row(
                 business_id=str(item["id"]),
-                score=float(item["profile_score"] or 0),
+                matched_signal_count=int(item["matched_signal_count"] or 0),
                 distance_km=(
                     float(item["distance_km"])
                     if item["distance_km"] is not None
@@ -186,7 +192,7 @@ class ProfileMatchService:
         self,
         *,
         business_id: str,
-        score: float,
+        matched_signal_count: int,
         distance_km: float | None,
         rank_position: int,
         profile,
@@ -201,6 +207,10 @@ class ProfileMatchService:
                 select(BusinessFactModel).where(
                     BusinessFactModel.business_id == business_id,
                     BusinessFactModel.observed_at >= cutoff,
+                    or_(
+                        BusinessFactModel.expires_at.is_(None),
+                        BusinessFactModel.expires_at >= utcnow(),
+                    ),
                 )
             )
         }
@@ -229,6 +239,15 @@ class ProfileMatchService:
             for signal, fact_key in SIGNAL_FACTS.items()
             if signal in set(profile.signal_keys or [])
         }
+        matched_signals = [
+            {
+                "signal_key": signal,
+                "fact_key": evidence["fact_key"],
+                "value": evidence["value"],
+            }
+            for signal, evidence in signal_evidence.items()
+            if evidence["matched"] is True
+        ]
         classifications = {
             "customer_kind": business.customer_kind,
             "is_chain": business.is_chain,
@@ -246,7 +265,10 @@ class ProfileMatchService:
             },
             "profile_match": {
                 "status": "matched",
-                "score": score,
+                "score": matched_signal_count,
+                "selected_signal_count": len(signal_evidence),
+                "matched_signal_count": matched_signal_count,
+                "matched_signals": matched_signals,
                 "rank_position": rank_position,
                 "distance_km": round(distance_km, 2) if distance_km is not None else None,
                 "location_evidence": (

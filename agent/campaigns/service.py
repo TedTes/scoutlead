@@ -306,33 +306,52 @@ class CampaignService:
         campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
         created: list[LeadRead] = []
         for row in rows[: campaign.max_leads]:
-            lead = self.leads.create_from_existing_match(
-                campaign_id=campaign.id,
-                product_id=campaign.product_id,
-                result=row,
-            )
             profile_match = (row.get("raw") or {}).get("profile_match") or {}
             signal_evidence = profile_match.get("signals") or {}
+            if not isinstance(signal_evidence, dict):
+                signal_evidence = {}
             matched_signals = [
                 key
                 for key, evidence in signal_evidence.items()
                 if isinstance(evidence, dict) and evidence.get("matched") is True
             ]
-            rank_score = float(profile_match.get("score") or 0)
+            selected_signals = list(signal_evidence)
+            if selected_signals and not matched_signals:
+                continue
+            lead = self.leads.create_from_existing_match(
+                campaign_id=campaign.id,
+                product_id=campaign.product_id,
+                result=row,
+            )
+            qualified = bool(matched_signals)
+            rank_score = float(
+                profile_match.get("matched_signal_count")
+                or len(matched_signals)
+            )
+            positive_signals = [
+                _profile_signal_evidence(key, signal_evidence[key])
+                for key in matched_signals
+            ]
             lead = self.leads.attach_qualification(
                 lead.id,
                 QualificationResult(
-                    qualified=True,
-                    fit_status=AgentFitStatus.GOOD_FIT,
-                    score=max(60, min(100, 70 + round(rank_score * 2))),
-                    rationale=(
-                        "Matched stored audience fields"
-                        + (
-                            f" and signals: {', '.join(matched_signals)}."
-                            if matched_signals
-                            else "."
-                        )
+                    qualified=qualified,
+                    fit_status=(
+                        AgentFitStatus.GOOD_FIT
+                        if qualified
+                        else AgentFitStatus.MAYBE
                     ),
+                    score=(
+                        min(100, 70 + max(0, len(matched_signals) - 1) * 10)
+                        if qualified
+                        else 50
+                    ),
+                    rationale=(
+                        f"Confirmed selected signals: {', '.join(matched_signals)}."
+                        if matched_signals
+                        else "Matched the audience trade and location; no opportunity signal was requested."
+                    ),
+                    positive_signals=positive_signals,
                     recommended_next_step="Review the stored evidence before outreach.",
                     signal_tags=matched_signals,
                 ),
@@ -1329,6 +1348,20 @@ def email_provider_setup_hint(provider: str) -> str:
     if provider == "http":
         return "Configure EMAIL_PROVIDER=http with EMAIL_PROVIDER_ENDPOINT."
     return "Configure EMAIL_PROVIDER with a real sender before outreach."
+
+
+def _profile_signal_evidence(signal_key: str, evidence: Any) -> str:
+    if not isinstance(evidence, dict):
+        return signal_key
+    fact_key = str(evidence.get("fact_key") or signal_key)
+    value = evidence.get("value")
+    if isinstance(value, bool):
+        rendered_value = str(value).lower()
+    elif value is None:
+        rendered_value = "unknown"
+    else:
+        rendered_value = str(value)
+    return f"{signal_key}: {fact_key}={rendered_value}"
 
 
 def _optional_text(value: Any) -> str | None:
