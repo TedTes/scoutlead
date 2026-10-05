@@ -3826,12 +3826,17 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
 }
 
 function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
-  if (contact.website_url || contact.research?.website_url) return "present";
+  let storedStatus = "";
   for (const raw of getRawObjects(contact)) {
-    const status = rawValueToString(getRawValue(raw, "business_facts.website_status.value"));
-    if (status) return status;
+    const status = rawValueToString(
+      getRawValue(raw, "business_facts.website_status.value")
+      ?? getRawValue(raw, "business_facts.website_status"),
+    );
+    if (["unavailable", "parked"].includes(status)) return status;
+    if (status && !storedStatus) storedStatus = status;
   }
-  return "unknown";
+  if (contact.website_url || contact.research?.website_url) return "present";
+  return storedStatus || "unknown";
 }
 
 function opportunityLabel(level: ContactOpportunity["level"]) {

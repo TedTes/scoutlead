@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from business_facts.repository import BusinessFactKey, BusinessFactRepository, fact_value
+from business_facts.service import _replace_website_fact
 from business_index.contracts import compile_search_contract, search_contract_hash
 from business_index.schemas import BusinessIndexSearch, OpportunityType
 from business_index.search import BusinessIndexSearchService
@@ -118,6 +119,87 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
         )
         facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
         assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
+
+
+def test_verified_website_enrichment_promotes_canonical_url() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="Luke's Painting",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("no_website_listed"),
+        )
+        business = session.get(SourceObservationModel, link.source_observation_id).business
+
+        canonical.record_business_evidence(
+            business=business,
+            source="company_website_seed",
+            raw={
+                "website_url": "https://lukekushspainting.example",
+                "website_enrichment": {
+                    "availability_status": "active",
+                    "inspected_urls": ["https://lukekushspainting.example"],
+                    "phones": [],
+                },
+            },
+        )
+
+        assert business.website_url == "https://lukekushspainting.example"
+        facts = BusinessFactRepository(session).map_for_businesses([business.id])
+        assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
+
+
+def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="Max Painting",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("no_website_listed", phone="416-555-0101"),
+        )
+        business = session.get(SourceObservationModel, link.source_observation_id).business
+
+        canonical.record_business_evidence(
+            business=business,
+            source="company_website_seed",
+            raw={
+                "website_url": "https://maxpaintworks.example",
+                "website_enrichment": {
+                    "availability_status": "active",
+                    "inspected_urls": ["https://maxpaintworks.example"],
+                    "phones": ["845-555-0199"],
+                },
+            },
+        )
+
+        assert business.website_url is None
+        facts = BusinessFactRepository(session).map_for_businesses([business.id])
+        assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "not_listed"
+
+
+def test_reconciliation_updates_materialized_lead_fact_snapshot() -> None:
+    raw_sources = [
+        {
+            "match_origin": "profile_sql",
+            "business_facts": {"website_status": "not_listed"},
+        },
+        {
+            "nested": {
+                "business_facts": {"website_status": {"value": "missing"}}
+            }
+        },
+    ]
+
+    assert _replace_website_fact(raw_sources, "present") is True
+    assert raw_sources[0]["business_facts"]["website_status"] == "present"
+    assert raw_sources[1]["nested"]["business_facts"]["website_status"]["value"] == "present"
+    assert _replace_website_fact(raw_sources, "present") is False
 
 
 def test_search_contract_matches_only_current_supported_facts() -> None:

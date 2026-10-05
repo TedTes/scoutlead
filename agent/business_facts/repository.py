@@ -43,14 +43,33 @@ class BusinessFactRepository:
         *,
         commit: bool = False,
     ) -> BusinessFactModel:
+        model, _ = self.upsert_with_value_change(
+            business_id,
+            fact,
+            commit=commit,
+        )
+        return model
+
+    def upsert_with_value_change(
+        self,
+        business_id: str,
+        fact: BusinessFactValue,
+        *,
+        commit: bool = False,
+    ) -> tuple[BusinessFactModel, bool]:
         existing = self.session.scalar(
             select(BusinessFactModel).where(
                 BusinessFactModel.business_id == business_id,
                 BusinessFactModel.fact_key == fact.key.value,
             )
         )
-        if existing is not None and _aware(existing.observed_at) > _aware(fact.observed_at):
-            return existing
+        if (
+            existing is not None
+            and _aware(existing.observed_at) > _aware(fact.observed_at)
+            and existing.resolver_version >= fact.resolver_version
+        ):
+            return existing, False
+        value_changed = existing is None or fact_value(existing) != fact.value
         value_type, value_text, value_number, value_boolean = _typed_value(fact.value)
         if existing is None:
             existing = BusinessFactModel(
@@ -83,7 +102,7 @@ class BusinessFactRepository:
             self.session.refresh(existing)
         else:
             self.session.flush()
-        return existing
+        return existing, value_changed
 
     def map_for_businesses(
         self,

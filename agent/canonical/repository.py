@@ -30,6 +30,7 @@ from canonical.semantics import (
     request_semantic_profile,
     semantic_key,
 )
+from canonical.website_evidence import trusted_website_evidence
 from business_facts.service import reconcile_business_facts
 from db.models import (
     BusinessModel,
@@ -131,6 +132,15 @@ class CanonicalRepository:
             business,
             extract_business_attributes([raw], category=business.category_key),
         )
+        website_evidence = trusted_website_evidence(
+            source=source,
+            payload=raw,
+            business_name=business.display_name,
+            business_phone=business.phone,
+        )
+        if business.website_url is None and website_evidence is not None:
+            business.website_url = website_evidence.url
+            business.domain = normalize_domain(website_evidence.url)
         contact = self._upsert_contact(
             business=business,
             email=contact_email,

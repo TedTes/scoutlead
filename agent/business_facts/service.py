@@ -5,17 +5,24 @@ from typing import Any, Iterator
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from business_facts.repository import (
     BusinessFactKey,
     BusinessFactRepository,
     BusinessFactValue,
 )
-from db.models import BusinessModel, SourceObservationModel
+from canonical.normalization import normalize_domain
+from canonical.website_evidence import (
+    best_trusted_website_evidence,
+    trusted_website_evidence,
+)
+from db.models import BusinessModel, LeadModel, SourceObservationModel
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
+from shared.utils import utcnow
 
 
-RESOLVER_VERSION = 2
+RESOLVER_VERSION = 3
 
 
 def reconcile_business_facts(session: Session, business_id: str) -> dict[str, Any]:
@@ -29,10 +36,29 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
             .order_by(SourceObservationModel.observed_at.desc())
         )
     )
+    trusted = best_trusted_website_evidence(
+        observations,
+        business_name=business.display_name,
+        business_phone=business.phone,
+    )
+    website_promoted = business.website_url is None and trusted is not None
+    if website_promoted:
+        business.website_url = trusted[0].url
+        business.domain = normalize_domain(trusted[0].url)
     resolved = _resolve_facts(business, observations)
     repository = BusinessFactRepository(session)
+    website_fact_changed = False
     for fact in resolved.values():
-        repository.upsert(business.id, fact)
+        _, value_changed = repository.upsert_with_value_change(business.id, fact)
+        if fact.key == BusinessFactKey.WEBSITE_STATUS:
+            website_fact_changed = value_changed
+    website_fact = resolved.get(BusinessFactKey.WEBSITE_STATUS.value)
+    if website_fact is not None and (website_promoted or website_fact_changed):
+        _synchronize_lead_website_state(
+            session,
+            business=business,
+            website_status=str(website_fact.value),
+        )
     return {key: fact.value for key, fact in resolved.items()}
 
 
@@ -65,6 +91,13 @@ def _website_status_fact(
     for observation in observations:
         payload = observation.raw_payload or {}
         status, confidence = _website_status_from_payload(payload)
+        if status == "present" and trusted_website_evidence(
+            source=observation.source,
+            payload=payload,
+            business_name=business.display_name,
+            business_phone=business.phone,
+        ) is None:
+            continue
         if status is not None:
             candidates.append(
                 BusinessFactValue(
@@ -312,3 +345,44 @@ def _walk_items(value: Any) -> Iterator[tuple[str, Any]]:
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _synchronize_lead_website_state(
+    session: Session,
+    *,
+    business: BusinessModel,
+    website_status: str,
+) -> None:
+    for lead in session.scalars(
+        select(LeadModel).where(LeadModel.business_id == business.id)
+    ):
+        changed = False
+        if business.website_url and lead.website_url != business.website_url:
+            lead.website_url = business.website_url
+            changed = True
+        if _replace_website_fact(lead.raw_sources, website_status):
+            flag_modified(lead, "raw_sources")
+            changed = True
+        if changed:
+            lead.updated_at = utcnow()
+
+
+def _replace_website_fact(value: Any, website_status: str) -> bool:
+    changed = False
+    if isinstance(value, dict):
+        facts = value.get("business_facts")
+        if isinstance(facts, dict):
+            current = facts.get("website_status")
+            if isinstance(current, dict):
+                if current.get("value") != website_status:
+                    current["value"] = website_status
+                    changed = True
+            elif current != website_status:
+                facts["website_status"] = website_status
+                changed = True
+        for entry in value.values():
+            changed = _replace_website_fact(entry, website_status) or changed
+    elif isinstance(value, list):
+        for entry in value:
+            changed = _replace_website_fact(entry, website_status) or changed
+    return changed

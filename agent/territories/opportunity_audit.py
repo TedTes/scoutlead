@@ -12,6 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from canonical.normalization import normalize_business_name, normalize_domain
 from canonical.repository import CanonicalRepository
+from canonical.website_evidence import trusted_website_evidence
 from canonical.website_enrichment import (
     SOURCE_NAME,
     BusinessTarget,
@@ -267,9 +268,29 @@ class BusinessOpportunityAuditor:
                     ),
                 )
                 continue
-            if business.website_url and not google_lists_no_website:
-                continue
-            if google_lists_no_website:
+            if business.website_url:
+                if not google_lists_no_website:
+                    continue
+                trusted = next(
+                    (
+                        evidence
+                        for raw in raw_sources
+                        if (
+                            evidence := trusted_website_evidence(
+                                source=str(raw.get("_observation_source") or ""),
+                                payload=raw,
+                                business_name=business.display_name,
+                                business_phone=business.phone,
+                            )
+                        )
+                        is not None
+                    ),
+                    None,
+                )
+                if trusted is not None:
+                    business.website_url = trusted.url
+                    business.domain = normalize_domain(trusted.url)
+                    continue
                 business.website_url = None
                 business.domain = None
             status = _raw_text(raw_sources, "businessStatus")

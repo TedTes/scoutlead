@@ -376,6 +376,58 @@ def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatc
         )
 
 
+def test_google_omission_preserves_url_supported_by_trusted_observation(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+    with session_factory() as session:
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="Luke's Painting",
+            website_url="https://lukekushspainting.example",
+            geography="Toronto, ON",
+            source="google_places_seed",
+            raw={
+                "id": "places/luke",
+                "businessStatus": "OPERATIONAL",
+                "nationalPhoneNumber": "416-555-0101",
+                "website_url": "https://lukekushspainting.example",
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+        canonical.record_business_evidence(
+            business=business,
+            source="google_places",
+            raw={
+                "businessStatus": "OPERATIONAL",
+                "nationalPhoneNumber": "416-555-0101",
+                "googleMapsUri": "https://maps.google.com/?cid=456",
+            },
+        )
+        session.commit()
+
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            timeout_seconds=1,
+        ).audit_businesses(
+            [business.id],
+            category="painting",
+            market="Toronto",
+            opportunity_policy="weak_or_missing",
+        )
+
+        session.refresh(business)
+        assert business.website_url == "https://lukekushspainting.example"
+        assert not session.query(SourceObservationModel).filter_by(
+            business_id=business.id,
+            source="website_presence_check",
+        ).all()
+
+
 def test_campaign_opportunity_audit_excludes_site_found_during_confirmation(
     monkeypatch,
 ) -> None:
