@@ -22,6 +22,7 @@ from territories.profile_catalog import (
     profile_trade_label,
     profile_trade_spec,
 )
+from territories.markets import market_center
 from territories.repository import TerritoryRepository
 from territories.schemas import (
     ProfileCreate,
@@ -134,11 +135,18 @@ class TerritoryService:
         niches = [self._ensure_profile_niche(key, city=city) for key in trade_keys]
         trade_label = profile_trade_label(trade_keys)
         customer_kind = data.customer_kind.value
+        center = market_center(city)
+        if center is None:
+            raise ValidationError(
+                "market coordinates are unavailable",
+                {
+                    "city": city,
+                    "reason": "A profile radius requires a stored market center.",
+                },
+            )
         signals = [signal.value for signal in data.signals]
         exclusions = [exclusion.value for exclusion in data.exclude]
-        contract = SearchContract(
-            semantic_all_of=(f"Business serves {customer_kind} customers",),
-        )
+        contract = SearchContract()
         contract_payload = {
             "opportunity_type": OpportunityType.ANY.value,
             "search_contract": contract.as_dict(),
@@ -163,6 +171,8 @@ class TerritoryService:
                 niche_category=niches[0].category,
                 market_key=city,
                 city=city,
+                latitude=center[0] if center else None,
+                longitude=center[1] if center else None,
                 radius_km=data.market.radius_km,
                 trade_keys=trade_keys,
                 customer_kind=data.customer_kind,
@@ -215,6 +225,17 @@ class TerritoryService:
         if "city" in values:
             values["city"] = normalize_text(values["city"])
             values["market_key"] = semantic_key(values["city"]) or model.market_key
+            center = market_center(values["city"])
+            if model.trade_keys and center is None:
+                raise ValidationError(
+                    "market coordinates are unavailable",
+                    {
+                        "city": values["city"],
+                        "reason": "A profile radius requires a stored market center.",
+                    },
+                )
+            if center is not None:
+                values["latitude"], values["longitude"] = center
         if "signal_keys" in values:
             values["signal_keys"] = (
                 _clean_profile_keys(values["signal_keys"])

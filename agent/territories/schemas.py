@@ -36,6 +36,7 @@ class TerritoryDeliveryStatus(StrEnum):
     SCHEDULED = "scheduled"
     RUNNING = "running"
     READY = "ready"
+    EMPTY = "empty"
     PARTIAL = "partial"
     FAILED = "failed"
 
@@ -43,7 +44,9 @@ class TerritoryDeliveryStatus(StrEnum):
 class ProfileBatchState(StrEnum):
     SETUP = "setup"
     SCORING = "scoring"
+    RETRYING = "retrying"
     READY = "ready"
+    EMPTY = "empty"
     PARTIAL = "partial"
     FAILED = "failed"
 
@@ -260,3 +263,5 @@ class ProfileBatchRead(BaseModel):
     requested_count: int
     result_count: int
     remaining_count: int
+    failure_class: Literal["rate_limit", "quota", "other"] | None = None
+    retry_at: datetime | None = None

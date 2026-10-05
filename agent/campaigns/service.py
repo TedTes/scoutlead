@@ -37,8 +37,10 @@ from icp.service import ICPPresetService
 from leads.repository import LeadRepository
 from leads.selection import select_campaign_results
 from leads.schemas import (
+    AgentFitStatus,
     ContactVerificationStatus,
     LeadRead,
+    QualificationResult,
 )
 from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
@@ -290,6 +292,49 @@ class CampaignService:
             campaign=campaign,
             assessed_rows=assessed_rows,
         )
+
+    def materialize_profile_matches(
+        self,
+        campaign_id: str,
+        rows: list[dict[str, Any]],
+    ) -> list[LeadRead]:
+        """Materialize deterministic audience matches without product or model judgment."""
+        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        created: list[LeadRead] = []
+        for row in rows[: campaign.max_leads]:
+            lead = self.leads.create_from_existing_match(
+                campaign_id=campaign.id,
+                product_id=campaign.product_id,
+                result=row,
+            )
+            profile_match = (row.get("raw") or {}).get("profile_match") or {}
+            signal_evidence = profile_match.get("signals") or {}
+            matched_signals = [
+                key
+                for key, evidence in signal_evidence.items()
+                if isinstance(evidence, dict) and evidence.get("matched") is True
+            ]
+            rank_score = float(profile_match.get("score") or 0)
+            lead = self.leads.attach_qualification(
+                lead.id,
+                QualificationResult(
+                    qualified=True,
+                    fit_status=AgentFitStatus.GOOD_FIT,
+                    score=max(60, min(100, 70 + round(rank_score * 2))),
+                    rationale=(
+                        "Matched stored audience fields"
+                        + (
+                            f" and signals: {', '.join(matched_signals)}."
+                            if matched_signals
+                            else "."
+                        )
+                    ),
+                    recommended_next_step="Review the stored evidence before outreach.",
+                    signal_tags=matched_signals,
+                ),
+            )
+            created.append(LeadRead.model_validate(lead))
+        return created
 
     def materialize_index_candidates(
         self,

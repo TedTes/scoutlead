@@ -3,28 +3,28 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agents.llm import LLMClient
 from business_index.schemas import (
-    BusinessIndexSearch,
     FactOperator,
     FactPredicate,
     OpportunityType,
     SearchContract,
 )
-from business_index.search import BusinessIndexSearchService
 from campaigns.schemas import CampaignCreate, CampaignGoalType
 from campaigns.service import CampaignService
-from db.models import LeadModel, NicheModel, TerritoryDeliveryModel
+from db.models import (
+    LeadModel,
+    NicheModel,
+    ProfileDeliveryItemModel,
+    TerritoryDeliveryModel,
+)
 from evaluation.digital_opportunity import (
     has_minimum_opportunity,
     opportunity_score_from_sources,
 )
 from leads.schemas import AgentFitStatus, LeadRead
-from search_evaluations.service import SearchEvaluationService
 from shared.errors import ConflictError
 from shared.utils import new_id, utcnow
-from territories.dedupe import exclude_previously_delivered_rows
-from territories.opportunity_audit import TerritoryOpportunityAuditor
+from territories.matching import ProfileMatchService
 from territories.profile_catalog import profile_trade_spec
 from territories.repository import TerritoryRepository
 from territories.schemas import TerritoryMinFit
@@ -37,15 +37,11 @@ class TerritoryRefreshService:
         session: Session,
         campaigns: CampaignService,
         workspace_id: str,
-        llm: LLMClient | None = None,
-        opportunity_auditor: TerritoryOpportunityAuditor | None = None,
     ) -> None:
         self.session = session
         self.campaigns = campaigns
         self.territories = TerritoryRepository(session, workspace_id=workspace_id)
         self.workspace_id = workspace_id
-        self.llm = llm
-        self.opportunity_auditor = opportunity_auditor
 
     def refresh(
         self,
@@ -137,54 +133,29 @@ class TerritoryRefreshService:
             self.session.add(delivery)
         self.session.commit()
         try:
-            index_search = BusinessIndexSearchService(self.session)
-            evaluator = (
-                SearchEvaluationService(session=self.session, llm=self.llm)
-                if search_contract.requires_semantic_evaluation and self.llm is not None
-                else None
+            rows = ProfileMatchService(self.session).match(
+                profile=territory,
+                niche_ids=[item.id for item in niches] or [territory.niche_id],
+                limit=territory.batch_size,
             )
-            rows_by_niche: list[list[dict]] = []
-            for target_niche in niches or ([niche] if niche else []):
-                index_request = BusinessIndexSearch(
-                    niche_id=target_niche.id,
-                    market_key=territory.market_key,
-                    opportunity_type=opportunity_type,
-                    evidence_fresh_after=utcnow()
-                    - timedelta(days=territory.evidence_max_age_days),
-                    result_count=territory.batch_size * 3,
-                    contract=search_contract,
-                    contract_hash=_territory_contract_hash(territory),
-                )
-                rows, decisions = index_search.search_with_diagnostics(index_request)
-                if evaluator is None:
-                    rows_by_niche.append(rows)
-                    continue
-                for decision in decisions:
-                    if decision["status"] != "pending":
-                        continue
-                    evaluator.evaluate(
-                        business_id=str(decision["business_id"]),
-                        contract_hash=index_request.contract_hash,
-                        contract=search_contract,
-                        evidence_fresh_after=index_request.evidence_fresh_after,
-                    )
-                rows = index_search.search(index_request)
-                rows_by_niche.append(rows)
-            rows = _merge_niche_rows(
-                rows_by_niche,
-                limit=territory.batch_size * 3,
-            )
-            rows = exclude_previously_delivered_rows(
-                self.session,
-                campaign_id=campaign.id,
-                territory_id=territory.id,
-                rows=rows,
-            )[: territory.batch_size]
-            self.campaigns.materialize_existing_matches(campaign.id, rows)
+            self.campaigns.materialize_profile_matches(campaign.id, rows)
             contacts = self.contacts(delivery, min_fit=TerritoryMinFit(territory.min_fit))
+            delivered_at = utcnow()
+            for contact in contacts:
+                if not contact.business_id:
+                    continue
+                self.session.add(
+                    ProfileDeliveryItemModel(
+                        id=new_id("profile_delivery_item"),
+                        profile_id=territory.id,
+                        delivery_id=delivery.id,
+                        business_id=contact.business_id,
+                        delivered_at=delivered_at,
+                    )
+                )
             delivery.new_contact_count = len(contacts)
-            delivery.status = "ready" if contacts else "partial"
-            delivery.delivered_at = utcnow()
+            delivery.status = "ready" if contacts else "empty"
+            delivery.delivered_at = delivered_at
             territory.last_run_at = delivery.delivered_at
             territory.next_run_at = _next_run_at(
                 scheduled_for,
@@ -413,6 +384,12 @@ def _is_business_index_match(lead: LeadRead) -> bool:
     while stack:
         value = stack.pop()
         if isinstance(value, dict):
+            if (
+                value.get("match_origin") == "profile_sql"
+                and isinstance(value.get("profile_match"), dict)
+                and value["profile_match"].get("status") == "matched"
+            ):
+                return True
             if value.get("match_origin") == "business_index" and value.get("business_facts"):
                 return True
             stack.extend(value.values())

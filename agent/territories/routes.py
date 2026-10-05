@@ -257,7 +257,13 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
     service = _service(session, auth)
     profile = service.get(profile_id)
     delivery = service.territories.latest_delivery(profile.id)
-    active_job = _active_profile_job(session, profile.id)
+    latest_job = _latest_profile_job(session, profile.id)
+    active_job = (
+        latest_job
+        if latest_job is not None
+        and latest_job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value}
+        else None
+    )
     leads: list[LeadRead] = []
     if delivery is not None:
         models = list(
@@ -275,14 +281,26 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         and lead.review_status != "not_fit"
         for lead in leads
     )
-    if active_job is not None:
+    if active_job is not None and (
+        active_job.attempts > 1
+        or (
+            active_job.status == JobStatus.QUEUED.value
+            and active_job.attempts > 0
+        )
+    ):
+        state = ProfileBatchState.RETRYING
+    elif active_job is not None:
         state = ProfileBatchState.SCORING
+    elif latest_job is not None and latest_job.status == JobStatus.FAILED.value:
+        state = ProfileBatchState.FAILED
     elif delivery is None:
         state = ProfileBatchState.SETUP
     elif delivery.status == "failed":
         state = ProfileBatchState.FAILED
     elif delivery.status == "ready":
         state = ProfileBatchState.READY
+    elif delivery.status == "empty":
+        state = ProfileBatchState.EMPTY
     else:
         state = ProfileBatchState.PARTIAL
     return ProfileBatchRead(
@@ -293,18 +311,29 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         requested_count=profile.batch_size,
         result_count=len(leads),
         remaining_count=remaining,
+        failure_class=(
+            _failure_class(
+                latest_job.last_error
+                if latest_job is not None and latest_job.last_error
+                else delivery.failure_reason if delivery is not None else None
+            )
+            if state in {ProfileBatchState.RETRYING, ProfileBatchState.FAILED}
+            else None
+        ),
+        retry_at=(
+            active_job.run_after
+            if state == ProfileBatchState.RETRYING and active_job is not None
+            else None
+        ),
     )
 
 
-def _active_profile_job(session: DbSession, profile_id: str) -> QueueJobModel | None:
+def _latest_profile_job(session: DbSession, profile_id: str) -> QueueJobModel | None:
     jobs = list(
         session.scalars(
             select(QueueJobModel)
             .where(
                 QueueJobModel.type == JobType.TERRITORY_REFRESH.value,
-                QueueJobModel.status.in_(
-                    [JobStatus.QUEUED.value, JobStatus.RUNNING.value]
-                ),
             )
             .order_by(QueueJobModel.created_at.desc())
         )
@@ -313,6 +342,15 @@ def _active_profile_job(session: DbSession, profile_id: str) -> QueueJobModel | 
         (job for job in jobs if job.payload.get("territory_id") == profile_id),
         None,
     )
+
+
+def _failure_class(error: str | None) -> str:
+    normalized = str(error or "").lower()
+    if "insufficient_quota" in normalized or "quota" in normalized:
+        return "quota"
+    if "429" in normalized or "rate limit" in normalized or "rate_limit" in normalized:
+        return "rate_limit"
+    return "other"
 
 
 def _delivery_contacts(

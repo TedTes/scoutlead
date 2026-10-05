@@ -60,7 +60,6 @@ def territory_refresh_service(
     services: AppServices,
     workspace_id: str,
 ) -> TerritoryRefreshService:
-    settings = services.settings
     return TerritoryRefreshService(
         session=session,
         campaigns=campaign_service(
@@ -69,13 +68,6 @@ def territory_refresh_service(
             workspace_id=workspace_id,
         ),
         workspace_id=workspace_id,
-        llm=services.llm,
-        opportunity_auditor=BusinessOpportunityAuditor(
-            session=session,
-            verifier=_verification_tool(services),
-            search=services.search,
-            timeout_seconds=settings.request_timeout_seconds,
-        ),
     )
 
 

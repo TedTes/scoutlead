@@ -6,14 +6,21 @@ from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaigns.repository import CampaignRepository
+from business_facts.repository import (
+    BusinessFactKey,
+    BusinessFactRepository,
+    BusinessFactValue,
+)
 from business_index.schemas import SearchContract
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import (
+    BusinessModel,
     CampaignModel,
     LeadModel,
     LeadOutcomeModel,
     NicheModel,
+    ProfileDeliveryItemModel,
     QueueJobModel,
     TerritoryDeliveryModel,
     TerritoryModel,
@@ -22,8 +29,11 @@ from db.session import create_database
 from products.repository import ProductRepository
 from products.schemas import ProductCreate, QualificationCriterion
 from shared.errors import ConflictError, NotFoundError, ValidationError
-from shared.utils import new_id
-from territories.routes import create_profile as create_profile_route
+from shared.utils import new_id, utcnow
+from territories.routes import (
+    create_profile as create_profile_route,
+    current_profile_batch,
+)
 from territories.schemas import (
     ProfileCreate,
     TerritoryCreate,
@@ -45,6 +55,7 @@ from leads.schemas import AgentFitStatus, QualificationResult
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
 from territories.metrics import TerritoryMetricsService
+from territories.matching import ProfileMatchService
 
 
 def test_resolve_existing_niche_is_read_only() -> None:
@@ -140,6 +151,43 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
             session.scalar(select(func.count()).select_from(TerritoryDeliveryModel))
             == 0
         )
+
+
+def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        auth = SimpleNamespace(workspace_id="workspace:first")
+        result = create_profile_route(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+            ),
+            session,
+            auth,
+        )
+
+        scoring = current_profile_batch(result.profile.id, session, auth)
+        assert scoring.state.value == "scoring"
+        assert scoring.failure_class is None
+
+        job = session.get(QueueJobModel, result.job.id)
+        assert job is not None
+        job.attempts = 1
+        job.last_error = "HTTP 429 rate_limit_exceeded"
+        session.commit()
+        retrying = current_profile_batch(result.profile.id, session, auth)
+        assert retrying.state.value == "retrying"
+        assert retrying.failure_class == "rate_limit"
+        assert retrying.retry_at == job.run_after
+
+        job.status = "failed"
+        session.commit()
+        failed = current_profile_batch(result.profile.id, session, auth)
+        assert failed.state.value == "failed"
+        assert failed.failure_class == "rate_limit"
 
 
 def test_profile_contract_rejects_missing_or_unsupported_batch_fields() -> None:
@@ -415,12 +463,10 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
             )
         )
         campaigns = _FakeCampaigns(session, workspace_id="workspace:first")
-        auditor = _FakeOpportunityAuditor()
         refresh = TerritoryRefreshService(
             session=session,
             campaigns=campaigns,
             workspace_id="workspace:first",
-            opportunity_auditor=auditor,
         )
         scheduled = datetime(2026, 9, 28, tzinfo=timezone.utc)
 
@@ -431,7 +477,6 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
         assert first.status == "ready"
         assert first.new_contact_count == 2
         assert campaigns.run_count == 1
-        assert auditor.campaign_ids == []
         assert all(
             lead.territory_id == territory.id
             for lead in refresh.contacts(first, min_fit=territory.min_fit)
@@ -586,6 +631,143 @@ def test_failed_refresh_reuses_delivery_on_retry() -> None:
         assert retried.id == failed.id
         assert retried.status == "ready"
         assert campaigns.run_count == 2
+
+
+def test_profile_refresh_materializes_without_calling_an_llm() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=["chains", "franchises"],
+                limit=25,
+            )
+        )
+        refresh = TerritoryRefreshService(
+            session=session,
+            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
+            workspace_id="workspace:first",
+        )
+        delivery = refresh.refresh(profile.id)
+
+        assert delivery.status == "ready"
+        assert delivery.new_contact_count == 2
+        items = list(
+            session.scalars(
+                select(ProfileDeliveryItemModel).where(
+                    ProfileDeliveryItemModel.profile_id == profile.id
+                )
+            )
+        )
+        assert len(items) == 2
+
+        next_delivery = refresh.refresh(
+            profile.id,
+            scheduled_for=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        )
+        assert next_delivery.status == "empty"
+        assert next_delivery.new_contact_count == 0
+        current = current_profile_batch(
+            profile.id,
+            session,
+            SimpleNamespace(workspace_id="workspace:first"),
+        )
+        assert current.state.value == "empty"
+
+
+def test_profile_match_excludes_only_explicit_true_classifications() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        businesses[0].is_chain = True
+        businesses[1].is_chain = None
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=["chains"],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [businesses[1].display_name]
+        assert rows[0]["raw"]["profile_match"]["classifications"]["is_chain"] is None
+
+
+def test_profile_signals_rank_known_matches_without_rejecting_null_facts() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        BusinessFactRepository(session).upsert(
+            businesses[1].id,
+            BusinessFactValue(
+                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_quote_flow"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [
+            businesses[1].display_name,
+            businesses[0].display_name,
+        ]
+        assert rows[0]["raw"]["profile_match"]["signals"]["no_quote_flow"]["matched"] is True
+        assert rows[1]["raw"]["profile_match"]["signals"]["no_quote_flow"]["value"] is None
 
 
 def test_scheduler_enqueues_one_active_job_per_territory_and_date() -> None:
@@ -886,7 +1068,7 @@ class _FakeCampaigns:
     def create(self, campaign):
         return self.repository.create(campaign)
 
-    def materialize_existing_matches(self, campaign_id: str, rows: list[dict]):
+    def materialize_profile_matches(self, campaign_id: str, rows: list[dict]):
         self.run_count += 1
         if self.fail_first and self.run_count == 1:
             raise RuntimeError("temporary source failure")
@@ -928,6 +1110,10 @@ def _seed_hvac_businesses(session) -> None:
             raw={
                 "id": f"places/hvac-{index}",
                 "businessStatus": "OPERATIONAL",
+                "location": {
+                    "latitude": 43.6532 + index / 1000,
+                    "longitude": -79.3832 + index / 1000,
+                },
                 "nationalPhoneNumber": f"416-555-010{index}",
                 "website_presence": {"status": "no_website_found"},
                 "source_request_intent": {
@@ -938,14 +1124,3 @@ def _seed_hvac_businesses(session) -> None:
             },
         )
     session.commit()
-
-
-class _FakeOpportunityAuditor:
-    def __init__(self) -> None:
-        self.campaign_ids: list[str] = []
-
-    def audit_campaign(self, campaign_id: str, *, category: str | None, market: str | None):
-        assert category == "HVAC contractors"
-        assert market == "toronto"
-        self.campaign_ids.append(campaign_id)
-        return SimpleNamespace(selected=2, inspected=2, written=2)

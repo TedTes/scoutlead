@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient, MissingEmbeddingClient
+from canonical.attributes import apply_business_attributes, extract_business_attributes
 from canonical.normalization import (
     contact_name_from_raw,
     email_from_raw,
@@ -125,7 +126,11 @@ class CanonicalRepository:
         raw: dict[str, Any],
         contact_email: str | None = None,
     ) -> CanonicalLeadLink:
-        """Attach evidence and contact data without changing the business profile."""
+        """Attach evidence, contact data, and explicit structured attributes."""
+        apply_business_attributes(
+            business,
+            extract_business_attributes([raw], category=business.category_key),
+        )
         contact = self._upsert_contact(
             business=business,
             email=contact_email,
@@ -359,6 +364,7 @@ class CanonicalRepository:
             source=source,
             raw=raw,
         )
+        attributes = extract_business_attributes([raw], category=profile.category_key)
 
         business = self._find_business(
             source=source,
@@ -380,10 +386,12 @@ class CanonicalRepository:
                 geography=normalized_geography,
                 category_key=profile.category_key,
                 market_key=profile.market_key,
+                customer_kind="unknown",
                 semantic_text=profile.text,
                 first_seen_at=now,
                 last_seen_at=now,
             )
+            apply_business_attributes(business, attributes)
             self._refresh_embedding_if_needed(business, profile.text, now=now)
             self.session.add(business)
             self.session.flush()
@@ -398,6 +406,7 @@ class CanonicalRepository:
         business.geography = business.geography or normalized_geography
         business.category_key = business.category_key or profile.category_key
         business.market_key = business.market_key or profile.market_key
+        apply_business_attributes(business, attributes)
         if profile.text:
             previous_semantic_text = business.semantic_text
             business.semantic_text = profile.text

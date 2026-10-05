@@ -178,6 +178,15 @@ class BusinessModel(TimestampMixin, Base):
     geography: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     category_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    customer_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown", index=True
+    )
+    is_chain: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    is_franchise: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    is_directory: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    is_agency: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
     semantic_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
     embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector(1536), nullable=True)
@@ -371,6 +380,36 @@ class TerritoryDeliveryModel(TimestampMixin, Base):
 
     territory: Mapped[TerritoryModel] = relationship(back_populates="deliveries")
     campaign: Mapped[CampaignModel] = relationship()
+
+
+class ProfileDeliveryItemModel(TimestampMixin, Base):
+    __tablename__ = "profile_delivery_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "business_id",
+            name="uq_profile_delivery_items_profile_business",
+        ),
+        UniqueConstraint(
+            "delivery_id",
+            "business_id",
+            name="uq_profile_delivery_items_delivery_business",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(
+        ForeignKey("territories.id"), nullable=False, index=True
+    )
+    delivery_id: Mapped[str] = mapped_column(
+        ForeignKey("territory_deliveries.id"), nullable=False, index=True
+    )
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class SeedBatchModel(TimestampMixin, Base):
