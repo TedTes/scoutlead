@@ -6123,16 +6123,43 @@ body.is-resizing-navigation .rail {
 }
 
 .results-controlbar {
-  align-items: flex-end;
+  align-items: center;
   border-bottom: 1px solid var(--line);
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
+  justify-content: space-between;
   margin-bottom: 14px;
   overflow: visible;
-  padding: 0 0 2px;
+  padding: 0 0 9px;
   position: relative;
   z-index: 45;
+}
+
+.results-breadcrumb {
+  align-items: center;
+  color: var(--faint);
+  display: flex;
+  font-size: 11px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.results-breadcrumb button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  max-width: min(52vw, 440px);
+  overflow: hidden;
+  padding: 3px 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.results-breadcrumb button:hover,
+.results-breadcrumb button:focus-visible {
+  text-decoration: underline;
 }
 
 .workflow-tabs {
@@ -6194,22 +6221,18 @@ body.is-resizing-navigation .rail {
   flex: 0 0 auto;
   gap: 7px;
   margin-left: auto;
-  padding-bottom: 7px;
+  padding-bottom: 0;
 }
 
 .bulk-outreach-control {
   position: static;
 }
 
-.filter-menu-control,
-.sort-menu-control,
 .delivery-menu-control {
   position: relative;
   z-index: 95;
 }
 
-.filter-button,
-.sort-button,
 .delivery-button {
   align-items: center;
   background: var(--panel);
@@ -6241,71 +6264,6 @@ body.is-resizing-navigation .rail {
   margin-left: auto;
 }
 
-.filter-button .control-label,
-.sort-button .control-label {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.filter-button strong,
-.sort-button strong {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 650;
-  margin-right: 2px;
-}
-
-.filter-button svg,
-.sort-button svg {
-  color: var(--muted);
-  margin-left: auto;
-}
-
-.filter-button:hover,
-.sort-button:hover {
-  background: var(--panel-soft);
-  color: var(--text);
-}
-
-.filter-button.active {
-  border-color: var(--line-strong);
-  color: var(--muted);
-}
-
-.filter-menu {
-  min-width: 194px;
-}
-
-.filter-menu button {
-  justify-content: space-between;
-}
-
-.filter-menu button.active {
-  background: var(--panel-muted);
-  font-weight: 650;
-}
-
-.filter-menu button span {
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 11px;
-  margin-left: 18px;
-}
-
-.sort-menu {
-  min-width: 146px;
-}
-
-.sort-menu button {
-  justify-content: space-between;
-}
-
-.sort-menu button.active {
-  background: var(--panel-muted);
-  font-weight: 650;
-}
-
 .delivery-menu {
   min-width: 220px;
 }
@@ -6334,40 +6292,10 @@ body.is-resizing-navigation .rail {
   background: var(--panel-muted);
 }
 
-.sort-indicator {
-  align-items: center;
-  color: var(--text);
-  display: inline-flex;
-  flex: 0 0 14px;
-  height: 14px;
-  justify-content: center;
-  margin-left: 18px;
-  width: 14px;
-}
-
-.sort-indicator svg {
-  display: block;
-}
-
 .results-controlbar .menu-button {
   border-radius: 9px;
   height: 32px;
   width: 32px;
-}
-
-.audience-profile-button {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 650;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  white-space: nowrap;
 }
 
 .lead-feed-header-actions {
@@ -6375,12 +6303,6 @@ body.is-resizing-navigation .rail {
   display: flex;
   gap: 8px;
   margin-left: auto;
-}
-
-.audience-profile-button:hover,
-.audience-profile-button:focus-visible {
-  background: var(--panel-soft);
-  color: var(--text);
 }
 
 .audience-profile-details {
@@ -7050,31 +6972,6 @@ button.bulk-recipient-select:hover {
   font-size: 11px;
 }
 
-.lead-feed-sort {
-  align-items: center;
-  display: inline-flex;
-  font-weight: 600;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-.lead-feed-sort span {
-  color: var(--muted);
-}
-
-.lead-feed-sort select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 650;
-  outline: 0;
-  padding: 0 13px 0 0;
-}
-
 .lead-feed-search {
   align-items: center;
   background: var(--panel);
@@ -7532,12 +7429,12 @@ button.bulk-recipient-select:hover {
   }
 
   .results-workspace.has-detail .results-controlbar {
-    border: 0;
+    border-bottom: 1px solid var(--line);
     margin: 0;
-    padding: 0;
-    position: absolute;
-    right: 18px;
-    top: 18px;
+    padding: 10px 18px;
+    position: relative;
+    right: auto;
+    top: auto;
     z-index: 55;
   }
 
@@ -7546,9 +7443,7 @@ button.bulk-recipient-select:hover {
     padding: 0;
   }
 
-  .results-workspace.has-detail .delivery-menu-control,
-  .results-workspace.has-detail .filter-menu-control,
-  .results-workspace.has-detail .sort-menu-control {
+  .results-workspace.has-detail .delivery-menu-control {
     display: none;
   }
 
@@ -7562,10 +7457,6 @@ button.bulk-recipient-select:hover {
 
   .results-workspace.has-detail .bulk-outreach-control {
     display: none;
-  }
-
-  .results-workspace.has-detail .contact-drawer-header {
-    padding-right: 70px;
   }
 
   .results-workspace.has-detail .outreach-toolbar-button .outreach-label,
@@ -10242,12 +10133,9 @@ button.bulk-recipient-select:hover {
   }
 
   .results-control-actions {
-    display: grid;
-    gap: 6px;
-    grid-template-columns: minmax(0, 1fr) minmax(68px, 0.42fr) minmax(86px, 0.58fr) 32px;
-    justify-content: stretch;
-    margin-left: 0;
-    width: 100%;
+    display: flex;
+    margin-left: auto;
+    width: auto;
   }
 
   .results-control-actions:has(.delivery-menu-control) {
@@ -10269,20 +10157,8 @@ button.bulk-recipient-select:hover {
     grid-row: 1;
   }
 
-  .results-control-actions:has(.delivery-menu-control) .filter-menu-control {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .results-control-actions:has(.delivery-menu-control) .sort-menu-control {
-    grid-column: 2 / 4;
-    grid-row: 2;
-  }
-
   .bulk-outreach-control,
   .delivery-menu-control,
-  .filter-menu-control,
-  .sort-menu-control,
   .results-menu-control {
     min-width: 0;
   }
@@ -10298,21 +10174,12 @@ button.bulk-recipient-select:hover {
     min-width: 0;
   }
 
-  .filter-button,
-  .sort-button,
   .delivery-button {
     min-width: 0;
     padding: 0 8px;
     width: 100%;
   }
 
-  .filter-button .control-label,
-  .sort-button .control-label {
-    display: none;
-  }
-
-  .filter-button strong,
-  .sort-button strong,
   .delivery-button strong {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -10343,11 +10210,6 @@ button.bulk-recipient-select:hover {
 
   .bulk-send-selected {
     width: 100%;
-  }
-
-  .filter-menu {
-    left: 0;
-    right: auto;
   }
 
   .delivery-menu {

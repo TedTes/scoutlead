@@ -3,7 +3,6 @@ import {
   ArrowRight,
   CalendarClock,
   Check,
-  ChevronDown,
   Copy,
   Download,
   ExternalLink,
@@ -18,7 +17,6 @@ import {
   RotateCw,
   Search,
   Send,
-  Settings2,
   Sparkles,
   Star,
   Trash2,
@@ -63,8 +61,6 @@ import {
 import { formatDate } from "../utils/format";
 import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
 
-type ResultAttributeFilter = "matched" | "needs_verification" | "good_fit" | "verified" | "not_fit" | "has_draft";
-type ResultSort = "contact" | "score" | "name";
 type DrawerTab = "overview" | "evidence";
 type ContactActivityTone = "done" | "pending" | "warning" | "blocked";
 type ContactActivityItem = {
@@ -162,13 +158,9 @@ export function ResultsScreen({
   const [draftPrompt, setDraftPrompt] = useState("");
   const [searchIntent, setSearchIntent] = useState<SearchIntent | null>(null);
   const [editedSearchIntent, setEditedSearchIntent] = useState<SearchIntent | null>(null);
-  const [attributeFilter, setAttributeFilter] = useState<ResultAttributeFilter | null>(null);
-  const [sort, setSort] = useState<ResultSort>("score");
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
   const [sendingWebhook, setSendingWebhook] = useState(false);
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
@@ -183,8 +175,6 @@ export function ResultsScreen({
   const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const [bulkPopoverStyle, setBulkPopoverStyle] = useState<CSSProperties>({});
-  const filterMenuRef = useRef<HTMLDivElement | null>(null);
-  const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
   const bulkOutreachRef = useRef<HTMLDivElement | null>(null);
   const bulkOutreachButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -218,16 +208,9 @@ export function ResultsScreen({
       .filter((message) => message.status === "approved" || message.status === "sent")
       .map((message) => message.lead_id),
   );
-  const verifiedContacts = contacts.filter(isVerifiedContact).length;
-  const goodFitContacts = contacts.filter(canShortlistContact).length;
-  const shortlistedContacts = contacts.filter((contact) => contact.shortlisted_at).length;
-  const notFitContacts = contacts.filter((contact) => reviewStatus(contact) === "not_fit").length;
+  const shortlistedContactRows = contacts.filter((contact) => contact.shortlisted_at);
+  const shortlistedContacts = shortlistedContactRows.length;
   const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
-  const draftedContacts = contacts.filter((contact) => draftedLeadIds.has(contact.id)).length;
-  const matchedContacts = contacts.filter((contact) => searchMatchStatus(contact) === "matched").length;
-  const needsVerificationContacts = contacts.filter(
-    (contact) => searchMatchStatus(contact) === "unknown",
-  ).length;
   const approvedShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && approvedLeadIds.has(contact.id),
   );
@@ -238,23 +221,8 @@ export function ResultsScreen({
   const draftableShortlistContacts = contacts.filter(
     (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
   );
-  const outreachReadyContacts = contacts.filter(isBulkOutreachReadyContact);
-  const outreachSkippedContacts = contacts.filter((contact) => !isBulkOutreachReadyContact(contact));
-  const attributeFilterOptions: Array<{ id: ResultAttributeFilter; label: string; count: number }> = [
-    { id: "matched", label: "Matched criteria", count: matchedContacts },
-    { id: "needs_verification", label: "Needs verification", count: needsVerificationContacts },
-    { id: "good_fit", label: "Good fit", count: goodFitContacts },
-    { id: "verified", label: "Verified", count: verifiedContacts },
-    { id: "has_draft", label: "Has draft", count: draftedContacts },
-    { id: "not_fit", label: "Not fit", count: notFitContacts },
-  ];
-  const sortOptions: Array<{ id: ResultSort; label: string }> = [
-    { id: "contact", label: "Contact" },
-    { id: "score", label: "Recommended" },
-    { id: "name", label: "Name" },
-  ];
-  const activeAttributeFilter = attributeFilterOptions.find((option) => option.id === attributeFilter);
-  const activeSort = sortOptions.find((option) => option.id === sort) || sortOptions[0];
+  const outreachReadyContacts = shortlistedContactRows.filter(isBulkOutreachReadyContact);
+  const outreachSkippedContacts = shortlistedContactRows.filter((contact) => !isBulkOutreachReadyContact(contact));
   const workflowContext = { isDeliveryScoped, thisWeekCutoffMs };
   const workflowCounts = useMemo<LeadWorkflowCounts>(() => ({
     inbox: contacts.filter((contact) => matchesWorkflowView(contact, "inbox", workflowContext)).length,
@@ -283,24 +251,10 @@ export function ResultsScreen({
         .toLowerCase()
         .includes(needle);
     })
-    .filter((contact) => {
-      if (attributeFilter === "verified") return isVerifiedContact(contact);
-      if (attributeFilter === "matched") return searchMatchStatus(contact) === "matched";
-      if (attributeFilter === "needs_verification") return searchMatchStatus(contact) === "unknown";
-      if (attributeFilter === "good_fit") return canShortlistContact(contact);
-      if (attributeFilter === "not_fit") return reviewStatus(contact) === "not_fit";
-      if (attributeFilter === "has_draft") return draftedLeadIds.has(contact.id);
-      return true;
-    })
-    .sort((a, b) => {
-      if (sort === "name") return a.company_name.localeCompare(b.company_name);
-      if (sort === "score") {
-        return contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score || contactScore(b) - contactScore(a);
-      }
-      return Number(isReachableContact(b)) - Number(isReachableContact(a))
-        || contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score
-        || contactScore(b) - contactScore(a);
-    });
+    .sort((a, b) =>
+      contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score
+      || contactScore(b) - contactScore(a),
+    );
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
@@ -350,7 +304,6 @@ export function ResultsScreen({
     setDetailPanelOpen(true);
     setLeadSearch("");
     onWorkflowViewChange("this_week");
-    setAttributeFilter(null);
     setRerunPromptOpen(false);
     setBulkOutreachOpen(false);
   }, [onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
@@ -388,21 +341,17 @@ export function ResultsScreen({
 
   useEffect(() => {
     setRunMenuOpen(false);
-    setFilterMenuOpen(false);
-    setSortMenuOpen(false);
   }, [selectedDiscoveryRunId]);
 
   useEffect(() => {
-    if (!runMenuOpen && !filterMenuOpen && !sortMenuOpen && !bulkOutreachOpen) return undefined;
+    if (workflowView !== "shortlisted") setBulkOutreachOpen(false);
+  }, [workflowView]);
+
+  useEffect(() => {
+    if (!runMenuOpen && !bulkOutreachOpen) return undefined;
     const closeMenus = (event: MouseEvent) => {
       if (!runMenuRef.current?.contains(event.target as Node)) {
         setRunMenuOpen(false);
-      }
-      if (!filterMenuRef.current?.contains(event.target as Node)) {
-        setFilterMenuOpen(false);
-      }
-      if (!sortMenuRef.current?.contains(event.target as Node)) {
-        setSortMenuOpen(false);
       }
       if (
         !bulkOutreachRef.current?.contains(event.target as Node)
@@ -413,7 +362,7 @@ export function ResultsScreen({
     };
     document.addEventListener("mousedown", closeMenus);
     return () => document.removeEventListener("mousedown", closeMenus);
-  }, [bulkOutreachOpen, filterMenuOpen, runMenuOpen, sortMenuOpen]);
+  }, [bulkOutreachOpen, runMenuOpen]);
 
   useEffect(() => {
     // Freezes the underlying results list while the popup is open so it
@@ -760,91 +709,16 @@ export function ResultsScreen({
   return (
     <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
       <div className="results-controlbar">
+        {activeProfile ? (
+          <nav aria-label="Audience context" className="results-breadcrumb">
+            <span>Audiences</span>
+            <span aria-hidden="true">/</span>
+            <button type="button" onClick={() => setProfileDetailsOpen(true)}>
+              {activeProfile.label}
+            </button>
+          </nav>
+        ) : null}
         <div className="results-control-actions">
-          <div className="filter-menu-control" ref={filterMenuRef}>
-            <button
-              aria-expanded={filterMenuOpen}
-              className={attributeFilter ? "filter-button active" : "filter-button"}
-              type="button"
-              onClick={() => {
-                setBulkOutreachOpen(false);
-                setSortMenuOpen(false);
-                setRunMenuOpen(false);
-                setFilterMenuOpen((open) => !open);
-              }}
-            >
-              <span className="control-label">Filter</span>
-              <strong>{activeAttributeFilter?.label || "All"}</strong>
-              <ChevronDown size={14} />
-            </button>
-            {filterMenuOpen ? (
-              <div className="action-menu filter-menu">
-                {attributeFilter ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAttributeFilter(null);
-                      setFilterMenuOpen(false);
-                    }}
-                  >
-                    Clear filter
-                    <span>{contacts.length}</span>
-                  </button>
-                ) : null}
-                {attributeFilterOptions.map((option) => (
-                  <button
-                    className={attributeFilter === option.id ? "active" : ""}
-                    key={option.id}
-                    type="button"
-                    onClick={() => {
-                      setAttributeFilter((current) => (current === option.id ? null : option.id));
-                      setFilterMenuOpen(false);
-                    }}
-                  >
-                    {option.label}
-                    <span>{option.count}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="sort-menu-control" ref={sortMenuRef}>
-            <button
-              aria-expanded={sortMenuOpen}
-              className="sort-button"
-              type="button"
-              onClick={() => {
-                setBulkOutreachOpen(false);
-                setFilterMenuOpen(false);
-                setRunMenuOpen(false);
-                setSortMenuOpen((open) => !open);
-              }}
-            >
-              <span className="control-label">Sort</span>
-              <strong>{activeSort.label}</strong>
-              <ChevronDown size={14} />
-            </button>
-            {sortMenuOpen ? (
-              <div className="action-menu sort-menu">
-                {sortOptions.map((option) => (
-                  <button
-                    className={sort === option.id ? "active" : ""}
-                    key={option.id}
-                    type="button"
-                    onClick={() => {
-                      setSort(option.id);
-                      setSortMenuOpen(false);
-                    }}
-                  >
-                    {option.label}
-                    <span className="sort-indicator">{sort === option.id ? <Check size={12} /> : null}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
           <div className="results-menu-control" ref={runMenuRef}>
             <button
               aria-expanded={runMenuOpen}
@@ -853,8 +727,6 @@ export function ResultsScreen({
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
-                setFilterMenuOpen(false);
-                setSortMenuOpen(false);
                 setRunMenuOpen((open) => !open);
               }}
             >
@@ -1001,71 +873,50 @@ export function ResultsScreen({
                 </span>
               </div>
               <div className="lead-feed-header-actions">
-                <div className="bulk-outreach-control" ref={bulkOutreachRef}>
-                  <button
-                    aria-expanded={bulkOutreachOpen}
-                    aria-haspopup="dialog"
-                    className={bulkOutreachOpen ? "secondary outreach-toolbar-button active" : "secondary outreach-toolbar-button"}
-                    ref={bulkOutreachButtonRef}
-                    type="button"
-                    disabled={!contacts.length}
-                    onClick={() => {
-                      setFilterMenuOpen(false);
-                      setSortMenuOpen(false);
-                      setRunMenuOpen(false);
-                      setBulkOutreachOpen((open) => !open);
-                    }}
-                  >
-                    <Users size={14} />
-                    <span className="outreach-label">Prepare outreach</span>
-                    <span className="outreach-count">{outreachReadyContacts.length}</span>
-                  </button>
-                  {bulkOutreachOpen
-                    ? createPortal(
-                        <>
-                          <div
-                            className="bulk-outreach-backdrop"
-                            role="presentation"
-                            onMouseDown={() => setBulkOutreachOpen(false)}
-                          />
-                          <div className="bulk-outreach-popover" ref={bulkOutreachPopoverRef} style={bulkPopoverStyle}>
-                            <BulkOutreachPanel
-                              gmailConnected={gmailConnected}
-                              product={selectedProduct}
-                              readyContacts={outreachReadyContacts}
-                              skippedContacts={outreachSkippedContacts}
-                              onApproveDrafts={approveCampaignOutreachDrafts}
-                              onClose={() => setBulkOutreachOpen(false)}
-                              onCreateDrafts={createCampaignOutreachDrafts}
-                              onSendDrafts={sendCampaignOutreachDrafts}
-                              onUpdateMessage={updateMessage}
+                {workflowView === "shortlisted" && outreachReadyContacts.length ? (
+                  <div className="bulk-outreach-control" ref={bulkOutreachRef}>
+                    <button
+                      aria-expanded={bulkOutreachOpen}
+                      aria-haspopup="dialog"
+                      className={bulkOutreachOpen ? "secondary outreach-toolbar-button active" : "secondary outreach-toolbar-button"}
+                      ref={bulkOutreachButtonRef}
+                      type="button"
+                      onClick={() => {
+                        setRunMenuOpen(false);
+                        setBulkOutreachOpen((open) => !open);
+                      }}
+                    >
+                      <Users size={14} />
+                      <span className="outreach-label">Prepare outreach</span>
+                      <span className="outreach-count">{outreachReadyContacts.length}</span>
+                    </button>
+                    {bulkOutreachOpen
+                      ? createPortal(
+                          <>
+                            <div
+                              className="bulk-outreach-backdrop"
+                              role="presentation"
+                              onMouseDown={() => setBulkOutreachOpen(false)}
                             />
-                          </div>
-                        </>,
-                        document.body,
-                      )
-                    : null}
-                </div>
-                {activeProfile ? (
-                  <button
-                    aria-label="View audience profile"
-                    className="audience-profile-button"
-                    title="View audience profile"
-                    type="button"
-                    onClick={() => setProfileDetailsOpen(true)}
-                  >
-                    <Settings2 size={13} />
-                    <span>Profile</span>
-                  </button>
+                            <div className="bulk-outreach-popover" ref={bulkOutreachPopoverRef} style={bulkPopoverStyle}>
+                              <BulkOutreachPanel
+                                gmailConnected={gmailConnected}
+                                product={selectedProduct}
+                                readyContacts={outreachReadyContacts}
+                                skippedContacts={outreachSkippedContacts}
+                                onApproveDrafts={approveCampaignOutreachDrafts}
+                                onClose={() => setBulkOutreachOpen(false)}
+                                onCreateDrafts={createCampaignOutreachDrafts}
+                                onSendDrafts={sendCampaignOutreachDrafts}
+                                onUpdateMessage={updateMessage}
+                              />
+                            </div>
+                          </>,
+                          document.body,
+                        )
+                      : null}
+                  </div>
                 ) : null}
-                <label className="lead-feed-sort">
-                  <span>Sort:</span>
-                  <select value={sort} onChange={(event) => setSort(event.target.value as ResultSort)}>
-                    {sortOptions.map((option) => (
-                      <option key={option.id} value={option.id}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
               </div>
             </div>
             <label className="lead-feed-search">
