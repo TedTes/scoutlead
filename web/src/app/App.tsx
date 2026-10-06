@@ -585,9 +585,6 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           />
           <div className="lead-workspace-heading">
             <span>Audiences</span>
-            <button type="button" aria-label="New audience" title="New audience" onClick={startNewAudience}>
-              <Plus size={15} />
-            </button>
           </div>
           <div className="lead-workspace-list">
             {visibleProfiles.map((profile) => (
@@ -721,6 +718,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
                 onCountsChange: handleWorkflowCountsChange,
+                onCreateAudience: startNewAudience,
               },
               {
                 onCountChange: (runId, count) => setSourceReviewSummary({ runId, count }),

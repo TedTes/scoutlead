@@ -2846,18 +2846,6 @@ a {
   text-transform: uppercase;
 }
 
-.lead-workspace-heading button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--muted);
-  display: inline-flex;
-  height: 24px;
-  justify-content: center;
-  padding: 0;
-  width: 24px;
-}
-
 .lead-workspace-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -6224,6 +6212,13 @@ body.is-resizing-navigation .rail {
   padding-bottom: 0;
 }
 
+.results-new-audience-button {
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
 .bulk-outreach-control {
   position: static;
 }
@@ -9415,7 +9410,6 @@ button.bulk-recipient-select:hover {
   .rail-product-caret,
   .lead-workflow-links button span,
   .lead-workflow-links button em,
-  .lead-workspace-heading > span,
   .lead-workspace-list button > span,
   .lead-workspace-list .workspace-more,
   .lead-workspace-empty,
@@ -9469,17 +9463,7 @@ button.bulk-recipient-select:hover {
   }
 
   .lead-workspace-heading {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  .lead-workspace-heading button {
-    border-radius: 6px;
-  }
-
-  .lead-workspace-heading button:hover {
-    background: var(--panel-soft);
+    display: none;
   }
 
   .lead-workspace-list button.active,
@@ -10136,6 +10120,15 @@ button.bulk-recipient-select:hover {
     display: flex;
     margin-left: auto;
     width: auto;
+  }
+
+  .results-new-audience-button {
+    padding: 0;
+    width: 32px;
+  }
+
+  .results-new-audience-button span {
+    display: none;
   }
 
   .results-control-actions:has(.delivery-menu-control) {

@@ -14,6 +14,7 @@ import {
   Phone,
   Play,
   PlugZap,
+  Plus,
   RotateCw,
   Search,
   Send,
@@ -111,10 +112,12 @@ type BulkEmailOverride = {
 export function ResultsScreen({
   onWorkflowViewChange,
   onWorkflowCountsChange,
+  onCreateAudience,
   workflowView,
 }: {
   onWorkflowViewChange: (view: LeadWorkflowView) => void;
   onWorkflowCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
+  onCreateAudience?: () => void;
   workflowView: LeadWorkflowView;
 }) {
   const {
@@ -719,6 +722,18 @@ export function ResultsScreen({
           </nav>
         ) : null}
         <div className="results-control-actions">
+          {onCreateAudience ? (
+            <button
+              aria-label="New audience"
+              className="secondary results-new-audience-button"
+              title="New audience"
+              type="button"
+              onClick={onCreateAudience}
+            >
+              <Plus size={14} />
+              <span>New audience</span>
+            </button>
+          ) : null}
           <div className="results-menu-control" ref={runMenuRef}>
             <button
               aria-expanded={runMenuOpen}

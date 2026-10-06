@@ -25,6 +25,7 @@ export function renderScreen(
     view: LeadWorkflowView;
     onViewChange: (view: LeadWorkflowView) => void;
     onCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
+    onCreateAudience?: () => void;
   } = {
     view: "this_week",
     onViewChange: () => undefined,
@@ -46,6 +47,7 @@ export function renderScreen(
           workflowView={resultsNavigation.view}
           onWorkflowViewChange={resultsNavigation.onViewChange}
           onWorkflowCountsChange={resultsNavigation.onCountsChange}
+          onCreateAudience={resultsNavigation.onCreateAudience}
         />
       );
     default:
