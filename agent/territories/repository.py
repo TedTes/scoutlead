@@ -168,6 +168,20 @@ class TerritoryRepository:
             .limit(1)
         )
 
+    def latest_nonempty_delivery(self, territory_id: str) -> TerritoryDeliveryModel | None:
+        self.get(territory_id)
+        return self.session.scalar(
+            select(TerritoryDeliveryModel)
+            .where(
+                TerritoryDeliveryModel.workspace_id == self.workspace_id,
+                TerritoryDeliveryModel.territory_id == territory_id,
+                TerritoryDeliveryModel.status.in_(("ready", "partial")),
+                TerritoryDeliveryModel.new_contact_count > 0,
+            )
+            .order_by(TerritoryDeliveryModel.created_at.desc())
+            .limit(1)
+        )
+
     def get_delivery(self, territory_id: str, delivery_id: str) -> TerritoryDeliveryModel:
         self.get(territory_id)
         model = self.session.scalar(

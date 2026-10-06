@@ -724,7 +724,11 @@ def test_profile_refresh_materializes_without_calling_an_llm() -> None:
             session,
             SimpleNamespace(workspace_id="workspace:first"),
         )
-        assert current.state.value == "empty"
+        assert current.state.value == "ready"
+        assert current.delivery is not None
+        assert current.delivery.id == delivery.id
+        assert current.result_count == 2
+        assert len(current.leads) == 2
 
 
 def test_profile_match_excludes_only_explicit_true_classifications() -> None:

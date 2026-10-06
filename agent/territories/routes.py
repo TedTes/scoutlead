@@ -263,6 +263,8 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
     service = _service(session, auth)
     profile = service.get(profile_id)
     delivery = service.territories.latest_delivery(profile.id)
+    if delivery is not None and delivery.status == "empty":
+        delivery = service.territories.latest_nonempty_delivery(profile.id) or delivery
     latest_job = _latest_profile_job(session, profile.id)
     active_job = (
         latest_job

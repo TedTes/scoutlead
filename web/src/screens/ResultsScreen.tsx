@@ -128,8 +128,6 @@ export function ResultsScreen({
     selectedProduct,
     selectedProductId,
     selectedProfileId,
-    selectProfile,
-    switchingProfileId,
     profileBatch,
     setSelectedDiscoveryRunId,
     deleteDiscoveryRuns,
@@ -172,7 +170,6 @@ export function ResultsScreen({
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
-  const [deliveryMenuOpen, setDeliveryMenuOpen] = useState(false);
   const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -189,7 +186,6 @@ export function ResultsScreen({
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
-  const deliveryMenuRef = useRef<HTMLDivElement | null>(null);
   const bulkOutreachRef = useRef<HTMLDivElement | null>(null);
   const bulkOutreachButtonRef = useRef<HTMLButtonElement | null>(null);
   const bulkOutreachPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -197,10 +193,7 @@ export function ResultsScreen({
   const selectedTerritory = selectedDiscoveryRun?.territory_id
     ? territories.find((territory) => territory.id === selectedDiscoveryRun.territory_id)
     : undefined;
-  const productProfiles = territories.filter(
-    (territory) => territory.product_id === selectedProductId,
-  );
-  const activeProfile = productProfiles.find((profile) => profile.id === selectedProfileId)
+  const activeProfile = territories.find((profile) => profile.id === selectedProfileId)
     || selectedTerritory;
   const selectedDelivery = selectedTerritory
     ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
@@ -360,7 +353,6 @@ export function ResultsScreen({
     setAttributeFilter(null);
     setRerunPromptOpen(false);
     setBulkOutreachOpen(false);
-    setDeliveryMenuOpen(false);
   }, [onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
 
   useEffect(() => {
@@ -401,13 +393,10 @@ export function ResultsScreen({
   }, [selectedDiscoveryRunId]);
 
   useEffect(() => {
-    if (!runMenuOpen && !deliveryMenuOpen && !filterMenuOpen && !sortMenuOpen && !bulkOutreachOpen) return undefined;
+    if (!runMenuOpen && !filterMenuOpen && !sortMenuOpen && !bulkOutreachOpen) return undefined;
     const closeMenus = (event: MouseEvent) => {
       if (!runMenuRef.current?.contains(event.target as Node)) {
         setRunMenuOpen(false);
-      }
-      if (!deliveryMenuRef.current?.contains(event.target as Node)) {
-        setDeliveryMenuOpen(false);
       }
       if (!filterMenuRef.current?.contains(event.target as Node)) {
         setFilterMenuOpen(false);
@@ -424,7 +413,7 @@ export function ResultsScreen({
     };
     document.addEventListener("mousedown", closeMenus);
     return () => document.removeEventListener("mousedown", closeMenus);
-  }, [bulkOutreachOpen, deliveryMenuOpen, filterMenuOpen, runMenuOpen, sortMenuOpen]);
+  }, [bulkOutreachOpen, filterMenuOpen, runMenuOpen, sortMenuOpen]);
 
   useEffect(() => {
     // Freezes the underlying results list while the popup is open so it
@@ -648,12 +637,6 @@ export function ResultsScreen({
     }
   };
 
-  const selectDelivery = async (delivery: TerritoryDelivery) => {
-    setDeliveryMenuOpen(false);
-    setSelectedDiscoveryRunId(delivery.campaign_id);
-    await refreshSnapshot(delivery.campaign_id);
-  };
-
   const recordContactOutcome = async (leadId: string, outcome: LeadOutcomeValue) => {
     await territoryApi.recordLeadOutcome(leadId, outcome, outcome === "contacted" ? "email" : "other");
     await Promise.all([
@@ -778,122 +761,6 @@ export function ResultsScreen({
     <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
       <div className="results-controlbar">
         <div className="results-control-actions">
-          {productProfiles.length ? (
-            <label className="results-audience-select">
-              <span>Audience</span>
-              <select
-                aria-label="Audience profile"
-                disabled={Boolean(switchingProfileId)}
-                value={selectedProfileId || selectedTerritory?.id || ""}
-                onChange={(event) => {
-                  void selectProfile(event.target.value).catch((cause) => showToast({
-                    title: "Audience could not be opened",
-                    message: cause instanceof Error ? cause.message : String(cause),
-                    tone: "red",
-                  }));
-                }}
-              >
-                {productProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>{profile.label}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {activeProfile ? (
-            <button
-              aria-label="View audience profile"
-              className="audience-profile-button"
-              title="View audience profile"
-              type="button"
-              onClick={() => setProfileDetailsOpen(true)}
-            >
-              <Settings2 size={14} />
-              <span>Profile</span>
-            </button>
-          ) : null}
-          {selectedTerritory && deliveries.length ? (
-            <div className="delivery-menu-control" ref={deliveryMenuRef}>
-              <button
-                aria-expanded={deliveryMenuOpen}
-                className="delivery-button"
-                type="button"
-                onClick={() => {
-                  setRunMenuOpen(false);
-                  setFilterMenuOpen(false);
-                  setSortMenuOpen(false);
-                  setDeliveryMenuOpen((open) => !open);
-                }}
-              >
-                <CalendarClock size={14} />
-                <strong>{selectedDelivery ? deliveryLabel(selectedDelivery) : "Deliveries"}</strong>
-                <ChevronDown size={14} />
-              </button>
-              {deliveryMenuOpen ? (
-                <div className="action-menu delivery-menu">
-                  {deliveries.map((delivery, index) => (
-                    <button
-                      className={delivery.campaign_id === selectedDiscoveryRunId ? "active" : ""}
-                      key={delivery.id}
-                      type="button"
-                      onClick={() => void selectDelivery(delivery)}
-                    >
-                      <span>
-                        <strong>{index === 0 ? "Latest" : deliveryDate(delivery)}</strong>
-                        <small>{delivery.new_contact_count} contacts · {delivery.status}</small>
-                      </span>
-                      {delivery.campaign_id === selectedDiscoveryRunId ? <Check size={12} /> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="bulk-outreach-control" ref={bulkOutreachRef}>
-            <button
-              aria-expanded={bulkOutreachOpen}
-              aria-haspopup="dialog"
-              className={bulkOutreachOpen ? "secondary outreach-toolbar-button active" : "secondary outreach-toolbar-button"}
-              ref={bulkOutreachButtonRef}
-              type="button"
-              disabled={!contacts.length}
-              onClick={() => {
-                setDeliveryMenuOpen(false);
-                setFilterMenuOpen(false);
-                setSortMenuOpen(false);
-                setRunMenuOpen(false);
-                setBulkOutreachOpen((open) => !open);
-              }}
-            >
-              <Users size={14} />
-              <span className="outreach-label">Prepare outreach</span>
-              <span className="outreach-count">{outreachReadyContacts.length}</span>
-            </button>
-            {bulkOutreachOpen
-              ? createPortal(
-                  <>
-                    <div
-                      className="bulk-outreach-backdrop"
-                      role="presentation"
-                      onMouseDown={() => setBulkOutreachOpen(false)}
-                    />
-                    <div className="bulk-outreach-popover" ref={bulkOutreachPopoverRef} style={bulkPopoverStyle}>
-                      <BulkOutreachPanel
-                        gmailConnected={gmailConnected}
-                        product={selectedProduct}
-                        readyContacts={outreachReadyContacts}
-                        skippedContacts={outreachSkippedContacts}
-                        onApproveDrafts={approveCampaignOutreachDrafts}
-                        onClose={() => setBulkOutreachOpen(false)}
-                        onCreateDrafts={createCampaignOutreachDrafts}
-                        onSendDrafts={sendCampaignOutreachDrafts}
-                        onUpdateMessage={updateMessage}
-                      />
-                    </div>
-                  </>,
-                  document.body,
-                )
-              : null}
-          </div>
           <div className="filter-menu-control" ref={filterMenuRef}>
             <button
               aria-expanded={filterMenuOpen}
@@ -901,7 +768,6 @@ export function ResultsScreen({
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
-                setDeliveryMenuOpen(false);
                 setSortMenuOpen(false);
                 setRunMenuOpen(false);
                 setFilterMenuOpen((open) => !open);
@@ -950,7 +816,6 @@ export function ResultsScreen({
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
-                setDeliveryMenuOpen(false);
                 setFilterMenuOpen(false);
                 setRunMenuOpen(false);
                 setSortMenuOpen((open) => !open);
@@ -988,7 +853,6 @@ export function ResultsScreen({
               type="button"
               onClick={() => {
                 setBulkOutreachOpen(false);
-                setDeliveryMenuOpen(false);
                 setFilterMenuOpen(false);
                 setSortMenuOpen(false);
                 setRunMenuOpen((open) => !open);
@@ -998,19 +862,6 @@ export function ResultsScreen({
             </button>
             {runMenuOpen ? (
               <div className="action-menu">
-                <button
-                  type="button"
-                  disabled={!contacts.length}
-                  onClick={() => {
-                    setRunMenuOpen(false);
-                    setBulkOutreachOpen(true);
-                  }}
-                >
-                  <Users size={14} />
-                  Prepare outreach
-                  <span>{outreachReadyContacts.length}</span>
-                </button>
-                <div className="action-menu-divider" />
                 {selectedTerritory ? (
                   <div className="run-menu-summary">
                     <strong>{refillPolicyLabel(selectedTerritory.refill_policy)} · {selectedTerritory.status}</strong>
@@ -1149,14 +1000,73 @@ export function ResultsScreen({
                     : `${visibleContacts.length} of ${workflowContacts.length}`}
                 </span>
               </div>
-              <label className="lead-feed-sort">
-                <span>Sort:</span>
-                <select value={sort} onChange={(event) => setSort(event.target.value as ResultSort)}>
-                  {sortOptions.map((option) => (
-                    <option key={option.id} value={option.id}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="lead-feed-header-actions">
+                <div className="bulk-outreach-control" ref={bulkOutreachRef}>
+                  <button
+                    aria-expanded={bulkOutreachOpen}
+                    aria-haspopup="dialog"
+                    className={bulkOutreachOpen ? "secondary outreach-toolbar-button active" : "secondary outreach-toolbar-button"}
+                    ref={bulkOutreachButtonRef}
+                    type="button"
+                    disabled={!contacts.length}
+                    onClick={() => {
+                      setFilterMenuOpen(false);
+                      setSortMenuOpen(false);
+                      setRunMenuOpen(false);
+                      setBulkOutreachOpen((open) => !open);
+                    }}
+                  >
+                    <Users size={14} />
+                    <span className="outreach-label">Prepare outreach</span>
+                    <span className="outreach-count">{outreachReadyContacts.length}</span>
+                  </button>
+                  {bulkOutreachOpen
+                    ? createPortal(
+                        <>
+                          <div
+                            className="bulk-outreach-backdrop"
+                            role="presentation"
+                            onMouseDown={() => setBulkOutreachOpen(false)}
+                          />
+                          <div className="bulk-outreach-popover" ref={bulkOutreachPopoverRef} style={bulkPopoverStyle}>
+                            <BulkOutreachPanel
+                              gmailConnected={gmailConnected}
+                              product={selectedProduct}
+                              readyContacts={outreachReadyContacts}
+                              skippedContacts={outreachSkippedContacts}
+                              onApproveDrafts={approveCampaignOutreachDrafts}
+                              onClose={() => setBulkOutreachOpen(false)}
+                              onCreateDrafts={createCampaignOutreachDrafts}
+                              onSendDrafts={sendCampaignOutreachDrafts}
+                              onUpdateMessage={updateMessage}
+                            />
+                          </div>
+                        </>,
+                        document.body,
+                      )
+                    : null}
+                </div>
+                {activeProfile ? (
+                  <button
+                    aria-label="View audience profile"
+                    className="audience-profile-button"
+                    title="View audience profile"
+                    type="button"
+                    onClick={() => setProfileDetailsOpen(true)}
+                  >
+                    <Settings2 size={13} />
+                    <span>Profile</span>
+                  </button>
+                ) : null}
+                <label className="lead-feed-sort">
+                  <span>Sort:</span>
+                  <select value={sort} onChange={(event) => setSort(event.target.value as ResultSort)}>
+                    {sortOptions.map((option) => (
+                      <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
             <label className="lead-feed-search">
               <Search size={15} aria-hidden="true" />
@@ -3652,15 +3562,6 @@ function formatActivityDate(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return formatDate(date.toISOString());
-}
-
-function deliveryDate(delivery: TerritoryDelivery) {
-  return formatCompactDate(delivery.delivered_at || delivery.scheduled_for || delivery.started_at);
-}
-
-function deliveryLabel(delivery: TerritoryDelivery) {
-  const date = deliveryDate(delivery);
-  return date ? `${date} · ${delivery.new_contact_count}` : `${delivery.new_contact_count} contacts`;
 }
 
 function emptyBatchCopy(
