@@ -212,6 +212,41 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
         )
 
 
+def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        auth = SimpleNamespace(workspace_id="workspace:first")
+        data = ProfileCreate(
+            product_id=offer.id,
+            trades=["painters"],
+            customer_kind="residential",
+            market={"city": "Toronto", "radius_km": 25},
+            signals=["website_unavailable"],
+            exclude=["franchises"],
+        )
+
+        first = create_profile_route(data, session, auth)
+        repeated = create_profile_route(data, session, auth)
+
+        assert repeated.profile.id == first.profile.id
+        assert repeated.job.id == first.job.id
+        assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 1
+
+        queued = session.get(QueueJobModel, first.job.id)
+        assert queued is not None
+        queued.status = "completed"
+        session.commit()
+
+        refilled = create_profile_route(data, session, auth)
+
+        assert refilled.profile.id == first.profile.id
+        assert refilled.job.id != first.job.id
+        assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 2
+
+
 def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -726,7 +761,7 @@ def test_profile_refresh_materializes_without_calling_an_llm() -> None:
         )
         assert current.state.value == "ready"
         assert current.delivery is not None
-        assert current.delivery.id == delivery.id
+        assert current.delivery.id == next_delivery.id
         assert current.result_count == 2
         assert len(current.leads) == 2
 

@@ -128,7 +128,7 @@ export function AudienceProfileScreen() {
     setSaving(true);
     try {
       await createProfile(input);
-      showToast({ title: "Audience created", message: "The first lead batch is queued.", tone: "green" });
+      showToast({ title: "Audience ready", message: "A refresh is queued and existing leads remain available.", tone: "green" });
     } catch (error) {
       showToast({ title: "Audience could not be created", message: error instanceof Error ? error.message : String(error), tone: "red" });
     } finally {

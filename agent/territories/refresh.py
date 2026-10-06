@@ -163,6 +163,7 @@ def eligible_delivery_leads(
     leads: list[LeadModel],
     *,
     min_fit: TerritoryMinFit,
+    preserve_order: bool = False,
 ) -> list[LeadRead]:
     allowed = {AgentFitStatus.GOOD_FIT.value}
     if min_fit == TerritoryMinFit.MAYBE:
@@ -180,11 +181,9 @@ def eligible_delivery_leads(
         ):
             continue
         eligible.append(lead)
-    return sorted(
-        eligible,
-        key=_delivery_sort_key,
-        reverse=True,
-    )
+    if preserve_order:
+        return eligible
+    return sorted(eligible, key=_delivery_sort_key, reverse=True)
 
 
 def _delivery_sort_key(lead: LeadRead) -> tuple[float, float, float, float]:

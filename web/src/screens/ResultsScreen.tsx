@@ -196,11 +196,14 @@ export function ResultsScreen({
     && (!selectedDelivery || profileBatch.delivery?.id === selectedDelivery.id)
       ? profileBatch
       : null;
-  const sourceContacts = selectedDiscoveryRunId
-    ? selectedDelivery && deliveryContacts ? deliveryContacts : snapshot.results
-    : [];
+  const isProfileAggregate = Boolean(visibleProfileBatch);
+  const sourceContacts = visibleProfileBatch
+    ? visibleProfileBatch.leads
+    : selectedDiscoveryRunId
+      ? selectedDelivery && deliveryContacts ? deliveryContacts : snapshot.results
+      : [];
   const contacts = useMemo(() => deduplicateContacts(sourceContacts), [sourceContacts]);
-  const isDeliveryScoped = Boolean(selectedDelivery && deliveryContacts);
+  const isDeliveryScoped = Boolean(!isProfileAggregate && selectedDelivery && deliveryContacts);
   const thisWeekCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = runPrompt;
@@ -226,7 +229,10 @@ export function ResultsScreen({
   );
   const outreachReadyContacts = shortlistedContactRows.filter(isBulkOutreachReadyContact);
   const outreachSkippedContacts = shortlistedContactRows.filter((contact) => !isBulkOutreachReadyContact(contact));
-  const workflowContext = { isDeliveryScoped, thisWeekCutoffMs };
+  const workflowContext = {
+    includeAllLeads: isProfileAggregate || isDeliveryScoped,
+    thisWeekCutoffMs,
+  };
   const workflowCounts = useMemo<LeadWorkflowCounts>(() => ({
     inbox: contacts.filter((contact) => matchesWorkflowView(contact, "inbox", workflowContext)).length,
     this_week: contacts.filter((contact) => matchesWorkflowView(contact, "this_week", workflowContext)).length,
@@ -234,7 +240,7 @@ export function ResultsScreen({
     contacted: contacts.filter((contact) => matchesWorkflowView(contact, "contacted", workflowContext)).length,
     dismissed: contacts.filter((contact) => matchesWorkflowView(contact, "dismissed", workflowContext)).length,
     all: contacts.length,
-  }), [contacts, isDeliveryScoped, thisWeekCutoffMs]);
+  }), [contacts, isDeliveryScoped, isProfileAggregate, thisWeekCutoffMs]);
   const workflowContacts = contacts.filter((contact) =>
     matchesWorkflowView(contact, workflowView, workflowContext),
   );
@@ -880,7 +886,11 @@ export function ResultsScreen({
           <header className="lead-feed-header">
             <div className="lead-feed-title-row">
               <div>
-                <strong>{workflowViewLabel(workflowView)}</strong>
+                <strong>
+                  {isProfileAggregate && workflowView === "this_week"
+                    ? "Leads"
+                    : workflowViewLabel(workflowView)}
+                </strong>
                 <span>
                   {visibleContacts.length === workflowContacts.length
                     ? workflowContacts.length
@@ -3535,11 +3545,11 @@ function profileValueLabel(value: string) {
 function matchesWorkflowView(
   contact: DiscoveryResult,
   view: LeadWorkflowView,
-  context: { isDeliveryScoped: boolean; thisWeekCutoffMs: number },
+  context: { includeAllLeads: boolean; thisWeekCutoffMs: number },
 ) {
   if (view === "inbox") return reviewStatus(contact) === "unreviewed";
   if (view === "this_week") {
-    if (context.isDeliveryScoped) return true;
+    if (context.includeAllLeads) return true;
     const createdAt = new Date(contact.created_at).getTime();
     return Number.isFinite(createdAt) && createdAt >= context.thisWeekCutoffMs;
   }

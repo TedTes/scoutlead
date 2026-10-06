@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Response, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from app.dependencies import CurrentAuth, DbSession
-from db.models import LeadModel, QueueJobModel
+from db.models import (
+    LeadModel,
+    ProfileDeliveryItemModel,
+    QueueJobModel,
+    TerritoryDeliveryModel,
+)
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from leads.schemas import LeadRead
@@ -200,6 +205,7 @@ def create_profile(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
         profile.id,
         scheduled_for,
         criteria_version=profile.criteria_version,
+        dedupe_key=f"profile-refill:{profile.id}:{profile.criteria_version}",
         commit=False,
     )
     session.commit()
@@ -254,6 +260,7 @@ def refill_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
         profile.id,
         utcnow().replace(microsecond=0).isoformat(),
         criteria_version=profile.criteria_version,
+        dedupe_key=f"profile-refill:{profile.id}:{profile.criteria_version}",
     )
     return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
 
@@ -263,8 +270,6 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
     service = _service(session, auth)
     profile = service.get(profile_id)
     delivery = service.territories.latest_delivery(profile.id)
-    if delivery is not None and delivery.status == "empty":
-        delivery = service.territories.latest_nonempty_delivery(profile.id) or delivery
     latest_job = _latest_profile_job(session, profile.id)
     active_job = (
         latest_job
@@ -272,17 +277,32 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         and latest_job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value}
         else None
     )
-    leads: list[LeadRead] = []
-    if delivery is not None:
-        models = list(
-            session.scalars(
-                select(LeadModel).where(LeadModel.campaign_id == delivery.campaign_id)
+    models = list(
+        session.scalars(
+            select(LeadModel)
+            .join(
+                TerritoryDeliveryModel,
+                TerritoryDeliveryModel.campaign_id == LeadModel.campaign_id,
+            )
+            .join(
+                ProfileDeliveryItemModel,
+                and_(
+                    ProfileDeliveryItemModel.delivery_id == TerritoryDeliveryModel.id,
+                    ProfileDeliveryItemModel.business_id == LeadModel.business_id,
+                ),
+            )
+            .where(ProfileDeliveryItemModel.profile_id == profile.id)
+            .order_by(
+                ProfileDeliveryItemModel.delivered_at.desc(),
+                LeadModel.created_at.desc(),
             )
         )
-        leads = eligible_delivery_leads(
-            models,
-            min_fit=TerritoryMinFit(profile.min_fit),
-        )
+    )
+    leads = eligible_delivery_leads(
+        models,
+        min_fit=TerritoryMinFit(profile.min_fit),
+        preserve_order=True,
+    )
     remaining = sum(
         not lead.shortlisted_at
         and not lead.last_contacted_at
@@ -308,7 +328,7 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
     elif delivery.status == "ready":
         state = ProfileBatchState.READY
     elif delivery.status == "empty":
-        state = ProfileBatchState.EMPTY
+        state = ProfileBatchState.READY if leads else ProfileBatchState.EMPTY
     else:
         state = ProfileBatchState.PARTIAL
     return ProfileBatchRead(

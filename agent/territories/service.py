@@ -91,7 +91,13 @@ class TerritoryService:
             existing_niche=False,
         )
 
-    def create(self, data: TerritoryCreate, *, commit: bool = True):
+    def create(
+        self,
+        data: TerritoryCreate,
+        *,
+        reuse_existing: bool = False,
+        commit: bool = True,
+    ):
         if not data.confirmed:
             raise ValidationError("territory resolution must be confirmed before creation")
         niche = self._confirmed_niche(data)
@@ -138,7 +144,12 @@ class TerritoryService:
                 "criteria_hash": criteria_hash,
             }
         )
-        return self.territories.create(normalized, niche_id=niche.id, commit=commit)
+        return self.territories.create(
+            normalized,
+            niche_id=niche.id,
+            reuse_existing=reuse_existing,
+            commit=commit,
+        )
 
     def create_profile(self, data: ProfileCreate, *, commit: bool = True):
         trade_keys = list(dict.fromkeys(trade.value for trade in data.trades))
@@ -189,6 +200,7 @@ class TerritoryService:
                 criteria_hash=_criteria_hash(criteria),
                 confirmed=True,
             ),
+            reuse_existing=True,
             commit=commit,
         )
         profile.next_run_at = None

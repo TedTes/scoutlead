@@ -21,6 +21,7 @@ class TerritoryRepository:
         data: TerritoryCreate,
         *,
         niche_id: str,
+        reuse_existing: bool = False,
         commit: bool = True,
     ) -> TerritoryModel:
         existing = self.session.scalar(
@@ -60,6 +61,8 @@ class TerritoryRepository:
                 else:
                     self.session.flush()
                 self.session.refresh(existing)
+                return existing
+            if reuse_existing:
                 return existing
             raise ConflictError(
                 "territory already exists for this offer, niche, and market",
