@@ -8,6 +8,7 @@ from shared.utils import normalize_text
 
 
 OperatorType = Literal["solo", "small_team", "business", "unknown"]
+CustomerKind = Literal["residential", "commercial", "unknown"]
 
 
 class BusinessSeedInput(BaseModel):
@@ -21,6 +22,12 @@ class BusinessSeedInput(BaseModel):
     contact_role: str | None = None
     geography: str | None = None
     address: str | None = None
+    city: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    customer_kind: CustomerKind = "unknown"
+    is_chain: bool | None = None
+    is_franchise: bool | None = None
     description: str | None = None
     source: str = "manual_seed"
     source_url: str | None = None
@@ -41,6 +48,7 @@ class BusinessSeedInput(BaseModel):
         "contact_role",
         "geography",
         "address",
+        "city",
         "description",
         "source",
         "source_url",
@@ -96,4 +104,3 @@ class BusinessSeedImportSummary(BaseModel):
     source_observations_created: int = 0
     skipped_rows: int = 0
     errors: list[BusinessSeedRowError] = Field(default_factory=list)
-

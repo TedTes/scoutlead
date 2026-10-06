@@ -44,6 +44,7 @@ from evaluation.digital_opportunity import (
     OpportunitySignal,
     assess_digital_opportunity,
 )
+from seeding.batches import active_membership_condition, observation_is_quarantined
 from shared.utils import normalize_text, normalize_url, truncate, utcnow
 from tools.verify import EmailVerificationTool
 
@@ -665,6 +666,7 @@ def select_businesses(
         )
         .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
         .where(BusinessModel.website_url.is_not(None), NicheModel.active.is_(True))
+        .where(active_membership_condition())
         .distinct()
     )
     if business_ids is not None:
@@ -1453,6 +1455,8 @@ def _google_places_reputation(
         .order_by(SourceObservationModel.observed_at.desc())
     )
     for observation in observations:
+        if observation_is_quarantined(session, observation):
+            continue
         payload = observation.raw_payload or {}
         place = payload.get("google_places")
         if not isinstance(place, dict):

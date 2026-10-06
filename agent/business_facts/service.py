@@ -19,6 +19,7 @@ from canonical.website_evidence import (
 )
 from db.models import BusinessModel, LeadModel, SourceObservationModel
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
+from seeding.batches import observation_is_quarantined
 from shared.utils import utcnow
 
 
@@ -29,13 +30,15 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
     business = session.get(BusinessModel, business_id)
     if business is None:
         return {}
-    observations = list(
-        session.scalars(
+    observations = [
+        observation
+        for observation in session.scalars(
             select(SourceObservationModel)
             .where(SourceObservationModel.business_id == business_id)
             .order_by(SourceObservationModel.observed_at.desc())
         )
-    )
+        if not observation_is_quarantined(session, observation)
+    ]
     trusted = best_trusted_website_evidence(
         observations,
         business_name=business.display_name,

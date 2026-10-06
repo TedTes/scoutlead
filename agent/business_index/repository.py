@@ -12,6 +12,7 @@ from db.models import (
     NicheModel,
 )
 from niches.resolver import resolve_niche
+from seeding.batches import active_membership_condition
 from shared.utils import new_id, normalize_text, utcnow
 
 
@@ -93,7 +94,7 @@ class BusinessIndexRepository:
         memberships = self.session.scalars(
             select(BusinessNicheMembershipModel).where(
                 BusinessNicheMembershipModel.niche_id == segment.niche_id
-            )
+            ).where(active_membership_condition())
         )
         return list(
             dict.fromkeys(

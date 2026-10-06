@@ -30,8 +30,10 @@ from app.config import get_settings  # noqa: E402
 from seeding.google_places import (  # noqa: E402
     GooglePlacesSeedCollector,
     GooglePlacesSeedQuery,
+    NICHE_INCLUDED_TYPES,
     build_niche_queries,
     seed_dedupe_key,
+    seed_identity_keys,
 )
 from seeding.schemas import BusinessSeedInput  # noqa: E402
 
@@ -56,6 +58,7 @@ def main(argv: list[str] | None = None) -> None:
         existing=existing,
         max_requests=args.max_requests,
         max_pages_per_query=args.max_pages_per_query,
+        max_results_per_query=args.max_results_per_query,
     )
     write_jsonl(args.output, collection.rows)
 
@@ -89,6 +92,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=3,
         help="Maximum paginated Text Search pages to request for each query.",
     )
+    parser.add_argument(
+        "--max-results-per-query",
+        type=int,
+        help="Maximum accepted businesses per query, useful for exact-name lookups.",
+    )
     parser.add_argument("--market", default="Toronto/GTA", help="Seed market label.")
     parser.add_argument(
         "--niche",
@@ -100,6 +108,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional Google Places includedType override for this niche.",
     )
     parser.add_argument("--region-code", default="CA", help="Google Places region code.")
+    parser.add_argument("--seed-city", help="Canonical city written to every collected row.")
+    parser.add_argument("--center-lat", type=float, help="Search center latitude.")
+    parser.add_argument("--center-lng", type=float, help="Search center longitude.")
+    parser.add_argument("--radius-km", type=float, help="Maximum accepted distance from the center.")
+    parser.add_argument(
+        "--customer-kind",
+        choices=("residential", "commercial", "unknown"),
+        default="residential",
+    )
+    parser.add_argument(
+        "--require-phone",
+        action="store_true",
+        help="Discard Places rows without a public phone number.",
+    )
     parser.add_argument(
         "--city",
         action="append",
@@ -118,6 +140,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Text file with one exact Google Places text query per line.",
     )
     parser.add_argument(
+        "--named-queries-file",
+        type=Path,
+        help="Text file of exact business names; results must match each supplied name.",
+    )
+    parser.add_argument(
         "--merge-existing",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -131,6 +158,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def build_queries(args: argparse.Namespace) -> list[GooglePlacesSeedQuery]:
+    if args.named_queries_file:
+        names = read_query_file(args.named_queries_file)
+        return [
+            GooglePlacesSeedQuery(
+                text_query=name,
+                expected_name=name,
+                seed_market=args.market,
+                region_code=args.region_code,
+                included_type=(
+                    args.included_type or NICHE_INCLUDED_TYPES.get(args.niche)
+                ),
+                seed_niche=args.niche,
+                city=args.seed_city,
+                center_latitude=args.center_lat,
+                center_longitude=args.center_lng,
+                radius_meters=(args.radius_km * 1000 if args.radius_km is not None else None),
+                customer_kind=args.customer_kind,
+                require_phone=args.require_phone,
+            )
+            for name in names
+        ]
     exact_queries = list(args.query)
     if args.queries_file:
         exact_queries.extend(read_query_file(args.queries_file))
@@ -142,6 +190,12 @@ def build_queries(args: argparse.Namespace) -> list[GooglePlacesSeedQuery]:
                 region_code=args.region_code,
                 included_type=args.included_type,
                 seed_niche=args.niche,
+                city=args.seed_city,
+                center_latitude=args.center_lat,
+                center_longitude=args.center_lng,
+                radius_meters=(args.radius_km * 1000 if args.radius_km is not None else None),
+                customer_kind=args.customer_kind,
+                require_phone=args.require_phone,
             )
             for query in exact_queries
             if query.strip()
@@ -153,12 +207,24 @@ def build_queries(args: argparse.Namespace) -> list[GooglePlacesSeedQuery]:
             region_code=args.region_code,
             cities=args.city,
             included_type=args.included_type,
+            city=args.seed_city,
+            center_latitude=args.center_lat,
+            center_longitude=args.center_lng,
+            radius_meters=(args.radius_km * 1000 if args.radius_km is not None else None),
+            customer_kind=args.customer_kind,
+            require_phone=args.require_phone,
         )
     return build_niche_queries(
         seed_niche=args.niche,
         seed_market=args.market,
         region_code=args.region_code,
         included_type=args.included_type,
+        city=args.seed_city,
+        center_latitude=args.center_lat,
+        center_longitude=args.center_lng,
+        radius_meters=(args.radius_km * 1000 if args.radius_km is not None else None),
+        customer_kind=args.customer_kind,
+        require_phone=args.require_phone,
     )
 
 
@@ -189,11 +255,10 @@ def read_existing_seeds(path: Path) -> list[BusinessSeedInput]:
                 seed = BusinessSeedInput.model_validate(parsed)
             except (ValueError, ValidationError) as exc:
                 raise SystemExit(f"{path}:{line_number}: {exc}") from exc
-            key = seed_dedupe_key(seed)
-            if key and key in seen:
+            keys = seed_identity_keys(seed)
+            if keys & seen:
                 continue
-            if key:
-                seen.add(key)
+            seen.update(keys)
             rows.append(seed)
     return rows
 

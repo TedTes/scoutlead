@@ -57,7 +57,10 @@ def main(argv: list[str] | None = None) -> None:
     session_generator = services.db.session()
     session = next(session_generator)
     try:
-        summary = BusinessSeedService(session, embedding=services.embedding).import_seeds(
+        summary = BusinessSeedService(
+            session,
+            embedding=None if args.skip_embeddings else services.embedding,
+        ).import_seeds(
             seeds,
             batch_id=batch_id,
         )
@@ -82,6 +85,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed-market", help="Default market/geography, e.g. Toronto/GTA.")
     parser.add_argument("--limit", type=int, help="Maximum rows to read from the file.")
     parser.add_argument("--dry-run", action="store_true", help="Validate and summarize without DB writes.")
+    parser.add_argument(
+        "--skip-embeddings",
+        action="store_true",
+        help="Import deterministic business fields without generating semantic embeddings.",
+    )
     return parser.parse_args(argv)
 
 
@@ -232,4 +240,3 @@ def print_summary(summary: BusinessSeedImportSummary) -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -2,7 +2,7 @@ import httpx
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from db.models import BusinessModel, ContactModel, SourceObservationModel
+from db.models import BusinessModel, ContactModel, SeedBatchModel, SourceObservationModel
 from db.session import create_database
 from canonical.website_enrichment import (
     SOURCE_NAME,
@@ -509,6 +509,41 @@ def test_website_enrichment_can_target_exact_business_ids(monkeypatch) -> None:
         assert [observation.business_id for observation in observations] == [
             businesses["Target Painter"].id
         ]
+
+
+def test_website_enrichment_ignores_quarantined_seed_memberships(monkeypatch) -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        BusinessSeedService(session).import_seeds(
+            [
+                painting_seed(
+                    contact_email=None,
+                    contact_name=None,
+                    website_url="https://paint.testsite.ca",
+                )
+            ],
+            batch_id="contaminated-v1",
+        )
+        session.get(SeedBatchModel, "contaminated-v1").status = "quarantined"
+        session.commit()
+
+        def unexpected_request(*args, **kwargs):
+            raise AssertionError("quarantined business should not be crawled")
+
+        monkeypatch.setattr("canonical.website_enrichment.httpx.get", unexpected_request)
+
+        summary = enrich_business_pool(
+            session,
+            category="painting",
+            market="toronto",
+            limit=1,
+            dry_run=False,
+            timeout_seconds=0.1,
+            page_delay_seconds=0,
+        )
+
+        assert summary.selected == 0
 
 
 def test_website_enrichment_ignores_placeholder_email(monkeypatch) -> None:

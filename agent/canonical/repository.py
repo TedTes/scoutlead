@@ -38,7 +38,12 @@ from db.models import (
     ContactModel,
     SourceObservationModel,
 )
-from niches.resolver import resolve_niche, source_inputs_from_raw
+from niches.resolver import (
+    lexical_resolution_has_taxonomy_evidence,
+    resolve_niche,
+    source_inputs_from_raw,
+)
+from seeding.batches import active_membership_condition, observation_is_quarantined
 from shared.utils import new_id, normalize_text, normalize_url, utcnow
 
 
@@ -193,6 +198,7 @@ class CanonicalRepository:
                 SourceObservationModel.query_signature == signature,
                 BusinessNicheMembershipModel.niche_id == resolution.niche_id,
             )
+            .where(active_membership_condition())
             .order_by(SourceObservationModel.observed_at.desc())
         )
         rows: list[dict[str, Any]] = []
@@ -441,17 +447,17 @@ class CanonicalRepository:
         geography: str | None,
     ) -> BusinessModel | None:
         if external_id:
-            observation = self.session.scalar(
+            observations = self.session.scalars(
                 select(SourceObservationModel)
                 .where(
                     SourceObservationModel.source == source,
                     SourceObservationModel.external_id == external_id,
                 )
                 .order_by(SourceObservationModel.observed_at.desc())
-                .limit(1)
             )
-            if observation:
-                return observation.business
+            for observation in observations:
+                if not observation_is_quarantined(self.session, observation):
+                    return observation.business
 
         if domain:
             business = self.session.scalar(
@@ -460,7 +466,10 @@ class CanonicalRepository:
                 .order_by(BusinessModel.created_at)
                 .limit(1)
             )
-            if business:
+            if business and _business_names_are_compatible(
+                normalized_name,
+                business.normalized_name,
+            ):
                 return business
 
         if phone:
@@ -470,7 +479,10 @@ class CanonicalRepository:
                 .order_by(BusinessModel.created_at)
                 .limit(1)
             )
-            if business:
+            if business and _business_names_are_compatible(
+                normalized_name,
+                business.normalized_name,
+            ):
                 return business
 
         if normalized_name and geography:
@@ -621,6 +633,7 @@ class CanonicalRepository:
             )
             .where(BusinessModel.embedding.is_not(None))
             .where(BusinessNicheMembershipModel.niche_id == niche_id)
+            .where(active_membership_condition())
             .order_by(BusinessNicheMembershipModel.last_seen_at.desc())
             .limit(max(limit * 20, 200))
         )
@@ -655,6 +668,7 @@ class CanonicalRepository:
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
             .where(BusinessNicheMembershipModel.niche_id == niche_id)
+            .where(active_membership_condition())
             .order_by(
                 BusinessNicheMembershipModel.confidence.desc(),
                 BusinessNicheMembershipModel.last_seen_at.desc(),
@@ -669,11 +683,17 @@ class CanonicalRepository:
         return matches[:limit]
 
     def _latest_observation_for_business(self, business_id: str) -> SourceObservationModel | None:
-        return self.session.scalar(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id == business_id)
-            .order_by(SourceObservationModel.observed_at.desc())
-            .limit(1)
+        return next(
+            (
+                observation
+                for observation in self.session.scalars(
+                    select(SourceObservationModel)
+                    .where(SourceObservationModel.business_id == business_id)
+                    .order_by(SourceObservationModel.observed_at.desc())
+                )
+                if not observation_is_quarantined(self.session, observation)
+            ),
+            None,
         )
 
     def _backfill_niche_semantic_fields(
@@ -690,6 +710,7 @@ class CanonicalRepository:
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
             .where(BusinessNicheMembershipModel.niche_id == niche_id)
+            .where(active_membership_condition())
             .where(or_(BusinessModel.semantic_text.is_(None), BusinessModel.embedding.is_(None)))
             .order_by(BusinessNicheMembershipModel.last_seen_at.desc())
             .limit(limit)
@@ -750,6 +771,13 @@ class CanonicalRepository:
         )
         if resolution is None:
             return
+        if resolution.match_type == "lexical" and not lexical_resolution_has_taxonomy_evidence(
+            self.session,
+            resolution,
+            source_inputs=source_inputs,
+            source_input=source_input,
+        ):
+            return
         market_key = resolution.market_key or semantic_key(business.geography) or "unknown"
         membership = self.session.scalar(
             select(BusinessNicheMembershipModel)
@@ -776,7 +804,7 @@ class CanonicalRepository:
                     business_id=business.id,
                     niche_id=resolution.niche_id,
                     market_key=market_key,
-                    confidence=max(0.5, resolution.score),
+                    confidence=resolution.score,
                     evidence=[evidence],
                     source_observation_id=observation.id,
                     seed_batch_id=None,
@@ -866,6 +894,21 @@ def _prefer_existing(existing: str | None, candidate: str | None) -> str:
     if existing and existing.strip():
         return existing
     return candidate or ""
+
+
+def _business_names_are_compatible(first: str, second: str) -> bool:
+    if not first or not second:
+        return True
+    if first == second:
+        return True
+    first_tokens = set(first.split())
+    second_tokens = set(second.split())
+    if min(len(first_tokens), len(second_tokens)) >= 2 and (
+        first_tokens <= second_tokens or second_tokens <= first_tokens
+    ):
+        return True
+    overlap = len(first_tokens & second_tokens)
+    return overlap / max(len(first_tokens | second_tokens), 1) >= 0.6
 
 
 def _observation_to_search_result(

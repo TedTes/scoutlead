@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
+from math import asin, cos, radians, sin, sqrt
 import time
 from typing import Any, Iterable
 
@@ -77,7 +79,9 @@ NICHE_QUERY_TEMPLATES = {
 NICHE_INCLUDED_TYPES = {
     "home_service_painting": "painter",
     "home_service_roofing": "roofing_contractor",
-    "home_service_hvac": "hvac_contractor",
+    # Google Places has no HVAC filter type. Keep HVAC precision in the query
+    # text and enforce geography/identity after the response.
+    "home_service_hvac": None,
     "home_service_plumbing": "plumber",
     "home_service_electrical": "electrician",
     "home_service_landscaping": "landscaper",
@@ -122,6 +126,37 @@ TORONTO_GTA_SEED_CITIES = [
     "Port Perry ON",
 ]
 
+KNOWN_FRANCHISES = (
+    "benjamin franklin plumbing",
+    "certapro painters",
+    "five star painting",
+    "mr electric",
+    "mr rooter",
+    "one hour heating and air conditioning",
+    "roto rooter",
+    "wow 1 day painting",
+)
+
+KNOWN_CHAINS = (
+    "aire one",
+    "enercare",
+    "reliance home comfort",
+    "reliance heating",
+)
+
+HVAC_NAME_MARKERS = (
+    "air",
+    "air conditioning",
+    "airflow",
+    "climate",
+    "cooling",
+    "furnace",
+    "heating",
+    "home comfort",
+    "hvac",
+    "mechanical",
+)
+
 
 @dataclass(frozen=True)
 class GooglePlacesSeedQuery:
@@ -132,6 +167,13 @@ class GooglePlacesSeedQuery:
     strict_type_filtering: bool = False
     include_pure_service_area_businesses: bool = True
     seed_niche: str = "home_service_painting"
+    city: str | None = None
+    center_latitude: float | None = None
+    center_longitude: float | None = None
+    radius_meters: float | None = None
+    customer_kind: str = "residential"
+    require_phone: bool = False
+    expected_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -163,9 +205,14 @@ class GooglePlacesSeedCollector:
         existing: Iterable[BusinessSeedInput] = (),
         max_requests: int | None = None,
         max_pages_per_query: int = 3,
+        max_results_per_query: int | None = None,
     ) -> GooglePlacesSeedCollection:
         rows = list(existing)
-        seen = {seed_dedupe_key(row) for row in rows if seed_dedupe_key(row)}
+        seen = {
+            key
+            for row in rows
+            for key in seed_identity_keys(row)
+        }
         requests_made = 0
         queries_attempted = 0
 
@@ -177,8 +224,14 @@ class GooglePlacesSeedCollector:
             queries_attempted += 1
             page_token: str | None = None
             pages_loaded = 0
+            query_result_count = 0
 
             while len(rows) < target_count and pages_loaded < max_pages_per_query:
+                if (
+                    max_results_per_query is not None
+                    and query_result_count >= max_results_per_query
+                ):
+                    break
                 if max_requests is not None and requests_made >= max_requests:
                     break
                 payload = _request_payload(query, page_token=page_token)
@@ -200,13 +253,18 @@ class GooglePlacesSeedCollector:
                     seed = seed_from_place(place, query=query)
                     if seed is None:
                         continue
-                    key = seed_dedupe_key(seed)
-                    if key and key in seen:
+                    keys = seed_identity_keys(seed)
+                    if keys & seen:
                         continue
                     rows.append(seed)
-                    if key:
-                        seen.add(key)
+                    query_result_count += 1
+                    seen.update(keys)
                     if len(rows) >= target_count:
+                        break
+                    if (
+                        max_results_per_query is not None
+                        and query_result_count >= max_results_per_query
+                    ):
                         break
 
                 page_token = normalize_text(data.get("nextPageToken"))
@@ -228,6 +286,11 @@ def build_home_service_painting_queries(
     region_code: str | None = "CA",
     cities: Iterable[str] = TORONTO_GTA_SEED_CITIES,
     query_templates: Iterable[str] = PAINTING_SERVICE_QUERIES,
+    city: str | None = None,
+    center_latitude: float | None = None,
+    center_longitude: float | None = None,
+    radius_meters: float | None = None,
+    require_phone: bool = False,
 ) -> list[GooglePlacesSeedQuery]:
     return build_niche_queries(
         seed_niche="home_service_painting",
@@ -235,6 +298,11 @@ def build_home_service_painting_queries(
         region_code=region_code,
         cities=cities,
         query_templates=query_templates,
+        city=city,
+        center_latitude=center_latitude,
+        center_longitude=center_longitude,
+        radius_meters=radius_meters,
+        require_phone=require_phone,
     )
 
 
@@ -246,6 +314,12 @@ def build_niche_queries(
     cities: Iterable[str] = TORONTO_GTA_SEED_CITIES,
     query_templates: Iterable[str] | None = None,
     included_type: str | None = None,
+    city: str | None = None,
+    center_latitude: float | None = None,
+    center_longitude: float | None = None,
+    radius_meters: float | None = None,
+    customer_kind: str = "residential",
+    require_phone: bool = False,
 ) -> list[GooglePlacesSeedQuery]:
     templates = list(query_templates or NICHE_QUERY_TEMPLATES.get(seed_niche, ()))
     if not templates:
@@ -253,13 +327,19 @@ def build_niche_queries(
     place_type = included_type if included_type is not None else NICHE_INCLUDED_TYPES.get(seed_niche)
     return [
         GooglePlacesSeedQuery(
-            text_query=template.format(city=city),
+            text_query=template.format(city=search_city),
             seed_market=seed_market,
             region_code=region_code,
             included_type=place_type,
             seed_niche=seed_niche,
+            city=city or search_city,
+            center_latitude=center_latitude,
+            center_longitude=center_longitude,
+            radius_meters=radius_meters,
+            customer_kind=customer_kind,
+            require_phone=require_phone,
         )
-        for city in cities
+        for search_city in cities
         for template in templates
     ]
 
@@ -275,14 +355,35 @@ def seed_from_place(
     company_name = normalize_text(display_name.get("text") or place.get("id"))
     if not company_name:
         return None
+    if query.expected_name and not _business_name_matches(query.expected_name, company_name):
+        return None
 
     phone = normalize_text(place.get("nationalPhoneNumber") or place.get("internationalPhoneNumber"))
+    if query.require_phone and not phone:
+        return None
     website_url = normalize_url(place.get("websiteUri"))
     maps_url = normalize_url(place.get("googleMapsUri"))
     address = normalize_text(place.get("formattedAddress"))
     types = [normalize_text(item) for item in place.get("types", []) if normalize_text(item)]
+    if not _matches_niche(company_name, types=types, niche=query.seed_niche):
+        return None
     rating = place.get("rating")
     review_count = place.get("userRatingCount")
+    location = place.get("location") if isinstance(place.get("location"), dict) else {}
+    latitude = _coordinate(location.get("latitude"), minimum=-90, maximum=90)
+    longitude = _coordinate(location.get("longitude"), minimum=-180, maximum=180)
+    if query.center_latitude is not None and query.center_longitude is not None:
+        if latitude is None or longitude is None:
+            return None
+        if query.radius_meters is not None and _distance_meters(
+            query.center_latitude,
+            query.center_longitude,
+            latitude,
+            longitude,
+        ) > query.radius_meters:
+            return None
+    is_franchise = _known_brand(company_name, KNOWN_FRANCHISES)
+    is_chain = is_franchise or _known_brand(company_name, KNOWN_CHAINS)
 
     niche_label = query.seed_niche.replace("_", " ").strip()
     signals = ["google places result", f"{niche_label} query"]
@@ -315,6 +416,12 @@ def seed_from_place(
             "phone": phone,
             "geography": address or query.seed_market,
             "address": address,
+            "city": query.city,
+            "latitude": latitude,
+            "longitude": longitude,
+            "customer_kind": query.customer_kind,
+            "is_chain": True if is_chain else None,
+            "is_franchise": True if is_franchise else None,
             "description": description,
             "source": "google_places_seed",
             "source_url": maps_url or website_url,
@@ -329,6 +436,16 @@ def seed_from_place(
                 "collection_query": query.text_query,
                 "seed_market": query.seed_market,
                 "seed_niche": query.seed_niche,
+                "city": query.city,
+                "latitude": latitude,
+                "longitude": longitude,
+                "customer_kind": query.customer_kind,
+                "is_chain": True if is_chain else None,
+                "is_franchise": True if is_franchise else None,
+                "website_presence": {
+                    "status": "active" if website_url else "no_website_listed",
+                    "website_url": website_url,
+                },
             },
         }
     )
@@ -352,6 +469,25 @@ def seed_dedupe_key(seed: BusinessSeedInput) -> str | None:
     return None
 
 
+def seed_identity_keys(seed: BusinessSeedInput) -> set[str]:
+    keys: set[str] = set()
+    if seed.external_id:
+        keys.add(f"external:{seed.source}:{seed.external_id}")
+    domain = normalize_domain(seed.website_url)
+    if domain:
+        keys.add(f"domain:{domain}")
+    phone = normalize_phone(seed.phone)
+    if phone:
+        keys.add(f"phone:{phone}")
+    name = normalize_business_name(seed.company_name)
+    address = normalize_text(seed.address or seed.geography)
+    if name and address:
+        keys.add(f"name-address:{name}:{address}")
+    elif name:
+        keys.add(f"name:{name}")
+    return keys
+
+
 def _request_payload(query: GooglePlacesSeedQuery, *, page_token: str | None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "textQuery": query.text_query,
@@ -363,6 +499,70 @@ def _request_payload(query: GooglePlacesSeedQuery, *, page_token: str | None) ->
     if query.included_type:
         payload["includedType"] = query.included_type
         payload["strictTypeFiltering"] = query.strict_type_filtering
+    if query.center_latitude is not None and query.center_longitude is not None:
+        payload["locationBias"] = {
+            "circle": {
+                "center": {
+                    "latitude": query.center_latitude,
+                    "longitude": query.center_longitude,
+                },
+                "radius": query.radius_meters or 25_000,
+            }
+        }
     if page_token:
         payload["pageToken"] = page_token
     return payload
+
+
+def _known_brand(company_name: str, markers: tuple[str, ...]) -> bool:
+    normalized = normalize_business_name(company_name)
+    return any(marker in normalized for marker in markers)
+
+
+def _matches_niche(company_name: str, *, types: list[str], niche: str) -> bool:
+    if niche != "home_service_hvac":
+        return True
+    normalized_name = normalize_business_name(company_name)
+    name_tokens = set(normalized_name.split())
+    return any(
+        marker in name_tokens if marker == "air" else marker in normalized_name
+        for marker in HVAC_NAME_MARKERS
+    )
+
+
+def _business_name_matches(expected: str, actual: str) -> bool:
+    expected_name = normalize_business_name(expected)
+    actual_name = normalize_business_name(actual)
+    if not expected_name or not actual_name:
+        return False
+    if expected_name in actual_name:
+        return True
+    expected_tokens = set(expected_name.split())
+    actual_tokens = set(actual_name.split())
+    token_overlap = len(expected_tokens & actual_tokens) / max(1, len(expected_tokens))
+    return token_overlap >= 0.8 and SequenceMatcher(None, expected_name, actual_name).ratio() >= 0.7
+
+
+def _coordinate(value: Any, *, minimum: float, maximum: float) -> float | None:
+    try:
+        coordinate = float(value)
+    except (TypeError, ValueError):
+        return None
+    return coordinate if minimum <= coordinate <= maximum else None
+
+
+def _distance_meters(
+    first_latitude: float,
+    first_longitude: float,
+    second_latitude: float,
+    second_longitude: float,
+) -> float:
+    lat_delta = radians(second_latitude - first_latitude)
+    lng_delta = radians(second_longitude - first_longitude)
+    first_lat = radians(first_latitude)
+    second_lat = radians(second_latitude)
+    value = (
+        sin(lat_delta / 2) ** 2
+        + cos(first_lat) * cos(second_lat) * sin(lng_delta / 2) ** 2
+    )
+    return 2 * 6_371_000 * asin(sqrt(value))

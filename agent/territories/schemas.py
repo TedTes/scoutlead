@@ -13,6 +13,7 @@ from leads.schemas import LeadRead
 class TerritoryStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
+    ARCHIVED = "archived"
 
 
 class TerritoryCadence(StrEnum):

@@ -17,12 +17,14 @@ from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessModel,
+    BusinessNicheMembershipModel,
     CampaignModel,
     LeadModel,
     LeadOutcomeModel,
     NicheModel,
     ProfileDeliveryItemModel,
     QueueJobModel,
+    SeedBatchModel,
     TerritoryDeliveryModel,
     TerritoryModel,
 )
@@ -76,6 +78,61 @@ def test_resolve_existing_niche_is_read_only() -> None:
         assert resolution.niche_id == niche.id
         assert resolution.market_key == "toronto"
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 0
+
+
+def test_audience_can_be_renamed_and_archived_from_the_visible_list() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        service = TerritoryService(session, workspace_id="workspace:first")
+        territory = service.create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                label="Toronto HVAC",
+                confirmed=True,
+            )
+        )
+
+        service.update(territory.id, TerritoryUpdate(label="Priority HVAC accounts"))
+        assert service.get(territory.id).label == "Priority HVAC accounts"
+
+        service.delete(territory.id)
+
+        archived = service.get(territory.id)
+        assert archived.status == "archived"
+        assert archived.next_run_at is None
+        assert service.list() == []
+
+
+def test_recreating_archived_audience_restores_it() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        service = TerritoryService(session, workspace_id="workspace:first")
+        create = TerritoryCreate(
+            product_id=offer.id,
+            niche_id=niche.id,
+            niche_slug=niche.slug,
+            niche_label=niche.label,
+            market_key="Toronto",
+            label="Toronto HVAC",
+            confirmed=True,
+        )
+        first = service.create(create)
+        service.delete(first.id)
+
+        restored = service.create(create.model_copy(update={"label": "Restored HVAC"}))
+
+        assert restored.id == first.id
+        assert restored.status == "active"
+        assert restored.label == "Restored HVAC"
+        assert [item.id for item in service.list()] == [first.id]
 
 
 def test_resolve_unknown_niche_proposes_without_creating_it() -> None:
@@ -705,6 +762,54 @@ def test_profile_match_excludes_only_explicit_true_classifications() -> None:
 
         assert [row["title"] for row in rows] == [businesses[1].display_name]
         assert rows[0]["raw"]["profile_match"]["classifications"]["is_chain"] is None
+
+
+def test_profile_match_ignores_quarantined_seed_membership() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        memberships = list(
+            session.scalars(
+                select(BusinessNicheMembershipModel).order_by(
+                    BusinessNicheMembershipModel.business_id
+                )
+            )
+        )
+        quarantined = SeedBatchModel(
+            id="contaminated-v1",
+            niche_id=memberships[0].niche_id,
+            market_key="toronto",
+            source="google_places_seed",
+            status="quarantined",
+            started_at=utcnow(),
+        )
+        session.add(quarantined)
+        memberships[0].seed_batch_id = quarantined.id
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert len(rows) == 1
 
 
 def test_profile_signals_deliver_only_confirmed_matches() -> None:

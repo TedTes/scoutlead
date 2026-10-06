@@ -236,6 +236,12 @@ def update_profile(
     return service.get_read(profile_id)
 
 
+@profiles_router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
+    _service(session, auth).delete(profile_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @profiles_router.post(
     "/{profile_id}/refill",
     response_model=ProfileQueuedRead,

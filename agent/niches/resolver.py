@@ -146,6 +146,44 @@ def source_inputs_from_raw(raw: dict[str, Any]) -> tuple[dict[str, Any], str | N
     return {}, None
 
 
+def lexical_resolution_has_taxonomy_evidence(
+    session: Session,
+    resolution: NicheResolution,
+    *,
+    source_inputs: dict[str, Any],
+    source_input: str | None,
+) -> bool:
+    """Require a resolved niche term in the source before persisting membership."""
+    niche = session.get(NicheModel, resolution.niche_id)
+    if niche is None:
+        return False
+    profile = request_semantic_profile(
+        source_inputs=source_inputs,
+        source_input=source_input,
+    )
+    request_tokens = _niche_tokens(
+        " ".join(
+            part
+            for part in (
+                profile.category_key,
+                profile.text,
+                normalize_text(source_input),
+            )
+            if part
+        ),
+        market_key=profile.market_key,
+    )
+    taxonomy_tokens = _niche_tokens(
+        " ".join(
+            part
+            for part in (niche.slug, niche.label, niche.category)
+            if part
+        ),
+        market_key=profile.market_key,
+    )
+    return bool(request_tokens & taxonomy_tokens)
+
+
 def _resolution(
     niche: NicheModel,
     *,

@@ -24,6 +24,7 @@ from db.models import (
 )
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from search_evaluations.repository import SearchEvaluationRepository
+from seeding.batches import active_membership_condition, observation_is_quarantined
 
 
 class BusinessIndexSearchService:
@@ -61,6 +62,7 @@ class BusinessIndexSearchService:
             self.session.scalars(
                 select(BusinessNicheMembershipModel)
                 .where(BusinessNicheMembershipModel.niche_id == request.niche_id)
+                .where(active_membership_condition())
                 .order_by(
                     BusinessNicheMembershipModel.confidence.desc(),
                     BusinessNicheMembershipModel.last_seen_at.desc(),
@@ -105,6 +107,8 @@ class BusinessIndexSearchService:
             )
             .order_by(SourceObservationModel.observed_at.desc())
         ):
+            if observation_is_quarantined(self.session, observation):
+                continue
             observations[observation.business_id].append(observation)
         latest_listings: dict[str, SourceObservationModel] = {}
         for observation in self.session.scalars(
@@ -117,6 +121,8 @@ class BusinessIndexSearchService:
             )
             .order_by(SourceObservationModel.observed_at.desc())
         ):
+            if observation_is_quarantined(self.session, observation):
+                continue
             latest_listings.setdefault(observation.business_id, observation)
 
         ranked: list[tuple[tuple, dict]] = []

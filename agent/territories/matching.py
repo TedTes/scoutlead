@@ -7,6 +7,12 @@ from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from business_facts.repository import fact_value
+from canonical.normalization import (
+    email_from_raw,
+    normalize_email,
+    normalize_phone,
+    phone_from_raw,
+)
 from db.models import (
     BusinessFactModel,
     BusinessModel,
@@ -17,6 +23,7 @@ from db.models import (
 )
 from shared.errors import ConflictError
 from shared.utils import utcnow
+from seeding.batches import active_membership_condition, observation_is_quarantined
 
 
 SIGNAL_FACTS = {
@@ -65,6 +72,7 @@ class ProfileMatchService:
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
             .where(BusinessNicheMembershipModel.niche_id.in_(niche_ids))
+            .where(active_membership_condition())
             .where(
                 ~select(ProfileDeliveryItemModel.id)
                 .where(
@@ -214,21 +222,31 @@ class ProfileMatchService:
                 )
             )
         }
-        contact = self.session.scalar(
-            select(ContactModel)
-            .where(ContactModel.business_id == business_id)
-            .order_by(
-                ContactModel.email.is_not(None).desc(),
-                ContactModel.phone.is_not(None).desc(),
-                ContactModel.last_seen_at.desc(),
+        observations = [
+            candidate
+            for candidate in self.session.scalars(
+                select(SourceObservationModel)
+                .where(SourceObservationModel.business_id == business_id)
+                .order_by(SourceObservationModel.observed_at.desc())
             )
-            .limit(1)
-        )
-        observation = self.session.scalar(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id == business_id)
-            .order_by(SourceObservationModel.observed_at.desc())
-            .limit(1)
+            if not observation_is_quarantined(self.session, candidate)
+        ]
+        observation = observations[0] if observations else None
+        contact = next(
+            (
+                candidate
+                for candidate in self.session.scalars(
+                    select(ContactModel)
+                    .where(ContactModel.business_id == business_id)
+                    .order_by(
+                        ContactModel.email.is_not(None).desc(),
+                        ContactModel.phone.is_not(None).desc(),
+                        ContactModel.last_seen_at.desc(),
+                    )
+                )
+                if _contact_has_active_support(candidate, business, observations)
+            ),
+            None,
         )
         signal_evidence = {
             signal: {
@@ -314,6 +332,30 @@ def _signal_fact_matches(signal: str, fact: BusinessFactModel | None) -> bool:
     if signal == "reviews_under_15":
         return isinstance(value, (int, float)) and value < 15
     return False
+
+
+def _contact_has_active_support(
+    contact: ContactModel,
+    business: BusinessModel,
+    observations: list[SourceObservationModel],
+) -> bool:
+    supported_phones = {
+        value
+        for value in [normalize_phone(business.phone)]
+        + [phone_from_raw(observation.raw_payload) for observation in observations]
+        if value
+    }
+    supported_emails = {
+        value
+        for value in [email_from_raw(observation.raw_payload) for observation in observations]
+        if value
+    }
+    phone = normalize_phone(contact.phone)
+    email = normalize_email(contact.email)
+    return bool(
+        (phone and phone in supported_phones)
+        or (email and email in supported_emails)
+    )
 
 
 def literal_column_nulls_last(name: str):

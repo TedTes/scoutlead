@@ -8,6 +8,7 @@ from seeding.google_places import (
     build_home_service_painting_queries,
     build_niche_queries,
     seed_dedupe_key,
+    seed_from_place,
 )
 from scripts.collect_google_places_seed import read_existing_seeds, write_jsonl
 
@@ -116,8 +117,6 @@ def test_google_places_seed_collector_honors_existing_rows(monkeypatch) -> None:
         "businessStatus": "OPERATIONAL",
         "types": ["painter"],
     }
-    from seeding.google_places import seed_from_place
-
     seed = seed_from_place(existing_row, query=existing)
     assert seed is not None
 
@@ -149,6 +148,39 @@ def test_google_places_seed_collector_honors_existing_rows(monkeypatch) -> None:
     assert [row.external_id for row in result.rows] == ["place_1", "place_2"]
 
 
+def test_google_places_seed_dedupes_distinct_place_ids_by_phone(monkeypatch) -> None:
+    def fake_post(url, *, timeout, headers, json):
+        del url, timeout, headers, json
+        return FakePlacesResponse(
+            {
+                "places": [
+                    {
+                        "id": "branch_1",
+                        "displayName": {"text": "Home Painters Toronto"},
+                        "formattedAddress": "Toronto, ON",
+                        "nationalPhoneNumber": "416-555-0101",
+                        "businessStatus": "OPERATIONAL",
+                    },
+                    {
+                        "id": "branch_2",
+                        "displayName": {"text": "Home Painters Toronto"},
+                        "formattedAddress": "North York, ON",
+                        "nationalPhoneNumber": "416-555-0101",
+                        "businessStatus": "OPERATIONAL",
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr("seeding.google_places.httpx.post", fake_post)
+    result = GooglePlacesSeedCollector(api_key="test-key").collect(
+        [GooglePlacesSeedQuery(text_query="painters Toronto", seed_market="Toronto")],
+        target_count=10,
+    )
+
+    assert [row.external_id for row in result.rows] == ["branch_1"]
+
+
 def test_home_service_painting_query_plan_can_cover_large_seed() -> None:
     queries = build_home_service_painting_queries()
 
@@ -166,6 +198,179 @@ def test_query_plan_keeps_each_niche_taxonomy() -> None:
     assert queries[0].text_query == "roofing contractors Toronto ON"
     assert queries[0].seed_niche == "home_service_roofing"
     assert queries[0].included_type == "roofing_contractor"
+
+    hvac_queries = build_niche_queries(
+        seed_niche="home_service_hvac",
+        cities=["Toronto ON"],
+    )
+    assert hvac_queries[0].included_type is None
+
+
+def test_query_plan_keeps_canonical_city_separate_from_search_locality() -> None:
+    queries = build_niche_queries(
+        seed_niche="home_service_painting",
+        cities=["North York ON"],
+        city="Toronto",
+    )
+
+    assert queries[0].text_query == "residential painters North York ON"
+    assert queries[0].city == "Toronto"
+
+
+def test_google_places_seed_enforces_radius_and_sets_structured_attributes() -> None:
+    query = GooglePlacesSeedQuery(
+        text_query="CertaPro Painters Toronto",
+        seed_market="Toronto",
+        seed_niche="home_service_painting",
+        city="Toronto",
+        center_latitude=43.6532,
+        center_longitude=-79.3832,
+        radius_meters=25_000,
+        customer_kind="residential",
+        require_phone=True,
+    )
+    inside = {
+        "id": "inside",
+        "displayName": {"text": "CertaPro Painters of Toronto"},
+        "formattedAddress": "Toronto, ON, Canada",
+        "nationalPhoneNumber": "(416) 555-0199",
+        "businessStatus": "OPERATIONAL",
+        "location": {"latitude": 43.66, "longitude": -79.39},
+        "types": ["painter"],
+    }
+    outside = {
+        **inside,
+        "id": "outside",
+        "displayName": {"text": "Remote Painter"},
+        "location": {"latitude": 44.1, "longitude": -79.39},
+    }
+
+    seed = seed_from_place(inside, query=query)
+
+    assert seed is not None
+    assert seed.city == "Toronto"
+    assert seed.latitude == 43.66
+    assert seed.longitude == -79.39
+    assert seed.customer_kind == "residential"
+    assert seed.is_chain is True
+    assert seed.is_franchise is True
+    assert seed.raw["website_presence"]["status"] == "no_website_listed"
+    assert seed_from_place(outside, query=query) is None
+
+
+def test_google_places_seed_marks_known_chain_without_assuming_franchise() -> None:
+    query = GooglePlacesSeedQuery(
+        text_query="HVAC Toronto",
+        seed_market="Toronto",
+        seed_niche="home_service_hvac",
+    )
+    place = {
+        "id": "reliance",
+        "displayName": {"text": "Reliance Home Comfort"},
+        "businessStatus": "OPERATIONAL",
+    }
+
+    seed = seed_from_place(place, query=query)
+
+    assert seed is not None
+    assert seed.is_chain is True
+    assert seed.is_franchise is None
+
+
+def test_google_places_hvac_seed_rejects_generic_query_result() -> None:
+    query = GooglePlacesSeedQuery(
+        text_query="HVAC contractors Toronto",
+        seed_market="Toronto",
+        seed_niche="home_service_hvac",
+    )
+    generic = {
+        "id": "generic",
+        "displayName": {"text": "Hudson Condominium Solutions Inc"},
+        "businessStatus": "OPERATIONAL",
+    }
+    hvac = {
+        "id": "hvac",
+        "displayName": {"text": "Hudson Heating and Cooling Inc"},
+        "businessStatus": "OPERATIONAL",
+    }
+
+    assert seed_from_place(generic, query=query) is None
+    assert seed_from_place(hvac, query=query) is not None
+
+
+def test_named_google_places_seed_rejects_a_different_business() -> None:
+    query = GooglePlacesSeedQuery(
+        text_query="Royal Home Painters",
+        expected_name="Royal Home Painters",
+        seed_market="Toronto",
+    )
+    unrelated = {
+        "id": "unrelated",
+        "displayName": {"text": "Downtown Painting Services"},
+        "businessStatus": "OPERATIONAL",
+    }
+    variant = {
+        "id": "variant",
+        "displayName": {"text": "Royal Home Painters Toronto"},
+        "businessStatus": "OPERATIONAL",
+    }
+
+    assert seed_from_place(unrelated, query=query) is None
+    assert seed_from_place(variant, query=query) is not None
+
+    missing_distinctive_name = {
+        "id": "missing-distinctive-name",
+        "displayName": {"text": "Home Painters Toronto"},
+        "businessStatus": "OPERATIONAL",
+    }
+    amazon_query = GooglePlacesSeedQuery(
+        text_query="Amazonia Home Painters Toronto",
+        expected_name="Amazonia Home Painters Toronto",
+        seed_market="Toronto",
+    )
+    assert seed_from_place(missing_distinctive_name, query=amazon_query) is None
+
+    picture_query = GooglePlacesSeedQuery(
+        text_query="Picture Perfect Painters",
+        expected_name="Picture Perfect Painters",
+        seed_market="Toronto",
+    )
+    perfect_painter = {
+        "id": "perfect-painter",
+        "displayName": {"text": "Perfect Painter"},
+        "businessStatus": "OPERATIONAL",
+    }
+    assert seed_from_place(perfect_painter, query=picture_query) is None
+
+
+def test_google_places_exact_queries_can_limit_each_query_to_one_result(monkeypatch) -> None:
+    def fake_post(url, *, timeout, headers, json):
+        del url, timeout, headers, json
+        return FakePlacesResponse(
+            {
+                "places": [
+                    {
+                        "id": "first",
+                        "displayName": {"text": "Exact Painter"},
+                        "businessStatus": "OPERATIONAL",
+                    },
+                    {
+                        "id": "second",
+                        "displayName": {"text": "Loose Result"},
+                        "businessStatus": "OPERATIONAL",
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr("seeding.google_places.httpx.post", fake_post)
+    result = GooglePlacesSeedCollector(api_key="test-key").collect(
+        [GooglePlacesSeedQuery(text_query="Exact Painter", seed_market="Toronto")],
+        target_count=10,
+        max_results_per_query=1,
+    )
+
+    assert [row.company_name for row in result.rows] == ["Exact Painter"]
 
 
 def test_seed_jsonl_round_trips_with_dedupe(tmp_path) -> None:

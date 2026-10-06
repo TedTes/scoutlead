@@ -34,6 +34,33 @@ class TerritoryRepository:
             ).limit(1)
         )
         if existing is not None:
+            if existing.status == "archived":
+                existing.city = data.city or data.market_key
+                existing.latitude = data.latitude
+                existing.longitude = data.longitude
+                existing.radius_km = data.radius_km
+                existing.trade_keys = data.trade_keys
+                existing.customer_kind = data.customer_kind.value
+                existing.signal_keys = data.signal_keys
+                existing.exclusion_keys = data.exclusion_keys
+                existing.status = data.status.value
+                existing.label = data.label or f"{data.niche_label} · {data.market_key}"
+                existing.cadence = data.cadence.value
+                existing.refill_policy = data.refill_policy.value
+                existing.criteria_version = data.criteria_version
+                existing.batch_size = data.batch_size
+                existing.min_fit = data.min_fit.value
+                existing.search_prompt = data.request
+                existing.search_contract = data.search_contract
+                existing.evidence_max_age_days = data.evidence_max_age_days
+                existing.next_run_at = utcnow()
+                existing.updated_at = utcnow()
+                if commit:
+                    self.session.commit()
+                else:
+                    self.session.flush()
+                self.session.refresh(existing)
+                return existing
             raise ConflictError(
                 "territory already exists for this offer, niche, and market",
                 {"territory_id": existing.id},
@@ -76,7 +103,9 @@ class TerritoryRepository:
     def list(self) -> list[TerritoryModel]:
         return list(
             self.session.scalars(
-                self._scope(select(TerritoryModel)).order_by(TerritoryModel.created_at.desc())
+                self._scope(
+                    select(TerritoryModel).where(TerritoryModel.status != "archived")
+                ).order_by(TerritoryModel.created_at.desc())
             )
         )
 
@@ -110,17 +139,9 @@ class TerritoryRepository:
 
     def delete(self, territory_id: str) -> None:
         model = self.get(territory_id)
-        has_delivery = self.session.scalar(
-            select(TerritoryDeliveryModel.id)
-            .where(TerritoryDeliveryModel.territory_id == territory_id)
-            .limit(1)
-        )
-        if has_delivery:
-            raise ConflictError(
-                "territories with delivery history must be paused instead of deleted",
-                {"territory_id": territory_id},
-            )
-        self.session.delete(model)
+        model.status = "archived"
+        model.next_run_at = None
+        model.updated_at = utcnow()
         self.session.commit()
 
     def list_deliveries(self, territory_id: str) -> list[TerritoryDeliveryModel]:
