@@ -315,6 +315,14 @@ class CampaignService:
                 for key, evidence in signal_evidence.items()
                 if isinstance(evidence, dict) and evidence.get("matched") is True
             ]
+            confirmed_signals = [
+                key
+                for key in matched_signals
+                if signal_evidence[key].get("confidence", "confirmed") == "confirmed"
+            ]
+            possible_signals = [
+                key for key in matched_signals if key not in confirmed_signals
+            ]
             selected_signals = list(signal_evidence)
             if selected_signals and not matched_signals:
                 continue
@@ -338,17 +346,21 @@ class CampaignService:
                     qualified=qualified,
                     fit_status=(
                         AgentFitStatus.GOOD_FIT
-                        if qualified
+                        if confirmed_signals
                         else AgentFitStatus.MAYBE
                     ),
                     score=(
-                        min(100, 70 + max(0, len(matched_signals) - 1) * 10)
-                        if qualified
+                        min(100, 70 + max(0, len(confirmed_signals) - 1) * 10)
+                        if confirmed_signals
+                        else 55
+                        if possible_signals
                         else 50
                     ),
                     rationale=(
-                        f"Confirmed selected signals: {', '.join(matched_signals)}."
-                        if matched_signals
+                        f"Confirmed selected signals: {', '.join(confirmed_signals)}."
+                        if confirmed_signals
+                        else f"Possible selected signals: {', '.join(possible_signals)}."
+                        if possible_signals
                         else "Matched the audience trade and location; no opportunity signal was requested."
                     ),
                     positive_signals=positive_signals,

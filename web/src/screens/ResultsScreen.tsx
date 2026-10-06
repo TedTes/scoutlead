@@ -3684,6 +3684,17 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
     if (!matchedSignals.length) {
       return { label: "No clear signal", level: "none", score: 0, signals: [] };
     }
+    const confirmedSignals = matchedSignals.filter(([, value]) =>
+      rawValueToString(value.confidence || "confirmed") === "confirmed",
+    );
+    if (!confirmedSignals.length) {
+      return {
+        label: "Possible",
+        level: "moderate",
+        score: Math.min(65, 50 + (matchedSignals.length - 1) * 5),
+        signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
+      };
+    }
     return {
       label: "Confirmed",
       level: "high",
@@ -3697,6 +3708,9 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
 function profileSignalMessage(signalKey: string, evidence: Record<string, unknown>) {
   const value = evidence.value;
   if (signalKey === "website_unavailable") {
+    if (rawValueToString(value) === "not_listed") {
+      return "No website is listed in the source profile; website presence is not yet independently verified.";
+    }
     return `Website status is confirmed as ${rawValueToString(value) || "unavailable"}.`;
   }
   if (signalKey === "no_quote_flow") {

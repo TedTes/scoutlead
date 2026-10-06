@@ -58,6 +58,7 @@ class ProfileMatchService:
             return []
         cutoff = utcnow() - timedelta(days=profile.evidence_max_age_days)
         matched_signal_count = literal(0)
+        confirmed_signal_count = literal(0)
         signal_conditions: list[Any] = []
         signal_aliases: dict[str, Any] = {}
         statement = (
@@ -119,6 +120,10 @@ class ProfileMatchService:
             condition = _signal_condition(signal, fact)
             signal_conditions.append(condition)
             matched_signal_count += case((condition, 1), else_=0)
+            confirmed_signal_count += case(
+                (_confirmed_signal_condition(signal, fact), 1),
+                else_=0,
+            )
 
         if selected_signals:
             statement = statement.where(
@@ -164,7 +169,8 @@ class ProfileMatchService:
         if distance_sq is not None:
             group_columns.extend([BusinessModel.latitude, BusinessModel.longitude])
         statement = statement.add_columns(
-            matched_signal_count.label("matched_signal_count")
+            matched_signal_count.label("matched_signal_count"),
+            confirmed_signal_count.label("confirmed_signal_count"),
         )
         if distance_sq is not None:
             statement = statement.add_columns(
@@ -173,6 +179,7 @@ class ProfileMatchService:
         else:
             statement = statement.add_columns(literal(None).label("distance_km"))
         statement = statement.group_by(*group_columns).order_by(
+            confirmed_signal_count.desc(),
             matched_signal_count.desc(),
             literal_column_nulls_last("distance_km"),
             func.max(BusinessNicheMembershipModel.confidence).desc(),
@@ -184,6 +191,7 @@ class ProfileMatchService:
             self._result_row(
                 business_id=str(item["id"]),
                 matched_signal_count=int(item["matched_signal_count"] or 0),
+                confirmed_signal_count=int(item["confirmed_signal_count"] or 0),
                 distance_km=(
                     float(item["distance_km"])
                     if item["distance_km"] is not None
@@ -201,6 +209,7 @@ class ProfileMatchService:
         *,
         business_id: str,
         matched_signal_count: int,
+        confirmed_signal_count: int,
         distance_km: float | None,
         rank_position: int,
         profile,
@@ -252,7 +261,8 @@ class ProfileMatchService:
             signal: {
                 "fact_key": fact_key,
                 "value": fact_value(facts.get(fact_key)),
-                "matched": _signal_fact_matches(signal, facts.get(fact_key)),
+                "matched": _signal_match_confidence(signal, facts.get(fact_key)) is not None,
+                "confidence": _signal_match_confidence(signal, facts.get(fact_key)),
             }
             for signal, fact_key in SIGNAL_FACTS.items()
             if signal in set(profile.signal_keys or [])
@@ -286,6 +296,8 @@ class ProfileMatchService:
                 "score": matched_signal_count,
                 "selected_signal_count": len(signal_evidence),
                 "matched_signal_count": matched_signal_count,
+                "confirmed_signal_count": confirmed_signal_count,
+                "possible_signal_count": matched_signal_count - confirmed_signal_count,
                 "matched_signals": matched_signals,
                 "rank_position": rank_position,
                 "distance_km": round(distance_km, 2) if distance_km is not None else None,
@@ -313,7 +325,7 @@ class ProfileMatchService:
 
 def _signal_condition(signal: str, fact) -> Any:
     if signal == "website_unavailable":
-        return fact.value_text.in_(("missing", "unavailable", "parked"))
+        return fact.value_text.in_(("missing", "not_listed", "unavailable", "parked"))
     if signal in {"no_quote_flow", "no_contact_form"}:
         return fact.value_boolean.is_(False)
     if signal == "reviews_under_15":
@@ -321,17 +333,28 @@ def _signal_condition(signal: str, fact) -> Any:
     return literal(False)
 
 
-def _signal_fact_matches(signal: str, fact: BusinessFactModel | None) -> bool:
+def _confirmed_signal_condition(signal: str, fact) -> Any:
+    if signal == "website_unavailable":
+        return fact.value_text.in_(("missing", "unavailable", "parked"))
+    return _signal_condition(signal, fact)
+
+
+def _signal_match_confidence(
+    signal: str,
+    fact: BusinessFactModel | None,
+) -> str | None:
     if fact is None:
-        return False
+        return None
     value = fact_value(fact)
     if signal == "website_unavailable":
-        return value in {"missing", "unavailable", "parked"}
+        if value == "not_listed":
+            return "possible"
+        return "confirmed" if value in {"missing", "unavailable", "parked"} else None
     if signal in {"no_quote_flow", "no_contact_form"}:
-        return value is False
+        return "confirmed" if value is False else None
     if signal == "reviews_under_15":
-        return isinstance(value, (int, float)) and value < 15
-    return False
+        return "confirmed" if isinstance(value, (int, float)) and value < 15 else None
+    return None
 
 
 def _contact_has_active_support(

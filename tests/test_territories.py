@@ -912,6 +912,100 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
         assert rows == []
 
 
+def test_profile_website_signal_includes_not_listed_as_possible_after_confirmed() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        BusinessFactRepository(session).upsert(
+            businesses[1].id,
+            BusinessFactValue(
+                key=BusinessFactKey.WEBSITE_STATUS,
+                value="missing",
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["website_unavailable"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [
+            businesses[1].display_name,
+            businesses[0].display_name,
+        ]
+        assert rows[0]["raw"]["profile_match"]["confirmed_signal_count"] == 1
+        assert rows[0]["raw"]["profile_match"]["signals"]["website_unavailable"] == {
+            "fact_key": "website_status",
+            "value": "missing",
+            "matched": True,
+            "confidence": "confirmed",
+        }
+        assert rows[1]["raw"]["profile_match"]["confirmed_signal_count"] == 0
+        assert rows[1]["raw"]["profile_match"]["possible_signal_count"] == 1
+        assert rows[1]["raw"]["profile_match"]["signals"]["website_unavailable"] == {
+            "fact_key": "website_status",
+            "value": "not_listed",
+            "matched": True,
+            "confidence": "possible",
+        }
+
+        campaign = CampaignRepository(
+            session,
+            workspace_id="workspace:first",
+        ).create(
+            CampaignCreate(
+                product_id=offer.id,
+                territory_id=profile.id,
+                name="Website confidence delivery",
+                max_leads=25,
+            )
+        )
+        service = CampaignService.__new__(CampaignService)
+        service.session = session
+        service.campaigns = CampaignRepository(
+            session,
+            workspace_id="workspace:first",
+        )
+        service.leads = LeadRepository(
+            session,
+            workspace_id="workspace:first",
+        )
+
+        leads = service.materialize_profile_matches(campaign.id, rows)
+
+        assert [lead.qualification.fit_status for lead in leads if lead.qualification] == [
+            AgentFitStatus.GOOD_FIT,
+            AgentFitStatus.MAYBE,
+        ]
+        assert leads[1].qualification is not None
+        assert leads[1].qualification.rationale == (
+            "Possible selected signals: website_unavailable."
+        )
+
+
 def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
