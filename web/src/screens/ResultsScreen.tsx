@@ -18,6 +18,7 @@ import {
   RotateCw,
   Search,
   Send,
+  Settings2,
   Sparkles,
   Star,
   Trash2,
@@ -127,9 +128,10 @@ export function ResultsScreen({
     selectedProduct,
     selectedProductId,
     selectedProfileId,
+    selectProfile,
+    switchingProfileId,
     profileBatch,
     setSelectedDiscoveryRunId,
-    setSelectedProfileId,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
     qualifyLead,
@@ -174,6 +176,7 @@ export function ResultsScreen({
   const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [profileDetailsOpen, setProfileDetailsOpen] = useState(false);
   const [scheduleResolution, setScheduleResolution] = useState<TerritoryResolution | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [deliveries, setDeliveries] = useState<TerritoryDelivery[]>([]);
@@ -197,6 +200,8 @@ export function ResultsScreen({
   const productProfiles = territories.filter(
     (territory) => territory.product_id === selectedProductId,
   );
+  const activeProfile = productProfiles.find((profile) => profile.id === selectedProfileId)
+    || selectedTerritory;
   const selectedDelivery = selectedTerritory
     ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
     : undefined;
@@ -778,14 +783,14 @@ export function ResultsScreen({
               <span>Audience</span>
               <select
                 aria-label="Audience profile"
+                disabled={Boolean(switchingProfileId)}
                 value={selectedProfileId || selectedTerritory?.id || ""}
-                onChange={async (event) => {
-                  const profileId = event.target.value;
-                  setSelectedProfileId(profileId);
-                  const batch = await territoryApi.getProfileBatch(profileId);
-                  if (!batch.delivery?.campaign_id) return;
-                  setSelectedDiscoveryRunId(batch.delivery.campaign_id);
-                  await refreshSnapshot(batch.delivery.campaign_id);
+                onChange={(event) => {
+                  void selectProfile(event.target.value).catch((cause) => showToast({
+                    title: "Audience could not be opened",
+                    message: cause instanceof Error ? cause.message : String(cause),
+                    tone: "red",
+                  }));
                 }}
               >
                 {productProfiles.map((profile) => (
@@ -793,6 +798,18 @@ export function ResultsScreen({
                 ))}
               </select>
             </label>
+          ) : null}
+          {activeProfile ? (
+            <button
+              aria-label="View audience profile"
+              className="audience-profile-button"
+              title="View audience profile"
+              type="button"
+              onClick={() => setProfileDetailsOpen(true)}
+            >
+              <Settings2 size={14} />
+              <span>Profile</span>
+            </button>
           ) : null}
           {selectedTerritory && deliveries.length ? (
             <div className="delivery-menu-control" ref={deliveryMenuRef}>
@@ -1230,7 +1247,44 @@ export function ResultsScreen({
           onSave={saveSchedule}
         />
       ) : null}
+      {profileDetailsOpen && activeProfile ? (
+        <AudienceDetailsDialog
+          profile={activeProfile}
+          onClose={() => setProfileDetailsOpen(false)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {
+  const tradeLabels = profile.trade_keys.map((key) => profileTradeLabel(key));
+  const signalLabels = profile.signal_keys.map((key) => profileSignalLabel(key));
+  const exclusionLabels = profile.exclusion_keys.map((key) => profileExclusionLabel(key));
+  return (
+    <Modal title="Audience profile" onClose={onClose}>
+      <div className="audience-profile-details">
+        <header>
+          <strong>{profile.label}</strong>
+          <span className={`audience-profile-status is-${profile.status}`}>{profile.status}</span>
+        </header>
+        <dl>
+          <div><dt>Business type</dt><dd>{tradeLabels.join(", ") || "Any supported type"}</dd></div>
+          <div><dt>Customer kind</dt><dd>{profileValueLabel(profile.customer_kind)}</dd></div>
+          <div><dt>Market</dt><dd>{profile.city} · {profile.radius_km} km</dd></div>
+          <div><dt>Batch size</dt><dd>{profile.batch_size} leads</dd></div>
+          <div><dt>Refill</dt><dd>{refillPolicyLabel(profile.refill_policy)}</dd></div>
+        </dl>
+        <section>
+          <span>Opportunity signals</span>
+          <p>{signalLabels.join(", ") || "No opportunity signal required"}</p>
+        </section>
+        <section>
+          <span>Excluded businesses</span>
+          <p>{exclusionLabels.join(", ") || "None"}</p>
+        </section>
+      </div>
+    </Modal>
   );
 }
 
@@ -3673,6 +3727,42 @@ function refillPolicyLabel(value: Territory["refill_policy"]) {
   if (value === "when_depleted") return "Refill when depleted";
   if (value === "biweekly") return "Every two weeks";
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function profileTradeLabel(value: string) {
+  const labels: Record<string, string> = {
+    painters: "Painters",
+    hvac: "HVAC",
+    roofers: "Roofers",
+    plumbers: "Plumbers",
+    electricians: "Electricians",
+  };
+  return labels[value] || profileValueLabel(value);
+}
+
+function profileSignalLabel(value: string) {
+  const labels: Record<string, string> = {
+    website_unavailable: "Missing or unavailable website",
+    no_quote_flow: "No quote or booking flow",
+    no_contact_form: "No contact form",
+    reviews_under_15: "Reviews under 15",
+  };
+  return labels[value] || profileValueLabel(value);
+}
+
+function profileExclusionLabel(value: string) {
+  const labels: Record<string, string> = {
+    closed: "Closed or inactive",
+    chains: "Chains",
+    franchises: "Franchises",
+    directories: "Directories",
+    agencies: "Marketing agencies",
+  };
+  return labels[value] || profileValueLabel(value);
+}
+
+function profileValueLabel(value: string) {
+  return titleCase(value.replace(/_/g, " "));
 }
 
 function matchesWorkflowView(

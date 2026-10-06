@@ -132,6 +132,10 @@ export class ApiClient {
     return this.request<Territory>(`/profiles/${id}`, { method: "PATCH", body: update });
   }
 
+  deleteProfile(id: string) {
+    return this.request<void>(`/profiles/${id}`, { method: "DELETE" });
+  }
+
   refillProfile(id: string) {
     return this.request<ProfileQueued>(`/profiles/${id}/refill`, { method: "POST" });
   }

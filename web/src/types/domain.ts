@@ -336,7 +336,7 @@ export type Territory = {
   signal_keys: string[];
   exclusion_keys: string[];
   label: string;
-  status: "active" | "paused";
+  status: "active" | "paused" | "archived";
   cadence: "weekly";
   refill_policy: "manual" | "when_depleted" | "weekly" | "biweekly" | "monthly";
   criteria_version: number;

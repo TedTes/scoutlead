@@ -40,6 +40,7 @@ type AppDataContextValue = {
   selectedProductId: string;
   selectedDiscoveryRunId: string;
   selectedProfileId: string;
+  switchingProfileId: string;
   selectedProduct?: Product;
   selectedDiscoveryRun?: DiscoveryRun;
   selectedProfile?: Territory;
@@ -54,6 +55,7 @@ type AppDataContextValue = {
   setSelectedProductId: (productId: string) => void;
   setSelectedDiscoveryRunId: (runId: string) => void;
   setSelectedProfileId: (profileId: string) => void;
+  selectProfile: (profileId: string) => Promise<void>;
   setActiveSourceIds: (sourceIds: SourceRequestSource[]) => void;
   refreshAll: (options?: RefreshAllOptions) => Promise<void>;
   refreshSnapshot: (runId?: string) => Promise<void>;
@@ -65,6 +67,8 @@ type AppDataContextValue = {
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
   createProductFromProfile: (input: ProductProfileInput) => Promise<Product | null>;
   createProfile: (input: ProfileCreateInput) => Promise<ProfileQueued | null>;
+  renameProfile: (profileId: string, label: string) => Promise<Territory>;
+  deleteProfile: (profileId: string) => Promise<void>;
   refillProfile: (profileId?: string) => Promise<ProfileQueued | null>;
   deleteProduct: (productId?: string) => Promise<void>;
   discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
@@ -180,10 +184,12 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   );
   const selectedProfileIdRef = useRef(selectedProfileIdState);
   const selectedDiscoveryRunIdRef = useRef(selectedDiscoveryRunIdState);
+  const profileSelectionRequestRef = useRef(0);
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [profileBatch, setProfileBatch] = useState<ProfileBatch | null>(null);
+  const [switchingProfileId, setSwitchingProfileId] = useState("");
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
   const [gmailConnectionStatus, setGmailConnectionStatus] = useState<GmailConnectionStatus | null>(null);
   const [activeSourceIds, setActiveSourceIdsState] = useState<SourceRequestSource[]>(readStoredActiveSourceIds);
@@ -266,13 +272,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     [api],
   );
 
-  const refreshSnapshot = useCallback(
-    async (runId?: string) => {
-      const targetRunId = runId ?? selectedDiscoveryRunIdRef.current;
-      if (!targetRunId) {
-        setSnapshot(emptySnapshot);
-        return;
-      }
+  const fetchSnapshot = useCallback(
+    async (targetRunId: string): Promise<DiscoverySnapshot> => {
       const [
         run,
         sourceConfigs,
@@ -294,7 +295,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       ]);
       const latestAgentRun = trace?.latest_run ?? undefined;
       const agentRuns = trace?.runs ?? [];
-      setSnapshot({
+      return {
         run,
         sourceConfigs,
         results,
@@ -305,9 +306,63 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         trace,
         agentRuns,
         latestAgentRun,
-      });
+      };
     },
     [api],
+  );
+
+  const refreshSnapshot = useCallback(
+    async (runId?: string, resultOverride?: DiscoveryResult[]) => {
+      const targetRunId = runId ?? selectedDiscoveryRunIdRef.current;
+      if (!targetRunId) {
+        setSnapshot(emptySnapshot);
+        return;
+      }
+      const nextSnapshot = await fetchSnapshot(targetRunId);
+      if (targetRunId === selectedDiscoveryRunIdRef.current) {
+        setSnapshot(
+          resultOverride === undefined
+            ? nextSnapshot
+            : { ...nextSnapshot, results: resultOverride },
+        );
+      }
+    },
+    [fetchSnapshot],
+  );
+
+  const selectProfile = useCallback(
+    async (profileId: string) => {
+      if (!profileId || profileId === selectedProfileIdRef.current) return;
+      const requestId = ++profileSelectionRequestRef.current;
+      setSwitchingProfileId(profileId);
+      try {
+        const batch = await api.getProfileBatch(profileId);
+        const runId = batch.delivery?.campaign_id || "";
+        const [run, nextSnapshot] = runId
+          ? await Promise.all([api.getDiscoveryRun(runId), fetchSnapshot(runId)])
+          : [null, emptySnapshot] as const;
+        if (requestId !== profileSelectionRequestRef.current) return;
+
+        localStorage.setItem("selectedProfileId", profileId);
+        selectedProfileIdRef.current = profileId;
+        setSelectedProfileIdState(profileId);
+        setProfileBatch(batch);
+
+        localStorage.setItem("selectedDiscoveryRunId", runId);
+        selectedDiscoveryRunIdRef.current = runId;
+        setSelectedDiscoveryRunIdState(runId);
+        setSnapshot({ ...nextSnapshot, results: batch.leads });
+        if (run) setDiscoveryRuns((current) => upsertDiscoveryRun(current, run));
+      } catch (err) {
+        if (requestId === profileSelectionRequestRef.current) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+        throw err;
+      } finally {
+        if (requestId === profileSelectionRequestRef.current) setSwitchingProfileId("");
+      }
+    },
+    [api, fetchSnapshot],
   );
 
   const refreshProfileBatch = useCallback(
@@ -318,7 +373,15 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         return null;
       }
       const batch = await api.getProfileBatch(targetProfileId);
-      setProfileBatch(batch);
+      if (targetProfileId === selectedProfileIdRef.current) {
+        setProfileBatch(batch);
+        if (!batch.delivery?.campaign_id) {
+          localStorage.setItem("selectedDiscoveryRunId", "");
+          selectedDiscoveryRunIdRef.current = "";
+          setSelectedDiscoveryRunIdState("");
+          setSnapshot(emptySnapshot);
+        }
+      }
       if (
         batch.delivery?.campaign_id
         && targetProfileId === selectedProfileIdRef.current
@@ -328,7 +391,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         localStorage.setItem("selectedDiscoveryRunId", run.id);
         selectedDiscoveryRunIdRef.current = run.id;
         setSelectedDiscoveryRunIdState(run.id);
-        await refreshSnapshot(run.id);
+        await refreshSnapshot(run.id, batch.leads);
       }
       return batch;
     },
@@ -413,15 +476,26 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
       await refreshProductContacts(nextProductId, nextRuns);
-      await refreshSnapshot(nextRunId);
-      await refreshProfileBatch(nextProfileId).catch(() => setProfileBatch(null));
+      const nextBatch = nextProfileId
+        ? await api.getProfileBatch(nextProfileId).catch(() => null)
+        : null;
+      setProfileBatch(nextBatch);
+      const effectiveRunId = nextBatch
+        ? nextBatch.delivery?.campaign_id || ""
+        : nextRunId;
+      if (effectiveRunId !== nextRunId) {
+        setSelectedDiscoveryRunIdState(effectiveRunId);
+        selectedDiscoveryRunIdRef.current = effectiveRunId;
+        localStorage.setItem("selectedDiscoveryRunId", effectiveRunId);
+      }
+      await refreshSnapshot(effectiveRunId, nextBatch?.leads);
       await refreshGmailConnection(nextProductId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [api, refreshGmailConnection, refreshProductContacts, refreshProfileBatch, refreshSnapshot]);
+  }, [api, refreshGmailConnection, refreshProductContacts, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -485,6 +559,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectedProductId: selectedProductIdState,
       selectedDiscoveryRunId: selectedDiscoveryRunIdState,
       selectedProfileId: selectedProfileIdState,
+      switchingProfileId,
       selectedProduct,
       selectedDiscoveryRun,
       selectedProfile,
@@ -499,6 +574,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       setSelectedProductId: persistSelectedProductId,
       setSelectedDiscoveryRunId: persistSelectedDiscoveryRunId,
       setSelectedProfileId: persistSelectedProfileId,
+      selectProfile,
       setActiveSourceIds: persistActiveSourceIds,
       refreshAll,
       refreshSnapshot,
@@ -559,6 +635,43 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           throw err;
         }
         return created;
+      },
+      renameProfile: async (profileId, label) => {
+        setError("");
+        try {
+          const updated = await api.updateProfile(profileId, { label });
+          setTerritories((current) => current.map((profile) => (
+            profile.id === profileId ? updated : profile
+          )));
+          setProfileBatch((current) => (
+            current?.profile.id === profileId
+              ? { ...current, profile: updated }
+              : current
+          ));
+          return updated;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
+      },
+      deleteProfile: async (profileId) => {
+        setError("");
+        try {
+          await api.deleteProfile(profileId);
+          const remaining = territories.filter((profile) => profile.id !== profileId);
+          setTerritories(remaining);
+          if (profileId === selectedProfileIdState) {
+            const nextProfile = remaining.find(
+              (profile) => profile.product_id === selectedProductIdState,
+            );
+            persistSelectedProfileId(nextProfile?.id || "");
+            persistSelectedDiscoveryRunId("");
+            setProfileBatch(null);
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
       },
       refillProfile: async (profileId = selectedProfileIdState) => {
         if (!profileId) return null;
@@ -799,6 +912,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectedDiscoveryRunIdState,
       selectedProfile,
       selectedProfileIdState,
+      selectProfile,
       selectedProduct,
       selectedProductIdState,
       sourceProviders,
@@ -806,6 +920,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       activeSourceIds,
       snapshot,
       profileBatch,
+      switchingProfileId,
     ],
   );
 

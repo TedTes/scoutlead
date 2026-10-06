@@ -2,10 +2,10 @@ import {
   CalendarClock,
   Check,
   ChevronDown,
-  ChevronRight,
   CircleX,
   Download,
   List,
+  LoaderCircle,
   Menu,
   Package,
   Pencil,
@@ -85,6 +85,8 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [productMenuOpen, setProductMenuOpen] = useState(false);
+  const [renameAudience, setRenameAudience] = useState<Territory | null>(null);
+  const [deleteAudience, setDeleteAudience] = useState<Territory | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
   const [exportFileName, setExportFileName] = useState("");
@@ -117,12 +119,16 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setSelectedDiscoveryRunId,
     selectedProfileId,
     setSelectedProfileId,
+    selectProfile,
+    switchingProfileId,
     profileBatch,
     productDiscoveryRuns,
     productContacts,
     territories,
     gmailConnectionStatus,
     createProductFromProfile,
+    renameProfile,
+    deleteProfile,
     deleteProduct,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
@@ -301,6 +307,28 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setDraftRunName(null);
     setSelectedDiscoveryRunId("");
     setViewMode("overview");
+  };
+
+  const handleRenameAudience = async (profile: Territory, label: string) => {
+    await renameProfile(profile.id, label);
+    setRenameAudience(null);
+    showToast({ title: "Audience renamed", tone: "green" });
+  };
+
+  const handleDeleteAudience = async (profile: Territory) => {
+    const nextProfile = productProfiles.find((item) => item.id !== profile.id);
+    await deleteProfile(profile.id);
+    setDeleteAudience(null);
+    if (selectedProfileId === profile.id) {
+      setSelectedProfileId(nextProfile?.id || "");
+      setSelectedDiscoveryRunId("");
+      setViewMode("overview");
+    }
+    showToast({
+      title: "Audience deleted",
+      message: `${profile.label} was removed from this product.`,
+      tone: "green",
+    });
   };
 
   const handleExportProductContacts = () => {
@@ -563,31 +591,48 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           </div>
           <div className="lead-workspace-list">
             {visibleProfiles.map((profile) => (
-              <button
-                className={profile.id === selectedProfileId ? "active" : ""}
-                key={profile.id}
-                aria-label={profile.label}
-                title={profile.label}
-                type="button"
-                onClick={() => {
-                  setSelectedProfileId(profile.id);
-                  const run = productDiscoveryRuns.find((item) => item.territory_id === profile.id);
-                  setLeadWorkflowView("inbox");
-                  if (run) {
-                    setSelectedDiscoveryRunId(run.id);
-                    void refreshSnapshot(run.id);
-                    selectScreen("results");
-                  } else {
-                    setSelectedDiscoveryRunId("");
-                    selectScreen("overview");
-                  }
-                  setMobileRailOpen(false);
-                }}
-              >
-                <Users className="lead-workspace-icon" size={15} />
-                <span>{profile.label}</span>
-                <ChevronRight className="lead-workspace-chevron" size={14} />
-              </button>
+              <div className="audience-list-row" key={profile.id}>
+                <button
+                  className={`audience-list-main ${profile.id === selectedProfileId ? "active" : ""}`}
+                  aria-label={profile.label}
+                  title={profile.label}
+                  type="button"
+                  onClick={() => {
+                    setLeadWorkflowView("inbox");
+                    setMobileRailOpen(false);
+                    void selectProfile(profile.id)
+                      .then(() => setViewMode("auto"))
+                      .catch((cause) => showToast({
+                        title: "Audience could not be opened",
+                        message: cause instanceof Error ? cause.message : String(cause),
+                        tone: "red",
+                      }));
+                  }}
+                >
+                  {switchingProfileId === profile.id
+                    ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} />
+                    : <Users className="lead-workspace-icon" size={15} />}
+                  <span>{profile.label}</span>
+                </button>
+                <div className="audience-row-actions">
+                  <button
+                    aria-label={`Rename ${profile.label}`}
+                    title="Rename audience"
+                    type="button"
+                    onClick={() => setRenameAudience(profile)}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${profile.label}`}
+                    title="Delete audience"
+                    type="button"
+                    onClick={() => setDeleteAudience(profile)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
             ))}
             {productProfiles.length > 5 ? (
               <button
@@ -711,6 +756,20 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           onChange={setExportFileName}
           onClose={() => setExportDialogOpen(false)}
           onExport={confirmExportProductContacts}
+        />
+      ) : null}
+      {renameAudience ? (
+        <RenameAudienceDialog
+          audience={renameAudience}
+          onClose={() => setRenameAudience(null)}
+          onRename={handleRenameAudience}
+        />
+      ) : null}
+      {deleteAudience ? (
+        <DeleteAudienceDialog
+          audience={deleteAudience}
+          onClose={() => setDeleteAudience(null)}
+          onDelete={handleDeleteAudience}
         />
       ) : null}
     </div>
@@ -1140,6 +1199,99 @@ function RunHistoryItem({
         </button>
       </div> : null}
     </div>
+  );
+}
+
+function RenameAudienceDialog({
+  audience,
+  onClose,
+  onRename,
+}: {
+  audience: Territory;
+  onClose: () => void;
+  onRename: (audience: Territory, label: string) => Promise<void>;
+}) {
+  const [label, setLabel] = useState(audience.label);
+  const [saving, setSaving] = useState(false);
+  const cleanedLabel = label.trim();
+
+  return (
+    <Modal title="Rename audience" onClose={onClose}>
+      <form
+        className="audience-dialog-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!cleanedLabel || cleanedLabel === audience.label || saving) return;
+          setSaving(true);
+          try {
+            await onRename(audience, cleanedLabel);
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <label className="field">
+          <span>Audience name</span>
+          <input
+            autoFocus
+            maxLength={255}
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+          />
+        </label>
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={onClose}>Cancel</button>
+          <button
+            className="runbtn"
+            disabled={!cleanedLabel || cleanedLabel === audience.label || saving}
+            type="submit"
+          >
+            {saving ? "Saving..." : "Save name"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function DeleteAudienceDialog({
+  audience,
+  onClose,
+  onDelete,
+}: {
+  audience: Territory;
+  onClose: () => void;
+  onDelete: (audience: Territory) => Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  return (
+    <Modal title="Delete audience" onClose={onClose}>
+      <div className="audience-delete-dialog">
+        <p>
+          Remove <strong>{audience.label}</strong> from this product? Existing lead history will be retained.
+        </p>
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={onClose}>Cancel</button>
+          <button
+            className="danger"
+            disabled={deleting}
+            type="button"
+            onClick={async () => {
+              if (deleting) return;
+              setDeleting(true);
+              try {
+                await onDelete(audience);
+              } finally {
+                setDeleting(false);
+              }
+            }}
+          >
+            <Trash2 size={14} />
+            {deleting ? "Deleting..." : "Delete audience"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

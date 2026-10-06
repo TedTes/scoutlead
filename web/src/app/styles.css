@@ -2903,14 +2903,76 @@ a {
   color: #6f51df;
 }
 
-.lead-workspace-chevron {
-  color: var(--faint);
-  flex: 0 0 14px;
-  margin-left: auto;
+.audience-list-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  position: relative;
 }
 
-.lead-workspace-list button.active .lead-workspace-chevron {
-  color: #6f51df;
+.lead-workspace-list .audience-list-main {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  padding-right: 60px;
+}
+
+.audience-row-actions {
+  align-items: center;
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 2;
+}
+
+.audience-list-row:hover .audience-row-actions,
+.audience-list-row:focus-within .audience-row-actions {
+  opacity: 1;
+}
+
+.lead-workspace-list .audience-row-actions button {
+  align-items: center;
+  color: var(--faint);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0;
+  width: 26px;
+}
+
+.lead-workspace-list .audience-row-actions button:hover,
+.lead-workspace-list .audience-row-actions button:focus-visible {
+  background: var(--panel);
+  color: var(--muted);
+}
+
+@media (hover: none) {
+  .audience-row-actions {
+    opacity: 1;
+  }
+}
+
+.audience-dialog-form,
+.audience-delete-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.audience-dialog-form .field {
+  margin: 0;
+}
+
+.audience-delete-dialog p {
+  margin: 0;
+}
+
+.audience-delete-dialog .danger {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
 }
 
 .lead-workspace-empty {
@@ -6324,6 +6386,103 @@ body.is-resizing-navigation .rail {
   padding: 0 8px;
 }
 
+.audience-profile-button {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.audience-profile-button:hover,
+.audience-profile-button:focus-visible {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.audience-profile-details {
+  display: grid;
+  gap: 18px;
+}
+
+.audience-profile-details > header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.audience-profile-details > header strong {
+  font-size: 15px;
+}
+
+.audience-profile-status {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.audience-profile-status.is-active {
+  color: var(--green);
+}
+
+.audience-profile-details dl {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+.audience-profile-details dl > div {
+  align-items: baseline;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 130px minmax(0, 1fr);
+  padding: 10px 0;
+}
+
+.audience-profile-details dl > div:first-child {
+  border-top: 0;
+}
+
+.audience-profile-details dt,
+.audience-profile-details section > span {
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.audience-profile-details dd {
+  color: var(--text);
+  font-size: 12.5px;
+  margin: 0;
+}
+
+.audience-profile-details section {
+  display: grid;
+  gap: 5px;
+}
+
+.audience-profile-details section p {
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.sl-spin-icon {
+  animation: sl-spin 700ms linear infinite;
+}
+
 .outreach-toolbar-button {
   height: 32px;
   font-weight: 650;
@@ -9391,7 +9550,6 @@ button.bulk-recipient-select:hover {
   .lead-workflow-links button em,
   .lead-workspace-heading > span,
   .lead-workspace-list button > span,
-  .lead-workspace-chevron,
   .lead-workspace-list .workspace-more,
   .lead-workspace-empty,
   .mng-label,
