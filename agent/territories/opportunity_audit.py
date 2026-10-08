@@ -117,16 +117,22 @@ class BusinessOpportunityAuditor:
         timeout_seconds: float,
         search: SearchTool | None = None,
         workers: int = 4,
+        browser_render_endpoint: str | None = None,
+        browser_render_api_key: str | None = None,
     ) -> None:
         self.session = session
         self.verifier = verifier
         self.search = search
         self.timeout_seconds = timeout_seconds
         self.workers = max(1, workers)
+        self.browser_render_endpoint = browser_render_endpoint
+        self.browser_render_api_key = browser_render_api_key
         self.website_inspector = WebsiteEnrichmentClient(
             timeout_seconds=timeout_seconds,
             max_pages_per_business=1,
             page_delay_seconds=0,
+            browser_render_endpoint=browser_render_endpoint,
+            browser_render_api_key=browser_render_api_key,
         )
 
     def audit_campaign(
@@ -166,6 +172,8 @@ class BusinessOpportunityAuditor:
             workers=self.workers,
             business_ids=website_business_ids,
             opportunity_policy=website_policy,
+            browser_render_endpoint=self.browser_render_endpoint,
+            browser_render_api_key=self.browser_render_api_key,
         )
         summary.selected += missing_website_audit.confirmed_absent
         summary.inspected += missing_website_audit.confirmed_absent
@@ -224,6 +232,8 @@ class BusinessOpportunityAuditor:
             workers=self.workers,
             business_ids=website_ids,
             opportunity_policy=opportunity_policy,
+            browser_render_endpoint=self.browser_render_endpoint,
+            browser_render_api_key=self.browser_render_api_key,
         )
         summary.selected += missing.confirmed_absent
         summary.inspected += missing.confirmed_absent

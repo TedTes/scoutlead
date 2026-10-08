@@ -50,6 +50,8 @@ def campaign_service(
             verifier=_verification_tool(services),
             search=services.search,
             timeout_seconds=settings.request_timeout_seconds,
+            browser_render_endpoint=settings.browser_render_endpoint,
+            browser_render_api_key=settings.browser_render_api_key,
         ),
     )
 
@@ -99,6 +101,8 @@ def business_index_refresh_service(
             verifier=_verification_tool(services),
             search=services.search,
             timeout_seconds=settings.request_timeout_seconds,
+            browser_render_endpoint=settings.browser_render_endpoint,
+            browser_render_api_key=settings.browser_render_api_key,
         ),
         embedding=services.embedding,
         discovery_config={

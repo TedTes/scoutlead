@@ -12,6 +12,7 @@ from business_facts.repository import (
     BusinessFactRepository,
     BusinessFactValue,
 )
+from business_facts.freshness import fact_expires_at
 from canonical.normalization import normalize_domain
 from canonical.website_evidence import (
     best_trusted_website_evidence,
@@ -109,6 +110,10 @@ def _website_status_fact(
                     observed_at=observation.observed_at,
                     source_observation_id=observation.id,
                     confidence=confidence,
+                    expires_at=fact_expires_at(
+                        BusinessFactKey.WEBSITE_STATUS.value,
+                        observation.observed_at,
+                    ),
                     resolver_version=RESOLVER_VERSION,
                 )
             )
@@ -127,6 +132,10 @@ def _website_status_fact(
             observed_at=(evidence.observed_at if evidence else business.updated_at),
             source_observation_id=evidence.id if evidence else None,
             confidence=100,
+            expires_at=fact_expires_at(
+                BusinessFactKey.WEBSITE_STATUS.value,
+                evidence.observed_at if evidence else business.updated_at,
+            ),
             resolver_version=RESOLVER_VERSION,
         )
         # A provider omitting websiteUri does not invalidate a URL already attached to
@@ -161,6 +170,12 @@ def _website_status_fact(
                 latest_observation.id if latest_observation is not None else None
             ),
             confidence=0,
+            expires_at=fact_expires_at(
+                BusinessFactKey.WEBSITE_STATUS.value,
+                latest_observation.observed_at
+                if latest_observation is not None
+                else business.updated_at,
+            ),
             resolver_version=RESOLVER_VERSION,
         )
     conclusive = [
@@ -232,6 +247,10 @@ def _quote_form_fact(
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
             confidence=100,
+            expires_at=fact_expires_at(
+                BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
+                observation.observed_at,
+            ),
             resolver_version=RESOLVER_VERSION,
         )
     return None
@@ -250,6 +269,10 @@ def _contact_form_fact(
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
             confidence=100,
+            expires_at=fact_expires_at(
+                BusinessFactKey.CONTACT_FORM_PRESENT.value,
+                observation.observed_at,
+            ),
             resolver_version=RESOLVER_VERSION,
         )
     return None
@@ -295,6 +318,7 @@ def _number_fact(
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
             confidence=95,
+            expires_at=fact_expires_at(key.value, observation.observed_at),
             resolver_version=RESOLVER_VERSION,
         )
     return None
@@ -316,6 +340,10 @@ def _operational_fact(
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
             confidence=100,
+            expires_at=fact_expires_at(
+                BusinessFactKey.BUSINESS_OPERATIONAL.value,
+                observation.observed_at,
+            ),
             resolver_version=RESOLVER_VERSION,
         )
     return None

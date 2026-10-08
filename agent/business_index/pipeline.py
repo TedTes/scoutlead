@@ -326,13 +326,37 @@ class BusinessIndexPipelineService:
         )
         if not link.business_id:
             raise RuntimeError(f"source item did not resolve to a business: {item.id}")
+        if link.identity_conflict:
+            self.items.add_decision(
+                item.id,
+                SourceItemDecisionCreate(
+                    stage=SourceItemStage.IDENTITY,
+                    decision=SourceItemDecisionValue.NEEDS_REVIEW,
+                    reason=link.identity_conflict_reason,
+                    details={
+                        "business_id": link.business_id,
+                        "resolution": link.identity_resolution,
+                        "candidate_business_ids": list(link.identity_candidate_ids),
+                    },
+                ),
+                next_state=SourceItemState.NEEDS_REVIEW,
+                business_id=link.business_id,
+            )
+            return {
+                "business_id": link.business_id,
+                "state": "needs_review",
+                "candidate_business_ids": list(link.identity_candidate_ids),
+            }
         self.items.add_decision(
             item.id,
             SourceItemDecisionCreate(
                 stage=SourceItemStage.IDENTITY,
                 decision=SourceItemDecisionValue.RESOLVED,
                 reason="Resolved to a canonical business.",
-                details={"business_id": link.business_id},
+                details={
+                    "business_id": link.business_id,
+                    "resolution": link.identity_resolution,
+                },
             ),
             next_state=SourceItemState.AUDIT_PENDING,
             business_id=link.business_id,

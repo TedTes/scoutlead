@@ -240,6 +240,41 @@ class BusinessFactModel(TimestampMixin, Base):
     source_observation: Mapped["SourceObservationModel | None"] = relationship()
 
 
+class BusinessFactChangeModel(TimestampMixin, Base):
+    __tablename__ = "business_fact_changes"
+    __table_args__ = (
+        Index(
+            "ix_business_fact_changes_business_changed",
+            "business_id",
+            "changed_at",
+        ),
+        Index(
+            "ix_business_fact_changes_key_changed",
+            "fact_key",
+            "changed_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    previous_value: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    current_value: Mapped[Any] = mapped_column(JSON, nullable=False)
+    previous_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_observation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_observations.id"), nullable=True, index=True
+    )
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class BusinessSearchEvaluationModel(TimestampMixin, Base):
     __tablename__ = "business_search_evaluations"
     __table_args__ = (

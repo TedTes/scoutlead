@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import BusinessFactModel
+from db.models import BusinessFactChangeModel, BusinessFactModel
 from shared.utils import new_id
 
 
@@ -69,7 +69,9 @@ class BusinessFactRepository:
             and existing.resolver_version >= fact.resolver_version
         ):
             return existing, False
-        value_changed = existing is None or fact_value(existing) != fact.value
+        previous_value = fact_value(existing)
+        previous_confidence = existing.confidence if existing is not None else None
+        value_changed = existing is None or previous_value != fact.value
         value_type, value_text, value_number, value_boolean = _typed_value(fact.value)
         if existing is None:
             existing = BusinessFactModel(
@@ -97,6 +99,20 @@ class BusinessFactRepository:
             existing.expires_at = fact.expires_at
             existing.source_observation_id = fact.source_observation_id
             existing.resolver_version = fact.resolver_version
+        if value_changed:
+            self.session.add(
+                BusinessFactChangeModel(
+                    id=new_id("fact_change"),
+                    business_id=business_id,
+                    fact_key=fact.key.value,
+                    previous_value=previous_value,
+                    current_value=fact.value,
+                    previous_confidence=previous_confidence,
+                    current_confidence=fact.confidence,
+                    source_observation_id=fact.source_observation_id,
+                    changed_at=fact.observed_at,
+                )
+            )
         if commit:
             self.session.commit()
             self.session.refresh(existing)

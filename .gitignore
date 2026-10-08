@@ -4,10 +4,15 @@ dist/
 !/data/seeds/
 /data/seeds/*
 !/data/seeds/*.sample.jsonl
+!/data/benchmarks/
+/data/benchmarks/*
+!/data/benchmarks/README.md
 .env
 .env.local
 .env.*.local
 .DS_Store
+data/benchmarks/*.local.jsonl
+data/benchmarks/*.local.json
 npm-debug.log*
 __pycache__/
 *.py[cod]

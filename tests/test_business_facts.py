@@ -9,7 +9,12 @@ from business_index.contracts import compile_search_contract, search_contract_ha
 from business_index.schemas import BusinessIndexSearch, OpportunityType
 from business_index.search import BusinessIndexSearchService
 from canonical.repository import CanonicalRepository
-from db.models import BusinessNicheMembershipModel, NicheModel, SourceObservationModel
+from db.models import (
+    BusinessFactChangeModel,
+    BusinessNicheMembershipModel,
+    NicheModel,
+    SourceObservationModel,
+)
 from db.session import create_database
 from shared.utils import new_id, utcnow
 from search_evaluations.schemas import (
@@ -88,6 +93,52 @@ def test_repeated_provider_fetches_append_observations_and_preserve_identity() -
         assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 2
 
 
+def test_name_alone_does_not_merge_businesses_across_locations() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        first = canonical.upsert_from_discovery_result(
+            company_name="Common Painting",
+            geography="Toronto",
+            source="directory_a",
+            raw={},
+        )
+        second = canonical.upsert_from_discovery_result(
+            company_name="Common Painting",
+            geography="Hamilton",
+            source="directory_b",
+            raw={},
+        )
+
+        assert first.business_id != second.business_id
+        assert second.identity_conflict is True
+        assert first.business_id in second.identity_candidate_ids
+
+
+def test_incompatible_shared_phone_is_created_for_review_not_merged() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        first = canonical.upsert_from_discovery_result(
+            company_name="Alpha Painting",
+            geography="Toronto",
+            source="directory_a",
+            raw={"phone": "416-555-0199"},
+        )
+        second = canonical.upsert_from_discovery_result(
+            company_name="Beta Roofing",
+            geography="Toronto",
+            source="directory_b",
+            raw={"phone": "416-555-0199"},
+        )
+
+        assert first.business_id != second.business_id
+        assert second.identity_conflict is True
+        assert second.identity_conflict_reason == "strong identifier conflicts with the business name"
+
+
 def test_confirmed_evidence_reconciles_current_website_fact() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -119,6 +170,17 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
         )
         facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
         assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
+        fact = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
+        assert fact.expires_at is not None
+        changes = list(
+            session.scalars(
+                select(BusinessFactChangeModel).where(
+                    BusinessFactChangeModel.business_id == link.business_id,
+                    BusinessFactChangeModel.fact_key == "website_status",
+                )
+            )
+        )
+        assert [change.current_value for change in changes] == ["not_listed", "present"]
 
 
 def test_verified_website_enrichment_promotes_canonical_url() -> None:

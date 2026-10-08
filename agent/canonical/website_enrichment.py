@@ -76,6 +76,16 @@ BOOKING_TERMS = (
     "schedule service",
     "appointment",
 )
+EMBEDDED_BOOKING_MARKERS = (
+    "calendly.com",
+    "housecallpro.com",
+    "getjobber.com",
+    "bookingkoala.com",
+    "acuityscheduling.com",
+    "setmore.com",
+    "servicetitan.com",
+    "square.site/appointments",
+)
 SERVICE_TERMS = (
     "interior painting",
     "exterior painting",
@@ -265,10 +275,14 @@ class WebsiteEnrichmentClient:
         timeout_seconds: float = 12.0,
         max_pages_per_business: int = 5,
         page_delay_seconds: float = 0.2,
+        browser_render_endpoint: str | None = None,
+        browser_render_api_key: str | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.max_pages_per_business = max(1, max_pages_per_business)
         self.page_delay_seconds = max(0.0, page_delay_seconds)
+        self.browser_render_endpoint = normalize_url(browser_render_endpoint)
+        self.browser_render_api_key = browser_render_api_key
 
     def inspect(self, business: BusinessModel | BusinessTarget) -> BusinessWebsiteEnrichment:
         website_url = normalize_url(business.website_url)
@@ -388,6 +402,12 @@ class WebsiteEnrichmentClient:
             )
 
         html = response.text or ""
+        rendered = self._render_page(str(response.url), html)
+        if rendered is not None:
+            response_url, html, response_status = rendered
+        else:
+            response_url = str(response.url)
+            response_status = getattr(response, "status_code", 200)
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
@@ -398,7 +418,7 @@ class WebsiteEnrichmentClient:
             description = normalize_text(str(meta["content"]))
         text = truncate(normalize_text(soup.get_text(" ")), 5000)
         links = [
-            urljoin(str(response.url), str(link["href"]))
+            urljoin(response_url, str(link["href"]))
             for link in soup.find_all("a", href=True)
         ]
         form_text = " ".join(
@@ -411,8 +431,9 @@ class WebsiteEnrichmentClient:
             "meta",
             attrs={"name": re.compile(r"^viewport$", re.IGNORECASE)},
         )
+        booking_embed = any(marker in html.lower() for marker in EMBEDDED_BOOKING_MARKERS)
         return WebsitePage(
-            url=str(response.url),
+            url=response_url,
             title=title,
             description=description,
             text=text,
@@ -422,10 +443,43 @@ class WebsiteEnrichmentClient:
             links=sorted(set(links)),
             has_form=has_form,
             has_quote_form=has_form and _has_quote_signal(form_context),
-            has_booking_form=has_form and bool(_term_hits(form_context, BOOKING_TERMS)),
+            has_booking_form=(
+                (has_form and bool(_term_hits(form_context, BOOKING_TERMS)))
+                or booking_embed
+            ),
             has_mobile_viewport=viewport is not None,
-            status_code=getattr(response, "status_code", 200),
+            status_code=response_status,
         )
+
+    def _render_page(
+        self,
+        url: str,
+        static_html: str,
+    ) -> tuple[str, str, int] | None:
+        if not self.browser_render_endpoint or not _needs_browser_render(static_html):
+            return None
+        headers = {"content-type": "application/json"}
+        if self.browser_render_api_key:
+            headers["authorization"] = f"Bearer {self.browser_render_api_key}"
+        try:
+            response = httpx.post(
+                self.browser_render_endpoint,
+                json={"url": url, "wait_until": "networkidle", "timeout_ms": 15000},
+                headers=headers,
+                timeout=max(self.timeout_seconds, 20),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            html = str(payload.get("html") or "")
+            if not html.strip():
+                return None
+            return (
+                str(payload.get("final_url") or url),
+                html,
+                int(payload.get("status_code") or 200),
+            )
+        except Exception:
+            return None
 
 
 def enrich_business_pool(
@@ -449,6 +503,8 @@ def enrich_business_pool(
     progress_every: int = 0,
     business_ids: list[str] | None = None,
     opportunity_policy: str = "any",
+    browser_render_endpoint: str | None = None,
+    browser_render_api_key: str | None = None,
 ) -> EnrichmentSummary:
     businesses = select_businesses(
         session,
@@ -465,6 +521,8 @@ def enrich_business_pool(
         timeout_seconds=timeout_seconds,
         max_pages_per_business=max_pages_per_business,
         page_delay_seconds=page_delay_seconds,
+        browser_render_endpoint=browser_render_endpoint,
+        browser_render_api_key=browser_render_api_key,
     )
     canonical = CanonicalRepository(session)
     writes_since_commit = 0
@@ -805,6 +863,19 @@ def _failed_availability(checks: list[WebsitePage]) -> tuple[str, str]:
         "inconclusive",
         f"Website availability could not be confirmed ({detail or 'unknown fetch error'}).",
     )
+
+
+def _needs_browser_render(html: str) -> bool:
+    if not html.strip():
+        return False
+    soup = BeautifulSoup(html, "html.parser")
+    visible = normalize_text(soup.get_text(" "))
+    script_count = len(soup.find_all("script"))
+    has_app_root = any(
+        soup.find(id=value) is not None
+        for value in ("app", "root", "__next", "__nuxt")
+    )
+    return len(visible) < 120 and (script_count >= 3 or has_app_root)
 
 
 def _availability_assessment(
@@ -1579,6 +1650,8 @@ def main(argv: list[str] | None = None) -> None:
             mark_attempted=args.mark_attempted,
             workers=args.workers,
             progress_every=args.progress_every,
+            browser_render_endpoint=settings.browser_render_endpoint,
+            browser_render_api_key=settings.browser_render_api_key,
         )
     finally:
         session.close()

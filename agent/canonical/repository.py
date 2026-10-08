@@ -52,6 +52,22 @@ class CanonicalLeadLink:
     business_id: str | None
     contact_id: str | None
     source_observation_id: str | None = None
+    identity_resolution: str = "unknown"
+    identity_conflict: bool = False
+    identity_conflict_reason: str | None = None
+    identity_candidate_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class IdentityResolution:
+    business: BusinessModel | None
+    method: str
+    conflict_reason: str | None = None
+    candidate_ids: tuple[str, ...] = ()
+
+    @property
+    def conflict(self) -> bool:
+        return self.conflict_reason is not None
 
 
 @dataclass(frozen=True)
@@ -81,7 +97,7 @@ class CanonicalRepository:
     ) -> CanonicalLeadLink:
         raw_payload = raw or {}
         source_name = normalize_text(source) or "unknown"
-        business = self._upsert_business(
+        business, identity = self._upsert_business(
             company_name=company_name,
             website_url=website_url,
             geography=geography,
@@ -122,6 +138,10 @@ class CanonicalRepository:
             business_id=business.id,
             contact_id=contact.id if contact else None,
             source_observation_id=observation.id,
+            identity_resolution=identity.method,
+            identity_conflict=identity.conflict,
+            identity_conflict_reason=identity.conflict_reason,
+            identity_candidate_ids=identity.candidate_ids,
         )
 
     def record_business_evidence(
@@ -362,7 +382,7 @@ class CanonicalRepository:
         description: str | None,
         source: str,
         raw: dict[str, Any],
-    ) -> BusinessModel:
+    ) -> tuple[BusinessModel, IdentityResolution]:
         now = utcnow()
         display_name = normalize_text(company_name)
         normalized_name = normalize_business_name(display_name)
@@ -382,7 +402,7 @@ class CanonicalRepository:
         )
         attributes = extract_business_attributes([raw], category=profile.category_key)
 
-        business = self._find_business(
+        identity = self._find_business(
             source=source,
             external_id=external_id_from_raw(raw),
             normalized_name=normalized_name,
@@ -390,6 +410,7 @@ class CanonicalRepository:
             phone=phone,
             geography=normalized_geography,
         )
+        business = identity.business
         if business is None:
             business = BusinessModel(
                 id=new_id("business"),
@@ -411,7 +432,12 @@ class CanonicalRepository:
             self._refresh_embedding_if_needed(business, profile.text, now=now)
             self.session.add(business)
             self.session.flush()
-            return business
+            return business, IdentityResolution(
+                business=business,
+                method="created",
+                conflict_reason=identity.conflict_reason,
+                candidate_ids=identity.candidate_ids,
+            )
 
         business.display_name = _prefer_existing(business.display_name, display_name)
         business.normalized_name = business.normalized_name or normalized_name
@@ -434,7 +460,7 @@ class CanonicalRepository:
                 self._refresh_embedding_if_needed(business, profile.text, now=now)
         business.last_seen_at = now
         self.session.flush()
-        return business
+        return business, identity
 
     def _find_business(
         self,
@@ -445,7 +471,7 @@ class CanonicalRepository:
         domain: str | None,
         phone: str | None,
         geography: str | None,
-    ) -> BusinessModel | None:
+    ) -> IdentityResolution:
         if external_id:
             observations = self.session.scalars(
                 select(SourceObservationModel)
@@ -457,33 +483,50 @@ class CanonicalRepository:
             )
             for observation in observations:
                 if not observation_is_quarantined(self.session, observation):
-                    return observation.business
+                    return IdentityResolution(observation.business, "provider_external_id")
 
+        strong_candidates: dict[str, tuple[BusinessModel, set[str]]] = {}
+        incompatible_candidates: dict[str, BusinessModel] = {}
         if domain:
-            business = self.session.scalar(
+            businesses = list(self.session.scalars(
                 select(BusinessModel)
                 .where(BusinessModel.domain == domain)
                 .order_by(BusinessModel.created_at)
-                .limit(1)
-            )
-            if business and _business_names_are_compatible(
-                normalized_name,
-                business.normalized_name,
-            ):
-                return business
+            ))
+            for business in businesses:
+                if _business_names_are_compatible(normalized_name, business.normalized_name):
+                    candidate, methods = strong_candidates.setdefault(
+                        business.id, (business, set())
+                    )
+                    methods.add("domain")
+                else:
+                    incompatible_candidates[business.id] = business
 
         if phone:
-            business = self.session.scalar(
+            businesses = list(self.session.scalars(
                 select(BusinessModel)
                 .where(BusinessModel.phone == phone)
                 .order_by(BusinessModel.created_at)
-                .limit(1)
+            ))
+            for business in businesses:
+                if _business_names_are_compatible(normalized_name, business.normalized_name):
+                    candidate, methods = strong_candidates.setdefault(
+                        business.id, (business, set())
+                    )
+                    methods.add("phone")
+                else:
+                    incompatible_candidates[business.id] = business
+
+        if len(strong_candidates) == 1:
+            business, methods = next(iter(strong_candidates.values()))
+            return IdentityResolution(business, "+".join(sorted(methods)))
+        if len(strong_candidates) > 1:
+            return IdentityResolution(
+                None,
+                "created",
+                conflict_reason="domain and phone identify different canonical businesses",
+                candidate_ids=tuple(sorted(strong_candidates)),
             )
-            if business and _business_names_are_compatible(
-                normalized_name,
-                business.normalized_name,
-            ):
-                return business
 
         if normalized_name and geography:
             business = self.session.scalar(
@@ -496,16 +539,30 @@ class CanonicalRepository:
                 .limit(1)
             )
             if business:
-                return business
+                return IdentityResolution(business, "name_and_geography")
 
         if normalized_name:
-            return self.session.scalar(
-                select(BusinessModel)
-                .where(BusinessModel.normalized_name == normalized_name)
-                .order_by(BusinessModel.created_at)
-                .limit(1)
+            same_name = list(
+                self.session.scalars(
+                    select(BusinessModel)
+                    .where(BusinessModel.normalized_name == normalized_name)
+                    .order_by(BusinessModel.created_at)
+                    .limit(10)
+                )
             )
-        return None
+            incompatible_candidates.update({item.id: item for item in same_name})
+        if incompatible_candidates:
+            return IdentityResolution(
+                None,
+                "created",
+                conflict_reason=(
+                    "strong identifier conflicts with the business name"
+                    if domain or phone
+                    else "business name exists without enough location evidence to merge"
+                ),
+                candidate_ids=tuple(sorted(incompatible_candidates)),
+            )
+        return IdentityResolution(None, "created")
 
     def _upsert_contact(
         self,

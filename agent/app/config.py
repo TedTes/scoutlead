@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     zerobounce_api_endpoint: str | None = None
 
     request_timeout_seconds: float = Field(default=20.0, gt=0)
+    browser_render_endpoint: str | None = None
+    browser_render_api_key: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_attempts: int = Field(default=3, ge=1, le=6)
 

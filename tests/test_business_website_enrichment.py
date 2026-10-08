@@ -6,6 +6,8 @@ from db.models import BusinessModel, ContactModel, SeedBatchModel, SourceObserva
 from db.session import create_database
 from canonical.website_enrichment import (
     SOURCE_NAME,
+    BusinessTarget,
+    WebsiteEnrichmentClient,
     cleanup_placeholder_emails,
     enrich_business_pool,
 )
@@ -598,6 +600,50 @@ def test_cleanup_placeholder_emails_removes_existing_bad_values() -> None:
 
         assert summary["contacts_changed"] == 1
         assert session.scalar(select(ContactModel).where(ContactModel.email == "your@email.com")) is None
+
+
+def test_javascript_shell_uses_configured_renderer_for_booking_evidence(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda url, **kwargs: FakeResponse(
+            url,
+            "<html><body><div id='root'></div><script></script><script></script></body></html>",
+        ),
+    )
+
+    class RenderResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {
+                "final_url": "https://dynamic.example/",
+                "status_code": 200,
+                "html": "<html><body><iframe src='https://calendly.com/example'></iframe></body></html>",
+            }
+
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.post",
+        lambda *args, **kwargs: RenderResponse(),
+    )
+    result = WebsiteEnrichmentClient(
+        max_pages_per_business=1,
+        page_delay_seconds=0,
+        browser_render_endpoint="https://renderer.example/render",
+    ).inspect(
+        BusinessTarget(
+            id="business_dynamic",
+            display_name="Dynamic Services",
+            website_url="https://dynamic.example",
+            phone=None,
+            address=None,
+            geography="Toronto",
+            semantic_text=None,
+        )
+    )
+
+    assert result.has_booking_form is True
+    assert result.inspected_urls == ["https://dynamic.example/"]
 
 
 class FakeResponse:
