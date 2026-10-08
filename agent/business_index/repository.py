@@ -28,25 +28,30 @@ class BusinessIndexRepository:
         market_label: str,
         source_plan: list[dict],
         target_business_count: int,
+        niche_id: str | None = None,
+        record_demand: bool = True,
     ) -> BusinessIndexSegmentModel:
-        source_inputs = {
-            "business_category": business_category,
-            "location": market_label,
-            "source_request_intent": {
+        if niche_id is None:
+            source_inputs = {
                 "business_category": business_category,
                 "location": market_label,
-            },
-        }
-        resolution = resolve_niche(
-            self.session,
-            source_inputs=source_inputs,
-            source_input=f"{business_category} in {market_label}",
-        )
-        if resolution is None:
-            niche = self._create_niche(business_category, market_label)
-            niche_id = niche.id
-        else:
-            niche_id = resolution.niche_id
+                "source_request_intent": {
+                    "business_category": business_category,
+                    "location": market_label,
+                },
+            }
+            resolution = resolve_niche(
+                self.session,
+                source_inputs=source_inputs,
+                source_input=f"{business_category} in {market_label}",
+            )
+            if resolution is None:
+                niche = self._create_niche(business_category, market_label)
+                niche_id = niche.id
+            else:
+                niche_id = resolution.niche_id
+        elif self.session.get(NicheModel, niche_id) is None:
+            raise ValueError(f"niche not found: {niche_id}")
         market_key = semantic_key(market_label) or "unknown"
         segment = self.session.scalar(
             select(BusinessIndexSegmentModel)
@@ -76,7 +81,8 @@ class BusinessIndexRepository:
             segment.product_id = product_id
             segment.market_label = normalize_text(market_label) or segment.market_label
             segment.status = "active"
-            segment.demand_count += 1
+            if record_demand:
+                segment.demand_count += 1
             segment.target_business_count = max(
                 segment.target_business_count,
                 target_business_count,

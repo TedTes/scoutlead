@@ -16,6 +16,7 @@ from business_index.schemas import SearchContract
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import (
+    BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     CampaignModel,
@@ -52,6 +53,7 @@ from territories.refresh import (
 )
 from territories.refill import enqueue_refill_if_depleted
 from territories.scheduler import enqueue_due_territories
+from territories.source_expansion import enqueue_profile_source_expansion
 from leads.repository import LeadRepository
 from leads.schemas import AgentFitStatus, QualificationResult
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
@@ -245,6 +247,62 @@ def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
         assert refilled.job.id != first.job.id
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 2
+
+
+def test_profile_source_expansion_queues_each_trade_once() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters", "roofers"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                limit=25,
+            )
+        )
+
+        first = enqueue_profile_source_expansion(
+            session,
+            profile,
+            google_places_configured=False,
+            search_configured=False,
+            openstreetmap_enabled=True,
+            apify_sources=[],
+            source_recipes=[],
+        )
+        repeated = enqueue_profile_source_expansion(
+            session,
+            profile,
+            google_places_configured=False,
+            search_configured=False,
+            openstreetmap_enabled=True,
+            apify_sources=[],
+            source_recipes=[],
+        )
+
+        segments = list(session.scalars(select(BusinessIndexSegmentModel)))
+        jobs = list(
+            session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type == "business_index.refresh"
+                )
+            )
+        )
+        assert repeated == first
+        assert len(first) == 2
+        assert len(segments) == 2
+        assert len(jobs) == 2
+        assert all(segment.target_business_count == 100 for segment in segments)
+        assert all(segment.demand_count == 1 for segment in segments)
+        assert all(
+            [task["provider_id"] for task in segment.source_plan] == ["openstreetmap"]
+            for segment in segments
+        )
 
 
 def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:

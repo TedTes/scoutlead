@@ -29,6 +29,7 @@ from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
+from territories.source_expansion import enqueue_profile_source_expansion
 
 logger = get_logger(__name__)
 _last_territory_scheduler_tick = 0.0
@@ -105,6 +106,33 @@ def run_once() -> bool:
                     services=services,
                     workspace_id=territory.workspace_id,
                 ).refresh(territory_id, scheduled_for=scheduled_for)
+                try:
+                    enqueue_profile_source_expansion(
+                        session,
+                        territory,
+                        google_places_configured=bool(
+                            services.settings.google_places_api_key
+                        ),
+                        search_configured=services.search.is_configured,
+                        openstreetmap_enabled=services.settings.openstreetmap_enabled,
+                        apify_sources=[
+                            source
+                            for source in services.settings.apify_source_configs
+                            if source.get("api_token")
+                            and source.get("actor_id")
+                            and (
+                                source.get("input_template")
+                                or source.get("search_url_template")
+                                or source.get("input_kind")
+                            )
+                        ],
+                        source_recipes=services.settings.discovery_source_recipe_configs,
+                    )
+                except Exception:
+                    logger.exception(
+                        "profile_source_expansion_failed territory_id=%s",
+                        territory_id,
+                    )
             elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
                 business_index_pipeline_service(
                     session=session,
