@@ -18,9 +18,11 @@ from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
+    OutcomeModel,
     ProfileDeliveryItemModel,
     SourceObservationModel,
 )
+from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adjustment
 from shared.errors import ConflictError
 from shared.utils import utcnow
 from seeding.batches import active_membership_condition, observation_is_quarantined
@@ -57,6 +59,11 @@ class ProfileMatchService:
         if not niche_ids or limit <= 0:
             return []
         cutoff = utcnow() - timedelta(days=profile.evidence_max_age_days)
+        outcome_weights = self._active_outcome_weights(
+            workspace_id=profile.workspace_id,
+            product_id=profile.product_id,
+            niche_ids=niche_ids,
+        )
         matched_signal_count = literal(0)
         confirmed_signal_count = literal(0)
         signal_conditions: list[Any] = []
@@ -178,31 +185,82 @@ class ProfileMatchService:
             )
         else:
             statement = statement.add_columns(literal(None).label("distance_km"))
+        candidate_limit = min(max(limit * 4, 100), 400) if outcome_weights else limit
         statement = statement.group_by(*group_columns).order_by(
             confirmed_signal_count.desc(),
             matched_signal_count.desc(),
             literal_column_nulls_last("distance_km"),
             func.max(BusinessNicheMembershipModel.confidence).desc(),
             BusinessModel.id,
-        ).limit(limit)
+        ).limit(candidate_limit)
 
         ranked = self.session.execute(statement).mappings().all()
-        return [
-            self._result_row(
-                business_id=str(item["id"]),
-                matched_signal_count=int(item["matched_signal_count"] or 0),
-                confirmed_signal_count=int(item["confirmed_signal_count"] or 0),
-                distance_km=(
-                    float(item["distance_km"])
-                    if item["distance_km"] is not None
-                    else None
+        results = [
+            (
+                self._result_row(
+                    business_id=str(item["id"]),
+                    matched_signal_count=int(item["matched_signal_count"] or 0),
+                    confirmed_signal_count=int(item["confirmed_signal_count"] or 0),
+                    distance_km=(
+                        float(item["distance_km"])
+                        if item["distance_km"] is not None
+                        else None
+                    ),
+                    rank_position=rank_position,
+                    profile=profile,
+                    cutoff=cutoff,
                 ),
-                rank_position=rank_position,
-                profile=profile,
-                cutoff=cutoff,
+                item,
             )
             for rank_position, item in enumerate(ranked, start=1)
         ]
+        if outcome_weights:
+            for result, _ in results:
+                profile_match = result["raw"]["profile_match"]
+                profile_match["outcome_adjustment"] = outcome_adjustment(
+                    [
+                        signal["signal_key"]
+                        for signal in profile_match["matched_signals"]
+                    ],
+                    outcome_weights,
+                )
+            results.sort(key=_learned_result_sort_key)
+        final = [result for result, _ in results[:limit]]
+        for rank_position, result in enumerate(final, start=1):
+            result["raw"]["profile_match"]["rank_position"] = rank_position
+        return final
+
+    def _active_outcome_weights(
+        self,
+        *,
+        workspace_id: str,
+        product_id: str,
+        niche_ids: list[str],
+    ) -> dict[str, float]:
+        models = list(
+            self.session.scalars(
+                select(OutcomeModel).where(
+                    OutcomeModel.workspace_id == workspace_id,
+                    OutcomeModel.product_id == product_id,
+                    OutcomeModel.niche_id.in_(niche_ids),
+                    OutcomeModel.n_contacted >= MIN_CONTACTED,
+                    OutcomeModel.n_positive >= MIN_POSITIVE,
+                )
+            )
+        )
+        if not models:
+            return {}
+        totals: dict[str, float] = {}
+        sample_counts: dict[str, int] = {}
+        for model in models:
+            for signal, weight in (model.weights or {}).items():
+                totals[signal] = totals.get(signal, 0.0) + float(weight) * model.n_contacted
+                sample_counts[signal] = sample_counts.get(signal, 0) + model.n_contacted
+        return {
+            signal: total / sample_counts[signal]
+            for signal, total in totals.items()
+            if sample_counts[signal]
+        }
 
     def _result_row(
         self,
@@ -378,6 +436,20 @@ def _contact_has_active_support(
     return bool(
         (phone and phone in supported_phones)
         or (email and email in supported_emails)
+    )
+
+
+def _learned_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
+    result, row = item
+    profile_match = result["raw"]["profile_match"]
+    distance = profile_match.get("distance_km")
+    return (
+        -int(profile_match.get("confirmed_signal_count") or 0),
+        -int(profile_match.get("matched_signal_count") or 0),
+        -float(profile_match.get("outcome_adjustment") or 0.0),
+        float(distance) if isinstance(distance, (int, float)) else float("inf"),
+        -float(row.get("membership_confidence") or 0.0),
+        str(row["id"]),
     )
 
 

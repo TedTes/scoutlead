@@ -25,6 +25,7 @@ import type {
   ProductProfileInput,
   ProfileBatch,
   ProfileCreateInput,
+  ProfileFactChange,
   ProfileOptions,
   ProfileQueued,
   SourceRequestInput,
@@ -142,6 +143,11 @@ export class ApiClient {
 
   getProfileBatch(id: string) {
     return this.request<ProfileBatch>(`/profiles/${id}/current-batch`);
+  }
+
+  getProfileChanges(id: string, since?: string) {
+    const query = since ? `?since=${encodeURIComponent(since)}` : "";
+    return this.request<ProfileFactChange[]>(`/profiles/${id}/changes${query}`);
   }
 
   resolveTerritory(productId: string, request: string) {

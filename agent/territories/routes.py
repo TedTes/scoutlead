@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Response, status
 from sqlalchemy import and_, select
 
@@ -18,6 +20,7 @@ from territories.metrics import (
     TerritoryMetricsService,
     territory_metrics_csv,
 )
+from territories.changes import ProfileChangeService, ProfileFactChangeRead
 from territories.schemas import (
     ProfileBatchRead,
     ProfileBatchState,
@@ -228,6 +231,23 @@ def profile_options(session: DbSession, auth: CurrentAuth):
 @profiles_router.get("/{profile_id}", response_model=TerritoryRead)
 def get_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
     return _service(session, auth).get_read(profile_id)
+
+
+@profiles_router.get(
+    "/{profile_id}/changes",
+    response_model=list[ProfileFactChangeRead],
+)
+def list_profile_changes(
+    profile_id: str,
+    session: DbSession,
+    auth: CurrentAuth,
+    since: datetime | None = None,
+    limit: int = 100,
+):
+    return ProfileChangeService(
+        session,
+        workspace_id=auth.workspace_id,
+    ).list(profile_id, since=since, limit=limit)
 
 
 @profiles_router.patch("/{profile_id}", response_model=TerritoryRead)

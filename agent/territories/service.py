@@ -195,7 +195,7 @@ class TerritoryService:
                 signal_keys=signals,
                 exclusion_keys=exclusions,
                 label=data.name or f"{trade_label} · {city}",
-                refill_policy="when_depleted",
+                refill_policy=data.refill_policy,
                 batch_size=data.limit,
                 criteria_hash=_criteria_hash(criteria),
                 confirmed=True,
@@ -203,7 +203,16 @@ class TerritoryService:
             reuse_existing=True,
             commit=commit,
         )
-        profile.next_run_at = None
+        interval_days = {
+            "weekly": 7,
+            "biweekly": 14,
+            "monthly": 30,
+        }.get(data.refill_policy.value)
+        profile.next_run_at = (
+            utcnow() + timedelta(days=interval_days)
+            if interval_days is not None
+            else None
+        )
         if commit:
             self.session.commit()
             self.session.refresh(profile)

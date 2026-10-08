@@ -239,6 +239,7 @@ class ProfileCreate(BaseModel):
         default_factory=lambda: list(ProfileExclusion)
     )
     limit: Literal[15, 25, 40] = 25
+    refill_policy: TerritoryRefillPolicy = TerritoryRefillPolicy.WHEN_DEPLETED
     exclude_already_delivered: Literal[True] = True
 
 

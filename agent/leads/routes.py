@@ -11,6 +11,8 @@ from leads.repository import LeadRepository
 from leads.approach_service import LeadApproachService
 from leads.schemas import LeadContactPolicyUpdate, LeadRead, LeadUpdate
 from leads.service import LeadQualificationService
+from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeSource
+from outcomes.service import OutcomeService
 from territories.refill import enqueue_refill_if_depleted
 
 router = APIRouter(tags=["leads"])
@@ -47,7 +49,23 @@ def get_lead(lead_id: str, session: DbSession, auth: CurrentAuth):
 
 @router.patch("/leads/{lead_id}", response_model=LeadRead)
 def update_lead(lead_id: str, update: LeadUpdate, session: DbSession, auth: CurrentAuth):
-    lead = LeadRepository(session, workspace_id=auth.workspace_id).update(lead_id, update)
+    repository = LeadRepository(session, workspace_id=auth.workspace_id)
+    previous = repository.get(lead_id)
+    previous_review_status = previous.review_status
+    lead = repository.update(lead_id, update)
+    if previous_review_status != "not_fit" and lead.review_status == "not_fit":
+        OutcomeService(
+            session,
+            workspace_id=auth.workspace_id,
+            recorded_by=auth.user_id,
+        ).record(
+            lead.id,
+            LeadOutcomeCreate(
+                outcome=LeadOutcome.NOT_A_FIT,
+                source=OutcomeSource.MANUAL,
+                note=lead.review_note,
+            ),
+        )
     enqueue_refill_if_depleted(session, lead.territory_id)
     return lead
 

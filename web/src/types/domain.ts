@@ -367,6 +367,20 @@ export type ProfileOptions = {
   }>;
 };
 
+export type ProfileFactChange = {
+  id: string;
+  business_id: string;
+  business_name: string;
+  fact_key: string;
+  signal_key?: string | null;
+  kind: "entered" | "exited" | "updated";
+  previous_value?: string | number | boolean | null;
+  current_value: string | number | boolean;
+  previous_confidence?: number | null;
+  current_confidence: number;
+  changed_at: string;
+};
+
 export type ProfileCreateInput = {
   product_id: string;
   name?: string;
@@ -379,6 +393,7 @@ export type ProfileCreateInput = {
   signals: ProfileSignal[];
   exclude: ProfileExclusion[];
   limit: 15 | 25 | 40;
+  refill_policy: Territory["refill_policy"];
   exclude_already_delivered: true;
 };
 

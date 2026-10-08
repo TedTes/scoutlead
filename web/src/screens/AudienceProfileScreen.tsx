@@ -49,6 +49,7 @@ export function AudienceProfileScreen() {
   const [city, setCity] = useState("");
   const [radiusKm, setRadiusKm] = useState<10 | 25 | 50>(25);
   const [batchSize, setBatchSize] = useState<15 | 25 | 40>(25);
+  const [refillPolicy, setRefillPolicy] = useState<ProfileCreateInput["refill_policy"]>("when_depleted");
   const [signals, setSignals] = useState<ProfileSignal[]>([]);
   const [exclusions, setExclusions] = useState<ProfileExclusion[]>(EXCLUSIONS.map((item) => item.value));
   const [saving, setSaving] = useState(false);
@@ -123,6 +124,7 @@ export function AudienceProfileScreen() {
       signals,
       exclude: exclusions,
       limit: batchSize,
+      refill_policy: refillPolicy,
       exclude_already_delivered: true,
     };
     setSaving(true);
@@ -297,6 +299,20 @@ export function AudienceProfileScreen() {
                 onChange={(event) => setBatchSize(Number(event.target.value) as 15 | 25 | 40)}
               >
                 {[15, 25, 40].map((value) => <option key={value} value={value}>{value} leads</option>)}
+              </select>
+            </label>
+            <label className="audience-field">
+              <span>Refresh</span>
+              <select
+                className="audience-input"
+                value={refillPolicy}
+                onChange={(event) => setRefillPolicy(event.target.value as ProfileCreateInput["refill_policy"])}
+              >
+                <option value="when_depleted">When reviewed</option>
+                <option value="manual">On demand</option>
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Every two weeks</option>
+                <option value="monthly">Monthly</option>
               </select>
             </label>
           </div>

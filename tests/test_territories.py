@@ -23,6 +23,7 @@ from db.models import (
     LeadModel,
     LeadOutcomeModel,
     NicheModel,
+    OutcomeModel,
     ProfileDeliveryItemModel,
     QueueJobModel,
     SeedBatchModel,
@@ -46,6 +47,7 @@ from territories.schemas import (
     TerritoryUpdate,
 )
 from territories.service import TerritoryService
+from territories.changes import ProfileChangeService
 from territories.dedupe import exclude_previously_delivered_rows
 from territories.refresh import (
     TerritoryRefreshService,
@@ -203,6 +205,7 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
         assert result.profile.exclusion_keys == ["franchises"]
         assert result.profile.batch_size == 25
         assert result.profile.refill_policy.value == "when_depleted"
+        assert result.profile.next_run_at is None
         assert result.profile.search_prompt is None
         assert result.profile.search_contract == {}
         assert result.job.status.value == "queued"
@@ -212,6 +215,31 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
             session.scalar(select(func.count()).select_from(TerritoryDeliveryModel))
             == 0
         )
+
+
+def test_profile_creation_can_schedule_recurring_runs() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                refill_policy="weekly",
+            )
+        )
+
+        assert profile.refill_policy == "weekly"
+        assert profile.next_run_at is not None
+        scheduled = profile.next_run_at.replace(tzinfo=timezone.utc)
+        assert timedelta(days=6, hours=23) < scheduled - utcnow()
+        assert scheduled - utcnow() <= timedelta(days=7)
 
 
 def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
@@ -962,6 +990,80 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         ]
 
 
+def test_profile_learning_reorders_only_already_eligible_matches() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        facts = BusinessFactRepository(session)
+        facts.upsert(
+            businesses[0].id,
+            BusinessFactValue(
+                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        facts.upsert(
+            businesses[1].id,
+            BusinessFactValue(
+                key=BusinessFactKey.CONTACT_FORM_PRESENT,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_quote_flow", "no_contact_form"],
+                exclude=[],
+                limit=25,
+            )
+        )
+        session.add(
+            OutcomeModel(
+                id=new_id("outcome_model"),
+                workspace_id="workspace:first",
+                product_id=offer.id,
+                niche_id=profile.niche_id,
+                computed_at=utcnow(),
+                n_contacted=30,
+                n_positive=5,
+                weights={"no_quote_flow": 0.25, "no_contact_form": 4.0},
+            )
+        )
+        session.commit()
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [
+            businesses[1].display_name,
+            businesses[0].display_name,
+        ]
+        assert all(
+            row["raw"]["profile_match"]["matched_signal_count"] == 1
+            for row in rows
+        )
+        assert rows[0]["raw"]["profile_match"]["outcome_adjustment"] > 0
+        assert rows[1]["raw"]["profile_match"]["outcome_adjustment"] < 0
+
+
 def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -1003,6 +1105,60 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
         )
 
         assert rows == []
+
+
+def test_profile_change_feed_reports_entering_and_exiting_selected_signal() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        business = session.scalar(
+            select(BusinessModel).order_by(BusinessModel.display_name).limit(1)
+        )
+        assert business is not None
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_quote_flow"],
+                exclude=[],
+            )
+        )
+        observed_at = utcnow()
+        facts = BusinessFactRepository(session)
+        facts.upsert(
+            business.id,
+            BusinessFactValue(
+                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                value=False,
+                observed_at=observed_at,
+                source_observation_id=None,
+            ),
+        )
+        facts.upsert(
+            business.id,
+            BusinessFactValue(
+                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                value=True,
+                observed_at=observed_at + timedelta(minutes=1),
+                source_observation_id=None,
+            ),
+        )
+        session.commit()
+
+        changes = ProfileChangeService(
+            session,
+            workspace_id="workspace:first",
+        ).list(profile.id)
+
+        relevant = [change for change in changes if change.business_id == business.id]
+        assert [change.kind.value for change in relevant] == ["exited", "entered"]
 
 
 def test_profile_website_signal_includes_not_listed_as_possible_after_confirmed() -> None:

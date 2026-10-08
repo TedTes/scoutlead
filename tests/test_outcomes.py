@@ -1,4 +1,5 @@
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -6,9 +7,17 @@ from sqlalchemy.orm import sessionmaker
 
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, LeadSeedInput
-from db.models import BusinessModel, ContactModel, NicheModel, OutcomeModel
+from db.models import (
+    BusinessModel,
+    ContactModel,
+    LeadOutcomeModel,
+    NicheModel,
+    OutcomeModel,
+)
 from db.session import create_database
 from leads.repository import LeadRepository
+from leads.routes import update_lead
+from leads.schemas import LeadUpdate
 from outcomes.policy import is_positive_outcome, no_response_due
 from outcomes.schemas import (
     LeadOutcome,
@@ -96,6 +105,35 @@ def test_data_quality_outcomes_update_canonical_data_but_not_fit_outcomes() -> N
         service.record(lead.id, LeadOutcomeCreate(outcome=LeadOutcome.BUSINESS_CLOSED))
         session.refresh(business)
         assert business.status == "closed"
+
+
+def test_dismissing_lead_records_not_fit_outcome_once() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        lead, _ = _territory_lead(session, workspace_id="workspace:first")
+        auth = SimpleNamespace(
+            workspace_id="workspace:first",
+            user_id="user:first",
+        )
+
+        update_lead(
+            lead.id,
+            LeadUpdate(review_status="not_fit", review_note="Wrong segment"),
+            session,
+            auth,
+        )
+        update_lead(
+            lead.id,
+            LeadUpdate(review_status="not_fit"),
+            session,
+            auth,
+        )
+
+        outcomes = session.query(LeadOutcomeModel).all()
+        assert len(outcomes) == 1
+        assert outcomes[0].outcome == LeadOutcome.NOT_A_FIT.value
+        assert outcomes[0].note == "Wrong segment"
+        assert outcomes[0].recorded_by == "user:first"
 
 
 def test_outcomes_are_workspace_scoped() -> None:
