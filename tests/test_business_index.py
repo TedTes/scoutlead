@@ -350,10 +350,20 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
                 pipeline.classify_source_item(job.payload["source_item_id"], job_id=job.id)
             elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
                 pipeline.resolve_identity(job.payload["source_item_id"])
+            elif job.type == JobType.BUSINESS_VALIDATE.value:
+                pipeline.validate_business(job.payload["source_item_id"])
             elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
                 pipeline.audit_opportunity(
                     job.payload["source_item_id"],
                     business_id=job.payload["business_id"],
+                    job_id=job.id,
+                )
+            elif job.type == JobType.BUSINESS_PUBLICATION_EVALUATE.value:
+                pipeline.evaluate_publication(
+                    business_id=job.payload["business_id"],
+                    segment_id=job.payload["segment_id"],
+                    source_item_id=job.payload.get("source_item_id"),
+                    job_id=job.id,
                 )
             elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
                 pipeline.match_eligibility(segment_id, job_id=job.id)
@@ -367,9 +377,11 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
         JobType.SOURCE_FETCH.value,
         JobType.SOURCE_ITEM_CLASSIFY.value,
         JobType.BUSINESS_IDENTITY_RESOLVE.value,
+        JobType.BUSINESS_VALIDATE.value,
         JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
+        JobType.BUSINESS_PUBLICATION_EVALUATE.value,
     }
-    assert sorted(item.state for item in items) == ["audited", "audited", "rejected"]
+    assert sorted(item.state for item in items) == ["needs_review", "needs_review", "rejected"]
     assert segment is not None
     assert segment.next_refresh_at > segment.last_refresh_at
 

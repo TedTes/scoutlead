@@ -3,8 +3,11 @@ from datetime import datetime
 from fastapi import APIRouter, Response, status
 from sqlalchemy import and_, select
 
+from audience_runs.schemas import AudienceRunState
+from audience_runs.service import AudienceRunService
 from app.dependencies import CurrentAuth, DbSession
 from db.models import (
+    AudienceRunModel,
     LeadModel,
     ProfileDeliveryItemModel,
     QueueJobModel,
@@ -203,14 +206,11 @@ def export_delivery_contacts(
 def create_profile(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
     profile = service.create_profile(data, commit=False)
-    scheduled_for = utcnow().replace(microsecond=0).isoformat()
-    job = QueueService(session).enqueue_territory_refresh(
+    run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
         profile.id,
-        scheduled_for,
-        criteria_version=profile.criteria_version,
-        dedupe_key=f"profile-refill:{profile.id}:{profile.criteria_version}",
         commit=False,
     )
+    job = QueueService(session).enqueue_audience_run(run.id, commit=False)
     session.commit()
     session.refresh(job)
     return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
@@ -276,12 +276,13 @@ def delete_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
 def refill_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
     profile = service.get(profile_id)
-    job = QueueService(session).enqueue_territory_refresh(
+    run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
         profile.id,
-        utcnow().replace(microsecond=0).isoformat(),
-        criteria_version=profile.criteria_version,
-        dedupe_key=f"profile-refill:{profile.id}:{profile.criteria_version}",
+        commit=False,
     )
+    job = QueueService(session).enqueue_audience_run(run.id, commit=False)
+    session.commit()
+    session.refresh(job)
     return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
 
 
@@ -289,44 +290,28 @@ def refill_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
 def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
     profile = service.get(profile_id)
-    delivery = service.territories.latest_delivery(profile.id)
-    latest_job = _latest_profile_job(session, profile.id)
+    run_service = AudienceRunService(session, workspace_id=auth.workspace_id)
+    latest_run = session.scalar(
+        select(AudienceRunModel)
+        .where(AudienceRunModel.audience_id == profile.id)
+        .order_by(AudienceRunModel.created_at.desc())
+        .limit(1)
+    )
+    latest_job = _latest_profile_job(
+        session,
+        latest_run.id if latest_run is not None else None,
+    )
     active_job = (
         latest_job
         if latest_job is not None
         and latest_job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value}
         else None
     )
-    models = list(
-        session.scalars(
-            select(LeadModel)
-            .join(
-                TerritoryDeliveryModel,
-                TerritoryDeliveryModel.campaign_id == LeadModel.campaign_id,
-            )
-            .join(
-                ProfileDeliveryItemModel,
-                and_(
-                    ProfileDeliveryItemModel.delivery_id == TerritoryDeliveryModel.id,
-                    ProfileDeliveryItemModel.business_id == LeadModel.business_id,
-                ),
-            )
-            .where(ProfileDeliveryItemModel.profile_id == profile.id)
-            .order_by(
-                ProfileDeliveryItemModel.delivered_at.desc(),
-                LeadModel.created_at.desc(),
-            )
-        )
-    )
-    leads = eligible_delivery_leads(
-        models,
-        min_fit=TerritoryMinFit(profile.min_fit),
-        preserve_order=True,
-    )
+    leads = run_service.latest_leads_for_audience(profile.id)
     remaining = sum(
         not lead.shortlisted_at
         and not lead.last_contacted_at
-        and lead.review_status != "not_fit"
+        and lead.review_status.value != "not_fit"
         for lead in leads
     )
     if active_job is not None and (
@@ -339,21 +324,28 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         state = ProfileBatchState.RETRYING
     elif active_job is not None:
         state = ProfileBatchState.SCORING
-    elif latest_job is not None and latest_job.status == JobStatus.FAILED.value:
+    elif latest_job is not None and latest_job.status in {
+        JobStatus.FAILED.value,
+        JobStatus.DEAD_LETTER.value,
+    }:
         state = ProfileBatchState.FAILED
-    elif delivery is None:
+    elif latest_run is None:
         state = ProfileBatchState.SETUP
-    elif delivery.status == "failed":
+    elif latest_run.state == AudienceRunState.FAILED.value:
         state = ProfileBatchState.FAILED
-    elif delivery.status == "ready":
-        state = ProfileBatchState.READY
-    elif delivery.status == "empty":
+    elif latest_run.state == AudienceRunState.READY.value:
         state = ProfileBatchState.READY if leads else ProfileBatchState.EMPTY
+    elif latest_run.state == AudienceRunState.PARTIAL.value:
+        state = ProfileBatchState.PARTIAL if leads else ProfileBatchState.EMPTY
     else:
-        state = ProfileBatchState.PARTIAL
+        state = ProfileBatchState.SCORING
     return ProfileBatchRead(
         profile=service.get_read(profile.id),
-        delivery=delivery,
+        delivery=None,
+        audience_run_id=latest_run.id if latest_run is not None else None,
+        outreach_campaign_id=(
+            latest_run.outreach_campaign_id if latest_run is not None else None
+        ),
         leads=leads,
         state=state,
         requested_count=profile.batch_size,
@@ -363,7 +355,7 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
             _failure_class(
                 latest_job.last_error
                 if latest_job is not None and latest_job.last_error
-                else delivery.failure_reason if delivery is not None else None
+                else latest_run.failure_reason if latest_run is not None else None
             )
             if state in {ProfileBatchState.RETRYING, ProfileBatchState.FAILED}
             else None
@@ -376,18 +368,27 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
     )
 
 
-def _latest_profile_job(session: DbSession, profile_id: str) -> QueueJobModel | None:
+def _latest_profile_job(
+    session: DbSession,
+    audience_run_id: str | None,
+) -> QueueJobModel | None:
+    if audience_run_id is None:
+        return None
     jobs = list(
         session.scalars(
             select(QueueJobModel)
             .where(
-                QueueJobModel.type == JobType.TERRITORY_REFRESH.value,
+                QueueJobModel.type == JobType.AUDIENCE_RUN.value,
             )
             .order_by(QueueJobModel.created_at.desc())
         )
     )
     return next(
-        (job for job in jobs if job.payload.get("territory_id") == profile_id),
+        (
+            job
+            for job in jobs
+            if job.payload.get("audience_run_id") == audience_run_id
+        ),
         None,
     )
 

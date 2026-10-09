@@ -1,7 +1,19 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base, TimestampMixin
@@ -229,6 +241,14 @@ class BusinessFactModel(TimestampMixin, Base):
     value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
     value_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    resolution_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown", index=True
+    )
+    supporting_claim_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    quality_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="staged", index=True
+    )
+    quality_policy_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source_observation_id: Mapped[str | None] = mapped_column(
@@ -273,6 +293,267 @@ class BusinessFactChangeModel(TimestampMixin, Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class FactClaimModel(TimestampMixin, Base):
+    __tablename__ = "fact_claims"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_fact_claims_idempotency_key"),
+        Index("ix_fact_claims_business_key_observed", "business_id", "fact_key", "observed_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    value: Mapped[Any] = mapped_column(JSON, nullable=False)
+    source_observation_id: Mapped[str] = mapped_column(
+        ForeignKey("source_observations.id"), nullable=False, index=True
+    )
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    extractor: Mapped[str] = mapped_column(String(128), nullable=False)
+    extractor_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ValidationResultModel(TimestampMixin, Base):
+    __tablename__ = "validation_results"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_validation_results_idempotency_key"),
+        Index(
+            "ix_validation_results_business_type_observed",
+            "business_id",
+            "validation_type",
+            "observed_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    source_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_items.id"), nullable=True, index=True
+    )
+    source_observation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_observations.id"), nullable=True, index=True
+    )
+    niche_id: Mapped[str | None] = mapped_column(
+        ForeignKey("niches.id"), nullable=True, index=True
+    )
+    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    validation_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    validator: Mapped[str] = mapped_column(String(128), nullable=False)
+    validator_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BusinessPublicationModel(TimestampMixin, Base):
+    __tablename__ = "business_publications"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "niche_id",
+            "market_key",
+            name="uq_business_publications_scope",
+        ),
+        Index(
+            "ix_business_publications_scope_status",
+            "niche_id",
+            "market_key",
+            "status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
+    market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    policy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    reasons: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class QualityLabelModel(TimestampMixin, Base):
+    __tablename__ = "quality_labels"
+    __table_args__ = (
+        Index("ix_quality_labels_dimension_reviewed", "dimension", "reviewed_at"),
+        Index("ix_quality_labels_scope", "source", "niche_id", "market_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, unique=True
+    )
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    dimension: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    expected: Mapped[Any] = mapped_column(JSON, nullable=False)
+    predicted: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    niche_id: Mapped[str | None] = mapped_column(
+        ForeignKey("niches.id"), nullable=True, index=True
+    )
+    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    validator_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reviewer: Mapped[str] = mapped_column(String(255), nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class QualityMetricSnapshotModel(TimestampMixin, Base):
+    __tablename__ = "quality_metric_snapshots"
+    __table_args__ = (
+        Index("ix_quality_metrics_dimension_calculated", "dimension", "calculated_at"),
+        Index("ix_quality_metrics_scope", "source", "niche_id", "market_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dimension: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    niche_id: Mapped[str | None] = mapped_column(
+        ForeignKey("niches.id"), nullable=True, index=True
+    )
+    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    validator_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    true_positive: Mapped[int] = mapped_column(Integer, nullable=False)
+    false_positive: Mapped[int] = mapped_column(Integer, nullable=False)
+    false_negative: Mapped[int] = mapped_column(Integer, nullable=False)
+    true_negative: Mapped[int] = mapped_column(Integer, nullable=False)
+    precision: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recall: Mapped[float | None] = mapped_column(Float, nullable=True)
+    precision_lower_bound: Mapped[float | None] = mapped_column(Float, nullable=True)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PipelineOutboxEventModel(TimestampMixin, Base):
+    __tablename__ = "pipeline_outbox_events"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_pipeline_outbox_idempotency_key"),
+        Index("ix_pipeline_outbox_poll", "status", "available_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    topic: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AudienceRunModel(TimestampMixin, Base):
+    __tablename__ = "audience_runs"
+    __table_args__ = (
+        Index("ix_audience_runs_audience_created", "audience_id", "created_at"),
+        Index("ix_audience_runs_state_deadline", "state", "deadline_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=True, index=True
+    )
+    audience_id: Mapped[str] = mapped_column(
+        ForeignKey("territories.id"), nullable=False, index=True
+    )
+    criteria_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    index_snapshot_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outreach_campaign_id: Mapped[str | None] = mapped_column(
+        ForeignKey("campaigns.id"), nullable=True, index=True
+    )
+
+
+class AudienceResultModel(TimestampMixin, Base):
+    __tablename__ = "audience_results"
+    __table_args__ = (
+        UniqueConstraint("run_id", "business_id", name="uq_audience_results_run_business"),
+        UniqueConstraint("run_id", "rank_position", name="uq_audience_results_run_rank"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("audience_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    audience_id: Mapped[str] = mapped_column(
+        ForeignKey("territories.id"), nullable=False, index=True
+    )
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    publication_id: Mapped[str] = mapped_column(
+        ForeignKey("business_publications.id"), nullable=False, index=True
+    )
+    rank_position: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_new: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    match_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    review_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unreviewed", index=True
+    )
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    shortlisted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    contacted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    outreach_lead_id: Mapped[str | None] = mapped_column(
+        ForeignKey("leads.id"), nullable=True, index=True
+    )
+
+
+class CoverageRequestModel(TimestampMixin, Base):
+    __tablename__ = "coverage_requests"
+    __table_args__ = (
+        UniqueConstraint("run_id", "niche_id", name="uq_coverage_requests_run_niche"),
+        Index("ix_coverage_requests_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("audience_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    audience_id: Mapped[str] = mapped_column(
+        ForeignKey("territories.id"), nullable=False, index=True
+    )
+    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
+    market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class BusinessSearchEvaluationModel(TimestampMixin, Base):
@@ -943,6 +1224,25 @@ class CampaignInsightModel(TimestampMixin, Base):
 
 class QueueJobModel(TimestampMixin, Base):
     __tablename__ = "queue_jobs"
+    __table_args__ = (
+        Index(
+            "ix_queue_jobs_poll",
+            "status",
+            "run_after",
+            "created_at",
+        ),
+        Index(
+            "uq_queue_jobs_active_idempotency",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text(
+                "idempotency_key IS NOT NULL AND status IN ('queued', 'running')"
+            ),
+            sqlite_where=text(
+                "idempotency_key IS NOT NULL AND status IN ('queued', 'running')"
+            ),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -951,6 +1251,12 @@ class QueueJobModel(TimestampMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
     run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    parent_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

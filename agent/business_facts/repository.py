@@ -28,6 +28,10 @@ class BusinessFactValue:
     observed_at: datetime
     source_observation_id: str | None
     confidence: int = 100
+    resolution_state: str = "confirmed"
+    supporting_claim_ids: tuple[str, ...] = ()
+    quality_state: str = "published"
+    quality_policy_version: int = 1
     expires_at: datetime | None = None
     resolver_version: int = 1
 
@@ -83,6 +87,10 @@ class BusinessFactRepository:
                 value_number=value_number,
                 value_boolean=value_boolean,
                 confidence=fact.confidence,
+                resolution_state=fact.resolution_state,
+                supporting_claim_ids=list(fact.supporting_claim_ids),
+                quality_state=fact.quality_state,
+                quality_policy_version=fact.quality_policy_version,
                 observed_at=fact.observed_at,
                 expires_at=fact.expires_at,
                 source_observation_id=fact.source_observation_id,
@@ -95,6 +103,10 @@ class BusinessFactRepository:
             existing.value_number = value_number
             existing.value_boolean = value_boolean
             existing.confidence = fact.confidence
+            existing.resolution_state = fact.resolution_state
+            existing.supporting_claim_ids = list(fact.supporting_claim_ids)
+            existing.quality_state = fact.quality_state
+            existing.quality_policy_version = fact.quality_policy_version
             existing.observed_at = fact.observed_at
             existing.expires_at = fact.expires_at
             existing.source_observation_id = fact.source_observation_id

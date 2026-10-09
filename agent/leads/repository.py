@@ -10,6 +10,7 @@ from campaigns.schemas import LeadSeedInput
 from canonical.repository import CanonicalRepository
 from canonical.normalization import normalize_email
 from db.models import (
+    AudienceResultModel,
     BusinessModel,
     CampaignModel,
     ContactModel,
@@ -146,6 +147,8 @@ class LeadRepository:
         campaign_id: str,
         product_id: str,
         result: dict[str, Any],
+        *,
+        commit: bool = True,
     ) -> LeadModel:
         self._assert_product_in_scope(product_id)
         raw = result.get("raw") if isinstance(result.get("raw"), dict) else {}
@@ -195,8 +198,11 @@ class LeadRepository:
         )
         self.session.add(model)
         ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
     def create_from_cached_result(
@@ -326,7 +332,13 @@ class LeadRepository:
         self.session.refresh(model)
         return model
 
-    def update(self, lead_id: str, update: LeadUpdate) -> LeadModel:
+    def update(
+        self,
+        lead_id: str,
+        update: LeadUpdate,
+        *,
+        commit: bool = True,
+    ) -> LeadModel:
         model = self.get(lead_id)
         data = update.model_dump(mode="python", exclude_unset=True)
         next_review_status = LeadReviewStatus(model.review_status)
@@ -363,8 +375,11 @@ class LeadRepository:
                     },
                 )
             model.shortlisted_at = utcnow() if data["shortlisted"] else None
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
     def update_contact_policy(self, lead_id: str, update: LeadContactPolicyUpdate) -> LeadModel:
@@ -380,7 +395,15 @@ class LeadRepository:
 
     def mark_contacted(self, lead_id: str, contacted_at=None) -> LeadModel:
         model = self.get(lead_id)
-        model.last_contacted_at = contacted_at or utcnow()
+        occurred_at = contacted_at or utcnow()
+        model.last_contacted_at = occurred_at
+        audience_result = self.session.scalar(
+            select(AudienceResultModel)
+            .where(AudienceResultModel.outreach_lead_id == model.id)
+            .limit(1)
+        )
+        if audience_result is not None:
+            audience_result.contacted_at = occurred_at
         self.session.commit()
         self.session.refresh(model)
         return model
@@ -396,7 +419,13 @@ class LeadRepository:
         self.session.refresh(model)
         return model
 
-    def attach_qualification(self, lead_id: str, result: QualificationResult) -> LeadModel:
+    def attach_qualification(
+        self,
+        lead_id: str,
+        result: QualificationResult,
+        *,
+        commit: bool = True,
+    ) -> LeadModel:
         model = self.get(lead_id)
         normalized = normalize_qualification_result(result)
         normalized = normalized.model_copy(
@@ -409,8 +438,11 @@ class LeadRepository:
         )
         model.qualification = normalized.model_dump(mode="json")
         model.status = LeadStatus.QUALIFIED.value if normalized.qualified else LeadStatus.DISQUALIFIED.value
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
     def signal_vocabulary_for_lead(self, lead_id: str) -> list[str]:

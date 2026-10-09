@@ -17,6 +17,7 @@ from db.models import (
     BusinessFactModel,
     BusinessModel,
     BusinessNicheMembershipModel,
+    BusinessPublicationModel,
     ContactModel,
     OutcomeModel,
     ProfileDeliveryItemModel,
@@ -55,6 +56,7 @@ class ProfileMatchService:
         profile,
         niche_ids: list[str],
         limit: int,
+        exclude_legacy_deliveries: bool = True,
     ) -> list[dict[str, Any]]:
         if not niche_ids or limit <= 0:
             return []
@@ -79,9 +81,26 @@ class ProfileMatchService:
                 BusinessNicheMembershipModel,
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
+            .join(
+                BusinessPublicationModel,
+                and_(
+                    BusinessPublicationModel.business_id == BusinessModel.id,
+                    BusinessPublicationModel.niche_id
+                    == BusinessNicheMembershipModel.niche_id,
+                    BusinessPublicationModel.market_key
+                    == BusinessNicheMembershipModel.market_key,
+                    BusinessPublicationModel.status == "published",
+                    or_(
+                        BusinessPublicationModel.expires_at.is_(None),
+                        BusinessPublicationModel.expires_at >= utcnow(),
+                    ),
+                ),
+            )
             .where(BusinessNicheMembershipModel.niche_id.in_(niche_ids))
             .where(active_membership_condition())
-            .where(
+        )
+        if exclude_legacy_deliveries:
+            statement = statement.where(
                 ~select(ProfileDeliveryItemModel.id)
                 .where(
                     ProfileDeliveryItemModel.profile_id == profile.id,
@@ -89,7 +108,6 @@ class ProfileMatchService:
                 )
                 .exists()
             )
-        )
 
         if profile.trade_keys:
             statement = statement.where(
@@ -162,7 +180,14 @@ class ProfileMatchService:
         group_columns = [BusinessModel.id]
         for fact in signal_aliases.values():
             group_columns.extend(
-                [fact.value_text, fact.value_number, fact.value_boolean]
+                [
+                    fact.value_text,
+                    fact.value_number,
+                    fact.value_boolean,
+                    fact.confidence,
+                    fact.resolution_state,
+                    fact.quality_state,
+                ]
             )
         group_columns.extend(
             [
@@ -383,17 +408,30 @@ class ProfileMatchService:
 
 def _signal_condition(signal: str, fact) -> Any:
     if signal == "website_unavailable":
-        return fact.value_text.in_(("missing", "not_listed", "unavailable", "parked"))
+        return and_(
+            fact.resolution_state == "confirmed",
+            fact.quality_state == "published",
+            fact.confidence >= 90,
+            fact.value_text.in_(("missing", "unavailable", "parked")),
+        )
     if signal in {"no_quote_flow", "no_contact_form"}:
-        return fact.value_boolean.is_(False)
+        return and_(
+            fact.resolution_state == "confirmed",
+            fact.quality_state == "published",
+            fact.confidence >= 90,
+            fact.value_boolean.is_(False),
+        )
     if signal == "reviews_under_15":
-        return fact.value_number < 15.0
+        return and_(
+            fact.resolution_state == "confirmed",
+            fact.quality_state == "published",
+            fact.confidence >= 90,
+            fact.value_number < 15.0,
+        )
     return literal(False)
 
 
 def _confirmed_signal_condition(signal: str, fact) -> Any:
-    if signal == "website_unavailable":
-        return fact.value_text.in_(("missing", "unavailable", "parked"))
     return _signal_condition(signal, fact)
 
 
@@ -403,10 +441,14 @@ def _signal_match_confidence(
 ) -> str | None:
     if fact is None:
         return None
+    if (
+        fact.resolution_state != "confirmed"
+        or fact.quality_state != "published"
+        or fact.confidence < 90
+    ):
+        return None
     value = fact_value(fact)
     if signal == "website_unavailable":
-        if value == "not_listed":
-            return "possible"
         return "confirmed" if value in {"missing", "unavailable", "parked"} else None
     if signal in {"no_quote_flow", "no_contact_form"}:
         return "confirmed" if value is False else None

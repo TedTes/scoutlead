@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models import QueueJobModel
@@ -22,6 +23,8 @@ class QueueRepository:
         *,
         delay_seconds: int = 0,
         max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        parent_run_id: str | None = None,
         commit: bool = True,
     ) -> QueueJobModel:
         model = QueueJobModel(
@@ -32,6 +35,8 @@ class QueueRepository:
             attempts=0,
             max_attempts=max_attempts,
             run_after=utcnow() + timedelta(seconds=delay_seconds),
+            idempotency_key=idempotency_key,
+            parent_run_id=parent_run_id,
         )
         self.session.add(model)
         if commit:
@@ -48,25 +53,49 @@ class QueueRepository:
         *,
         dedupe_key: str,
         max_attempts: int = 3,
+        parent_run_id: str | None = None,
+        delay_seconds: int = 0,
         commit: bool = True,
     ) -> QueueJobModel:
-        active = list(
-            self.session.scalars(
-                select(QueueJobModel).where(
-                    QueueJobModel.type == job_type.value,
-                    QueueJobModel.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
-                )
+        idempotency_key = f"{job_type.value}:{dedupe_key}"
+        active = self.session.scalar(
+            select(QueueJobModel)
+            .where(
+                QueueJobModel.idempotency_key == idempotency_key,
+                QueueJobModel.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
             )
+            .limit(1)
         )
-        for job in active:
-            if job.payload.get("dedupe_key") == dedupe_key:
-                return job
-        return self.enqueue(
-            job_type,
-            {**payload, "dedupe_key": dedupe_key},
-            max_attempts=max_attempts,
-            commit=commit,
-        )
+        if active is not None:
+            return active
+        try:
+            with self.session.begin_nested():
+                model = self.enqueue(
+                    job_type,
+                    {**payload, "dedupe_key": dedupe_key},
+                    max_attempts=max_attempts,
+                    idempotency_key=idempotency_key,
+                    parent_run_id=parent_run_id,
+                    delay_seconds=delay_seconds,
+                    commit=False,
+                )
+        except IntegrityError:
+            model = self.session.scalar(
+                select(QueueJobModel)
+                .where(
+                    QueueJobModel.idempotency_key == idempotency_key,
+                    QueueJobModel.status.in_(
+                        [JobStatus.QUEUED.value, JobStatus.RUNNING.value]
+                    ),
+                )
+                .limit(1)
+            )
+            if model is None:
+                raise
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        return model
 
     def claim_next(self) -> QueueJobModel | None:
         statement = (
@@ -74,6 +103,7 @@ class QueueRepository:
             .where(QueueJobModel.status == JobStatus.QUEUED.value)
             .where(QueueJobModel.run_after <= utcnow())
             .order_by(QueueJobModel.created_at)
+            .with_for_update(skip_locked=True)
             .limit(1)
         )
         job = self.session.scalar(statement)
@@ -81,6 +111,7 @@ class QueueRepository:
             return None
         job.status = JobStatus.RUNNING.value
         job.attempts += 1
+        job.locked_at = utcnow()
         self.session.commit()
         self.session.refresh(job)
         return job
@@ -91,7 +122,13 @@ class QueueRepository:
             self.session.scalars(
                 select(QueueJobModel).where(
                     QueueJobModel.status == JobStatus.RUNNING.value,
-                    QueueJobModel.updated_at <= cutoff,
+                    or_(
+                        QueueJobModel.locked_at <= cutoff,
+                        and_(
+                            QueueJobModel.locked_at.is_(None),
+                            QueueJobModel.updated_at <= cutoff,
+                        ),
+                    ),
                 )
             )
         )
@@ -100,8 +137,10 @@ class QueueRepository:
             if job.attempts < job.max_attempts:
                 job.status = JobStatus.QUEUED.value
                 job.run_after = utcnow()
+                job.locked_at = None
             else:
-                job.status = JobStatus.FAILED.value
+                job.status = JobStatus.DEAD_LETTER.value
+                job.dead_lettered_at = utcnow()
         if jobs:
             self.session.commit()
             for job in jobs:
@@ -131,8 +170,10 @@ class QueueRepository:
             job.status = JobStatus.QUEUED.value
             delay = retry_delay_seconds if retry_delay_seconds is not None else 30 * job.attempts
             job.run_after = utcnow() + timedelta(seconds=delay)
+            job.locked_at = None
         else:
-            job.status = JobStatus.FAILED.value
+            job.status = JobStatus.DEAD_LETTER.value
+            job.dead_lettered_at = utcnow()
         self.session.commit()
         self.session.refresh(job)
         return job

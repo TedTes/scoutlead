@@ -6,6 +6,9 @@ from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaigns.repository import CampaignRepository
+from audience_runs.service import AudienceRunService
+from audience_runs.outreach import AudienceOutreachService
+from audience_runs.schemas import AudienceResultUpdate
 from campaigns.service import CampaignService
 from business_facts.repository import (
     BusinessFactKey,
@@ -19,6 +22,8 @@ from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
+    BusinessPublicationModel,
+    AudienceRunModel,
     CampaignModel,
     LeadModel,
     LeadOutcomeModel,
@@ -57,9 +62,17 @@ from territories.refill import enqueue_refill_if_depleted
 from territories.scheduler import enqueue_due_territories
 from territories.source_expansion import enqueue_profile_source_expansion
 from leads.repository import LeadRepository
-from leads.schemas import AgentFitStatus, QualificationResult
+from leads.schemas import (
+    AgentFitStatus,
+    ContactPolicyStatus,
+    LeadContactPolicyUpdate,
+    QualificationResult,
+    SuppressionScope,
+)
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
+from pipeline_outbox.dispatcher import PipelineOutboxDispatcher
+from pipeline_outbox.repository import PipelineOutboxRepository
 from territories.metrics import TerritoryMetricsService
 from territories.matching import ProfileMatchService
 
@@ -209,7 +222,9 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
         assert result.profile.search_prompt is None
         assert result.profile.search_contract == {}
         assert result.job.status.value == "queued"
-        assert result.job.payload["territory_id"] == result.profile.id
+        run = session.get(AudienceRunModel, result.job.payload["audience_run_id"])
+        assert run is not None
+        assert run.audience_id == result.profile.id
         assert session.scalar(select(func.count()).select_from(CampaignModel)) == 0
         assert (
             session.scalar(select(func.count()).select_from(TerritoryDeliveryModel))
@@ -845,11 +860,209 @@ def test_profile_refresh_materializes_without_calling_an_llm() -> None:
             session,
             SimpleNamespace(workspace_id="workspace:first"),
         )
-        assert current.state.value == "ready"
-        assert current.delivery is not None
-        assert current.delivery.id == next_delivery.id
-        assert current.result_count == 2
-        assert len(current.leads) == 2
+        assert current.state.value == "setup"
+        assert current.delivery is None
+        assert current.result_count == 0
+        assert current.leads == []
+
+
+def test_audience_run_returns_new_results_then_reuses_previous_results() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+        profile.batch_size = 2
+        session.commit()
+        service = AudienceRunService(session, workspace_id="workspace:first")
+
+        first = service.create(profile.id)
+        first, first_needs_expansion = service.process(first.id)
+        first_read = service.get_read(first.id)
+
+        assert first.state == "ready"
+        assert first_needs_expansion is False
+        assert first.new_result_count == 2
+        assert all(result.is_new for result in first_read.results)
+
+        second = service.create(profile.id)
+        second, second_needs_expansion = service.process(second.id)
+        second_read = service.get_read(second.id)
+
+        assert second.state == "ready"
+        assert second_needs_expansion is False
+        assert second.new_result_count == 0
+        assert [result.business_id for result in second_read.results] == [
+            result.business_id for result in first_read.results
+        ]
+        assert all(not result.is_new for result in second_read.results)
+
+
+def test_audience_result_creates_outreach_records_only_after_user_action() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+        profile.batch_size = 1
+        session.commit()
+        runs = AudienceRunService(session, workspace_id="workspace:first")
+        run = runs.create(profile.id)
+        runs.process(run.id)
+        result = runs.get_read(run.id).results[0]
+
+        assert session.scalar(select(func.count()).select_from(CampaignModel)) == 0
+        runs.update_result(
+            result.id,
+            AudienceResultUpdate(shortlisted=True),
+        )
+        outreach = AudienceOutreachService(
+            session,
+            workspace_id="workspace:first",
+        )
+        lead = outreach.promote(result.id)
+        repeated = outreach.promote(result.id)
+        OutcomeService(
+            session,
+            workspace_id="workspace:first",
+        ).record(
+            lead.id,
+            LeadOutcomeCreate(
+                outcome=LeadOutcome.CONTACTED,
+                channel=OutcomeChannel.EMAIL,
+            ),
+        )
+
+        assert lead.id == repeated.id
+        assert lead.shortlisted_at is not None
+        assert session.scalar(select(func.count()).select_from(CampaignModel)) == 1
+        assert session.scalar(select(func.count()).select_from(LeadModel)) == 1
+        batch = current_profile_batch(
+            profile.id,
+            session,
+            SimpleNamespace(workspace_id="workspace:first"),
+        )
+        assert batch.outreach_campaign_id == lead.campaign_id
+        assert batch.leads[0].outreach_lead_id == lead.id
+        assert batch.leads[0].last_contacted_at is not None
+
+
+def test_audience_result_suppression_blocks_shortlisting_without_creating_a_lead() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+        profile.batch_size = 1
+        session.commit()
+        runs = AudienceRunService(session, workspace_id="workspace:first")
+        run = runs.create(profile.id)
+        runs.process(run.id)
+        result = runs.get_read(run.id).results[0]
+
+        blocked = runs.update_contact_policy(
+            result.id,
+            LeadContactPolicyUpdate(
+                status=ContactPolicyStatus.SUPPRESSED,
+                reason="Do not contact.",
+                scope=SuppressionScope.WORKSPACE,
+            ),
+        )
+
+        assert blocked.contact_policy_status == ContactPolicyStatus.SUPPRESSED.value
+        assert session.scalar(select(func.count()).select_from(LeadModel)) == 0
+        with pytest.raises(ConflictError, match="blocked from outreach"):
+            runs.update_result(result.id, AudienceResultUpdate(shortlisted=True))
+
+
+def test_published_business_event_wakes_matching_waiting_audience() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+        run = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).create(profile.id)
+        run.state = "waiting_validation"
+        PipelineOutboxRepository(session).emit(
+            topic="business.publication_changed",
+            aggregate_type="business_publication",
+            aggregate_id="publication:test",
+            payload={
+                "publication_id": "publication:test",
+                "business_id": "business:test",
+                "niche_id": profile.niche_id,
+                "market_key": profile.market_key,
+                "status": "published",
+            },
+            idempotency_key="publication:test:published",
+        )
+        session.commit()
+
+        assert PipelineOutboxDispatcher(session).dispatch_one() is True
+
+        job = session.scalar(
+            select(QueueJobModel).where(QueueJobModel.type == "audience.run")
+        )
+        assert job is not None
+        assert job.payload["audience_run_id"] == run.id
 
 
 def test_profile_match_excludes_only_explicit_true_classifications() -> None:
@@ -1161,7 +1374,7 @@ def test_profile_change_feed_reports_entering_and_exiting_selected_signal() -> N
         assert [change.kind.value for change in relevant] == ["exited", "entered"]
 
 
-def test_profile_website_signal_includes_not_listed_as_possible_after_confirmed() -> None:
+def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -1201,10 +1414,7 @@ def test_profile_website_signal_includes_not_listed_as_possible_after_confirmed(
             limit=25,
         )
 
-        assert [row["title"] for row in rows] == [
-            businesses[1].display_name,
-            businesses[0].display_name,
-        ]
+        assert [row["title"] for row in rows] == [businesses[1].display_name]
         assert rows[0]["raw"]["profile_match"]["confirmed_signal_count"] == 1
         assert rows[0]["raw"]["profile_match"]["signals"]["website_unavailable"] == {
             "fact_key": "website_status",
@@ -1212,15 +1422,6 @@ def test_profile_website_signal_includes_not_listed_as_possible_after_confirmed(
             "matched": True,
             "confidence": "confirmed",
         }
-        assert rows[1]["raw"]["profile_match"]["confirmed_signal_count"] == 0
-        assert rows[1]["raw"]["profile_match"]["possible_signal_count"] == 1
-        assert rows[1]["raw"]["profile_match"]["signals"]["website_unavailable"] == {
-            "fact_key": "website_status",
-            "value": "not_listed",
-            "matched": True,
-            "confidence": "possible",
-        }
-
         campaign = CampaignRepository(
             session,
             workspace_id="workspace:first",
@@ -1247,12 +1448,7 @@ def test_profile_website_signal_includes_not_listed_as_possible_after_confirmed(
 
         assert [lead.qualification.fit_status for lead in leads if lead.qualification] == [
             AgentFitStatus.GOOD_FIT,
-            AgentFitStatus.MAYBE,
         ]
-        assert leads[1].qualification is not None
-        assert leads[1].qualification.rationale == (
-            "Possible selected signals: website_unavailable."
-        )
 
 
 def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None:
@@ -1532,7 +1728,9 @@ def test_scheduler_enqueues_one_active_job_per_territory_and_date() -> None:
 
         jobs = list(session.scalars(select(QueueJobModel)))
         assert len(jobs) == 1
-        assert jobs[0].payload["territory_id"] == territory.id
+        run = session.get(AudienceRunModel, jobs[0].payload["audience_run_id"])
+        assert run is not None
+        assert run.audience_id == territory.id
 
 
 def test_previous_territory_business_is_excluded_from_future_rows() -> None:
@@ -1863,5 +2061,19 @@ def _seed_hvac_businesses(session) -> None:
                     "search_query": "HVAC contractors in Toronto",
                 },
             },
+        )
+    for membership in session.scalars(select(BusinessNicheMembershipModel)):
+        session.add(
+            BusinessPublicationModel(
+                id=new_id("publication"),
+                business_id=membership.business_id,
+                niche_id=membership.niche_id,
+                market_key=membership.market_key,
+                status="published",
+                policy_version=1,
+                reasons=[{"code": "test_fixture"}],
+                evaluated_at=utcnow(),
+                expires_at=utcnow() + timedelta(days=30),
+            )
         )
     session.commit()

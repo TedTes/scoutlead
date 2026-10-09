@@ -1,11 +1,18 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
 from benchmarks.evaluator import evaluate_records
+from benchmarks.importer import import_reviewed_records
 from benchmarks.schemas import (
     BenchmarkLabels,
     BenchmarkObserved,
     BenchmarkRecord,
 )
+from db.models import BusinessModel, QualityLabelModel
+from db.session import create_database
+from shared.utils import utcnow
 
 
 def _record(*, website_observed, website_expected, reviews_observed, reviews_expected):
@@ -96,3 +103,38 @@ def test_benchmark_gate_requires_review_volume_and_requested_scope() -> None:
     assert report.coverage.reviewed_by_market == {"toronto": 1}
     assert report.gate.passed is False
     assert any("home_service_roofing" in failure for failure in report.gate.failures)
+
+
+def test_reviewed_benchmark_import_is_idempotent() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_factory() as session:
+        record = _record(
+            website_observed="missing",
+            website_expected="missing",
+            reviews_observed=8,
+            reviews_expected=8,
+        ).model_copy(update={"business_id": "business-benchmark"})
+        session.add(
+            BusinessModel(
+                id=record.business_id,
+                display_name=record.display_name,
+                normalized_name="example business",
+                market_key="toronto",
+                status="active",
+                first_seen_at=utcnow(),
+                last_seen_at=utcnow(),
+            )
+        )
+        session.commit()
+
+        preview = import_reviewed_records(session, [record], dry_run=True)
+        assert preview["labels"]["website_unavailable"] == 1
+        assert list(session.scalars(select(QualityLabelModel))) == []
+
+        import_reviewed_records(session, [record], dry_run=False)
+        import_reviewed_records(session, [record], dry_run=False)
+
+        labels = list(session.scalars(select(QualityLabelModel)))
+        assert len(labels) == 6

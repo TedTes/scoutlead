@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from job_queue.schemas import QueueJobRead
+from audience_runs.schemas import AudienceLeadRead
 from leads.schemas import LeadRead
 
 
@@ -260,7 +261,9 @@ class ProfileQueuedRead(BaseModel):
 class ProfileBatchRead(BaseModel):
     profile: TerritoryRead
     delivery: TerritoryDeliveryRead | None = None
-    leads: list[LeadRead] = Field(default_factory=list)
+    audience_run_id: str | None = None
+    outreach_campaign_id: str | None = None
+    leads: list[AudienceLeadRead] = Field(default_factory=list)
     state: ProfileBatchState
     requested_count: int
     result_count: int

@@ -36,6 +36,23 @@ class QueueService:
             commit=commit,
         )
 
+    def enqueue_audience_run(
+        self,
+        audience_run_id: str,
+        *,
+        delay_seconds: int = 0,
+        commit: bool = True,
+    ):
+        return self.queue.enqueue_once(
+            JobType.AUDIENCE_RUN,
+            {"audience_run_id": audience_run_id},
+            dedupe_key=audience_run_id,
+            parent_run_id=audience_run_id,
+            delay_seconds=delay_seconds,
+            max_attempts=3,
+            commit=commit,
+        )
+
     def enqueue_business_index_refresh(
         self,
         *,
@@ -80,6 +97,24 @@ class QueueService:
             max_attempts=3,
         )
 
+    def enqueue_business_validate(
+        self,
+        *,
+        source_item_id: str,
+        segment_id: str,
+        business_id: str,
+    ):
+        return self.queue.enqueue_once(
+            JobType.BUSINESS_VALIDATE,
+            {
+                "source_item_id": source_item_id,
+                "segment_id": segment_id,
+                "business_id": business_id,
+            },
+            dedupe_key=f"{source_item_id}:{business_id}",
+            max_attempts=3,
+        )
+
     def enqueue_business_opportunity_audit(
         self,
         *,
@@ -95,6 +130,23 @@ class QueueService:
             payload["source_item_id"] = source_item_id
         return self.queue.enqueue_once(
             JobType.BUSINESS_OPPORTUNITY_AUDIT,
+            payload,
+            dedupe_key=f"{segment_id}:{business_id}:{source_item_id or 'index'}",
+            max_attempts=3,
+        )
+
+    def enqueue_business_publication_evaluate(
+        self,
+        *,
+        source_item_id: str | None,
+        segment_id: str,
+        business_id: str,
+    ):
+        payload = {"segment_id": segment_id, "business_id": business_id}
+        if source_item_id:
+            payload["source_item_id"] = source_item_id
+        return self.queue.enqueue_once(
+            JobType.BUSINESS_PUBLICATION_EVALUATE,
             payload,
             dedupe_key=f"{segment_id}:{business_id}:{source_item_id or 'index'}",
             max_attempts=3,

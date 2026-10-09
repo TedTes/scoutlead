@@ -12,6 +12,7 @@ from business_facts.repository import (
     BusinessFactRepository,
     BusinessFactValue,
 )
+from business_facts.claims import FactClaim, FactClaimRepository
 from business_facts.freshness import fact_expires_at
 from canonical.normalization import normalize_domain
 from canonical.website_evidence import (
@@ -20,6 +21,7 @@ from canonical.website_evidence import (
 )
 from db.models import BusinessModel, LeadModel, SourceObservationModel
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
+from quality.fact_policy import FactQualityPolicyService
 from seeding.batches import observation_is_quarantined
 from shared.utils import utcnow
 
@@ -49,11 +51,21 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
     if website_promoted:
         business.website_url = trusted[0].url
         business.domain = normalize_domain(trusted[0].url)
+    claim_repository = FactClaimRepository(session)
+    for observation in observations:
+        for claim in _claims_from_observation(business, observation):
+            claim_repository.record(claim)
+    claims = claim_repository.current_for_business(business.id, now=utcnow())
     resolved = _resolve_facts(business, observations)
+    resolved = {
+        key: _attach_claim_resolution(fact, claims)
+        for key, fact in resolved.items()
+    }
     repository = BusinessFactRepository(session)
     website_fact_changed = False
     for fact in resolved.values():
-        _, value_changed = repository.upsert_with_value_change(business.id, fact)
+        model, value_changed = repository.upsert_with_value_change(business.id, fact)
+        FactQualityPolicyService(session).evaluate(model, commit=False)
         if fact.key == BusinessFactKey.WEBSITE_STATUS:
             website_fact_changed = value_changed
     website_fact = resolved.get(BusinessFactKey.WEBSITE_STATUS.value)
@@ -85,6 +97,104 @@ def _resolve_facts(
         if fact is not None:
             facts[fact.key.value] = fact
     return facts
+
+
+def _claims_from_observation(
+    business: BusinessModel,
+    observation: SourceObservationModel,
+) -> list[FactClaim]:
+    payload = observation.raw_payload or {}
+    values: list[BusinessFactValue] = []
+    status, confidence = _website_status_from_payload(payload)
+    if status == "present" and trusted_website_evidence(
+        source=observation.source,
+        payload=payload,
+        business_name=business.display_name,
+        business_phone=business.phone,
+    ) is None:
+        status = None
+    if status is not None:
+        values.append(
+            BusinessFactValue(
+                key=BusinessFactKey.WEBSITE_STATUS,
+                value=status,
+                observed_at=observation.observed_at,
+                source_observation_id=observation.id,
+                confidence=confidence,
+                expires_at=fact_expires_at(
+                    BusinessFactKey.WEBSITE_STATUS.value,
+                    observation.observed_at,
+                ),
+                resolver_version=RESOLVER_VERSION,
+            )
+        )
+    for resolver in (
+        _quote_form_fact,
+        _contact_form_fact,
+        _google_rating_fact,
+        _google_review_count_fact,
+        _operational_fact,
+    ):
+        value = resolver([observation])
+        if value is not None:
+            values.append(value)
+    return [
+        FactClaim(
+            business_id=business.id,
+            fact_key=value.key.value,
+            value=value.value,
+            source_observation_id=observation.id,
+            confidence=value.confidence,
+            extractor="business_fact_resolver",
+            extractor_version=RESOLVER_VERSION,
+            observed_at=value.observed_at,
+            expires_at=value.expires_at
+            or fact_expires_at(value.key.value, value.observed_at),
+        )
+        for value in values
+    ]
+
+
+def _attach_claim_resolution(
+    fact: BusinessFactValue,
+    claims: list,
+) -> BusinessFactValue:
+    supporting = [
+        claim
+        for claim in claims
+        if claim.fact_key == fact.key.value and claim.value == fact.value
+    ]
+    competing = [
+        claim
+        for claim in claims
+        if claim.fact_key == fact.key.value
+        and claim.value != fact.value
+        and claim.confidence >= 90
+    ]
+    state = (
+        "unknown"
+        if fact.value == "unknown"
+        else "conflicted"
+        if competing and fact.confidence >= 90
+        else "confirmed"
+        if fact.confidence >= 90
+        else "probable"
+    )
+    value = "unknown" if state == "conflicted" else fact.value
+    confidence = 0 if state == "conflicted" else fact.confidence
+    return BusinessFactValue(
+        key=fact.key,
+        value=value,
+        observed_at=fact.observed_at,
+        source_observation_id=fact.source_observation_id,
+        confidence=confidence,
+        resolution_state=state,
+        supporting_claim_ids=tuple(claim.id for claim in supporting),
+        quality_state="staged",
+        quality_policy_version=1,
+        expires_at=fact.expires_at,
+        resolver_version=fact.resolver_version,
+    )
 
 
 def _website_status_fact(

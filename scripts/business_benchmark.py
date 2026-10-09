@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "agent"))
 
 from app.config import get_settings  # noqa: E402
 from benchmarks.evaluator import evaluate_records  # noqa: E402
+from benchmarks.importer import import_reviewed_records  # noqa: E402
 from benchmarks.io import read_jsonl, write_jsonl  # noqa: E402
 from benchmarks.sampler import sample_businesses  # noqa: E402
 from db.session import Database  # noqa: E402
@@ -41,6 +42,16 @@ def main() -> int:
     evaluate.add_argument("--minimum-scope-reviewed", type=int, default=30)
     evaluate.add_argument("--require-niche", action="append", default=[])
     evaluate.add_argument("--require-market", action="append", default=[])
+    apply_labels = commands.add_parser(
+        "import",
+        help="Import reviewed benchmark labels into runtime quality gates.",
+    )
+    apply_labels.add_argument("--input", type=Path, required=True)
+    apply_labels.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist labels. Without this flag the command is a dry run.",
+    )
     args = parser.parse_args()
 
     if args.command == "sample":
@@ -54,6 +65,17 @@ def main() -> int:
             )
         write_jsonl(args.output, records)
         print(json.dumps({"output": str(args.output), "record_count": len(records)}))
+        return 0
+
+    if args.command == "import":
+        database = Database(get_settings().database_url)
+        with database.session_factory() as session:
+            summary = import_reviewed_records(
+                session,
+                read_jsonl(args.input),
+                dry_run=not args.apply,
+            )
+        print(json.dumps(summary, indent=2, sort_keys=True))
         return 0
 
     report = evaluate_records(

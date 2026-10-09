@@ -5,6 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agent_runs.repository import AgentRunRepository
+from audience_runs.scheduler import enqueue_waiting_audience_runs
+from audience_runs.service import AudienceRunService
 from app.config import get_settings
 from app.dependencies import AppServices, create_app_services
 from app.service_factory import (
@@ -17,7 +19,13 @@ from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
 from db.session import create_database
-from db.models import CampaignModel, QueueJobModel, TerritoryModel
+from db.models import (
+    AudienceRunModel,
+    CampaignModel,
+    CoverageRequestModel,
+    QueueJobModel,
+    TerritoryModel,
+)
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
@@ -27,6 +35,8 @@ from business_index.schemas import SearchContract
 from products.repository import ProductRepository
 from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
+from pipeline_outbox.dispatcher import PipelineOutboxDispatcher
+from publication.maintenance import expire_stale_evidence
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
 from territories.source_expansion import enqueue_profile_source_expansion
@@ -35,6 +45,8 @@ logger = get_logger(__name__)
 _last_territory_scheduler_tick = 0.0
 _last_business_index_scheduler_tick = 0.0
 _last_outcome_maintenance_date: date | None = None
+_last_audience_run_scheduler_tick = 0.0
+_last_evidence_expiry_tick = 0.0
 
 
 def run_once() -> bool:
@@ -51,6 +63,8 @@ def run_once() -> bool:
         queue = QueueRepository(session)
         job = queue.claim_next()
         if job is None:
+            if PipelineOutboxDispatcher(session).dispatch_one():
+                return True
             agent_run = AgentRunRepository(session).claim_next()
             if agent_run is None:
                 return False
@@ -106,10 +120,26 @@ def run_once() -> bool:
                     services=services,
                     workspace_id=territory.workspace_id,
                 ).refresh(territory_id, scheduled_for=scheduled_for)
-                try:
+            elif job.type == JobType.AUDIENCE_RUN.value:
+                audience_run = session.get(
+                    AudienceRunModel,
+                    str(job.payload["audience_run_id"]),
+                )
+                if audience_run is None:
+                    raise ValueError(
+                        f"audience run not found: {job.payload['audience_run_id']}"
+                    )
+                run, needs_expansion = AudienceRunService(
+                    session,
+                    workspace_id=audience_run.workspace_id,
+                ).process(audience_run.id)
+                if needs_expansion:
+                    profile = session.get(TerritoryModel, run.audience_id)
+                    if profile is None:
+                        raise ValueError(f"audience not found: {run.audience_id}")
                     enqueue_profile_source_expansion(
                         session,
-                        territory,
+                        profile,
                         google_places_configured=bool(
                             services.settings.google_places_api_key
                         ),
@@ -128,11 +158,12 @@ def run_once() -> bool:
                         ],
                         source_recipes=services.settings.discovery_source_recipe_configs,
                     )
-                except Exception:
-                    logger.exception(
-                        "profile_source_expansion_failed territory_id=%s",
-                        territory_id,
-                    )
+                    for request in session.query(CoverageRequestModel).filter(
+                        CoverageRequestModel.run_id == run.id,
+                        CoverageRequestModel.status == "queued",
+                    ):
+                        request.status = "processing"
+                    session.commit()
             elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
                 business_index_pipeline_service(
                     session=session,
@@ -161,6 +192,11 @@ def run_once() -> bool:
                     session=session,
                     services=services,
                 ).resolve_identity(str(job.payload["source_item_id"]))
+            elif job.type == JobType.BUSINESS_VALIDATE.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).validate_business(str(job.payload["source_item_id"]))
             elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
                 business_index_pipeline_service(
                     session=session,
@@ -192,6 +228,20 @@ def run_once() -> bool:
                             else None
                         ),
                     )
+            elif job.type == JobType.BUSINESS_PUBLICATION_EVALUATE.value:
+                business_index_pipeline_service(
+                    session=session,
+                    services=services,
+                ).evaluate_publication(
+                    business_id=str(job.payload["business_id"]),
+                    segment_id=str(job.payload["segment_id"]),
+                    source_item_id=(
+                        str(job.payload["source_item_id"])
+                        if job.payload.get("source_item_id")
+                        else None
+                    ),
+                    job_id=job.id,
+                )
             elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
                 SearchEvaluationService(
                     session=session,
@@ -226,7 +276,10 @@ def run_once() -> bool:
                 str(exc),
                 retry_delay_seconds=(3600 if job.type == JobType.TERRITORY_REFRESH.value else None),
             )
-            if failed_job.status == JobStatus.FAILED.value and job.payload.get("source_item_id"):
+            if failed_job.status in {
+                JobStatus.FAILED.value,
+                JobStatus.DEAD_LETTER.value,
+            } and job.payload.get("source_item_id"):
                 _record_source_item_failure(
                     session,
                     source_item_id=str(job.payload["source_item_id"]),
@@ -234,7 +287,7 @@ def run_once() -> bool:
                     reason=str(exc),
                 )
             if (
-                failed_job.status == JobStatus.FAILED.value
+                failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
                 and job.type == JobType.BUSINESS_INDEX_REFRESH.value
             ):
                 _fail_expanding_campaigns(
@@ -243,13 +296,22 @@ def run_once() -> bool:
                     reason=str(exc),
                 )
             if (
-                failed_job.status == JobStatus.FAILED.value
+                failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
                 and job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
                 and job.payload.get("campaign_id")
             ):
                 _fail_campaign(
                     session,
                     campaign_id=str(job.payload["campaign_id"]),
+                    reason=str(exc),
+                )
+            if (
+                failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
+                and job.type == JobType.AUDIENCE_RUN.value
+            ):
+                _fail_audience_run(
+                    session,
+                    run_id=str(job.payload["audience_run_id"]),
                     reason=str(exc),
                 )
             return True
@@ -294,10 +356,12 @@ def _consolidate_legacy_search_evaluations(
     contract_hash = str(current_job.payload["contract_hash"])
     active = list(
         session.scalars(
-            select(QueueJobModel).where(
+            select(QueueJobModel)
+            .where(
                 QueueJobModel.type == JobType.BUSINESS_SEARCH_EVALUATE.value,
                 QueueJobModel.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
             )
+            .order_by(QueueJobModel.created_at, QueueJobModel.id)
         )
     )
     legacy_jobs = [
@@ -346,7 +410,10 @@ def _recover_interrupted_jobs() -> None:
     try:
         recovered = QueueRepository(session).recover_stale_running()
         for job in recovered:
-            if job.status == JobStatus.FAILED.value and job.payload.get("source_item_id"):
+            if job.status in {
+                JobStatus.FAILED.value,
+                JobStatus.DEAD_LETTER.value,
+            } and job.payload.get("source_item_id"):
                 _record_source_item_failure(
                     session,
                     source_item_id=str(job.payload["source_item_id"]),
@@ -354,7 +421,7 @@ def _recover_interrupted_jobs() -> None:
                     reason=job.last_error or "Background stage stopped before completion.",
                 )
             if (
-                job.status == JobStatus.FAILED.value
+                job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
                 and job.type == JobType.BUSINESS_INDEX_REFRESH.value
             ):
                 _fail_expanding_campaigns(
@@ -363,7 +430,7 @@ def _recover_interrupted_jobs() -> None:
                     reason=job.last_error or "Background discovery stopped before completion.",
                 )
             if (
-                job.status == JobStatus.FAILED.value
+                job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
                 and job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
                 and job.payload.get("campaign_id")
             ):
@@ -371,6 +438,17 @@ def _recover_interrupted_jobs() -> None:
                     session,
                     campaign_id=str(job.payload["campaign_id"]),
                     reason=job.last_error or "Search evaluation stopped before completion.",
+                )
+            if (
+                job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
+                and job.type == JobType.AUDIENCE_RUN.value
+                and job.payload.get("audience_run_id")
+            ):
+                _fail_audience_run(
+                    session,
+                    run_id=str(job.payload["audience_run_id"]),
+                    reason=job.last_error
+                    or "Audience matching stopped before completion.",
                 )
         if recovered:
             logger.warning("recovered_stale_jobs count=%s", len(recovered))
@@ -406,6 +484,16 @@ def _fail_campaign(session: Session, *, campaign_id: str, reason: str) -> None:
         )
 
 
+def _fail_audience_run(session: Session, *, run_id: str, reason: str) -> None:
+    run = session.get(AudienceRunModel, run_id)
+    if run is None:
+        return
+    run.state = "failed"
+    run.failure_reason = reason[:2000]
+    run.completed_at = datetime.now(timezone.utc)
+    session.commit()
+
+
 def _record_source_item_failure(
     session: Session,
     *,
@@ -427,7 +515,9 @@ def _record_source_item_failure(
             stage={
                 JobType.SOURCE_ITEM_CLASSIFY.value: SourceItemStage.RELEVANCE,
                 JobType.BUSINESS_IDENTITY_RESOLVE.value: SourceItemStage.IDENTITY,
+                JobType.BUSINESS_VALIDATE.value: SourceItemStage.VALIDATION,
                 JobType.BUSINESS_OPPORTUNITY_AUDIT.value: SourceItemStage.OPPORTUNITY,
+                JobType.BUSINESS_PUBLICATION_EVALUATE.value: SourceItemStage.ELIGIBILITY,
                 JobType.SEARCH_ELIGIBILITY_MATCH.value: SourceItemStage.ELIGIBILITY,
             }.get(job_type, SourceItemStage.IDENTITY),
             decision=SourceItemDecisionValue.FAILED,
@@ -447,15 +537,23 @@ def _campaign_service(*, session: Session, services: AppServices) -> CampaignSer
 
 
 def _scheduler_tick(session: Session, services: AppServices) -> None:
+    global _last_audience_run_scheduler_tick
     global _last_business_index_scheduler_tick
+    global _last_evidence_expiry_tick
     global _last_outcome_maintenance_date, _last_territory_scheduler_tick
     now = monotonic()
+    if now - _last_audience_run_scheduler_tick >= 60:
+        enqueue_waiting_audience_runs(session)
+        _last_audience_run_scheduler_tick = now
     if (
         services.settings.business_index_scheduler_enabled
         and now - _last_business_index_scheduler_tick >= 60
     ):
         enqueue_due_business_index_refreshes(session)
         _last_business_index_scheduler_tick = now
+    if now - _last_evidence_expiry_tick >= 3600:
+        expire_stale_evidence(session)
+        _last_evidence_expiry_tick = now
     if not services.settings.territory_scheduler_enabled:
         return
     if now - _last_territory_scheduler_tick < 60:

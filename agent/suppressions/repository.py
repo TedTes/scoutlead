@@ -43,6 +43,97 @@ class ContactSuppressionRepository:
         )
         return list(self.session.scalars(statement))
 
+    def find_match(
+        self,
+        *,
+        product_id: str,
+        workspace_id: str | None,
+        identifiers: Iterable[tuple[str, str]],
+    ) -> ContactSuppressionModel | None:
+        values = list(identifiers)
+        if not values:
+            return None
+        conditions = [
+            (ContactSuppressionModel.kind == kind)
+            & (ContactSuppressionModel.value == value)
+            for kind, value in values
+        ]
+        return self.session.scalar(
+            select(ContactSuppressionModel)
+            .where(or_(*conditions))
+            .where(
+                or_(
+                    ContactSuppressionModel.scope == SuppressionScope.GLOBAL.value,
+                    (
+                        (ContactSuppressionModel.scope == SuppressionScope.WORKSPACE.value)
+                        & (ContactSuppressionModel.workspace_id == workspace_id)
+                    ),
+                    ContactSuppressionModel.product_id == product_id,
+                )
+            )
+            .order_by(ContactSuppressionModel.created_at.desc())
+            .limit(1)
+        )
+
+    def set_policy(
+        self,
+        *,
+        product_id: str,
+        workspace_id: str | None,
+        identifiers: Iterable[tuple[str, str]],
+        status: ContactPolicyStatus,
+        reason: str | None,
+        scope: SuppressionScope,
+        lead_id: str | None = None,
+        source: str = "manual",
+    ) -> None:
+        normalized_reason = " ".join((reason or "").split()) or None
+        for kind, value in identifiers:
+            self._upsert(
+                workspace_id=(
+                    workspace_id if scope == SuppressionScope.WORKSPACE else None
+                ),
+                product_id=product_id if scope == SuppressionScope.PRODUCT else None,
+                lead_id=lead_id,
+                scope=scope.value,
+                kind=kind,
+                value=value,
+                status=status.value,
+                reason=normalized_reason,
+                source=source,
+            )
+        self.session.commit()
+
+    def clear_policy(
+        self,
+        *,
+        product_id: str,
+        workspace_id: str | None,
+        identifiers: Iterable[tuple[str, str]],
+    ) -> None:
+        values = list(identifiers)
+        if not values:
+            return
+        conditions = [
+            (ContactSuppressionModel.kind == kind)
+            & (ContactSuppressionModel.value == value)
+            for kind, value in values
+        ]
+        self.session.execute(
+            delete(ContactSuppressionModel)
+            .where(or_(*conditions))
+            .where(
+                or_(
+                    ContactSuppressionModel.product_id == product_id,
+                    (
+                        (ContactSuppressionModel.scope == SuppressionScope.WORKSPACE.value)
+                        & (ContactSuppressionModel.workspace_id == workspace_id)
+                    ),
+                )
+            )
+        )
+        self.session.commit()
+
     def set_lead_policy(
         self,
         lead: LeadModel,
@@ -135,7 +226,7 @@ class ContactSuppressionRepository:
         *,
         workspace_id: str | None,
         product_id: str | None,
-        lead_id: str,
+        lead_id: str | None,
         scope: str,
         kind: str,
         value: str,
@@ -201,6 +292,10 @@ def is_blocked_contact_policy(status: ContactPolicyStatus | str | None) -> bool:
 
 def lead_suppression_identifiers(lead: LeadModel) -> Iterable[tuple[str, str]]:
     seen: set[tuple[str, str]] = set()
+    if lead.business_id:
+        business_key = ("business_id", lead.business_id)
+        seen.add(business_key)
+        yield business_key
     emails = [
         lead.contact_email,
         _research_value(lead, "contact_email"),

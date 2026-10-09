@@ -6,6 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.dependencies import create_app_services
 from agent_runs.routes import router as agent_runs_router
+from audience_runs.routes import router as audience_runs_router
 from auth.middleware import AuthMiddleware
 from campaigns.routes import router as campaigns_router
 from db.session import create_database
@@ -16,6 +17,7 @@ from leads.routes import router as leads_router
 from messages.routes import router as messages_router
 from outcomes.routes import router as outcomes_router
 from products.routes import router as products_router
+from quality.routes import router as quality_router
 from shared.errors import SoutleadError
 from shared.logger import configure_logging
 from territories.routes import profiles_router, router as territories_router
@@ -55,7 +57,9 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(products_router)
+    app.include_router(quality_router)
     app.include_router(agent_runs_router)
+    app.include_router(audience_runs_router)
     app.include_router(campaigns_router)
     app.include_router(discovery_runs_router)
     app.include_router(email_connections_router)

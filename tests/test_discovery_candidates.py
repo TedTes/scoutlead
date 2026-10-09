@@ -210,7 +210,7 @@ def test_google_places_business_without_website_is_classified_from_listing_evide
     assert assessment.rejection_reason is None
 
 
-def test_marketplace_painting_ad_is_not_rejected_for_mentioning_trade_tools() -> None:
+def test_marketplace_painting_ad_is_not_treated_as_a_canonical_business() -> None:
     product_data = product_input().model_dump(mode="json")
     product_data.update(
         {
@@ -233,8 +233,10 @@ def test_marketplace_painting_ad_is_not_rejected_for_mentioning_trade_tools() ->
         ProductRead.model_validate(product_data),
     )
 
-    assert assessment.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS
-    assert assessment.rejection_reason is None
+    assert assessment.candidate_type == DiscoveryCandidateType.DIRECTORY
+    assert assessment.rejection_reason == (
+        "Marketplace advertisement, not an independently identified business."
+    )
 
 
 def test_lead_review_state_and_shortlist_are_persisted() -> None:

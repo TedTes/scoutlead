@@ -23,6 +23,13 @@ BLOCKED_SOCIAL_HOSTS = {
     "x.com",
 }
 
+BLOCKED_MARKETPLACE_HOSTS = {
+    "kijiji.ca",
+    "craigslist.org",
+    "facebook.com",
+    "marketplace.facebook.com",
+}
+
 DIRECTORY_HOST_HINTS = (
     "yelp.",
     "angi.",
@@ -161,6 +168,13 @@ def assess_discovery_candidate(result: SearchResult, product: ProductRead) -> Ca
 
     if _host_matches(host, BLOCKED_SOCIAL_HOSTS):
         return _reject(DiscoveryCandidateType.SOCIAL, 95, "Social/content host, not a business website.")
+
+    if _host_matches(host, BLOCKED_MARKETPLACE_HOSTS):
+        return _reject(
+            DiscoveryCandidateType.DIRECTORY,
+            98,
+            "Marketplace advertisement, not an independently identified business.",
+        )
 
     if _contains_any(text, SALARY_TERMS):
         return _reject(DiscoveryCandidateType.SALARY, 95, "Salary or compensation page, not a customer business.")

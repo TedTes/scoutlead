@@ -33,7 +33,12 @@ class CampaignRepository:
         self.session = session
         self.workspace_id = workspace_id
 
-    def create(self, campaign: CampaignCreate) -> CampaignModel:
+    def create(
+        self,
+        campaign: CampaignCreate,
+        *,
+        commit: bool = True,
+    ) -> CampaignModel:
         data = campaign.model_dump(mode="json")
         self._assert_product_in_scope(data["product_id"])
         requested_name = data.pop("name") or f"Campaign {utcnow().date().isoformat()}"
@@ -45,8 +50,11 @@ class CampaignRepository:
             **data,
         )
         self.session.add(model)
-        self.session.commit()
-        self.session.refresh(model)
+        if commit:
+            self.session.commit()
+            self.session.refresh(model)
+        else:
+            self.session.flush()
         return model
 
     def list(self) -> list[CampaignModel]:
