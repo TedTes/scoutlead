@@ -152,7 +152,10 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const selectedProfileRun = productDiscoveryRuns.find(
     (run) => run.territory_id === selectedProfileId,
   );
-  const activeScreen = resolveActiveScreen(viewMode, selectedRunExists);
+  const activeScreen = resolveActiveScreen(
+    viewMode,
+    selectedRunExists || Boolean(selectedProfileId),
+  );
   const currentRunContacts = selectedDiscoveryRunId
     ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
     : productContacts;
@@ -165,7 +168,10 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     dismissed: currentRunContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
     all: currentRunContacts.length,
   };
-  const workflowCounts = workflowSummary?.runId === selectedDiscoveryRunId
+  const workflowScopeId = selectedDiscoveryRunId
+    || profileBatch?.audience_run_id
+    || selectedProfileId;
+  const workflowCounts = workflowSummary?.runId === workflowScopeId
     ? workflowSummary.counts
     : fallbackWorkflowCounts;
   const leadWorkflowItems: Array<{ id: LeadWorkflowView; label: string; count: number; icon: ReactNode }> = [
@@ -220,7 +226,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     setLeadWorkflowView(nextView);
     const targetRunId = selectedRunExists
       ? selectedDiscoveryRunId
-      : selectedProfileRun?.id || productDiscoveryRuns[0]?.id;
+      : selectedProfileRun?.id || (!selectedProfileId ? productDiscoveryRuns[0]?.id : undefined);
     if (targetRunId) {
       setSelectedDiscoveryRunId(targetRunId);
       void refreshSnapshot(targetRunId);
@@ -388,9 +394,14 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, [selectedProductId]);
 
   useEffect(() => {
-    if (!profileBatch?.delivery?.campaign_id || profileBatch.profile.id !== selectedProfileId) return;
+    if (!profileBatch || profileBatch.profile.id !== selectedProfileId) return;
     setViewMode("auto");
-  }, [profileBatch?.delivery?.campaign_id, profileBatch?.profile.id, selectedProfileId]);
+  }, [
+    profileBatch?.audience_run_id,
+    profileBatch?.outreach_campaign_id,
+    profileBatch?.profile.id,
+    selectedProfileId,
+  ]);
 
   useEffect(() => {
     if (!productMenuOpen) return;

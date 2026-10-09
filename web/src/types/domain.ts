@@ -245,6 +245,7 @@ export type DiscoveryResult = {
   territory_id?: string | null;
   product_id: string;
   business_id?: string | null;
+  outreach_lead_id?: string | null;
   contact_id?: string | null;
   company_name: string;
   website_url?: string;
@@ -419,6 +420,8 @@ export type ProfileQueued = {
 export type ProfileBatch = {
   profile: Territory;
   delivery?: TerritoryDelivery | null;
+  audience_run_id?: string | null;
+  outreach_campaign_id?: string | null;
   leads: DiscoveryResult[];
   state: "setup" | "scoring" | "retrying" | "ready" | "empty" | "partial" | "failed";
   requested_count: number;

@@ -206,15 +206,21 @@ export class ApiClient {
     return this.request<TerritoryMetrics>(`/territories/${id}/metrics?weeks=${weeks}`);
   }
 
-  recordLeadOutcome(leadId: string, outcome: LeadOutcomeValue, channel = "other") {
-    return this.request(`/leads/${leadId}/outcomes`, {
+  async recordLeadOutcome(leadId: string, outcome: LeadOutcomeValue, channel = "other") {
+    const resolvedId = leadId.startsWith("audience_result_")
+      ? (await this.promoteAudienceResult(leadId)).id
+      : leadId;
+    return this.request(`/leads/${resolvedId}/outcomes`, {
       method: "POST",
       body: { outcome, channel },
     });
   }
 
-  generateLeadApproach(leadId: string) {
-    return this.request<DiscoveryResult>(`/leads/${leadId}/approach`, { method: "POST" });
+  async generateLeadApproach(leadId: string) {
+    const resolvedId = leadId.startsWith("audience_result_")
+      ? (await this.promoteAudienceResult(leadId)).id
+      : leadId;
+    return this.request<DiscoveryResult>(`/leads/${resolvedId}/approach`, { method: "POST" });
   }
 
   createDiscoveryRun(input: DiscoveryRunCreateInput) {
@@ -312,14 +318,23 @@ export class ApiClient {
   }
 
   updateLead(id: string, body: LeadUpdateInput) {
-    return this.request<DiscoveryResult>(`/leads/${id}`, { method: "PATCH", body });
+    const path = id.startsWith("audience_result_")
+      ? `/audiences/results/${id}`
+      : `/leads/${id}`;
+    return this.request<DiscoveryResult>(path, { method: "PATCH", body });
   }
 
   updateLeadContactPolicy(id: string, body: LeadContactPolicyInput) {
-    return this.request<DiscoveryResult>(`/leads/${id}/contact-policy`, { method: "PATCH", body });
+    const path = id.startsWith("audience_result_")
+      ? `/audiences/results/${id}/contact-policy`
+      : `/leads/${id}/contact-policy`;
+    return this.request<DiscoveryResult>(path, { method: "PATCH", body });
   }
 
   qualifyLead(id: string) {
+    if (id.startsWith("audience_result_")) {
+      return this.updateLead(id, { review_status: "good_fit" });
+    }
     return this.request<DiscoveryResult>(`/leads/${id}/qualify`, { method: "POST" });
   }
 
@@ -369,6 +384,13 @@ export class ApiClient {
 
   createLeadOutreachDraft(leadId: string) {
     return this.request<Message>(`/leads/${leadId}/outreach-draft`, { method: "POST" });
+  }
+
+  promoteAudienceResult(resultId: string) {
+    return this.request<DiscoveryResult>(
+      `/audiences/results/${resultId}/outreach-lead`,
+      { method: "POST" },
+    );
   }
 
   updateMessage(id: string, body: Partial<Message>) {

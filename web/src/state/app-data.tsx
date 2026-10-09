@@ -337,7 +337,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       setSwitchingProfileId(profileId);
       try {
         const batch = await api.getProfileBatch(profileId);
-        const runId = batch.delivery?.campaign_id || "";
+        const runId = batch.outreach_campaign_id || batch.delivery?.campaign_id || "";
         const [run, nextSnapshot] = runId
           ? await Promise.all([api.getDiscoveryRun(runId), fetchSnapshot(runId)])
           : [null, emptySnapshot] as const;
@@ -375,18 +375,19 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       const batch = await api.getProfileBatch(targetProfileId);
       if (targetProfileId === selectedProfileIdRef.current) {
         setProfileBatch(batch);
-        if (!batch.delivery?.campaign_id) {
+        if (!batch.outreach_campaign_id && !batch.delivery?.campaign_id) {
           localStorage.setItem("selectedDiscoveryRunId", "");
           selectedDiscoveryRunIdRef.current = "";
           setSelectedDiscoveryRunIdState("");
-          setSnapshot(emptySnapshot);
+          setSnapshot({ ...emptySnapshot, results: batch.leads });
         }
       }
       if (
-        batch.delivery?.campaign_id
+        (batch.outreach_campaign_id || batch.delivery?.campaign_id)
         && targetProfileId === selectedProfileIdRef.current
       ) {
-        const run = await api.getDiscoveryRun(batch.delivery.campaign_id);
+        const runId = batch.outreach_campaign_id || batch.delivery!.campaign_id;
+        const run = await api.getDiscoveryRun(runId);
         setDiscoveryRuns((current) => upsertDiscoveryRun(current, run));
         localStorage.setItem("selectedDiscoveryRunId", run.id);
         selectedDiscoveryRunIdRef.current = run.id;
@@ -481,14 +482,18 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         : null;
       setProfileBatch(nextBatch);
       const effectiveRunId = nextBatch
-        ? nextBatch.delivery?.campaign_id || ""
+        ? nextBatch.outreach_campaign_id || nextBatch.delivery?.campaign_id || ""
         : nextRunId;
       if (effectiveRunId !== nextRunId) {
         setSelectedDiscoveryRunIdState(effectiveRunId);
         selectedDiscoveryRunIdRef.current = effectiveRunId;
         localStorage.setItem("selectedDiscoveryRunId", effectiveRunId);
       }
-      await refreshSnapshot(effectiveRunId, nextBatch?.leads);
+      if (effectiveRunId) {
+        await refreshSnapshot(effectiveRunId, nextBatch?.leads);
+      } else {
+        setSnapshot({ ...emptySnapshot, results: nextBatch?.leads || [] });
+      }
       await refreshGmailConnection(nextProductId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -824,19 +829,35 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         });
         return created;
       },
-      createCampaignOutreachDrafts: async (input, runId = selectedDiscoveryRunIdState) => {
+      createCampaignOutreachDrafts: async (input, runId) => {
         let result: CampaignMessageBatchResult | null = null;
         await mutate(async () => {
-          if (!runId) return;
-          result = await api.createCampaignDrafts(runId, input);
+          let targetRunId = runId || selectedDiscoveryRunIdRef.current;
+          const leadIds: string[] = [];
+          for (const leadId of input.lead_ids || []) {
+            if (!leadId.startsWith("audience_result_")) {
+              leadIds.push(leadId);
+              continue;
+            }
+            const promoted = await api.promoteAudienceResult(leadId);
+            leadIds.push(promoted.id);
+            targetRunId = promoted.campaign_id;
+          }
+          if (!targetRunId) return;
+          selectedDiscoveryRunIdRef.current = targetRunId;
+          result = await api.createCampaignDrafts(targetRunId, {
+            ...input,
+            lead_ids: leadIds,
+          });
         });
         return result;
       },
-      approveCampaignOutreachDrafts: async (input = {}, runId = selectedDiscoveryRunIdState) => {
+      approveCampaignOutreachDrafts: async (input = {}, runId) => {
         let result: CampaignMessageBatchResult | null = null;
         await mutate(async () => {
-          if (!runId) return;
-          result = await api.approveCampaignDrafts(runId, {
+          const targetRunId = runId || selectedDiscoveryRunIdRef.current;
+          if (!targetRunId) return;
+          result = await api.approveCampaignDrafts(targetRunId, {
             message_ids: input.message_ids ?? [],
             approved_by: approverLabel || "operator",
             notes: input.notes,
@@ -844,11 +865,12 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         });
         return result;
       },
-      sendCampaignOutreachDrafts: async (input = {}, runId = selectedDiscoveryRunIdState) => {
+      sendCampaignOutreachDrafts: async (input = {}, runId) => {
         let result: CampaignMessageBatchResult | null = null;
         await mutate(async () => {
-          if (!runId) return;
-          result = await api.sendCampaignDrafts(runId, {
+          const targetRunId = runId || selectedDiscoveryRunIdRef.current;
+          if (!targetRunId) return;
+          result = await api.sendCampaignDrafts(targetRunId, {
             message_ids: input.message_ids ?? [],
           });
         });
@@ -857,7 +879,10 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       createOutreachDraft: async (leadId) => {
         let created: Message | null = null;
         await mutate(async () => {
-          created = await api.createLeadOutreachDraft(leadId);
+          const outreachLead = leadId.startsWith("audience_result_")
+            ? await api.promoteAudienceResult(leadId)
+            : null;
+          created = await api.createLeadOutreachDraft(outreachLead?.id || leadId);
         });
         return created;
       },

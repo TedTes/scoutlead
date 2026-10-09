@@ -268,7 +268,9 @@ export function ResultsScreen({
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
     : undefined;
-  const selectedMessage = selectedContact ? messageByLeadId.get(selectedContact.id) : undefined;
+  const selectedMessage = selectedContact
+    ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
+    : undefined;
   const searchIntentChanged = Boolean(
     searchIntent
     && editedSearchIntent
@@ -276,9 +278,18 @@ export function ResultsScreen({
   );
 
   useEffect(() => {
-    if (!selectedDiscoveryRunId || !onWorkflowCountsChange) return;
-    onWorkflowCountsChange(selectedDiscoveryRunId, workflowCounts);
-  }, [onWorkflowCountsChange, selectedDiscoveryRunId, workflowCounts]);
+    const scopeId = selectedDiscoveryRunId
+      || visibleProfileBatch?.audience_run_id
+      || selectedProfileId;
+    if (!scopeId || !onWorkflowCountsChange) return;
+    onWorkflowCountsChange(scopeId, workflowCounts);
+  }, [
+    onWorkflowCountsChange,
+    selectedDiscoveryRunId,
+    selectedProfileId,
+    visibleProfileBatch?.audience_run_id,
+    workflowCounts,
+  ]);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1160px)");
@@ -597,15 +608,10 @@ export function ResultsScreen({
 
   const recordContactOutcome = async (leadId: string, outcome: LeadOutcomeValue) => {
     await territoryApi.recordLeadOutcome(leadId, outcome, outcome === "contacted" ? "email" : "other");
-    await Promise.all([
-      refreshSnapshot(selectedDiscoveryRunId),
-      selectedTerritory && selectedDelivery
-        ? territoryApi.getTerritoryDeliveryContacts(selectedTerritory.id, selectedDelivery.id).then(setDeliveryContacts)
-        : Promise.resolve(),
-      selectedTerritory
-        ? territoryApi.getTerritoryMetrics(selectedTerritory.id).then(setTerritoryMetrics)
-        : Promise.resolve(),
-    ]);
+    await refreshAll({ showLoading: false });
+    if (selectedTerritory) {
+      await territoryApi.getTerritoryMetrics(selectedTerritory.id).then(setTerritoryMetrics);
+    }
   };
 
   const generateContactApproach = async (leadId: string) => {
@@ -613,7 +619,7 @@ export function ResultsScreen({
     setDeliveryContacts((current) => (
       current?.map((contact) => contact.id === updated.id ? updated : contact) || current
     ));
-    await refreshSnapshot(selectedDiscoveryRunId);
+    await refreshAll({ showLoading: false });
   };
 
   const draftCurrentShortlist = async () => {
@@ -988,7 +994,7 @@ export function ResultsScreen({
             onCreateDraft={createOutreachDraft}
             onQualifyLead={qualifyLead}
             onMarkMessageReplied={markMessageReplied}
-            onGenerateApproach={selectedTerritory ? generateContactApproach : undefined}
+            onGenerateApproach={activeProfile ? generateContactApproach : undefined}
             onRecordOutcome={recordContactOutcome}
             onSendMessage={sendMessage}
             onUpdateContactPolicy={updateLeadContactPolicy}
