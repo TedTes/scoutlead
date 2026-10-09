@@ -29,7 +29,7 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { OverviewScreen } from "./OverviewScreen";
+import { AudienceProfileScreen } from "./AudienceProfileScreen";
 import { SearchIntentChips, searchIntentFromRun } from "../components/SearchIntentChips";
 import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -148,6 +148,7 @@ export function ResultsScreen({
     snapshot,
     territories,
     territoryApi,
+    refillProfile,
     refreshAll,
     refreshSnapshot,
   } = useAppData();
@@ -197,6 +198,9 @@ export function ResultsScreen({
       ? profileBatch
       : null;
   const isProfileAggregate = Boolean(visibleProfileBatch);
+  const isAudienceView = Boolean(
+    activeProfile && (isProfileAggregate || (!selectedDiscoveryRun && selectedProfileId)),
+  );
   const sourceContacts = visibleProfileBatch
     ? visibleProfileBatch.leads
     : selectedDiscoveryRunId
@@ -664,6 +668,28 @@ export function ResultsScreen({
     }
   };
 
+  const runActiveAudienceAgain = async () => {
+    if (!activeProfile || scheduleBusy) return;
+    setScheduleBusy(true);
+    try {
+      await refillProfile(activeProfile.id);
+      setRunMenuOpen(false);
+      showToast({
+        title: "Audience queued",
+        message: "ScoutLead is checking the published business index for the next batch.",
+        tone: "blue",
+      });
+    } catch (err) {
+      showToast({
+        title: "Audience could not run",
+        message: err instanceof Error ? err.message : String(err),
+        tone: "red",
+      });
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
   const beginContactsExport = (contactsToExport: DiscoveryResult[], name: string, suffix = "contacts") => {
     if (!contactsToExport.length) {
       showToast({ title: "No contacts to export", message: "Change the view or run a search first.", tone: "amber" });
@@ -710,15 +736,8 @@ export function ResultsScreen({
     });
   };
 
-  if (!selectedDiscoveryRun) {
-    return <OverviewScreen />;
-  }
-
-  if (!contacts.length && !selectedTerritory) {
-    const emptyMessage = selectedDiscoveryRun.status === "failed"
-        ? selectedDiscoveryRun.failure_reason || "This search could not finish. Run it again after checking the worker."
-        : "No eligible contacts were found in the available business index. This request will guide the next scheduled refresh.";
-    return <OverviewScreen emptyMessage={emptyMessage} />;
+  if (!selectedDiscoveryRun && !activeProfile) {
+    return <AudienceProfileScreen />;
   }
 
   return (
@@ -761,7 +780,12 @@ export function ResultsScreen({
             </button>
             {runMenuOpen ? (
               <div className="action-menu">
-                {selectedTerritory ? (
+                {isAudienceView && activeProfile ? (
+                  <div className="run-menu-summary">
+                    <strong>{refillPolicyLabel(activeProfile.refill_policy)} · {activeProfile.status}</strong>
+                    <span>{visibleProfileBatch?.result_count || 0} leads in the current batch</span>
+                  </div>
+                ) : selectedTerritory ? (
                   <div className="run-menu-summary">
                     <strong>{refillPolicyLabel(selectedTerritory.refill_policy)} · {selectedTerritory.status}</strong>
                     <span>
@@ -770,7 +794,29 @@ export function ResultsScreen({
                     </span>
                   </div>
                 ) : null}
-                {selectedTerritory ? (
+                {isAudienceView && activeProfile ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={scheduleBusy || activeProfile.status !== "active"}
+                      onClick={() => void runActiveAudienceAgain()}
+                    >
+                      <RotateCw size={14} />
+                      {scheduleBusy ? "Queueing..." : "Run again"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRunMenuOpen(false);
+                        setProfileDetailsOpen(true);
+                      }}
+                    >
+                      <CalendarClock size={14} />
+                      Audience details
+                    </button>
+                    <div className="action-menu-divider" />
+                  </>
+                ) : selectedTerritory ? (
                   <>
                     <button
                       type="button"
@@ -839,32 +885,36 @@ export function ResultsScreen({
                 </button>
                 <button
                   type="button"
-                  disabled={!draftableShortlistContacts.length || draftingShortlist}
+                  disabled={!selectedDiscoveryRun || !draftableShortlistContacts.length || draftingShortlist}
                   onClick={() => void draftCurrentShortlist()}
                 >
                   <Mail size={14} />
                   Generate drafts for shortlist
                 </button>
-                <button type="button" onClick={() => void renameCurrentRun()}>
-                  Rename search
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRunMenuOpen(false);
-                    window.location.assign(`/trace?run=${encodeURIComponent(selectedDiscoveryRunId)}`);
-                  }}
-                >
-                  <Workflow size={14} />
-                  Inspect run
-                </button>
-                {!selectedTerritory ? (
+                {selectedDiscoveryRun ? (
+                  <>
+                    <button type="button" onClick={() => void renameCurrentRun()}>
+                      Rename search
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRunMenuOpen(false);
+                        window.location.assign(`/trace?run=${encodeURIComponent(selectedDiscoveryRunId)}`);
+                      }}
+                    >
+                      <Workflow size={14} />
+                      Inspect run
+                    </button>
+                  </>
+                ) : null}
+                {!selectedTerritory && !isAudienceView ? (
                   <button type="button" disabled={running} onClick={openRerunPrompt}>
                     <RotateCw size={14} />
                     Re-run search
                   </button>
                 ) : null}
-                {!selectedTerritory ? (
+                {!selectedTerritory && !isAudienceView ? (
                   <button className="danger-item" type="button" onClick={() => void deleteCurrentRun()}>
                     <Trash2 size={14} />
                     Delete this search
