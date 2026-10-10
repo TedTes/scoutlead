@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useAppData } from "../state/app-data";
+import type { ApiClient } from "../api/client";
 import type {
   AdminBusinessDetail,
   AdminBusinessSummary,
@@ -34,8 +34,7 @@ const emptyOverview: AdminOverview = {
   published: 0,
 };
 
-export function AdminDataScreen() {
-  const { territoryApi } = useAppData();
+export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [overview, setOverview] = useState(emptyOverview);
   const [rows, setRows] = useState<AdminBusinessSummary[]>([]);
@@ -54,11 +53,11 @@ export function AdminDataScreen() {
     setLoading(true);
     setError("");
     try {
-      await territoryApi.getAdminAccess();
+      await api.getAdminAccess();
       setAllowed(true);
       const [summary, businessPage] = await Promise.all([
-        territoryApi.getAdminOverview(),
-        territoryApi.getAdminBusinesses({ q: search, validation, status, page, page_size: 50 }),
+        api.getAdminOverview(),
+        api.getAdminBusinesses({ q: search, validation, status, page, page_size: 50 }),
       ]);
       setOverview(summary);
       setRows(businessPage.items);
@@ -75,7 +74,7 @@ export function AdminDataScreen() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, status, territoryApi, validation]);
+  }, [api, page, search, status, validation]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -87,10 +86,10 @@ export function AdminDataScreen() {
       setDetail(null);
       return;
     }
-    void territoryApi.getAdminBusiness(selectedId).then(setDetail).catch((cause) => {
+    void api.getAdminBusiness(selectedId).then(setDetail).catch((cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
-  }, [allowed, selectedId, territoryApi]);
+  }, [allowed, api, selectedId]);
 
   const refreshDetail = async (result?: AdminBusinessDetail) => {
     if (result) {
@@ -186,6 +185,7 @@ export function AdminDataScreen() {
         </div>
 
         <BusinessInspector
+          api={api}
           detail={detail}
           onEdit={() => setDialog("edit")}
           onDelete={() => setDialog("delete")}
@@ -193,9 +193,9 @@ export function AdminDataScreen() {
         />
       </div>
 
-      {dialog === "add" ? <BusinessForm mode="add" onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
-      {dialog === "edit" && detail ? <BusinessForm mode="edit" detail={detail} onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
-      {dialog === "delete" && detail ? <DeleteDialog detail={detail} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); setSelectedId(""); void load(); }} /> : null}
+      {dialog === "add" ? <BusinessForm api={api} mode="add" onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
+      {dialog === "edit" && detail ? <BusinessForm api={api} mode="edit" detail={detail} onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
+      {dialog === "delete" && detail ? <DeleteDialog api={api} detail={detail} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); setSelectedId(""); void load(); }} /> : null}
     </section>
   );
 }
@@ -209,17 +209,18 @@ function StatusPill({ value }: { value: string }) {
 }
 
 function BusinessInspector({
+  api,
   detail,
   onEdit,
   onDelete,
   onRefresh,
 }: {
+  api: ApiClient;
   detail: AdminBusinessDetail | null;
   onEdit: () => void;
   onDelete: () => void;
   onRefresh: (value?: AdminBusinessDetail) => Promise<void>;
 }) {
-  const { territoryApi } = useAppData();
   const [tab, setTab] = useState<"validation" | "facts" | "sources" | "history">("validation");
   const [busy, setBusy] = useState(false);
   if (!detail) return <aside className="admin-inspector is-empty">Select a business to inspect its evidence.</aside>;
@@ -230,8 +231,8 @@ function BusinessInspector({
     setBusy(true);
     try {
       const result = action === "revalidate"
-        ? await territoryApi.revalidateAdminBusiness(detail.id, reason)
-        : await territoryApi.changeAdminBusinessStatus(detail.id, status || "active", reason);
+        ? await api.revalidateAdminBusiness(detail.id, reason)
+        : await api.changeAdminBusinessStatus(detail.id, status || "active", reason);
       await onRefresh(result);
     } finally {
       setBusy(false);
@@ -284,8 +285,7 @@ function formatValue(value: unknown) {
   return String(value);
 }
 
-function BusinessForm({ mode, detail, onClose, onSaved }: { mode: "add" | "edit"; detail?: AdminBusinessDetail; onClose: () => void; onSaved: (value: AdminBusinessDetail) => void }) {
-  const { territoryApi } = useAppData();
+function BusinessForm({ api, mode, detail, onClose, onSaved }: { api: ApiClient; mode: "add" | "edit"; detail?: AdminBusinessDetail; onClose: () => void; onSaved: (value: AdminBusinessDetail) => void }) {
   const [form, setForm] = useState<Record<string, string>>({
     display_name: detail?.display_name || "",
     niche_slug: detail?.niche_slug || "home_service_painting",
@@ -309,7 +309,7 @@ function BusinessForm({ mode, detail, onClose, onSaved }: { mode: "add" | "edit"
       const payload: Record<string, unknown> = { ...form };
       ["latitude", "longitude"].forEach((key) => { payload[key] = form[key] === "" ? null : Number(form[key]); });
       if (mode === "edit") { delete payload.niche_slug; delete payload.market_key; delete payload.source_url; delete payload.source_provider; }
-      const result = mode === "add" ? await territoryApi.createAdminBusiness(payload) : await territoryApi.updateAdminBusiness(detail!.id, payload);
+      const result = mode === "add" ? await api.createAdminBusiness(payload) : await api.updateAdminBusiness(detail!.id, payload);
       onSaved(result);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSaving(false); }
@@ -319,10 +319,10 @@ function BusinessForm({ mode, detail, onClose, onSaved }: { mode: "add" | "edit"
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
 
-function DeleteDialog({ detail, onClose, onDeleted }: { detail: AdminBusinessDetail; onClose: () => void; onDeleted: () => void }) {
-  const { territoryApi } = useAppData(); const [confirmation, setConfirmation] = useState(""); const [reason, setReason] = useState(""); const [error, setError] = useState(""); const [dependencyMap, setDependencyMap] = useState<Record<string, number> | null>(null);
-  useEffect(() => { void territoryApi.getAdminBusinessDeleteDependencies(detail.id).then(setDependencyMap).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))); }, [detail.id, territoryApi]);
+function DeleteDialog({ api, detail, onClose, onDeleted }: { api: ApiClient; detail: AdminBusinessDetail; onClose: () => void; onDeleted: () => void }) {
+  const [confirmation, setConfirmation] = useState(""); const [reason, setReason] = useState(""); const [error, setError] = useState(""); const [dependencyMap, setDependencyMap] = useState<Record<string, number> | null>(null);
+  useEffect(() => { void api.getAdminBusinessDeleteDependencies(detail.id).then(setDependencyMap).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))); }, [api, detail.id]);
   const dependencies = useMemo(() => Object.entries(dependencyMap || {}), [dependencyMap]);
-  const remove = async () => { try { await territoryApi.deleteAdminBusiness(detail.id, confirmation, reason); onDeleted(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } };
+  const remove = async () => { try { await api.deleteAdminBusiness(detail.id, confirmation, reason); onDeleted(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } };
   return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-delete-dialog" role="dialog" aria-modal="true"><header><div><h2>Delete business permanently</h2><p>Use Archive for records that have evidence or workflow history.</p></div><button className="admin-icon-button" type="button" onClick={onClose}><X size={16} /></button></header>{dependencyMap === null ? <div className="admin-dependency-warning"><RefreshCw className="sl-spin-icon" size={16} /><div><strong>Checking related records</strong></div></div> : dependencies.length ? <div className="admin-dependency-warning"><CircleAlert size={16} /><div><strong>Permanent deletion is blocked</strong><p>{dependencies.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></div></div> : null}<Field label={`Type “${detail.display_name}”`} value={confirmation} onChange={setConfirmation} /><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-danger-button" disabled={dependencyMap === null || Boolean(dependencies.length) || confirmation !== detail.display_name || !reason.trim()} type="button" onClick={() => void remove()}><Trash2 size={14} /> Delete permanently</button></footer></div></div>;
 }

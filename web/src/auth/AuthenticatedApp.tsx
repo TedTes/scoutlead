@@ -1,20 +1,22 @@
 import { RedirectToSignIn, RedirectToSignUp, UserButton, useAuth, useUser } from "@clerk/react";
 import { useCallback, useEffect, useRef } from "react";
+import { AdminApp } from "../admin/AdminApp";
 import { App } from "../app/App";
 import { getClerkPublishableKey } from "../config/env";
 import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
 export default function AuthenticatedApp() {
   const publishableKey = getClerkPublishableKey();
+  const adminRoute = isAdminRoute();
 
   if (!publishableKey) {
-    return <App />;
+    return adminRoute ? <AdminApp /> : <App />;
   }
 
-  return <ClerkGate />;
+  return <ClerkGate adminRoute={adminRoute} />;
 }
 
-function ClerkGate() {
+function ClerkGate({ adminRoute }: { adminRoute: boolean }) {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
   const getTokenRef = useRef(getToken);
@@ -28,9 +30,10 @@ function ClerkGate() {
   }
 
   if (!isSignedIn) {
+    const destination = adminRoute ? "/admin" : "/app";
     const redirectProps = {
-      fallbackRedirectUrl: "/app",
-      forceRedirectUrl: "/app",
+      fallbackRedirectUrl: destination,
+      forceRedirectUrl: destination,
     };
     return preferredAuthMode() === "signup" ? (
       <RedirectToSignUp {...redirectProps} />
@@ -41,13 +44,30 @@ function ClerkGate() {
 
   const approverLabel =
     user?.fullName || user?.primaryEmailAddress?.emailAddress || user?.username || undefined;
+  const accountSlot = <UserButton appearance={{ elements: { avatarBox: "clerk-avatar-box" } }} />;
+
+  if (adminRoute) {
+    return (
+      <AdminApp
+        getAuthToken={getAuthToken}
+        accountSlot={accountSlot}
+        adminEmail={user?.primaryEmailAddress?.emailAddress || undefined}
+      />
+    );
+  }
 
   return (
     <App
       getAuthToken={getAuthToken}
-      accountSlot={<UserButton appearance={{ elements: { avatarBox: "clerk-avatar-box" } }} />}
+      accountSlot={accountSlot}
       approverLabel={approverLabel}
     />
+  );
+}
+
+function isAdminRoute() {
+  return typeof window !== "undefined" && (
+    window.location.pathname === "/admin" || window.location.pathname.startsWith("/admin/")
   );
 }
 

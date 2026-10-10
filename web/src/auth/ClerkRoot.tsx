@@ -58,7 +58,8 @@ function RootAppContent({ authEnabled }: { authEnabled: boolean }) {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  if (!isAppRoute(path)) return <LandingPage authEnabled={authEnabled} />;
+  if (path === "/app/admin") return <LegacyAdminRedirect />;
+  if (!isProtectedRoute(path)) return <LandingPage authEnabled={authEnabled} />;
 
   return (
     <Suspense fallback={<AuthLoadingScreen />}>
@@ -67,8 +68,15 @@ function RootAppContent({ authEnabled }: { authEnabled: boolean }) {
   );
 }
 
-function isAppRoute(path: string) {
-  return path === "/app" || path.startsWith("/app/") || path === "/trace" || path === "/debug/trace";
+function isProtectedRoute(path: string) {
+  return path === "/app" || path.startsWith("/app/") || path === "/admin" || path.startsWith("/admin/") || path === "/trace" || path === "/debug/trace";
+}
+
+function LegacyAdminRedirect() {
+  useEffect(() => {
+    window.location.replace("/admin");
+  }, []);
+  return <AuthLoadingScreen />;
 }
 
 function prefersReducedMotion() {
@@ -121,6 +129,7 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
             </div>
           </div>
           <div className="landing-nav-actions">
+            <a className="landing-nav-button landing-nav-signin" href="/admin">Admin</a>
             <LandingSignInAction authEnabled={authEnabled} className="landing-nav-button landing-nav-signin">
               Sign in
             </LandingSignInAction>
