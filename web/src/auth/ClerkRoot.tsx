@@ -23,6 +23,7 @@ import {
   Phone,
   Plug,
   Plus,
+  Quote,
   Search,
   Send,
   Settings,
@@ -139,36 +140,25 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
         </nav>
 
         <section className="landing-hero">
-          <div className="landing-hero-head">
-            <div className="landing-copy">
-              <p className="landing-eyebrow">Evidence-backed local business discovery</p>
-              <h1>Find the right local businesses, backed by real evidence.</h1>
-              <p className="landing-lede">
-                Pick a trade, a market, and the signals that mean opportunity: a missing website, no booking flow,
-                or thin reviews. ScoutLead returns matching businesses with the evidence behind each. Run it on
-                demand or on your own cadence.
-              </p>
+          <div className="landing-hero-band" aria-hidden="true" />
+          <div className="landing-hero-inner">
+            <div className="landing-hero-head">
+              <div className="landing-copy">
+                <p className="landing-eyebrow">Evidence-backed local business discovery</p>
+                <h1>Find the right local businesses, backed by real evidence.</h1>
+                <p className="landing-lede">
+                  Define an audience once — trade, market, the signals that mean opportunity. ScoutLead returns
+                  matching businesses with the evidence behind each.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <span className="landing-preview-live-badge"><i /> Live preview</span>
-          <AnimatedPreview />
+            <AnimatedPreview />
+          </div>
           <GlobeActivityPreview />
         </section>
 
-        <section className="landing-section landing-proof-section" id="lead-proof" aria-label="Lead review example">
-          <div className="landing-proof-inner">
-            <div className="landing-section-heading landing-proof-heading">
-              <p className="landing-eyebrow">Lead review</p>
-              <h2>See exactly why each business qualified</h2>
-              <p className="landing-lede">
-                Compare fit, the opportunity signal, contact readiness, and the underlying source without opening
-                every result. Expand a lead when you need the full reasoning and a grounded opener.
-              </p>
-            </div>
-            <WorkflowProofPreview />
-          </div>
-        </section>
+        <LeadReviewSection />
 
         <AudienceUseCases />
 
@@ -413,6 +403,7 @@ function AnimatedPreview() {
       setScreen("results");
       setVisibleLeads(4);
       setSelectedIndex(0);
+      setCriteriaStep(3);
       setReviewStage(3);
       setShortlisted(true);
       return;
@@ -539,8 +530,27 @@ function AnimatedPreview() {
     return () => timers.forEach(clearTimeout);
   }, [cycle]);
 
+  const heroStep =
+    screen === "loading" || (screen === "builder" && criteriaStep >= 3) || createCursor || createPressed
+      ? 2
+      : screen === "builder"
+        ? (criteriaStep >= 1 ? 1 : 0)
+        : criteriaStep >= 3
+          ? 3
+          : 0;
+
   return (
-    <div className="landing-preview preview-app landing-workspace-preview" aria-label="ScoutLead audience workspace preview">
+    <>
+      <div className="landing-hero-chips" aria-label="Audience creation steps">
+        <HeroStepChip active={heroStep === 0} number="01" label="New audience" />
+        <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
+        <HeroStepChip active={heroStep === 1} number="02" label="Set profile" />
+        <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
+        <HeroStepChip active={heroStep === 2} number="03" label="Create" />
+        <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
+        <HeroStepChip active={heroStep === 3} number="04" label="Leads" />
+      </div>
+      <div className="landing-preview preview-app landing-workspace-preview" aria-label="ScoutLead audience workspace preview">
       <PreviewRail activeManage="" activeRun="Toronto HVAC Low Reviews" shortlistedCount={shortlisted ? 1 : 0} />
       <div className="preview-main-panel">
         <div className="preview-audience-bar">
@@ -598,7 +608,16 @@ function AnimatedPreview() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
+  );
+}
+
+function HeroStepChip({ active, label, number }: { active: boolean; label: string; number: string }) {
+  return (
+    <span className={`landing-hero-chip${active ? " is-active" : ""}`}>
+      <b>{number}</b> {label}
+    </span>
   );
 }
 
@@ -732,100 +751,106 @@ function PreviewMatchLoading() {
   );
 }
 
-function WorkflowProofPreview() {
+function LeadReviewSection() {
   return (
-    <div className="lead-proof" aria-label="Evidence-rich lead list example">
-      <div className="lead-proof-toolbar">
-        <div>
-          <strong>Toronto HVAC Low Reviews</strong>
-          <span>4 matching businesses</span>
+    <section className="landing-section landing-proof-section" id="lead-proof" aria-label="What arrives with every lead">
+      <div className="landing-review-inner">
+        <div className="landing-section-heading">
+          <p className="landing-eyebrow">Lead review</p>
+          <h2>Every lead comes with the reason to reach out</h2>
+          <p className="landing-lede">
+            You decide in seconds instead of researching each business yourself — because four things arrive
+            attached to every match.
+          </p>
         </div>
-        <div className="lead-proof-toolbar-meta">
-          <span><Target size={13} /> Reviews under 15</span>
-          <span><MapPin size={13} /> Toronto · 25 km</span>
+
+        <div className="landing-review-anchor">
+          <span className="landing-review-anchor-dot" aria-hidden="true" />
+          <span className="landing-review-anchor-name">ONCALL Heating and Cooling</span>
+          <span className="landing-review-anchor-meta">HVAC · Scarborough</span>
+          <span className="landing-review-anchor-pill">
+            carries all four <ArrowRight size={11} />
+          </span>
+        </div>
+
+        <div className="landing-review-feats">
+          <LeadReviewFeature
+            description="The specific gap that flagged the business — the reason it's worth a message, not just that it exists."
+            icon={<Target size={20} />}
+            number="01"
+            title="The opportunity signal"
+          >
+            <div className="landing-review-feat-tags">
+              <span className="landing-review-feat-tag tone-green">4 public reviews</span>
+              <span className="landing-review-feat-tag tone-green">No website</span>
+              <span className="landing-review-feat-tag tone-green">No booking flow</span>
+            </div>
+          </LeadReviewFeature>
+
+          <LeadReviewFeature
+            description="Whether you can actually reach the owner, and how. A lead you can't contact isn't a lead."
+            icon={<Phone size={20} />}
+            number="02"
+            title="Contact readiness"
+          >
+            <div className="landing-review-feat-tags">
+              <span className="landing-review-feat-tag tone-green">Email + phone</span>
+              <span className="landing-review-feat-tag tone-amber">Phone only</span>
+              <span className="landing-review-feat-tag tone-neutral">No direct contact</span>
+            </div>
+          </LeadReviewFeature>
+
+          <LeadReviewFeature
+            description="A first line that references the real signal — ready to send or edit, not a generic template."
+            icon={<Quote size={20} />}
+            number="03"
+            title="A draft opener"
+          >
+            <p className="landing-review-feat-quote">
+              "I came across ONCALL while reviewing Toronto HVAC providers and noticed only four public reviews…"
+            </p>
+          </LeadReviewFeature>
+
+          <LeadReviewFeature
+            description="Every claim links back to its source, so you can verify before you reach out."
+            icon={<ExternalLink size={20} />}
+            number="04"
+            title="Traceable evidence"
+          >
+            <div className="landing-review-feat-tags">
+              <span className="landing-review-feat-tag tone-neutral">
+                Google Places <ExternalLink size={11} />
+              </span>
+            </div>
+          </LeadReviewFeature>
         </div>
       </div>
-      <div className="lead-proof-head" aria-hidden="true">
-        <span>Business</span>
-        <span>Fit</span>
-        <span>Opportunity</span>
-        <span>Contact</span>
-        <span>Evidence</span>
-      </div>
-      <LeadProofRow
-        business="ONCALL Heating and Cooling"
-        contact="Phone only"
-        evidence="Google Places"
-        location="Scarborough"
-        signal="4 public reviews"
-        trade="HVAC"
-        expanded
-      />
-      <LeadProofRow
-        business="GTA HVAC Pros"
-        contact="Email + phone"
-        evidence="Google Places"
-        location="Scarborough"
-        signal="13 public reviews"
-        trade="HVAC"
-      />
-      <LeadProofRow
-        business="Highland HVAC Services"
-        contact="Phone only"
-        evidence="Google Places"
-        location="Etobicoke"
-        signal="13 public reviews"
-        trade="HVAC"
-      />
-    </div>
+    </section>
   );
 }
 
-function LeadProofRow({
-  business,
-  contact,
-  evidence,
-  expanded = false,
-  location,
-  signal,
-  trade,
+function LeadReviewFeature({
+  children,
+  description,
+  icon,
+  number,
+  title,
 }: {
-  business: string;
-  contact: string;
-  evidence: string;
-  expanded?: boolean;
-  location: string;
-  signal: string;
-  trade: string;
+  children: ReactNode;
+  description: string;
+  icon: ReactNode;
+  number: string;
+  title: string;
 }) {
   return (
-    <div className={`lead-proof-entry${expanded ? " is-expanded" : ""}`}>
-      <div className="lead-proof-row">
-        <div className="lead-proof-business">
-          <i />
-          <span><strong>{business}</strong><em>{trade} · {location}</em></span>
-        </div>
-        <span className="lead-proof-fit"><CheckCircle2 size={13} /> Strong fit</span>
-        <span className="lead-proof-signal"><Target size={13} /> {signal}</span>
-        <span className="lead-proof-contact"><Phone size={13} /> {contact}</span>
-        <span className="lead-proof-source">{evidence} <ExternalLink size={12} /></span>
-      </div>
-      {expanded ? (
-        <div className="lead-proof-expanded">
-          <div>
-            <span>Why it qualified</span>
-            <p>The business matches the selected HVAC trade and Toronto radius. Its 4-review count confirms the selected opportunity signal.</p>
-          </div>
-          <div>
-            <span>Draft opener</span>
-            <p>“I came across ONCALL while reviewing Toronto HVAC providers and noticed the business has only four public reviews...”</p>
-          </div>
-          <div className="lead-proof-actions">
-            <button type="button" tabIndex={-1}>Dismiss</button>
-            <button type="button" tabIndex={-1}><Star size={13} /> Shortlist</button>
-          </div>
-        </div>
-      ) : null}
+    <div className="landing-review-feat">
+      <span className="landing-review-feat-ghost" aria-hidden="true">
+        {number}
+      </span>
+      <span className="landing-review-feat-icon">{icon}</span>
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {children}
     </div>
   );
 }
@@ -1033,7 +1058,12 @@ function PreviewRail({
       </div>
       <div className="preview-run-list">
         {PREVIEW_RUNS.map((run) => (
-          <div className={`preview-run${run.title === activeRun ? " is-active" : ""}`} key={run.title}>
+          <div
+            aria-label={run.title}
+            className={`preview-run${run.title === activeRun ? " is-active" : ""}`}
+            key={run.title}
+            title={run.title}
+          >
             <UsersRound size={13} />
             <strong>{run.title}</strong>
           </div>
