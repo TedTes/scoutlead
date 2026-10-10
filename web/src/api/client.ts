@@ -1,4 +1,7 @@
 import type {
+  AdminBusinessDetail,
+  AdminBusinessPage,
+  AdminOverview,
   ApiHealth,
   AgentRun,
   AgentRunDetail,
@@ -57,6 +60,59 @@ export class ApiClient {
 
   getHealth() {
     return this.request<ApiHealth>("/health");
+  }
+
+  getAdminAccess() {
+    return this.request<{ is_admin: boolean; email?: string | null }>("/admin/access");
+  }
+
+  getAdminOverview() {
+    return this.request<AdminOverview>("/admin/businesses/overview");
+  }
+
+  getAdminBusinesses(params: Record<string, string | number | undefined>) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    return this.request<AdminBusinessPage>(`/admin/businesses?${query.toString()}`);
+  }
+
+  getAdminBusiness(id: string) {
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}`);
+  }
+
+  createAdminBusiness(body: Record<string, unknown>) {
+    return this.request<AdminBusinessDetail>("/admin/businesses", { method: "POST", body });
+  }
+
+  updateAdminBusiness(id: string, body: Record<string, unknown>) {
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}`, { method: "PATCH", body });
+  }
+
+  changeAdminBusinessStatus(id: string, status: string, reason: string) {
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}/status`, {
+      method: "POST",
+      body: { status, reason },
+    });
+  }
+
+  revalidateAdminBusiness(id: string, reason: string) {
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}/revalidate`, {
+      method: "POST",
+      body: { reason },
+    });
+  }
+
+  getAdminBusinessDeleteDependencies(id: string) {
+    return this.request<Record<string, number>>(`/admin/businesses/${id}/delete-dependencies`);
+  }
+
+  deleteAdminBusiness(id: string, confirmation: string, reason: string) {
+    return this.request<void>(`/admin/businesses/${id}`, {
+      method: "DELETE",
+      body: { confirmation, reason },
+    });
   }
 
   createProduct(product: unknown) {

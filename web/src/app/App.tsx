@@ -13,6 +13,7 @@ import {
   Plus,
   Send,
   Settings,
+  ShieldCheck,
   Star,
   Trash2,
   User,
@@ -92,6 +93,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [railWidth, setRailWidth] = useState(() =>
     readStoredDimension("scoutlead:rail-width", RAIL_WIDTH_DEFAULT, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX),
   );
@@ -133,6 +135,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     deleteDiscoveryRuns,
     renameDiscoveryRun,
     refreshSnapshot,
+    territoryApi,
   } = useAppData();
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
@@ -145,6 +148,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     routePath === "/debug/trace" ||
     routePath === "/app/trace" ||
     routePath === "/app/debug/trace";
+  const isAdminRoute = routePath === "/admin" || routePath === "/app/admin";
   const selectedRunExists = Boolean(
     selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
   );
@@ -152,10 +156,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const selectedProfileRun = productDiscoveryRuns.find(
     (run) => run.territory_id === selectedProfileId,
   );
-  const activeScreen = resolveActiveScreen(
-    viewMode,
-    selectedRunExists || Boolean(selectedProfileId),
-  );
+  const activeScreen = isAdminRoute
+    ? "admin"
+    : resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
   const currentRunContacts = selectedDiscoveryRunId
     ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
     : productContacts;
@@ -262,6 +265,13 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
 
   const selectScreen = (screen: Screen) => {
     if (isTraceRoute) returnToApp();
+    if (screen === "admin") {
+      window.history.pushState(null, "", "/app/admin");
+      setRoutePath("/app/admin");
+    } else if (isAdminRoute) {
+      window.history.pushState(null, "", "/app");
+      setRoutePath("/app");
+    }
     setViewMode(screen);
     setMobileRailOpen(false);
   };
@@ -373,6 +383,10 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       tone: "green",
     });
   };
+
+  useEffect(() => {
+    void territoryApi.getAdminAccess().then(() => setIsAdmin(true)).catch(() => setIsAdmin(false));
+  }, [territoryApi]);
 
   useEffect(() => {
     if (!error) return;
@@ -670,11 +684,13 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         />
         <ProductManagementSection
           activeScreen={activeScreen}
+          isAdmin={isAdmin}
           integrationCount={getEnabledIntegrationCount(selectedProduct, Boolean(gmailConnectionStatus?.connected))}
           hasProduct={Boolean(selectedProduct)}
           hasContacts={productContacts.length > 0}
           onExport={handleExportProductContacts}
           onIntegrations={() => selectScreen("integrations")}
+          onAdmin={() => selectScreen("admin")}
           onProductSettings={() => selectScreen("product")}
         />
         <div className="rail-account-footer">
@@ -694,9 +710,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       </aside>
 
       <section
-        className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
+        className={["product", "integrations", "admin"].includes(activeScreen) ? "main main-settings-screen" : "main"}
       >
-        {loading ? (
+        {loading && activeScreen !== "admin" ? (
           <div className="loading-overlay" aria-live="polite">
             <div className="loading-indicator">
               <span className="sl-spin" />
@@ -898,6 +914,8 @@ function ProductManagementSection({
   hasContacts,
   hasProduct,
   integrationCount,
+  isAdmin,
+  onAdmin,
   onExport,
   onIntegrations,
   onProductSettings,
@@ -906,6 +924,8 @@ function ProductManagementSection({
   hasContacts: boolean;
   hasProduct: boolean;
   integrationCount: number;
+  isAdmin: boolean;
+  onAdmin: () => void;
   onExport: () => void;
   onIntegrations: () => void;
   onProductSettings: () => void;
@@ -926,6 +946,18 @@ function ProductManagementSection({
         </span>
         <span className="mng-label-text">Product settings</span>
       </button>
+      {isAdmin ? (
+        <button
+          className={manageItemClass(true, activeScreen === "admin")}
+          aria-label="Business quality administration"
+          title="Business quality"
+          type="button"
+          onClick={onAdmin}
+        >
+          <span className="mng-icon"><ShieldCheck size={13} /></span>
+          <span className="mng-label-text">Business quality</span>
+        </button>
+      ) : null}
       <button
         className={manageItemClass(hasProduct, activeScreen === "integrations")}
         disabled={!hasProduct}

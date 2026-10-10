@@ -423,6 +423,11 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   );
 
   const refreshAll = useCallback(async ({ showLoading = true }: RefreshAllOptions = {}) => {
+    if (window.location.pathname === "/app/admin" || window.location.pathname === "/admin") {
+      setLoading(false);
+      setError("");
+      return;
+    }
     if (showLoading) setLoading(true);
     setError("");
     try {

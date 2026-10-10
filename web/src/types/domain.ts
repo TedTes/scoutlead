@@ -851,3 +851,65 @@ export type DiscoveryRunSummary = {
   qualified_lead_count: number;
   drafted_message_count: number;
 };
+export type AdminOverview = {
+  total: number;
+  active: number;
+  quarantined: number;
+  archived: number;
+  fully_validated: number;
+  needs_attention: number;
+  incomplete: number;
+  published: number;
+};
+
+export type AdminBusinessSummary = {
+  id: string;
+  display_name: string;
+  status: string;
+  validation_state: "passed" | "attention" | "incomplete";
+  website_url?: string | null;
+  domain?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  geography?: string | null;
+  market_key?: string | null;
+  niche_slug?: string | null;
+  niche_label?: string | null;
+  last_seen_at: string;
+};
+
+export type AdminValidation = {
+  id: string;
+  type: string;
+  status: string;
+  confidence: number;
+  reason: string;
+  evidence: Array<Record<string, unknown>>;
+  observed_at: string;
+  expires_at: string;
+};
+
+export type AdminBusinessDetail = AdminBusinessSummary & {
+  normalized_name: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  customer_kind: string;
+  is_chain?: boolean | null;
+  is_franchise?: boolean | null;
+  is_directory?: boolean | null;
+  is_agency?: boolean | null;
+  memberships: Array<Record<string, unknown>>;
+  validations: AdminValidation[];
+  facts: Array<Record<string, unknown>>;
+  sources: Array<Record<string, unknown>>;
+  publications: Array<Record<string, unknown>>;
+  audit: Array<Record<string, unknown>>;
+  delete_dependencies: Record<string, number>;
+};
+
+export type AdminBusinessPage = {
+  items: AdminBusinessSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+};

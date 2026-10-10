@@ -2,6 +2,7 @@ export type Screen =
   | "overview"
   | "integrations"
   | "product"
+  | "admin"
   | "review"
   | "results";
 

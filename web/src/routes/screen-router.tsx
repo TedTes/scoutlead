@@ -1,4 +1,5 @@
 import { AudienceProfileScreen } from "../screens/AudienceProfileScreen";
+import { AdminDataScreen } from "../screens/AdminDataScreen";
 import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
@@ -35,6 +36,8 @@ export function renderScreen(
   } = {},
 ) {
   switch (screen) {
+    case "admin":
+      return <AdminDataScreen />;
     case "integrations":
       return <IntegrationsScreen />;
     case "product":
