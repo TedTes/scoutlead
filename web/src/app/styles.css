@@ -13678,6 +13678,64 @@ button.bulk-recipient-select:hover {
   font-weight: 650;
 }
 /* Admin data stewardship */
+.admin-shell {
+  min-height: 100vh;
+  background: #f5f6f7;
+  color: #20242a;
+}
+
+.admin-shell-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  min-height: 58px;
+  padding: 0 28px;
+  border-bottom: 1px solid #d8dde5;
+  background: rgb(255 255 255 / 96%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.admin-shell-brand,
+.admin-shell-account,
+.admin-shell-account a {
+  display: flex;
+  align-items: center;
+}
+
+.admin-shell-brand {
+  gap: 10px;
+  color: #20242a;
+  text-decoration: none;
+}
+
+.admin-shell-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #20242a;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-shell-brand strong,
+.admin-shell-brand small {
+  display: flex;
+  align-items: center;
+}
+
+.admin-shell-brand strong { font-size: 13px; }
+.admin-shell-brand small { gap: 4px; margin-top: 2px; color: #778190; font-size: 9px; text-transform: uppercase; }
+.admin-shell-account { gap: 14px; color: #778190; font-size: 11px; }
+.admin-shell-account a { gap: 5px; color: #4f5b6b; font-weight: 700; text-decoration: none; }
+.admin-shell-account a:hover { color: #20242a; }
+.admin-shell-main { width: min(1600px, 100%); margin: 0 auto; }
+
 .admin-data-screen {
   min-height: 100%;
   padding: 26px 28px 36px;
@@ -13839,6 +13897,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 }
 
 @media (max-width: 700px) {
+  .admin-shell-header { min-height: 54px; padding: 0 12px; }
+  .admin-shell-account { gap: 9px; }
+  .admin-shell-account > span { display: none; }
+  .admin-shell-account a { font-size: 0; }
+  .admin-shell-account a svg { width: 18px; height: 18px; }
   .admin-data-screen { padding: 16px 12px 28px; }
   .admin-data-header { align-items: flex-start; }
   .admin-metrics { grid-template-columns: 1fr 1fr; }

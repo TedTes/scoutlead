@@ -1,7 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import logging
+import time
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, Request
+import httpx
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -18,6 +22,12 @@ from db.session import Database
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
+
+
+logger = logging.getLogger(__name__)
+CLERK_API_BASE_URL = "https://api.clerk.com/v1"
+ADMIN_EMAIL_CACHE_TTL_SECONDS = 300
+_admin_email_cache: dict[str, tuple[float, str | None]] = {}
 
 
 @dataclass(slots=True)
@@ -125,18 +135,68 @@ def get_auth_context(request: Request, session: DbSession) -> AuthContext:
 CurrentAuth = Annotated[AuthContext, Depends(get_auth_context)]
 
 
-def require_admin(
+async def require_admin(
     auth: CurrentAuth,
     services: Annotated[AppServices, Depends(get_services)],
 ) -> AuthContext:
-    email = (auth.email or "").lower()
+    email = (auth.email or "").strip().lower()
     local_admin = (
         services.settings.environment in {"local", "test"}
         and not services.settings.require_user_auth
     )
+    if not local_admin and not email and auth.user_id and services.settings.clerk_secret_key:
+        email = await _clerk_primary_email(
+            auth.user_id,
+            services.settings.clerk_secret_key,
+            timeout_seconds=services.settings.request_timeout_seconds,
+        ) or ""
     if not local_admin and email not in services.settings.admin_email_set:
         raise HTTPException(status_code=403, detail="Administrator access required")
-    return auth
+    return replace(auth, email=email) if email and not auth.email else auth
+
+
+async def _clerk_primary_email(
+    user_id: str,
+    secret_key: str,
+    *,
+    timeout_seconds: float = 10,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str | None:
+    cached = _admin_email_cache.get(user_id)
+    now = time.monotonic()
+    if cached and cached[0] > now:
+        return cached[1]
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds, transport=transport) as client:
+            response = await client.get(
+                f"{CLERK_API_BASE_URL}/users/{quote(user_id, safe='')}",
+                headers={"Authorization": f"Bearer {secret_key}"},
+            )
+            response.raise_for_status()
+            email = _primary_email_from_clerk_user(response.json())
+    except (httpx.HTTPError, ValueError, TypeError):
+        logger.warning("Could not resolve Clerk email for verified user %s", user_id)
+        email = None
+
+    _admin_email_cache[user_id] = (now + ADMIN_EMAIL_CACHE_TTL_SECONDS, email)
+    return email
+
+
+def _primary_email_from_clerk_user(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    primary_id = payload.get("primary_email_address_id")
+    addresses = payload.get("email_addresses")
+    if not isinstance(addresses, list):
+        return None
+    records = [item for item in addresses if isinstance(item, dict)]
+    primary = next((item for item in records if item.get("id") == primary_id), None)
+    selected = primary or (records[0] if records else None)
+    if not selected:
+        return None
+    value = selected.get("email_address")
+    return value.strip().lower() if isinstance(value, str) and value.strip() else None
 
 
 AdminAuth = Annotated[AuthContext, Depends(require_admin)]
