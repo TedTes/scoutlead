@@ -33,7 +33,7 @@ export function AdminApp({ accountSlot, adminEmail, getAuthToken }: AdminAppProp
             </span>
           </a>
           <div className="admin-shell-account">
-            <a href="/"><ArrowLeft size={14} /> Back to site</a>
+            <a href="/app"><ArrowLeft size={14} /> Back to site</a>
             {adminEmail ? <span>{adminEmail}</span> : null}
             {accountSlot}
           </div>
