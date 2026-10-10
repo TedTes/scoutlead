@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     clerk_secret_key: str | None = None
     clerk_jwt_issuer: str | None = None
     clerk_jwks_url: str | None = None
+    admin_emails: str | list[str] = []
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        values = self.admin_emails
+        if isinstance(values, str):
+            values = [value.strip() for value in values.split(",")]
+        return {value.lower() for value in values if value}
 
     search_api_endpoint: str | None = None
     search_api_key: str | None = None

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -123,3 +123,20 @@ def get_auth_context(request: Request, session: DbSession) -> AuthContext:
 
 
 CurrentAuth = Annotated[AuthContext, Depends(get_auth_context)]
+
+
+def require_admin(
+    auth: CurrentAuth,
+    services: Annotated[AppServices, Depends(get_services)],
+) -> AuthContext:
+    email = (auth.email or "").lower()
+    local_admin = (
+        services.settings.environment in {"local", "test"}
+        and not services.settings.require_user_auth
+    )
+    if not local_admin and email not in services.settings.admin_email_set:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return auth
+
+
+AdminAuth = Annotated[AuthContext, Depends(require_admin)]
