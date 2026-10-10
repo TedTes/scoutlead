@@ -448,31 +448,11 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       setActiveSourceIdsState(nextActiveSourceIds);
       const storedProductId = localStorage.getItem("selectedProductId") || "";
       const storedProfileId = localStorage.getItem("selectedProfileId") || "";
-      const storedRunIdValue = localStorage.getItem("selectedDiscoveryRunId");
-      const storedRunId = storedRunIdValue || "";
-      const storedProfile = nextTerritories.find((profile) => profile.id === storedProfileId);
-      const storedRun = nextRuns.find((run) => run.id === storedRunId);
-      const storedProductExists = nextProducts.some((product) => product.id === storedProductId);
-      let nextProductId = storedProfile && nextProducts.some((product) => product.id === storedProfile.product_id)
-        ? storedProfile.product_id
-        : storedProductExists
+      const storedRunId = localStorage.getItem("selectedDiscoveryRunId") || "";
+      const nextProductId =
+        (storedProductId && nextProducts.some((product) => product.id === storedProductId)
           ? storedProductId
-          : nextProducts[0]?.id || "";
-
-      const selectedProductHasProfiles = nextTerritories.some(
-        (profile) => profile.product_id === nextProductId,
-      );
-      const restoredStandaloneRun = Boolean(
-        storedRun
-        && storedRun.product_id === nextProductId
-        && !storedRun.territory_id,
-      );
-      if (!selectedProductHasProfiles && restoredStandaloneRun) {
-        const firstSavedProfile = nextTerritories.find((profile) =>
-          nextProducts.some((product) => product.id === profile.product_id),
-        );
-        if (firstSavedProfile) nextProductId = firstSavedProfile.product_id;
-      }
+          : nextProducts[0]?.id) || "";
       setSelectedProductIdState(nextProductId);
       if (nextProductId) localStorage.setItem("selectedProductId", nextProductId);
 

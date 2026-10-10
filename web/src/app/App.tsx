@@ -145,15 +145,16 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
     routePath === "/debug/trace" ||
     routePath === "/app/trace" ||
     routePath === "/app/debug/trace";
-  const selectedRunExists = Boolean(
-    selectedDiscoveryRunId && productDiscoveryRuns.some((run) => run.id === selectedDiscoveryRunId),
-  );
   const productProfiles = territories.filter((profile) => profile.product_id === selectedProductId);
+  const selectedRun = productDiscoveryRuns.find((run) => run.id === selectedDiscoveryRunId);
+  const selectedRunExists = Boolean(
+    selectedProfileId && selectedRun?.territory_id === selectedProfileId,
+  );
   const selectedProfileRun = productDiscoveryRuns.find(
     (run) => run.territory_id === selectedProfileId,
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
-  const currentRunContacts = selectedDiscoveryRunId
+  const currentRunContacts = selectedRunExists
     ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
     : profileBatch?.profile.id === selectedProfileId
       ? profileBatch.leads
