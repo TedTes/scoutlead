@@ -188,7 +188,10 @@ export function ResultsScreen({
     : undefined;
   const activeProfile = territories.find((profile) => profile.id === selectedProfileId)
     || selectedTerritory;
-  const selectedDelivery = selectedTerritory
+  const selectedRunMatchesActiveProfile = Boolean(
+    activeProfile && selectedDiscoveryRun?.territory_id === activeProfile.id,
+  );
+  const selectedDelivery = selectedRunMatchesActiveProfile && selectedTerritory
     ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
     : undefined;
   const visibleProfileBatch =
@@ -202,7 +205,7 @@ export function ResultsScreen({
   );
   const sourceContacts = visibleProfileBatch
     ? visibleProfileBatch.leads
-    : selectedDiscoveryRunId
+    : selectedRunMatchesActiveProfile && selectedDiscoveryRunId
       ? selectedDelivery && deliveryContacts ? deliveryContacts : snapshot.results
       : [];
   const contacts = useMemo(() => deduplicateContacts(sourceContacts), [sourceContacts]);
@@ -275,15 +278,18 @@ export function ResultsScreen({
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
   useEffect(() => {
-    const scopeId = selectedDiscoveryRunId
+    const scopeId = selectedRunMatchesActiveProfile
+      ? selectedDiscoveryRunId
       || visibleProfileBatch?.audience_run_id
-      || selectedProfileId;
+      || selectedProfileId
+      : visibleProfileBatch?.audience_run_id || selectedProfileId;
     if (!scopeId || !onWorkflowCountsChange) return;
     onWorkflowCountsChange(scopeId, workflowCounts);
   }, [
     onWorkflowCountsChange,
     selectedDiscoveryRunId,
     selectedProfileId,
+    selectedRunMatchesActiveProfile,
     visibleProfileBatch?.audience_run_id,
     workflowCounts,
   ]);
