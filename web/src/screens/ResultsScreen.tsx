@@ -743,6 +743,17 @@ export function ResultsScreen({
               {activeProfile.label}
             </button>
           </nav>
+        ) : selectedDiscoveryRun ? (
+          <nav aria-label="Search context" className="results-breadcrumb">
+            <span>Leads</span>
+            <span aria-hidden="true">/</span>
+            <strong
+              style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={selectedDiscoveryRun.name || "Untitled search"}
+            >
+              {selectedDiscoveryRun.name || "Untitled search"}
+            </strong>
+          </nav>
         ) : null}
         <div className="results-control-actions">
           {onCreateAudience ? (

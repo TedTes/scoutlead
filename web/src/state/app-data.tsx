@@ -219,9 +219,11 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       localStorage.setItem("selectedProfileId", nextProfileId);
       selectedProfileIdRef.current = nextProfileId;
       setSelectedProfileIdState(nextProfileId);
-      const firstRunForProduct = nextRuns.find(
-        (run) => run.product_id === productId && (!nextProfileId || run.territory_id === nextProfileId),
-      );
+      const firstRunForProduct = nextProfileId
+        ? nextRuns.find(
+            (run) => run.product_id === productId && run.territory_id === nextProfileId,
+          )
+        : undefined;
       const nextRunId = firstRunForProduct?.id || "";
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
       selectedDiscoveryRunIdRef.current = nextRunId;
@@ -445,17 +447,38 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       localStorage.setItem(activeSourcesStorageKey, JSON.stringify(nextActiveSourceIds));
       setActiveSourceIdsState(nextActiveSourceIds);
       const storedProductId = localStorage.getItem("selectedProductId") || "";
-      const nextProductId =
-        (storedProductId && nextProducts.some((product) => product.id === storedProductId)
+      const storedProfileId = localStorage.getItem("selectedProfileId") || "";
+      const storedRunIdValue = localStorage.getItem("selectedDiscoveryRunId");
+      const storedRunId = storedRunIdValue || "";
+      const storedProfile = nextTerritories.find((profile) => profile.id === storedProfileId);
+      const storedRun = nextRuns.find((run) => run.id === storedRunId);
+      const storedProductExists = nextProducts.some((product) => product.id === storedProductId);
+      let nextProductId = storedProfile && nextProducts.some((product) => product.id === storedProfile.product_id)
+        ? storedProfile.product_id
+        : storedProductExists
           ? storedProductId
-          : nextProducts[0]?.id) || "";
+          : nextProducts[0]?.id || "";
+
+      const selectedProductHasProfiles = nextTerritories.some(
+        (profile) => profile.product_id === nextProductId,
+      );
+      const restoredStandaloneRun = Boolean(
+        storedRun
+        && storedRun.product_id === nextProductId
+        && !storedRun.territory_id,
+      );
+      if (!selectedProductHasProfiles && restoredStandaloneRun) {
+        const firstSavedProfile = nextTerritories.find((profile) =>
+          nextProducts.some((product) => product.id === profile.product_id),
+        );
+        if (firstSavedProfile) nextProductId = firstSavedProfile.product_id;
+      }
       setSelectedProductIdState(nextProductId);
       if (nextProductId) localStorage.setItem("selectedProductId", nextProductId);
 
       const productProfiles = nextTerritories.filter(
         (profile) => profile.product_id === nextProductId,
       );
-      const storedProfileId = localStorage.getItem("selectedProfileId") || "";
       const nextProfileId = productProfiles.some((profile) => profile.id === storedProfileId)
         ? storedProfileId
         : productProfiles[0]?.id || "";
@@ -463,15 +486,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectedProfileIdRef.current = nextProfileId;
       localStorage.setItem("selectedProfileId", nextProfileId);
 
-      const storedRunIdValue = localStorage.getItem("selectedDiscoveryRunId");
-      const storedRunId = storedRunIdValue || "";
       const productRunList = nextRuns.filter((run) => run.product_id === nextProductId);
-      const nextRunId =
-        storedRunId && productRunList.some((run) => run.id === storedRunId)
+      const nextRunId = nextProfileId
+        ? storedRunId && productRunList.some(
+            (run) => run.id === storedRunId && run.territory_id === nextProfileId,
+          )
           ? storedRunId
-          : productRunList.length === 1 || storedRunIdValue === null
-            ? productRunList[0]?.id || ""
-            : "";
+          : productRunList.find((run) => run.territory_id === nextProfileId)?.id || ""
+        : "";
       setSelectedDiscoveryRunIdState(nextRunId);
       selectedDiscoveryRunIdRef.current = nextRunId;
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);

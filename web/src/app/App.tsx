@@ -155,7 +155,9 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
   const currentRunContacts = selectedDiscoveryRunId
     ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
-    : productContacts;
+    : profileBatch?.profile.id === selectedProfileId
+      ? profileBatch.leads
+      : [];
   const recentRunContacts = currentRunContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
   const fallbackWorkflowCounts: LeadWorkflowCounts = {
     inbox: currentRunContacts.filter((contact) => (contact.review_status || "unreviewed") === "unreviewed").length,
