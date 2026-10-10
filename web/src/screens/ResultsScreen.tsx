@@ -30,7 +30,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AudienceProfileScreen } from "./AudienceProfileScreen";
-import { SearchIntentChips, searchIntentFromRun } from "../components/SearchIntentChips";
+import { searchIntentFromRun } from "../components/SearchIntentChips";
 import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type {
@@ -160,7 +160,6 @@ export function ResultsScreen({
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1160px)").matches : false,
   );
   const [draftPrompt, setDraftPrompt] = useState("");
-  const [searchIntent, setSearchIntent] = useState<SearchIntent | null>(null);
   const [editedSearchIntent, setEditedSearchIntent] = useState<SearchIntent | null>(null);
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
@@ -275,12 +274,6 @@ export function ResultsScreen({
   const selectedMessage = selectedContact
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
-  const searchIntentChanged = Boolean(
-    searchIntent
-    && editedSearchIntent
-    && JSON.stringify(searchIntent) !== JSON.stringify(editedSearchIntent),
-  );
-
   useEffect(() => {
     const scopeId = selectedDiscoveryRunId
       || visibleProfileBatch?.audience_run_id
@@ -322,7 +315,6 @@ export function ResultsScreen({
   useEffect(() => {
     setDraftPrompt(runPrompt);
     const savedIntent = searchIntentFromRun(selectedDiscoveryRun);
-    setSearchIntent(savedIntent);
     setEditedSearchIntent(savedIntent);
     setSelectedContactId("");
     setDetailPanelOpen(true);
@@ -925,17 +917,6 @@ export function ResultsScreen({
           </div>
         </div>
       </div>
-
-      {editedSearchIntent ? (
-        <div className="results-intentbar">
-          <SearchIntentChips intent={editedSearchIntent} onChange={setEditedSearchIntent} />
-          {searchIntentChanged ? (
-            <button className="secondary" disabled={running} type="button" onClick={() => void updateSearch()}>
-              {running ? "Applying..." : "Apply criteria"}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
 
       <div className={selectedContact ? "results-body has-detail" : "results-body"}>
         <section className="lead-feed-pane" aria-label="Lead list">

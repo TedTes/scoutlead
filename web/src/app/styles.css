@@ -13695,23 +13695,6 @@ button.bulk-recipient-select:hover {
   margin-top: 10px;
 }
 
-.results-intentbar {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  padding: 0 10px 12px;
-}
-
-.results-intentbar .search-intent-strip {
-  flex: 1;
-  margin-top: 0;
-  min-width: 0;
-}
-
-.results-intentbar > button {
-  flex: 0 0 auto;
-}
-
 .search-intent-chip {
   display: inline-flex;
   min-height: 26px;
