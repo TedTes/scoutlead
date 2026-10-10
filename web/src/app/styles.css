@@ -344,14 +344,32 @@ a {
 .landing-preview {
   background: var(--panel);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 670px;
   overflow: hidden;
   position: relative;
   width: 100%;
+}
+
+.landing-preview-live-badge {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 7px;
+  margin: 0 0 12px 2px;
+}
+
+.landing-preview-live-badge i {
+  animation: landing-monitor-pulse 1.4s ease-in-out infinite;
+  background: var(--green);
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
 }
 
 .landing-preview.preview-app {
@@ -2693,7 +2711,6 @@ a {
   display: inline-flex;
   font-size: 10px;
   font-weight: 650;
-  gap: 5px;
   height: 31px;
   justify-content: center;
   min-width: 0;
@@ -2735,7 +2752,7 @@ a {
 .audience-builder-market {
   display: grid;
   gap: 7px;
-  grid-template-columns: minmax(180px, 1fr) 92px;
+  grid-template-columns: minmax(180px, 1fr) 92px 102px;
 }
 
 .audience-builder-market span {
@@ -13584,6 +13601,7 @@ button.bulk-recipient-select:hover {
   .preview-match-spinner svg,
   .preview-match-progress i,
   .preview-workflow-row em.is-updated,
+  .landing-preview-live-badge i,
   .landing-recipe-stream > span i,
   .landing-recipe-stream > strong,
   .landing-recipe-link.is-flowing > i::after,

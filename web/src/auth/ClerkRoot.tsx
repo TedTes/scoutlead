@@ -151,6 +151,7 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
             </div>
           </div>
 
+          <span className="landing-preview-live-badge"><i /> Live preview</span>
           <AnimatedPreview />
           <GlobeActivityPreview />
         </section>
