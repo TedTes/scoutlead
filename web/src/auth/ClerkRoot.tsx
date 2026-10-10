@@ -129,7 +129,6 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
             </div>
           </div>
           <div className="landing-nav-actions">
-            <a className="landing-nav-button landing-nav-signin" href="/admin">Admin</a>
             <LandingSignInAction authEnabled={authEnabled} className="landing-nav-button landing-nav-signin">
               Sign in
             </LandingSignInAction>
