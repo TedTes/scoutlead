@@ -5585,6 +5585,7 @@ a {
   grid-column: 2;
   grid-row: 1;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 120ms ease;
   z-index: 2;
 }
@@ -5592,6 +5593,7 @@ a {
 .audience-list-row:hover .audience-row-actions,
 .audience-list-row:focus-within .audience-row-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .lead-workspace-list .audience-row-actions button {
@@ -5609,12 +5611,6 @@ a {
 .lead-workspace-list .audience-row-actions button:focus-visible {
   background: var(--panel);
   color: var(--muted);
-}
-
-@media (hover: none) {
-  .audience-row-actions {
-    opacity: 1;
-  }
 }
 
 .audience-dialog-form,
@@ -12046,7 +12042,7 @@ button.bulk-recipient-select:hover {
 }
 
 @media (max-width: 1159px) {
-  .navigation-resizer {
+  .navigation-resizer.is-horizontal {
     display: none;
   }
 
@@ -12063,96 +12059,11 @@ button.bulk-recipient-select:hover {
   }
 }
 
-@media (min-width: 901px) and (max-width: 1159px) {
-  .rail {
-    flex-basis: 68px;
-    width: 68px;
-  }
-
-  .rail:has(.rail-product-switcher.is-open) {
-    overflow: visible;
-    z-index: 40;
-  }
-
-  .brand {
-    flex-direction: column;
-    gap: 9px;
-    padding: 14px 10px 12px;
-  }
-
-  .brand-copy,
-  .rail-product-copy,
-  .rail-product-caret,
-  .lead-workflow-links button span,
-  .lead-workflow-links button em,
-  .lead-workspace-list button > span,
-  .lead-workspace-list .workspace-more,
-  .lead-workspace-empty,
-  .mng-label,
-  .mng-label-text,
-  .mng-badge {
-    display: none;
-  }
-
-  .rail-product-switcher {
-    margin-left: auto;
-    margin-right: auto;
-    width: 38px;
-  }
-
-  .rail-product-trigger {
-    justify-content: center;
-    min-height: 38px;
-    padding: 0;
-  }
-
-  .rail-product-menu {
-    left: calc(100% + 8px);
-    right: auto;
-    top: 0;
-    width: 220px;
-  }
-
-  .rail-account-footer {
-    justify-content: center;
-    padding-left: 8px;
-    padding-right: 8px;
-  }
-
-  .rail-account-label {
-    display: none;
-  }
-
-  .lead-workflow-nav {
-    padding-left: 8px;
-    padding-right: 8px;
-  }
-
-  .lead-workflow-links button,
-  .lead-workspace-list button,
-  .mng-item {
-    gap: 0;
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  .lead-workspace-heading {
-    display: none;
-  }
-
-  .lead-workspace-list button.active,
-  .mng-item.is-active {
-    box-shadow: inset 2px 0 0 #6f51df;
-  }
-
-  .mng {
-    padding-left: 8px;
-    padding-right: 8px;
-  }
-}
-
 @media (max-width: 900px) {
+  .navigation-resizer {
+    display: none;
+  }
+
   html,
   body,
   #root {
@@ -13223,8 +13134,17 @@ button.bulk-recipient-select:hover {
   }
 
   .results-new-audience-button {
+    align-items: center;
+    flex: 0 0 32px;
+    justify-content: center;
     padding: 0;
+    min-height: 32px;
     width: 32px;
+  }
+
+  .results-new-audience-button svg {
+    display: block;
+    margin: 0;
   }
 
   .results-new-audience-button span {
