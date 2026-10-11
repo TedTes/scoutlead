@@ -3465,7 +3465,7 @@ a {
   border-bottom: 1px solid var(--line-strong);
   display: grid;
   gap: 18px;
-  grid-template-columns: 160px minmax(0, 1fr) auto;
+  grid-template-columns: 160px minmax(0, 1fr) 160px;
   min-height: 52px;
   padding: 10px 16px;
 }
@@ -3494,6 +3494,7 @@ a {
   font-size: 11px;
   min-width: 0;
   overflow: hidden;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3503,6 +3504,7 @@ a {
   font-family: var(--mono);
   font-size: 9px;
   font-style: normal;
+  text-align: right;
 }
 
 .landing-infra-canvas {
@@ -4271,20 +4273,20 @@ a {
 
 .landing-proof-section {
   background: var(--panel);
-  padding-bottom: 64px;
-  padding-top: 64px;
+  padding-bottom: 68px;
+  padding-top: 68px;
 }
 
 .landing-freshness-inner {
   margin: 0 auto;
-  max-width: 1080px;
+  max-width: 1160px;
 }
 
 .landing-freshness-heading {
   align-items: end;
   display: grid;
-  gap: 44px;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  gap: 48px;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(320px, 0.65fr);
   max-width: none;
 }
 
@@ -4308,20 +4310,20 @@ a {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
-  margin-top: 34px;
+  margin-top: 36px;
   overflow: hidden;
 }
 
 .landing-freshness-panel-head {
   align-items: center;
-  background: var(--panel-soft);
+  background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   display: flex;
   font-size: 11px;
   justify-content: space-between;
-  min-height: 44px;
-  padding: 0 18px;
+  min-height: 52px;
+  padding: 0 16px;
 }
 
 .landing-freshness-panel-head > div {
@@ -4374,21 +4376,21 @@ a {
 
 .landing-freshness-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
-  min-height: 370px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.6fr);
+  min-height: 388px;
 }
 
 .landing-observation-ledger {
   border-right: 1px solid var(--line);
   min-width: 0;
-  padding: 20px 22px 22px;
+  padding: 24px;
 }
 
 .landing-observation-ledger-head {
   align-items: center;
   display: flex;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .landing-observation-ledger-head span {
@@ -4424,9 +4426,9 @@ a {
   display: grid;
   gap: 12px;
   grid-template-columns: 52px 28px minmax(0, 1fr) auto;
-  min-height: 82px;
+  min-height: 86px;
   opacity: 0;
-  padding: 7px 0;
+  padding: 8px 0;
   transform: translateX(-8px);
   transition: opacity 0.4s ease, transform 0.4s ease;
 }
@@ -4473,14 +4475,14 @@ a {
 
 .landing-observation-copy small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 750;
   text-transform: uppercase;
 }
 
 .landing-observation-copy strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: 12.5px;
   margin-top: 3px;
 }
 
@@ -4512,16 +4514,16 @@ a {
 
 .landing-current-profile {
   align-self: stretch;
-  background: #f7f9f8;
+  background: var(--panel-soft);
   display: flex;
   flex-direction: column;
   opacity: 0.62;
-  padding: 22px;
+  padding: 24px;
   transition: background 0.5s ease, opacity 0.5s ease;
 }
 
 .landing-current-profile.is-ready {
-  background: #f0f8f4;
+  background: #f7fbf9;
   opacity: 1;
 }
 
@@ -4554,7 +4556,7 @@ a {
   display: grid;
   gap: 11px;
   grid-template-columns: 38px minmax(0, 1fr);
-  margin-top: 38px;
+  margin-top: 34px;
 }
 
 .landing-current-profile-signal > span {
@@ -4581,7 +4583,8 @@ a {
 }
 
 .landing-current-profile-signal strong {
-  font-size: 16px;
+  font-size: 12.5px;
+  font-weight: 600;
   line-height: 1.25;
   margin-top: 3px;
 }
@@ -4589,7 +4592,7 @@ a {
 .landing-current-profile-facts {
   border-bottom: 1px solid var(--line);
   border-top: 1px solid var(--line);
-  margin: 28px 0 0;
+  margin: 26px 0 0;
 }
 
 .landing-current-profile-facts div {
@@ -4665,7 +4668,8 @@ a {
   font-size: 11px;
   gap: 8px;
   opacity: 0;
-  padding: 13px 18px;
+  line-height: 1.45;
+  padding: 14px 16px;
   transition: opacity 0.4s ease;
 }
 
@@ -14315,9 +14319,29 @@ button.bulk-recipient-select:hover {
   }
 
   .landing-infra-canvas .landing-infra-node {
+    gap: 7px;
+    grid-template-columns: 30px minmax(0, 1fr) 5px;
     height: 68px;
-    padding: 9px 8px;
+    padding: 8px 7px;
     width: 14%;
+  }
+
+  .landing-infra-canvas .landing-infra-node > span {
+    height: 29px;
+    width: 29px;
+  }
+
+  .landing-infra-canvas .landing-infra-node > div {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .landing-infra-canvas .landing-infra-node em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .landing-infra-canvas .landing-infra-node.is-listings,
@@ -14333,7 +14357,7 @@ button.bulk-recipient-select:hover {
   }
 
   .landing-infra-canvas .landing-infra-node small {
-    font-size: 7.5px;
+    display: none;
   }
 }
 
