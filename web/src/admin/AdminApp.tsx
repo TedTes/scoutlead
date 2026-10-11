@@ -1,8 +1,9 @@
-import { ArrowLeft, ShieldCheck } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { Database, ListChecks, ShieldCheck } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ApiClient } from "../api/client";
 import { getApiBaseUrl, getStaticApiToken } from "../config/env";
 import { AdminDataScreen } from "../screens/AdminDataScreen";
+import { AdminDataJobsScreen } from "../screens/AdminDataJobsScreen";
 import { ToastProvider } from "../shared-ui";
 
 type AdminAppProps = {
@@ -12,6 +13,7 @@ type AdminAppProps = {
 };
 
 export function AdminApp({ accountSlot, adminEmail, getAuthToken }: AdminAppProps) {
+  const [view, setView] = useState<"businesses" | "jobs">("businesses");
   const api = useMemo(
     () => new ApiClient({
       baseUrl: getApiBaseUrl(),
@@ -32,15 +34,20 @@ export function AdminApp({ accountSlot, adminEmail, getAuthToken }: AdminAppProp
               <small><ShieldCheck size={11} /> Data stewardship</small>
             </span>
           </a>
-          <div className="admin-shell-account">
-            <a href="/app"><ArrowLeft size={14} /> Back to site</a>
-            {adminEmail ? <span>{adminEmail}</span> : null}
-            {accountSlot}
-          </div>
         </header>
-        <main className="admin-shell-main">
-          <AdminDataScreen api={api} />
-        </main>
+        <div className="admin-shell-layout">
+          <nav className="admin-section-nav" aria-label="Admin sections">
+            <button className={view === "businesses" ? "active" : ""} title="Business quality" type="button" onClick={() => setView("businesses")}><ListChecks size={15} /><span>Business quality</span></button>
+            <button className={view === "jobs" ? "active" : ""} title="Sources" type="button" onClick={() => setView("jobs")}><Database size={15} /><span>Sources</span></button>
+            <div className="admin-sidebar-account">
+              {accountSlot}
+              {adminEmail ? <span title={adminEmail}>{adminEmail}</span> : null}
+            </div>
+          </nav>
+          <main className="admin-shell-main">
+            {view === "businesses" ? <AdminDataScreen api={api} /> : <AdminDataJobsScreen api={api} />}
+          </main>
+        </div>
       </div>
     </ToastProvider>
   );

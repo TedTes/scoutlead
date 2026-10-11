@@ -2,6 +2,8 @@ import type {
   AdminBusinessDetail,
   AdminBusinessPage,
   AdminOverview,
+  AdminDataJob,
+  AdminDataSegment,
   ApiHealth,
   AgentRun,
   AgentRunDetail,
@@ -112,6 +114,50 @@ export class ApiClient {
     return this.request<void>(`/admin/businesses/${id}`, {
       method: "DELETE",
       body: { confirmation, reason },
+    });
+  }
+
+  getAdminDataSegments() {
+    return this.request<AdminDataSegment[]>("/admin/data-jobs/segments");
+  }
+
+  getAdminDataJobs() {
+    return this.request<AdminDataJob[]>("/admin/data-jobs");
+  }
+
+  getAdminDataJob(id: string) {
+    return this.request<AdminDataJob>(`/admin/data-jobs/${id}`);
+  }
+
+  createAdminDataJob(body: { segment_id: string; processing_mode: "automatic" | "review_first"; reason: string }) {
+    return this.request<AdminDataJob>("/admin/data-jobs", { method: "POST", body });
+  }
+
+  validateAdminDataJob(id: string, reason: string, sourceItemIds: string[] = []) {
+    return this.request<AdminDataJob>(`/admin/data-jobs/${id}/validate`, {
+      method: "POST",
+      body: { reason, source_item_ids: sourceItemIds },
+    });
+  }
+
+  discardAdminDataJob(id: string, reason: string) {
+    return this.request<AdminDataJob>(`/admin/data-jobs/${id}/discard`, {
+      method: "POST",
+      body: { reason },
+    });
+  }
+
+  cancelAdminDataJob(id: string, reason: string) {
+    return this.request<AdminDataJob>(`/admin/data-jobs/${id}/cancel`, {
+      method: "POST",
+      body: { reason },
+    });
+  }
+
+  retryAdminDataJob(id: string, reason: string) {
+    return this.request<AdminDataJob>(`/admin/data-jobs/${id}/retry`, {
+      method: "POST",
+      body: { reason },
     });
   }
 

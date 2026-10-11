@@ -913,3 +913,54 @@ export type AdminBusinessPage = {
   page: number;
   page_size: number;
 };
+
+export type AdminDataSegment = {
+  id: string;
+  niche_slug: string;
+  niche_label: string;
+  market_key: string;
+  market_label: string;
+  status: string;
+  source_count: number;
+  target_business_count: number;
+};
+
+export type AdminDataJobSample = {
+  id: string;
+  provider: string;
+  state: string;
+  title?: string | null;
+  source_url?: string | null;
+  external_id?: string | null;
+  business_id?: string | null;
+  fetched_at: string;
+  address?: string | null;
+  phone?: string | null;
+  website?: string | null;
+};
+
+export type AdminDataJob = {
+  id: string;
+  segment_id: string;
+  segment_label: string;
+  processing_mode: "automatic" | "review_first";
+  status: string;
+  review_state: string;
+  reason?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  source_job_counts: Record<string, number>;
+  source_counts: Record<string, number>;
+  state_counts: Record<string, number>;
+  total_items: number;
+  pending_review: number;
+  processing: number;
+  validated: number;
+  needs_attention: number;
+  businesses_created: number;
+  completeness: Record<string, number>;
+  errors: string[];
+  source_items?: AdminDataJobSample[];
+  source_items_truncated?: boolean;
+};

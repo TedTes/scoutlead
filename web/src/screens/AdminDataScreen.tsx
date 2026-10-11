@@ -4,9 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
-  Database,
   ExternalLink,
-  FileClock,
   Pencil,
   Plus,
   RefreshCw,
@@ -15,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type {
   AdminBusinessDetail,
@@ -111,24 +109,18 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
 
   return (
     <section className="admin-data-screen">
-      <header className="admin-data-header">
-        <div>
-          <span className="admin-eyebrow">Data stewardship</span>
-          <h1>Business quality</h1>
-          <p>Inspect validation coverage, evidence, and publication readiness.</p>
+      <header className="admin-data-header admin-overview-header">
+        <div className="admin-metrics admin-business-metrics" aria-label="Business quality overview">
+          <Metric label="Businesses" value={overview.total} />
+          <Metric label="Validated" value={overview.fully_validated} tone="good" />
+          <Metric label="Needs attention" value={overview.needs_attention} tone="warn" />
+          <Metric label="Incomplete" value={overview.incomplete} />
+          <Metric label="Published" value={overview.published} />
         </div>
         <button className="admin-primary-button" type="button" onClick={() => setDialog("add")}>
           <Plus size={15} /> Add business
         </button>
       </header>
-
-      <div className="admin-metrics" aria-label="Business quality overview">
-        <Metric label="Businesses" value={overview.total} icon={<Database size={15} />} />
-        <Metric label="Validated" value={overview.fully_validated} tone="good" icon={<CheckCircle2 size={15} />} />
-        <Metric label="Needs attention" value={overview.needs_attention} tone="warn" icon={<CircleAlert size={15} />} />
-        <Metric label="Incomplete" value={overview.incomplete} icon={<FileClock size={15} />} />
-        <Metric label="Published" value={overview.published} icon={<CheckCircle2 size={15} />} />
-      </div>
 
       <div className="admin-toolbar">
         <label className="admin-search">
@@ -200,8 +192,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   );
 }
 
-function Metric({ label, value, icon, tone = "" }: { label: string; value: number; icon: ReactNode; tone?: string }) {
-  return <div className={`admin-metric ${tone}`}><span>{icon}{label}</span><strong>{value.toLocaleString()}</strong></div>;
+function Metric({ label, value, tone = "" }: { label: string; value: number; tone?: string }) {
+  return <div className={`admin-metric ${tone}`}><span>{label}:</span><strong>{value.toLocaleString()}</strong></div>;
 }
 
 function StatusPill({ value }: { value: string }) {
