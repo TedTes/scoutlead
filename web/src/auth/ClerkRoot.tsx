@@ -7,7 +7,6 @@ import {
   ArrowRight,
   Ban,
   Building2,
-  CalendarClock,
   ChevronDown,
   CheckCircle2,
   CircleX,
@@ -18,12 +17,12 @@ import {
   LoaderCircle,
   Mail,
   MapPin,
+  Menu,
   MoreVertical,
   Package,
   Phone,
   Plug,
   Plus,
-  Quote,
   Search,
   Send,
   Settings,
@@ -89,7 +88,6 @@ function useRevealOnScroll<T extends HTMLElement>(rootMargin = "0px") {
   const [active, setActive] = useState(false);
 
   useEffect(() => {
-    if (active) return;
     const node = ref.current;
     if (!node) return;
     if (prefersReducedMotion()) {
@@ -98,16 +96,13 @@ function useRevealOnScroll<T extends HTMLElement>(rootMargin = "0px") {
     }
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setActive(true);
-          observer.disconnect();
-        }
+        setActive(Boolean(entries[0]?.isIntersecting));
       },
-      { rootMargin, threshold: 0.35 },
+      { rootMargin, threshold: 0.12 },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [active, rootMargin]);
+  }, [rootMargin]);
 
   return [ref, active] as const;
 }
@@ -160,7 +155,7 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
 
         <LeadReviewSection />
 
-        <AudienceUseCases />
+        <MarketSection />
 
         <HowItWorksSection />
 
@@ -168,30 +163,46 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
 
         <OutreachSection />
 
-        <TrustSection />
-
         <FaqSection />
 
         <section className="landing-cta" aria-label="Get started">
-          <h2>Build an audience you can inspect and reuse</h2>
-          <p className="landing-lede">
-            Start with one trade, one market, and the signals that make a business worth contacting.
-          </p>
-          <div className="landing-proof-row landing-cta-proof" aria-label="Included with every account">
-            <span>
-              <CheckCircle2 size={14} /> Verified before outreach
-            </span>
-            <span>
-              <CheckCircle2 size={14} /> Human approval required
-            </span>
-            <span>
-              <CheckCircle2 size={14} /> Sends from your own Gmail
-            </span>
-          </div>
-          <div className="landing-actions">
-            <LandingSignUpAction authEnabled={authEnabled} className="landing-primary">
-              Create account <ArrowRight size={16} />
-            </LandingSignUpAction>
+          <div className="landing-cta-band">
+            <div className="landing-cta-band-grid" aria-hidden="true" />
+            <div className="landing-cta-band-glow" aria-hidden="true" />
+            <div className="landing-cta-band-inner">
+              <p className="landing-cta-band-prompt">
+                scout&gt; <b>create audience</b>
+                <span className="landing-cta-band-cursor" aria-hidden="true" />
+              </p>
+              <h2>Build an audience you can inspect and reuse</h2>
+              <p className="landing-cta-band-sub">
+                Start with one trade, one market, and the signals that make a business worth contacting.
+              </p>
+              <LandingSignUpAction authEnabled={authEnabled} className="landing-cta-band-button">
+                Create account <ArrowRight size={16} />
+              </LandingSignUpAction>
+              <div className="landing-cta-band-guarantees" aria-label="Included with every account">
+                <span>
+                  <CheckCircle2 size={15} /> Verified before outreach
+                </span>
+                <span>
+                  <CheckCircle2 size={15} /> Human approval required
+                </span>
+                <span>
+                  <CheckCircle2 size={15} /> Sends from your own Gmail
+                </span>
+              </div>
+              <div className="landing-cta-band-horizon" aria-hidden="true">
+                <svg viewBox="0 0 560 70" width="560" height="70">
+                  <ellipse cx="280" cy="78" fill="none" rx="280" ry="48" stroke="#2a2f37" />
+                  <ellipse cx="280" cy="78" fill="none" rx="180" ry="32" stroke="#23272e" />
+                  <path className="landing-cta-band-pin" d="M140 40l-4 8 4 4 4-4z" style={{ animationDelay: "0s" }} />
+                  <path className="landing-cta-band-pin" d="M240 32l-4 8 4 4 4-4z" style={{ animationDelay: "0.4s" }} />
+                  <path className="landing-cta-band-pin" d="M330 34l-4 8 4 4 4-4z" style={{ animationDelay: "0.8s" }} />
+                  <path className="landing-cta-band-pin" d="M420 42l-4 8 4 4 4-4z" style={{ animationDelay: "0.6s" }} />
+                </svg>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -203,7 +214,7 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
               <span>Discovery Console</span>
             </div>
           </div>
-          <p>Discovery and outreach, built to be reviewed, not automated blindly.</p>
+          <p>Discovery and outreach, built to be reviewed — not automated blindly.</p>
         </footer>
       </div>
     </main>
@@ -550,25 +561,26 @@ function AnimatedPreview() {
         <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
         <HeroStepChip active={heroStep === 3} number="04" label="Leads" />
       </div>
-      <div className="landing-preview preview-app landing-workspace-preview" aria-label="ScoutLead audience workspace preview">
+      <div className={`landing-preview preview-app landing-workspace-preview is-${screen}`} aria-label="ScoutLead audience workspace preview">
       <PreviewRail activeManage="" activeRun="Toronto HVAC Low Reviews" shortlistedCount={shortlisted ? 1 : 0} />
       <div className="preview-main-panel">
         <div className="preview-audience-bar">
+          <button className="preview-mobile-menu" type="button" tabIndex={-1} aria-label="Open preview navigation">
+            <Menu size={14} />
+          </button>
           <div>
             <span>Audiences</span>
             <em>/</em>
             <strong>{screen === "builder" ? "New audience" : "Toronto HVAC Low Reviews"}</strong>
           </div>
-          {screen === "results" ? (
-            <button className={newAudiencePressed ? "is-preview-pressed" : ""} type="button" tabIndex={-1}>
-              <Plus size={13} /> New audience
-              <PreviewCursor
-                className="preview-cursor-actor--new-audience"
-                pressed={newAudiencePressed}
-                visible={newAudienceCursor}
-              />
-            </button>
-          ) : null}
+          <button className={newAudiencePressed ? "is-preview-pressed" : ""} type="button" tabIndex={-1}>
+            <Plus size={13} /> New audience
+            <PreviewCursor
+              className="preview-cursor-actor--new-audience"
+              pressed={newAudiencePressed}
+              visible={screen === "results" && newAudienceCursor}
+            />
+          </button>
         </div>
         <div className="preview-stage">
           <div className="preview-scene-stack landing-workspace-scenes">
@@ -751,106 +763,167 @@ function PreviewMatchLoading() {
   );
 }
 
+type SignalObservation = {
+  date: string;
+  detail: string;
+  source: string;
+  state: "retired" | "retained" | "current";
+  title: string;
+};
+
+const SIGNAL_OBSERVATIONS: SignalObservation[] = [
+  {
+    date: "Sep 08",
+    detail: "The source profile did not include a business website.",
+    source: "Business listing",
+    state: "retired",
+    title: "Website not listed",
+  },
+  {
+    date: "Sep 27",
+    detail: "An owned domain was discovered and attached to the profile.",
+    source: "Website check",
+    state: "retained",
+    title: "Website found",
+  },
+  {
+    date: "Oct 09",
+    detail: "The live website has contact details, but no quote or booking path.",
+    source: "Conversion check",
+    state: "current",
+    title: "No quote flow confirmed",
+  },
+];
+
 function LeadReviewSection() {
+  const [sectionRef, sectionActive] = useRevealOnScroll<HTMLElement>("0px");
+  const [revealed, setRevealed] = useState(0);
+  const rowCount = SIGNAL_OBSERVATIONS.length;
+
+  useEffect(() => {
+    if (!sectionActive) {
+      setRevealed(0);
+      return;
+    }
+    if (prefersReducedMotion()) {
+      setRevealed(rowCount + 1);
+      return;
+    }
+
+    setRevealed(0);
+    const timers: number[] = [];
+    const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
+    SIGNAL_OBSERVATIONS.forEach((_, index) => {
+      at(260 + index * 420, () => setRevealed(index + 1));
+    });
+    at(260 + rowCount * 420 + 180, () => setRevealed(rowCount + 1));
+
+    return () => timers.forEach(clearTimeout);
+  }, [sectionActive, rowCount]);
+
   return (
-    <section className="landing-section landing-proof-section" id="lead-proof" aria-label="What arrives with every lead">
-      <div className="landing-review-inner">
-        <div className="landing-section-heading">
-          <p className="landing-eyebrow">Lead review</p>
-          <h2>Every lead comes with the reason to reach out</h2>
+    <section
+      className="landing-section landing-proof-section"
+      id="lead-proof"
+      aria-label="How ScoutLead keeps business opportunity signals current"
+      ref={sectionRef}
+    >
+      <div className="landing-freshness-inner">
+        <div className="landing-section-heading landing-freshness-heading">
+          <p className="landing-eyebrow">Evidence that ages honestly</p>
+          <h2>A lead should not outlive its evidence</h2>
           <p className="landing-lede">
-            You decide in seconds instead of researching each business yourself — because four things arrive
-            attached to every match.
+            Static lists go stale as businesses change. ScoutLead timestamps each observation, retires superseded
+            facts, and keeps the opportunity aligned with what is true now.
           </p>
         </div>
 
-        <div className="landing-review-anchor">
-          <span className="landing-review-anchor-dot" aria-hidden="true" />
-          <span className="landing-review-anchor-name">ONCALL Heating and Cooling</span>
-          <span className="landing-review-anchor-meta">HVAC · Scarborough</span>
-          <span className="landing-review-anchor-pill">
-            carries all four <ArrowRight size={11} />
-          </span>
-        </div>
-
-        <div className="landing-review-feats">
-          <LeadReviewFeature
-            description="The specific gap that flagged the business — the reason it's worth a message, not just that it exists."
-            icon={<Target size={20} />}
-            number="01"
-            title="The opportunity signal"
-          >
-            <div className="landing-review-feat-tags">
-              <span className="landing-review-feat-tag tone-green">4 public reviews</span>
-              <span className="landing-review-feat-tag tone-green">No website</span>
-              <span className="landing-review-feat-tag tone-green">No booking flow</span>
+        <div className="landing-freshness-panel">
+          <div className="landing-freshness-panel-head">
+            <div>
+              <span className="landing-freshness-live" aria-hidden="true"><i /></span>
+              <span><b>Eastline Heating</b> · Toronto HVAC</span>
             </div>
-          </LeadReviewFeature>
+            <span>Profile history</span>
+          </div>
 
-          <LeadReviewFeature
-            description="Whether you can actually reach the owner, and how. A lead you can't contact isn't a lead."
-            icon={<Phone size={20} />}
-            number="02"
-            title="Contact readiness"
-          >
-            <div className="landing-review-feat-tags">
-              <span className="landing-review-feat-tag tone-green">Email + phone</span>
-              <span className="landing-review-feat-tag tone-amber">Phone only</span>
-              <span className="landing-review-feat-tag tone-neutral">No direct contact</span>
+          <div className="landing-freshness-body">
+            <div className="landing-observation-ledger">
+              <div className="landing-observation-ledger-head">
+                <span>Evidence timeline</span>
+                <em>{Math.min(revealed, rowCount)} / {rowCount} reconciled</em>
+              </div>
+              <div className="landing-observation-list">
+                {SIGNAL_OBSERVATIONS.map((observation, index) => (
+                  <SignalObservationRow
+                    index={index}
+                    key={`${observation.date}-${observation.title}`}
+                    observation={observation}
+                    revealed={revealed > index}
+                  />
+                ))}
+              </div>
             </div>
-          </LeadReviewFeature>
 
-          <LeadReviewFeature
-            description="A first line that references the real signal — ready to send or edit, not a generic template."
-            icon={<Quote size={20} />}
-            number="03"
-            title="A draft opener"
-          >
-            <p className="landing-review-feat-quote">
-              "I came across ONCALL while reviewing Toronto HVAC providers and noticed only four public reviews…"
-            </p>
-          </LeadReviewFeature>
-
-          <LeadReviewFeature
-            description="Every claim links back to its source, so you can verify before you reach out."
-            icon={<ExternalLink size={20} />}
-            number="04"
-            title="Traceable evidence"
-          >
-            <div className="landing-review-feat-tags">
-              <span className="landing-review-feat-tag tone-neutral">
-                Google Places <ExternalLink size={11} />
-              </span>
+            <div className={`landing-current-profile${revealed > rowCount ? " is-ready" : ""}`}>
+              <div className="landing-current-profile-top">
+                <span>Current opportunity</span>
+                <em>{revealed > rowCount ? "Ready" : "Reconciling"}</em>
+              </div>
+              <div className="landing-current-profile-signal">
+                <span><Target size={16} /></span>
+                <div>
+                  <small>Confirmed signal</small>
+                  <strong>No quote or booking flow</strong>
+                </div>
+              </div>
+              <dl className="landing-current-profile-facts">
+                <div><dt>Website</dt><dd>Present</dd></div>
+                <div><dt>Contact details</dt><dd>Found</dd></div>
+                <div><dt>Last checked</dt><dd>9 min ago</dd></div>
+              </dl>
+              <div className="landing-freshness-meter">
+                <span><i /></span>
+                <div><strong>Current evidence</strong><em>Recheck due in 30 days</em></div>
+              </div>
             </div>
-          </LeadReviewFeature>
+          </div>
+
+          <div className={`landing-freshness-foot${revealed > rowCount ? " is-visible" : ""}`}>
+            <ShieldCheck size={15} />
+            The outreach angle changed with the evidence. The old missing-website claim was not reused.
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function LeadReviewFeature({
-  children,
-  description,
-  icon,
-  number,
-  title,
+function SignalObservationRow({
+  index,
+  observation,
+  revealed,
 }: {
-  children: ReactNode;
-  description: string;
-  icon: ReactNode;
-  number: string;
-  title: string;
+  index: number;
+  observation: SignalObservation;
+  revealed: boolean;
 }) {
+  const icon = index === 0 ? <MapPin size={15} /> : index === 1 ? <Globe size={15} /> : <Target size={15} />;
+  const stateLabel = observation.state === "retired" ? "Superseded" : observation.state === "retained" ? "Retained" : "Current";
+
   return (
-    <div className="landing-review-feat">
-      <span className="landing-review-feat-ghost" aria-hidden="true">
-        {number}
+    <div className={`landing-observation-row is-${observation.state}${revealed ? " is-in" : ""}`}>
+      <span className="landing-observation-date">{observation.date}</span>
+      <span className="landing-observation-icon">{icon}</span>
+      <span className="landing-observation-copy">
+        <small>{observation.source}</small>
+        <strong>{observation.title}</strong>
+        <em>{observation.detail}</em>
       </span>
-      <span className="landing-review-feat-icon">{icon}</span>
-      <h3>{title}</h3>
-      <p>{description}</p>
-      {children}
+      <span className="landing-observation-state">
+        {observation.state === "current" ? <CheckCircle2 size={13} /> : null}
+        {stateLabel}
+      </span>
     </div>
   );
 }
@@ -858,26 +931,23 @@ function LeadReviewFeature({
 function OutreachSection() {
   const [sectionRef, sectionActive] = useRevealOnScroll<HTMLElement>("0px");
   const [outreachStage, setOutreachStage] = useState(0);
-  const outreachMessages = [
-    "Evidence attached · 4 public reviews",
-    "Draft grounded in the observed signal",
-    "Waiting for human approval",
-    "Approved · sent from your Gmail",
-  ];
 
   useEffect(() => {
-    if (!sectionActive) return;
+    if (!sectionActive) {
+      setOutreachStage(0);
+      return;
+    }
     if (prefersReducedMotion()) {
       setOutreachStage(3);
       return;
     }
 
     const interval = window.setInterval(() => {
-      setOutreachStage((currentStage) => (currentStage + 1) % outreachMessages.length);
+      setOutreachStage((currentStage) => (currentStage + 1) % 4);
     }, 1550);
 
     return () => window.clearInterval(interval);
-  }, [sectionActive, outreachMessages.length]);
+  }, [sectionActive]);
 
   return (
     <section
@@ -887,13 +957,6 @@ function OutreachSection() {
       ref={sectionRef}
     >
       <div className="landing-draft-inner">
-        <div className="landing-outreach-stream" aria-live="polite">
-          <span><i /> Approval workflow</span>
-          <strong key={outreachStage}>{outreachMessages[outreachStage]}</strong>
-          <em className={outreachStage === 3 ? "is-ready" : ""}>
-            {outreachStage === 3 ? <><CheckCircle2 size={13} /> Sent</> : `0${outreachStage + 1} / 04`}
-          </em>
-        </div>
         <div className="landing-workflow-layout landing-workflow-layout-reverse">
           <DraftSendPreview stage={outreachStage} />
           <div>
@@ -912,7 +975,6 @@ function OutreachSection() {
             </div>
           </div>
         </div>
-        <IntegrationStrip gmailActive={outreachStage === 3} />
       </div>
     </section>
   );
@@ -987,20 +1049,6 @@ function DraftSequenceStep({
       <i>{completed ? <CheckCircle2 size={13} /> : icon}</i>
       <em>{label}</em>
     </span>
-  );
-}
-
-function IntegrationStrip({ gmailActive = false }: { gmailActive?: boolean }) {
-  return (
-    <div className={`landing-integration-strip${gmailActive ? " is-sending" : ""}`} aria-label="Available outreach and export integrations">
-      <p><strong>{gmailActive ? "Sent from your Gmail." : "Sends from your Gmail."}</strong> Exports approved leads to Sheets, webhooks, or HubSpot.</p>
-      <div>
-        <span className={gmailActive ? "is-active" : ""}><i className="is-gmail">G</i> Gmail</span>
-        <span><i className="is-sheets">S</i> Sheets</span>
-        <span><i className="is-webhook">&#123;&#125;</i> Webhooks</span>
-        <span><i className="is-hubspot">H</i> HubSpot</span>
-      </div>
-    </div>
   );
 }
 
@@ -1717,107 +1765,142 @@ function PreviewIntegrationRow({
   );
 }
 
+const HOW_IT_WORKS_FUNNEL: Array<{ count: number; hit?: boolean; label: string; suffix: string; width: number }> = [
+  { count: 1284, label: "business pool", suffix: "", width: 100 },
+  { count: 412, label: "trade match", suffix: "HVAC", width: 34 },
+  { count: 128, label: "within radius", suffix: "25 km", width: 12 },
+  { count: 30, hit: true, label: "signal confirmed", suffix: "reviews under 15", width: 4 },
+];
+
 function HowItWorksSection() {
   const [sectionRef, sectionActive] = useRevealOnScroll<HTMLElement>("0px");
-  const [activeStep, setActiveStep] = useState(0);
-  const statusMessages = [
-    "Audience saved · HVAC · Toronto · 25 km",
-    "Opportunity selected · Reviews under 15",
-    "Matching stored business facts",
-    "4 new, deduped matches ready",
-    "Evidence retained with every action",
-  ];
+  const [stage, setStage] = useState(0);
+  const rowCount = HOW_IT_WORKS_FUNNEL.length;
 
   useEffect(() => {
-    if (!sectionActive) return;
+    if (!sectionActive) {
+      setStage(0);
+      return;
+    }
     if (prefersReducedMotion()) {
-      setActiveStep(4);
+      setStage(rowCount + 1);
       return;
     }
 
-    const interval = window.setInterval(() => {
-      setActiveStep((currentStep) => (currentStep + 1) % statusMessages.length);
-    }, 1450);
+    const timers: number[] = [];
+    const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
 
-    return () => window.clearInterval(interval);
-  }, [sectionActive, statusMessages.length]);
+    setStage(0);
+    HOW_IT_WORKS_FUNNEL.forEach((_, index) => {
+      at(index * 500, () => setStage(index + 1));
+    });
+    at(rowCount * 500 + 200, () => setStage(rowCount + 1));
+
+    return () => timers.forEach(clearTimeout);
+  }, [sectionActive, rowCount]);
 
   return (
-    <section className="landing-section landing-story-section" id="how-it-works" aria-label="How ScoutLead works" ref={sectionRef}>
+    <section className="landing-section landing-story-section" id="how-it-works" aria-label="How ScoutLead narrows a search" ref={sectionRef}>
       <div className="landing-story-inner">
         <div className="landing-section-heading landing-story-heading">
           <div className="landing-story-title">
             <p className="landing-eyebrow">How it works</p>
-            <h2>From audience criteria to a reviewable lead list</h2>
+            <h2>Thousands of businesses in. A handful out — each with a reason.</h2>
           </div>
           <p className="landing-lede">
-            ScoutLead maintains the business pool separately, matches saved facts to the audience, and returns only
-            the businesses with evidence for the selected signals.
+            ScoutLead keeps the business pool separate, matches your saved criteria against confirmed facts, and
+            returns only the businesses with real evidence for the signals you chose.
           </p>
         </div>
 
-        <div className="landing-story-stream" aria-live="polite">
-          <span><i /> Matching workflow</span>
-          <strong key={activeStep}>{statusMessages[activeStep]}</strong>
-          <em className={activeStep === 4 ? "is-ready" : ""}>
-            {activeStep === 4 ? <><CheckCircle2 size={13} /> Reviewable</> : `0${activeStep + 1} / 05`}
-          </em>
-        </div>
-
-        <div className="landing-story-steps">
-          <LandingStep active={activeStep === 0} completed={activeStep > 0} number="01" icon={<Search size={16} />} title="Define the audience">
-            Choose the trade, customer kind, city, radius, and batch size once.
-          </LandingStep>
-          <LandingStep active={activeStep === 1} completed={activeStep > 1} number="02" icon={<Target size={16} />} title="Pick signals and exclusions">
-            Select the opportunities to find and exclude chains, franchises, directories, or agencies.
-          </LandingStep>
-          <LandingStep active={activeStep === 2} completed={activeStep > 2} number="03" icon={<CalendarClock size={16} />} title="Run it your way">
-            Start a batch on demand or set the cadence that fits your workflow.
-          </LandingStep>
-          <LandingStep active={activeStep === 3} completed={activeStep > 3} number="04" icon={<ListChecks size={16} />} title="Receive new matches">
-            Each run returns new matches first and suppresses duplicate deliveries.
-          </LandingStep>
-          <LandingStep active={activeStep === 4} completed={false} number="05" icon={<UserCheck size={16} />} title="Act on the list">
-            Shortlist, dismiss, or contact a lead. Keep the evidence attached to every decision.
-          </LandingStep>
-        </div>
-        <div className={`landing-story-principles${activeStep === 4 ? " is-emphasized" : ""}`} aria-label="Matching behavior">
-          <span><CheckCircle2 size={14} /> Confirmed signals qualify a lead</span>
-          <span><CheckCircle2 size={14} /> Unknown facts remain unknown</span>
-          <span><CheckCircle2 size={14} /> Criteria are never widened to fill a quota</span>
+        <div className="landing-how-console">
+          <div className="landing-how-console-top">
+            <i /><i /><i />
+            <span className="landing-how-console-cmd">
+              scoutlead run <b>--audience "HVAC · Toronto 25km · reviews&lt;15"</b>
+            </span>
+            <span className="landing-how-console-live">live</span>
+          </div>
+          <div className="landing-how-console-body">
+            {HOW_IT_WORKS_FUNNEL.map((row, index) => (
+              <HowItWorksRow key={row.label} {...row} revealed={stage > index} />
+            ))}
+            <div className="landing-how-console-divider" />
+            <div className={`landing-how-console-out${stage > rowCount ? " is-visible" : ""}`}>
+              <span className="landing-how-console-big">
+                <FunnelCount active={stage > rowCount} to={HOW_IT_WORKS_FUNNEL[rowCount - 1].count} />
+              </span>
+              <span className="landing-how-console-outtext">leads returned · evidence attached to each</span>
+            </div>
+            <ul className="landing-how-console-foot">
+              <li>Confirmed signals qualify a lead</li>
+              <li>Duplicates are suppressed, not reused</li>
+              <li>Criteria are never widened to fill a quota</li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function LandingStep({
-  active = false,
-  children,
-  completed = false,
-  icon,
-  number,
-  title,
+function HowItWorksRow({
+  count,
+  hit = false,
+  label,
+  revealed,
+  suffix,
+  width,
 }: {
-  active?: boolean;
-  children: ReactNode;
-  completed?: boolean;
-  icon: ReactNode;
-  number: string;
-  title: string;
+  count: number;
+  hit?: boolean;
+  label: string;
+  revealed: boolean;
+  suffix: string;
+  width: number;
 }) {
   return (
-    <div className={`landing-step${active ? " is-active" : ""}${completed ? " is-complete" : ""}`}>
-      <div className="landing-step-marker">
-        <span className="landing-feature-icon">{completed ? <CheckCircle2 size={16} /> : icon}</span>
-        <span className="landing-step-number">{number}</span>
-      </div>
-      <div className="landing-step-copy">
-        <h3>{title}</h3>
-        <p>{children}</p>
-      </div>
+    <div className={`landing-how-row${hit ? " is-hit" : ""}${revealed ? " is-in" : ""}`}>
+      <span className="landing-how-row-label">
+        {label} {suffix ? <em>· {suffix}</em> : null}
+      </span>
+      <span className="landing-how-row-bar">
+        <b style={{ width: revealed ? `${width}%` : "0%" }} />
+      </span>
+      <span className="landing-how-row-count">
+        <FunnelCount active={revealed} to={count} />
+      </span>
     </div>
   );
+}
+
+function FunnelCount({ active, to }: { active: boolean; to: number }) {
+  const [value, setValue] = useState(0);
+
+  useEffect(() => {
+    if (!active) {
+      setValue(0);
+      return;
+    }
+    if (prefersReducedMotion()) {
+      setValue(to);
+      return;
+    }
+
+    let frame = 0;
+    const start = performance.now();
+    const duration = 600;
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - start) / duration);
+      setValue(Math.round(to * progress));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frame);
+  }, [active, to]);
+
+  return <>{value.toLocaleString()}</>;
 }
 
 type GlobeMarker = {
@@ -2123,161 +2206,242 @@ function smoothStep(edge0: number, edge1: number, value: number) {
   return amount * amount * (3 - 2 * amount);
 }
 
-function AudienceUseCases() {
+type MarketRole = {
+  count: number;
+  findMarket: string;
+  findTrade: string;
+  icon: ReactNode;
+  returnedWith: string;
+  role: string;
+  sampleEvidence: string;
+  sampleName: string;
+  sell: string;
+  signal: string;
+};
+
+const MARKET_ROLES: MarketRole[] = [
+  {
+    count: 23,
+    findMarket: "Toronto · 25 km",
+    findTrade: "Painters",
+    icon: <Globe size={18} />,
+    returnedWith: "Website status + source",
+    role: "Web & SEO agencies",
+    sampleEvidence: "no website",
+    sampleName: "Lakeside Painting",
+    sell: "websites",
+    signal: "No website listed",
+  },
+  {
+    count: 17,
+    findMarket: "Toronto · Residential",
+    findTrade: "HVAC",
+    icon: <Star size={18} />,
+    returnedWith: "Review count + listing",
+    role: "Reputation consultants",
+    sampleEvidence: "4 reviews",
+    sampleName: "ONCALL Heating",
+    sell: "review growth",
+    signal: "Fewer than 15 reviews",
+  },
+  {
+    count: 11,
+    findMarket: "one local market",
+    findTrade: "Roofers",
+    icon: <Target size={18} />,
+    returnedWith: "Stored inspection fact",
+    role: "Conversion specialists",
+    sampleEvidence: "no booking flow",
+    sampleName: "Lismore Roofing",
+    sell: "booking flows",
+    signal: "No quote or booking flow",
+  },
+  {
+    count: 19,
+    findMarket: "Toronto · 25 km",
+    findTrade: "Plumbers",
+    icon: <ListChecks size={18} />,
+    returnedWith: "Form status + website source",
+    role: "Lead-gen partners",
+    sampleEvidence: "no contact form",
+    sampleName: "Highland Plumbing",
+    sell: "qualified leads",
+    signal: "No contact form",
+  },
+];
+
+// Keep in sync with the CSS --landing-market-dwell-equivalent animation duration (landing-market-fill, 4.2s).
+const MARKET_DWELL_MS = 4200;
+const MARKET_START_INDEX = 2;
+
+function MarketSection() {
   const [sectionRef, sectionActive] = useRevealOnScroll<HTMLElement>("0px");
-  const [activeRecipe, setActiveRecipe] = useState(0);
-  const [recipeStage, setRecipeStage] = useState(0);
-  const recipes = [
-    {
-      audience: "Painters · Toronto · 25 km",
-      evidence: "Website status + source",
-      icon: <Globe size={16} />,
-      signal: "No website listed",
-      title: "Web and SEO agencies",
-    },
-    {
-      audience: "HVAC · Toronto · Residential",
-      evidence: "Review count + listing",
-      icon: <Star size={16} />,
-      signal: "Fewer than 15 reviews",
-      title: "Reputation consultants",
-    },
-    {
-      audience: "Roofers · One local market",
-      evidence: "Stored inspection fact",
-      icon: <Target size={16} />,
-      signal: "No quote or booking flow",
-      title: "Conversion specialists",
-    },
-    {
-      audience: "Plumbers · Toronto · 25 km",
-      evidence: "Form status + website source",
-      icon: <ListChecks size={16} />,
-      signal: "No contact form",
-      title: "Lead generation partners",
-    },
-  ];
+  const [active, setActive] = useState(MARKET_START_INDEX);
+  const [revealStage, setRevealStage] = useState(0);
 
   useEffect(() => {
-    if (!sectionActive) return;
+    if (!sectionActive) {
+      setRevealStage(0);
+      return;
+    }
     if (prefersReducedMotion()) {
-      setRecipeStage(3);
+      setRevealStage(6);
       return;
     }
 
-    const interval = window.setInterval(() => {
-      setRecipeStage((currentStage) => {
-        if (currentStage < 3) return currentStage + 1;
-        setActiveRecipe((currentRecipe) => (currentRecipe + 1) % recipes.length);
-        return 0;
-      });
-    }, 1100);
+    setRevealStage(0);
+    const timers: number[] = [];
+    const at = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
+    at(90, () => setRevealStage(1));
+    at(200, () => setRevealStage(2));
+    at(310, () => setRevealStage(3));
+    at(420, () => setRevealStage(4));
+    at(530, () => setRevealStage(5));
+    at(750, () => setRevealStage(6));
 
-    return () => window.clearInterval(interval);
-  }, [sectionActive, recipes.length]);
+    return () => timers.forEach(clearTimeout);
+  }, [sectionActive, active]);
 
-  const currentRecipe = recipes[activeRecipe];
-  const streamMessage = [
-    `Scanning ${currentRecipe.audience}`,
-    `Signal matched · ${currentRecipe.signal}`,
-    `Evidence attached · ${currentRecipe.evidence}`,
-    `Match ready for review · ${currentRecipe.title}`,
-  ][recipeStage];
+  useEffect(() => {
+    if (!sectionActive || prefersReducedMotion()) return;
+    const timer = window.setTimeout(() => {
+      setActive((current) => (current + 1) % MARKET_ROLES.length);
+    }, MARKET_DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [sectionActive, active]);
+
+  const role = MARKET_ROLES[active];
 
   return (
-    <section className="landing-section landing-use-cases" aria-label="Who ScoutLead is for" ref={sectionRef}>
-      <div className="landing-use-cases-inner">
-        <div className="landing-section-heading">
-          <p className="landing-eyebrow">Built around a commercial question</p>
-          <h2>Turn the opportunity you solve into a monitored audience</h2>
+    <section className="landing-section landing-market-section" aria-label="Who ScoutLead is for" ref={sectionRef}>
+      <div className="landing-market-inner">
+        <div className="landing-section-heading landing-market-head">
+          <div>
+            <p className="landing-eyebrow">Who you can target</p>
+            <h2>Turn the opportunity you solve into a monitored audience</h2>
+          </div>
           <p className="landing-lede">
-            Choose who to find, where they operate, and the observable signal that makes outreach relevant.
+            Whatever you sell to local businesses, there's a public gap that flags a prospect. Pick your angle and
+            watch the audience it builds.
           </p>
         </div>
-        <div className="landing-use-case-list" aria-label="Example ScoutLead audience recipes">
-          <div className="landing-recipe-stream" aria-label="Example audience matching activity">
-            <span><i /> Audience monitor preview</span>
-            <strong key={`${activeRecipe}-${recipeStage}`}>{streamMessage}</strong>
-            <em className={recipeStage === 3 ? "is-ready" : ""}>
-              {recipeStage === 3 ? <><CheckCircle2 size={13} /> Ready</> : `0${recipeStage + 1} / 04`}
-            </em>
+
+        <div className="landing-market-grid">
+          <div className="landing-market-rail">
+            <span className="landing-market-rail-label">What you sell →</span>
+            {MARKET_ROLES.map((item, index) => (
+              <MarketPersonaButton
+                active={index === active}
+                filling={sectionActive && index === active}
+                item={item}
+                key={item.role}
+                onSelect={() => setActive(index)}
+              />
+            ))}
           </div>
-          <div className="landing-recipe-head" aria-hidden="true">
-            <span>Team</span><span>Who to find</span><span>Opportunity signal</span><span>Returned with</span>
+
+          <div className="landing-market-panel">
+            <div className="landing-market-panel-bar">
+              <span className="landing-market-panel-dot" aria-hidden="true" />
+              <span className="landing-market-panel-label">Audience monitor</span>
+              <span className="landing-market-panel-bridge">
+                <b>{role.role}</b> → the {role.findTrade.toLowerCase()} they'd monitor
+              </span>
+              <span className="landing-market-panel-count">
+                matched <b><FunnelCount active={revealStage >= 6} to={role.count} /></b>
+              </span>
+            </div>
+
+            <div className="landing-market-flow">
+              <MarketStage label="Who to find" main={role.findTrade} revealed={revealStage >= 1} sub={role.findMarket} />
+              <MarketArrow revealed={revealStage >= 2} />
+              <MarketStage label="Opportunity signal" main={role.signal} revealed={revealStage >= 3} signal sub="observable, public" />
+              <MarketArrow revealed={revealStage >= 4} />
+              <MarketStage label="Returned with" main={role.returnedWith} revealed={revealStage >= 5} sub="traceable evidence" />
+            </div>
+
+            <div className={`landing-market-sample${revealStage >= 6 ? " is-visible" : ""}`}>
+              <span className="landing-market-sample-k">e.g.</span>
+              <span className="landing-market-chip">
+                <span className="landing-market-chip-dot" aria-hidden="true" />
+                <span className="landing-market-chip-name">{role.sampleName}</span>
+                <span className="landing-market-chip-evidence">{role.sampleEvidence}</span>
+              </span>
+              <span className="landing-market-sample-k landing-market-sample-more">+ {role.count - 1} more</span>
+            </div>
+
+            <div className="landing-market-foot">
+              <CheckCircle2 aria-hidden="true" size={15} />
+              <span>
+                Only businesses with confirmed evidence for "{role.signal}" are returned — unknowns stay unknown.
+              </span>
+            </div>
           </div>
-          {recipes.map((recipe, index) => (
-            <LandingUseCase
-              active={index === activeRecipe}
-              audience={recipe.audience}
-              evidence={recipe.evidence}
-              icon={recipe.icon}
-              key={recipe.title}
-              signal={recipe.signal}
-              stage={index === activeRecipe ? recipeStage : -1}
-              title={recipe.title}
-            />
-          ))}
         </div>
       </div>
     </section>
   );
 }
 
-function LandingUseCase({
+function MarketPersonaButton({
   active,
-  audience,
-  evidence,
-  icon,
-  signal,
-  stage,
-  title,
+  filling,
+  item,
+  onSelect,
 }: {
   active: boolean;
-  audience: string;
-  evidence: string;
-  icon: ReactNode;
-  signal: string;
-  stage: number;
-  title: string;
+  filling: boolean;
+  item: MarketRole;
+  onSelect: () => void;
 }) {
   return (
-    <div className={`landing-use-case${active ? " is-active" : ""}`}>
-      <div className="landing-recipe-team">
-        <span className="landing-use-case-icon">{icon}</span>
-        <strong>{title}</strong>
-      </div>
-      <div className="landing-recipe-flow">
-        <div className={`landing-recipe-node${stage >= 0 ? " is-current" : ""}`}>
-          <span>Who to find</span>
-          <strong>{audience}</strong>
-        </div>
-        <RecipeLink flowing={active && stage === 0} passed={stage >= 1} />
-        <div className={`landing-recipe-node is-signal${stage >= 1 ? " is-current" : ""}`}>
-          <span>Opportunity</span>
-          <strong><Target size={13} /> {signal}</strong>
-        </div>
-        <RecipeLink flowing={active && stage === 1} passed={stage >= 2} />
-        <div className={`landing-recipe-node is-evidence${stage >= 2 ? " is-current" : ""}${stage >= 3 ? " is-ready" : ""}`}>
-          <span>Evidence</span>
-          <strong><CheckCircle2 size={13} /> {evidence}</strong>
-        </div>
+    <button className={`landing-market-persona${active ? " is-on" : ""}`} type="button" onClick={onSelect}>
+      <span className="landing-market-persona-icon">{item.icon}</span>
+      <span className="landing-market-persona-copy">
+        <span className="landing-market-persona-title">{item.role}</span>
+        <span className="landing-market-persona-sub">you sell {item.sell}</span>
+      </span>
+      <span className="landing-market-persona-nub" aria-hidden="true" />
+      <span className={`landing-market-persona-prog${filling ? " is-filling" : ""}`} aria-hidden="true" />
+    </button>
+  );
+}
+
+function MarketStage({
+  label,
+  main,
+  revealed,
+  signal = false,
+  sub,
+}: {
+  label: string;
+  main: string;
+  revealed: boolean;
+  signal?: boolean;
+  sub: string;
+}) {
+  return (
+    <div className={`landing-market-stage${revealed ? " is-in" : ""}`}>
+      <span className="landing-market-stage-cap">{label}</span>
+      <div className={`landing-market-box${signal ? " is-signal" : ""}`}>
+        <div className="landing-market-box-main">{main}</div>
+        <div className="landing-market-box-sub">{sub}</div>
       </div>
     </div>
   );
 }
 
-function RecipeLink({ flowing, passed }: { flowing: boolean; passed: boolean }) {
+function MarketArrow({ revealed }: { revealed: boolean }) {
   return (
-    <span className={`landing-recipe-link${flowing ? " is-flowing" : ""}${passed ? " is-passed" : ""}`} aria-hidden="true">
-      <i />
-      <ArrowRight size={15} />
-    </span>
+    <div className="landing-market-arrow" aria-hidden="true">
+      <span className={revealed ? "is-in" : ""}>→</span>
+    </div>
   );
 }
 
 function DataProvenanceSection() {
   const [sectionRef, sectionActive] = useRevealOnScroll<HTMLElement>("0px");
-  const [traceStage, setTraceStage] = useState(0);
+  const [traceStage, setTraceStage] = useState(-1);
   const traceMessages = [
     "Business listing contributed identity, trade, and location",
     "Business website contributed contact and conversion signals",
@@ -2290,14 +2454,18 @@ function DataProvenanceSection() {
   ];
 
   useEffect(() => {
-    if (!sectionActive) return;
+    if (!sectionActive) {
+      setTraceStage(-1);
+      return;
+    }
     if (prefersReducedMotion()) {
       setTraceStage(7);
       return;
     }
 
+    setTraceStage(0);
     const interval = window.setInterval(() => {
-      setTraceStage((currentStage) => (currentStage + 1) % traceMessages.length);
+      setTraceStage((currentStage) => (Math.max(currentStage, 0) + 1) % traceMessages.length);
     }, 1050);
 
     return () => window.clearInterval(interval);
@@ -2320,7 +2488,7 @@ function DataProvenanceSection() {
         <div className="landing-infra-simulation" aria-label="Business evidence infrastructure simulation">
           <div className="landing-infra-toolbar">
             <span><i /> Profile assembly</span>
-            <strong key={traceStage}>{traceMessages[traceStage]}</strong>
+            <strong key={traceStage}>{traceStage >= 0 ? traceMessages[traceStage] : "Ready to assemble a business profile"}</strong>
             <em>business_0842</em>
           </div>
 
@@ -2356,42 +2524,38 @@ function DataProvenanceSection() {
             <InfraNode active={traceStage === 7} className="is-lead-output" completed={false} detail="reason + evidence attached" icon={<CheckCircle2 size={17} />} kind="Result" title="Qualified lead" />
           </div>
 
-          <div className="landing-infra-mobile">
-            <InfraMobilePlane label="Evidence inputs" active={traceStage <= 3}>
-              <InfraNode active={traceStage === 0} completed={traceStage > 0} detail="identity · trade · location" icon={<MapPin size={16} />} kind="Public signal" title="Business listings" />
-              <InfraNode active={traceStage === 1} completed={traceStage > 1} detail="contact · forms · booking" icon={<Globe size={16} />} kind="Public signal" title="Business websites" />
-              <InfraNode active={traceStage === 2} completed={traceStage > 2} detail="status · classification" icon={<Building2 size={16} />} kind="Public signal" title="Public records" />
-              <InfraNode active={traceStage === 3} completed={traceStage > 3} detail="reviewed conflict fixes" icon={<UserCheck size={16} />} kind="Reviewed input" title="Curated corrections" />
-            </InfraMobilePlane>
-            <InfraMobilePlane label="Unified profile" active={traceStage >= 4 && traceStage <= 5}>
-              <InfraNode active={traceStage === 4} completed={traceStage > 4} detail="one business, one identity" icon={<UsersRound size={16} />} kind="Reconcile" title="Identity resolution" />
-              <InfraNode active={traceStage === 4} completed={traceStage > 4} detail="compare observations" icon={<ShieldCheck size={16} />} kind="Reconcile" title="Fact verification" />
-              <InfraNode active={traceStage === 5} completed={traceStage > 5} detail="facts + evidence + freshness" icon={<Package size={16} />} kind="Combined record" title="Business profile" />
-            </InfraMobilePlane>
-            <InfraMobilePlane label="Decision" active={traceStage === 6}>
-              <InfraNode active={traceStage === 6} completed={traceStage > 6} detail="trade · market · signals" icon={<Settings size={16} />} kind="Your criteria" title="Saved audience" />
-              <InfraNode active={traceStage === 6} completed={traceStage > 6} detail="confirmed facts only" icon={<Target size={16} />} kind="Decision" title="Audience match" />
-              <InfraNode active={traceStage === 6} completed={traceStage > 6} detail="prevents repeat delivery" icon={<Ban size={16} />} kind="Memory" title="Previous deliveries" />
-            </InfraMobilePlane>
-            <InfraMobilePlane label="Lead output" active={traceStage === 7}>
-              <InfraNode active={traceStage === 7} completed={false} detail="reason + evidence attached" icon={<CheckCircle2 size={16} />} kind="Result" title="Qualified lead" />
-            </InfraMobilePlane>
+          <div className="landing-infra-portrait" aria-label="Vertical business evidence flow">
+            <span className="landing-infra-portrait-plane is-inputs">Evidence inputs</span>
+            <span className="landing-infra-portrait-plane is-profile">Unified profile</span>
+            <span className="landing-infra-portrait-plane is-decision">Audience decision</span>
+            <span className="landing-infra-portrait-plane is-output">Lead output</span>
+
+            <svg className="landing-infra-portrait-links" viewBox="0 0 440 930" preserveAspectRatio="none" aria-hidden="true">
+              <InfraLink active={traceStage === 0} completed={traceStage > 0} d="M106 116 C106 220 106 235 106 294" />
+              <InfraLink active={traceStage === 1} completed={traceStage > 1} d="M334 116 C334 220 334 235 334 294" />
+              <InfraLink active={traceStage === 2} completed={traceStage > 2} d="M106 204 C106 230 106 245 106 294" />
+              <InfraLink active={traceStage === 3} completed={traceStage > 3} d="M334 204 C334 230 334 245 334 294" />
+              <InfraLink active={traceStage === 4} completed={traceStage > 4} d="M106 362 C106 406 170 406 220 438" />
+              <InfraLink active={traceStage === 4} completed={traceStage > 4} d="M334 362 C334 406 270 406 220 438" />
+              <InfraLink active={traceStage === 6} completed={traceStage > 6} d="M220 506 C220 570 220 630 220 700" />
+              <InfraLink active={traceStage === 6} completed={traceStage > 6} d="M106 634 C106 672 165 672 220 700" />
+              <InfraLink active={traceStage === 6} completed={traceStage > 6} d="M334 634 C334 672 275 672 220 700" />
+              <InfraLink active={traceStage === 7} completed={false} d="M220 768 L220 842" />
+            </svg>
+
+            <InfraNode active={traceStage === 0} className="is-portrait-listings" completed={traceStage > 0} detail="identity · trade · location" icon={<MapPin size={16} />} kind="Public signal" title="Business listings" />
+            <InfraNode active={traceStage === 1} className="is-portrait-websites" completed={traceStage > 1} detail="contact · forms · booking" icon={<Globe size={16} />} kind="Public signal" title="Business websites" />
+            <InfraNode active={traceStage === 2} className="is-portrait-records" completed={traceStage > 2} detail="status · classification" icon={<Building2 size={16} />} kind="Public signal" title="Public records" />
+            <InfraNode active={traceStage === 3} className="is-portrait-corrections" completed={traceStage > 3} detail="reviewed conflict fixes" icon={<UserCheck size={16} />} kind="Reviewed input" title="Curated corrections" />
+            <InfraNode active={traceStage === 4} className="is-portrait-identity" completed={traceStage > 4} detail="one business, one identity" icon={<UsersRound size={16} />} kind="Reconcile" title="Identity resolution" />
+            <InfraNode active={traceStage === 4} className="is-portrait-verification" completed={traceStage > 4} detail="compare observations" icon={<ShieldCheck size={16} />} kind="Reconcile" title="Fact verification" />
+            <InfraNode active={traceStage === 5} className="is-portrait-profile" completed={traceStage > 5} detail="facts + evidence + freshness" icon={<Package size={16} />} kind="Combined record" title="Business profile" />
+            <InfraNode active={traceStage === 6} className="is-portrait-criteria" completed={traceStage > 6} detail="trade · market · signals" icon={<Settings size={16} />} kind="Your criteria" title="Saved audience" />
+            <InfraNode active={traceStage === 6} className="is-portrait-memory" completed={traceStage > 6} detail="prevents repeat delivery" icon={<Ban size={16} />} kind="Memory" title="Previous deliveries" />
+            <InfraNode active={traceStage === 6} className="is-portrait-match" completed={traceStage > 6} detail="confirmed facts only" icon={<Target size={16} />} kind="Decision" title="Audience match" />
+            <InfraNode active={traceStage === 7} className="is-portrait-lead" completed={false} detail="reason + evidence attached" icon={<CheckCircle2 size={16} />} kind="Result" title="Qualified lead" />
           </div>
 
-          <div className="landing-infra-payload">
-            <span>Combined profile</span>
-            <code>4 inputs reconciled</code>
-            <code>unknowns preserved</code>
-            <code>duplicate suppressed</code>
-            <strong className={traceStage === 7 ? "is-ready" : ""}><CheckCircle2 size={13} /> Evidence retained end to end</strong>
-          </div>
-        </div>
-
-        <div className="landing-fact-states" aria-label="Fact verification states">
-          <FactState className="is-confirmed" title="Broader coverage">Complementary observations fill different parts of the profile.</FactState>
-          <FactState className="is-source" title="One business">Duplicate records resolve to one reusable identity.</FactState>
-          <FactState className="is-unknown" title="Honest gaps">Missing evidence remains unknown instead of becoming a match.</FactState>
-          <FactState className="is-stale" title="Traceable result">The reason and evidence remain attached to every lead.</FactState>
         </div>
       </div>
     </section>
@@ -2437,111 +2601,113 @@ function InfraLink({ active, completed, d }: { active: boolean; completed: boole
   );
 }
 
-function InfraMobilePlane({
-  active,
-  children,
-  label,
-}: {
-  active: boolean;
-  children: ReactNode;
-  label: string;
-}) {
-  return (
-    <div className={`landing-infra-mobile-plane${active ? " is-active" : ""}`}>
-      <span>{label} plane</span>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-function FactState({ children, className, title }: { children: ReactNode; className: string; title: string }) {
-  return (
-    <div>
-      <span className={`landing-fact-dot ${className}`} />
-      <p><strong>{title}</strong>{children}</p>
-    </div>
-  );
-}
+const FAQ_ITEMS: Array<{ answer: ReactNode; question: string }> = [
+  {
+    answer: (
+      <>
+        Public sources only — business listings, public records, and the businesses' own websites. ScoutLead never
+        uses private or purchased contact data.
+      </>
+    ),
+    question: "Where does the business data come from?",
+  },
+  {
+    answer: (
+      <>
+        A fact was <b>observed in a public source we can point to</b>. If it can't be observed, it's marked unknown
+        — ScoutLead doesn't infer or estimate.
+      </>
+    ),
+    question: "What does “confirmed” mean?",
+  },
+  {
+    answer: (
+      <>
+        Each audience remembers what it has already delivered. New runs return{" "}
+        <b>only businesses you haven't seen before</b>, deduped automatically.
+      </>
+    ),
+    question: "How are duplicate deliveries prevented?",
+  },
+  {
+    answer: (
+      <>
+        It stays blank. An unknown <b>never counts as a match</b>, and criteria are never widened to fill a quota.
+      </>
+    ),
+    question: "What happens when a fact is unknown?",
+  },
+  {
+    answer: (
+      <>
+        No. Drafts wait for your approval and send from <b>your own Gmail</b>. Nothing goes out until you click
+        send.
+      </>
+    ),
+    question: "Does ScoutLead send outreach automatically?",
+  },
+];
 
 function FaqSection() {
+  const [sectionRef, sectionActive] = useRevealOnScroll<HTMLElement>("0px");
+  const [openIndexes, setOpenIndexes] = useState<number[]>([0]);
+
+  const toggle = (index: number) => {
+    setOpenIndexes((current) =>
+      current.includes(index) ? current.filter((item) => item !== index) : [...current, index],
+    );
+  };
+
   return (
-    <section className="landing-section landing-faq-section" aria-label="Frequently asked questions">
+    <section className="landing-section landing-faq-section" aria-label="Frequently asked questions" ref={sectionRef}>
       <div className="landing-faq-inner">
-        <div className="landing-section-heading">
+        <div className="landing-section-heading landing-faq-head">
           <p className="landing-eyebrow">Questions before a first run</p>
           <h2>What the evidence means</h2>
           <p className="landing-lede">The short version of how sourcing, matching, and delivery behave.</p>
         </div>
-        <div className="landing-faq-list">
-          <FaqItem question="Where does the business data come from?">
-            Public business listings, linked business websites, structured website inspection, and curated corrections
-            where a source needs review. Available fields vary by business, and the source stays attached to the fact.
-          </FaqItem>
-          <FaqItem question="What does confirmed mean?">
-            A stored fact directly supports the selected signal. Source-listed evidence is labeled separately when a
-            public profile reports something that has not been independently verified.
-          </FaqItem>
-          <FaqItem question="How are duplicate deliveries prevented?">
-            Delivery history is stored per audience and business. A later run returns new eligible matches first
-            instead of padding the batch with the same businesses again.
-          </FaqItem>
-          <FaqItem question="What happens when a fact is unknown?">
-            Unknown stays unknown. It can remain eligible for basic trade and location filters, but it cannot satisfy a
-            selected opportunity signal until evidence is stored.
-          </FaqItem>
-          <FaqItem question="Does ScoutLead send outreach automatically?">
-            No. Drafts, exports, and sends require review and approval, and sending uses the connected account and its
-            configured provider checks.
-          </FaqItem>
+        <div className={`landing-faq-list${sectionActive ? " is-active" : ""}`}>
+          {FAQ_ITEMS.map((item, index) => (
+            <FaqAccordionItem
+              answer={item.answer}
+              index={index}
+              key={item.question}
+              open={openIndexes.includes(index)}
+              question={item.question}
+              onToggle={() => toggle(index)}
+            />
+          ))}
         </div>
       </div>
     </section>
   );
 }
 
-function FaqItem({ children, question }: { children: ReactNode; question: string }) {
+function FaqAccordionItem({
+  answer,
+  index,
+  onToggle,
+  open,
+  question,
+}: {
+  answer: ReactNode;
+  index: number;
+  onToggle: () => void;
+  open: boolean;
+  question: string;
+}) {
   return (
-    <details className="landing-faq-item">
-      <summary>{question}<Plus size={16} aria-hidden="true" /></summary>
-      <p>{children}</p>
-    </details>
-  );
-}
-
-function TrustSection() {
-  return (
-    <section className="landing-section landing-trust-section" aria-label="Privacy and compliance">
-      <div className="landing-section-heading">
-        <p className="landing-eyebrow">Privacy and compliance</p>
-        <h2>Outreach has guardrails before it reaches Gmail, exports, or webhooks</h2>
-        <p className="landing-lede">
-          Verification, suppression, human approval, and provider checks are handled once in the workflow.
-        </p>
+    <div className={`landing-faq-item${open ? " is-open" : ""}`}>
+      <button aria-expanded={open} className="landing-faq-question" type="button" onClick={onToggle}>
+        <span className="landing-faq-number">{String(index + 1).padStart(2, "0")}</span>
+        <span className="landing-faq-question-text">{question}</span>
+        <span className="landing-faq-toggle" aria-hidden="true" />
+      </button>
+      <div className="landing-faq-answer">
+        <div className="landing-faq-answer-inner">
+          <p>{answer}</p>
+        </div>
       </div>
-      <div className="landing-trust-row is-active">
-        <LandingTrustItem icon={<ShieldCheck size={15} />} title="Verify first">
-          Leads need a reachable email or phone before they move into outreach.
-        </LandingTrustItem>
-        <LandingTrustItem icon={<Ban size={15} />} title="Respect suppression">
-          Bounced, opted-out, and never-contact contacts stay blocked across future runs.
-        </LandingTrustItem>
-        <LandingTrustItem icon={<UserCheck size={15} />} title="Require approval">
-          Drafts, exports, and sends wait for a human decision.
-        </LandingTrustItem>
-        <LandingTrustItem icon={<ListChecks size={15} />} title="Check providers">
-          Campaigns surface missing search, verification, or sending configuration before work proceeds.
-        </LandingTrustItem>
-      </div>
-    </section>
-  );
-}
-
-function LandingTrustItem({ children, icon, title }: { children: ReactNode; icon: ReactNode; title: string }) {
-  return (
-    <div className="landing-trust-item">
-      <span>{icon}</span>
-      <strong>{title}</strong>
-      <p>{children}</p>
     </div>
   );
 }
