@@ -48,3 +48,15 @@ class AdminActionReason(BaseModel):
 class AdminDeleteRequest(BaseModel):
     confirmation: str
     reason: str = Field(min_length=3, max_length=1000)
+
+
+class AdminDataJobCreate(BaseModel):
+    segment_id: str
+    processing_mode: Literal["automatic", "review_first"] = "review_first"
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class AdminDataJobAction(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+    sample_size: int | None = Field(default=None, ge=1, le=100)
+    source_item_ids: list[str] = Field(default_factory=list, max_length=200)

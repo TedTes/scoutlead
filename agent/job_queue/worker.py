@@ -168,7 +168,11 @@ def run_once() -> bool:
                 business_index_pipeline_service(
                     session=session,
                     services=services,
-                ).plan_refresh(str(job.payload["segment_id"]))
+                ).plan_refresh(
+                    str(job.payload["segment_id"]),
+                    processing_mode=str(job.payload.get("processing_mode", "automatic")),
+                    parent_job_id=job.id,
+                )
             elif job.type == JobType.SOURCE_FETCH.value:
                 business_index_pipeline_service(
                     session=session,
@@ -178,6 +182,7 @@ def run_once() -> bool:
                     source_index=int(job.payload["source_index"]),
                     task_data=dict(job.payload["task"]),
                     job_id=job.id,
+                    processing_mode=str(job.payload.get("processing_mode", "automatic")),
                 )
             elif job.type == JobType.SOURCE_ITEM_CLASSIFY.value:
                 business_index_pipeline_service(

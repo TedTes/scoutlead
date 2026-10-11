@@ -12,7 +12,10 @@ from business_index.refresh import (
 )
 from business_index.pipeline import BusinessIndexPipelineService
 from business_index.repository import BusinessIndexRepository
-from business_index.scheduler import enqueue_due_business_index_refreshes
+from business_index.scheduler import (
+    _segments_awaiting_admin_review,
+    enqueue_due_business_index_refreshes,
+)
 from campaigns.service import CampaignService
 from campaigns.schemas import CampaignRead
 from db.models import (
@@ -30,6 +33,7 @@ from leads.repository import LeadRepository
 from leads.schemas import LeadRead
 from run_diagnostics.service import build_run_diagnostics
 from seeding.service import BusinessSeedService
+from shared.utils import utcnow
 from source_requests.schemas import SourceRequestCreate
 from source_requests.service import SourceRequestService
 from territories.opportunity_audit import BusinessOpportunityAuditor
@@ -79,6 +83,36 @@ class EmptySourceRegistry:
             confidence=80,
             data=[],
         )
+
+
+def test_review_first_admin_job_blocks_scheduled_refresh_until_released() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_factory() as session:
+        job = QueueJobModel(
+            id="job_admin_review",
+            type=JobType.BUSINESS_INDEX_REFRESH.value,
+            payload={
+                "segment_id": "segment_review",
+                "admin_requested": True,
+                "processing_mode": "review_first",
+            },
+            status="completed",
+            attempts=1,
+            max_attempts=3,
+            run_after=utcnow(),
+            completed_at=utcnow(),
+        )
+        session.add(job)
+        session.commit()
+
+        assert _segments_awaiting_admin_review(session) == {"segment_review"}
+
+        job.payload = {**job.payload, "review_state": "approved"}
+        session.commit()
+
+        assert _segments_awaiting_admin_review(session) == set()
 
 
 def test_refresh_candidate_order_interleaves_providers_before_existing_inventory() -> None:
@@ -384,6 +418,81 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
     assert sorted(item.state for item in items) == ["needs_review", "needs_review", "rejected"]
     assert segment is not None
     assert segment.next_refresh_at > segment.last_refresh_at
+
+
+def test_review_first_refresh_stops_after_source_items_are_collected() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        product = ProductRepository(session).create(_product())
+        campaigns = CampaignService(
+            session=session,
+            llm=FakeWorkflowLLM(),
+            search_tool=SearchTool(),
+            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
+            embedding=FakeEmbeddingClient(),
+        )
+        created = SourceRequestService(
+            products=ProductRepository(session),
+            campaigns=campaigns,
+            google_places_configured=True,
+            search_configured=True,
+            openstreetmap_enabled=True,
+        ).create(
+            SourceRequestCreate(
+                product_id=product.id,
+                source="auto",
+                prompt="Independent painters in Toronto without a website",
+                max_results=5,
+            )
+        )
+        segment_id = created.run.source_inputs["business_index_segment_id"]
+        pipeline = BusinessIndexPipelineService(
+            session=session,
+            registry=RecordingSourceRegistry(),
+            campaigns=campaigns,
+            auditor=BusinessOpportunityAuditor(
+                session=session,
+                verifier=None,
+                search=SearchTool(),
+                timeout_seconds=0.1,
+            ),
+            embedding=FakeEmbeddingClient(),
+        )
+
+        planned = pipeline.plan_refresh(
+            segment_id,
+            processing_mode="review_first",
+            parent_job_id="admin_batch_1",
+        )
+        queue = QueueRepository(session)
+        processed_types = []
+        for _ in range(10):
+            job = queue.claim_next()
+            if job is None:
+                break
+            processed_types.append(job.type)
+            pipeline.fetch_source(
+                segment_id,
+                source_index=int(job.payload["source_index"]),
+                task_data=job.payload["task"],
+                job_id=job.id,
+                processing_mode=job.payload["processing_mode"],
+            )
+            queue.complete(job.id)
+
+        items = session.query(SourceItemModel).all()
+        jobs = session.query(QueueJobModel).all()
+
+    assert planned["source_job_count"] == 3
+    assert planned["fact_audit_job_count"] == 0
+    assert set(processed_types) == {JobType.SOURCE_FETCH.value}
+    assert {job.type for job in jobs} == {JobType.SOURCE_FETCH.value}
+    assert all(job.parent_run_id == "admin_batch_1" for job in jobs)
+    assert all(item.state == "fetched" for item in items)
+    assert all(item.business_id is None for item in items)
 
 
 def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:

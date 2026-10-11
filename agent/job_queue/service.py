@@ -59,26 +59,51 @@ class QueueService:
         segment_id: str,
         campaign_id: str | None = None,
         requested_deficit: int = 0,
+        processing_mode: str = "automatic",
+        admin_requested: bool = False,
+        requested_by: str | None = None,
+        reason: str | None = None,
         commit: bool = True,
     ):
+        payload = {
+            "segment_id": segment_id,
+            "campaign_id": campaign_id,
+            "requested_deficit": max(0, requested_deficit),
+            "processing_mode": processing_mode,
+            "admin_requested": admin_requested,
+        }
+        if requested_by:
+            payload["requested_by"] = requested_by
+        if reason:
+            payload["reason"] = reason
         return self.queue.enqueue_once(
             JobType.BUSINESS_INDEX_REFRESH,
-            {
-                "segment_id": segment_id,
-                "campaign_id": campaign_id,
-                "requested_deficit": max(0, requested_deficit),
-            },
+            payload,
             dedupe_key=segment_id,
             max_attempts=3,
             commit=commit,
         )
 
-    def enqueue_source_fetch(self, *, segment_id: str, source_index: int, task: dict):
+    def enqueue_source_fetch(
+        self,
+        *,
+        segment_id: str,
+        source_index: int,
+        task: dict,
+        processing_mode: str = "automatic",
+        parent_run_id: str | None = None,
+    ):
         return self.queue.enqueue_once(
             JobType.SOURCE_FETCH,
-            {"segment_id": segment_id, "source_index": source_index, "task": task},
+            {
+                "segment_id": segment_id,
+                "source_index": source_index,
+                "task": task,
+                "processing_mode": processing_mode,
+            },
             dedupe_key=f"{segment_id}:{source_index}",
             max_attempts=3,
+            parent_run_id=parent_run_id,
         )
 
     def enqueue_source_item_classify(self, *, source_item_id: str, segment_id: str):

@@ -6,6 +6,8 @@ from admin.schemas import (
     AdminBusinessStateChange,
     AdminBusinessUpdate,
     AdminDeleteRequest,
+    AdminDataJobAction,
+    AdminDataJobCreate,
 )
 from admin.service import AdminDataService
 from app.dependencies import AdminAuth, DbSession
@@ -21,6 +23,75 @@ def _service(session: DbSession, auth: AdminAuth) -> AdminDataService:
 @router.get("/access")
 def admin_access(auth: AdminAuth):
     return {"is_admin": True, "email": auth.email}
+
+
+@router.get("/data-jobs/segments")
+def data_job_segments(session: DbSession, auth: AdminAuth):
+    return _service(session, auth).list_data_segments()
+
+
+@router.get("/data-jobs")
+def list_data_jobs(
+    session: DbSession,
+    auth: AdminAuth,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    return _service(session, auth).list_data_jobs(limit=limit)
+
+
+@router.post("/data-jobs")
+def create_data_job(data: AdminDataJobCreate, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).create_data_job(data)
+
+
+@router.get("/data-jobs/{job_id}")
+def data_job_detail(job_id: str, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).data_job_detail(job_id)
+
+
+@router.post("/data-jobs/{job_id}/validate")
+def validate_data_job(
+    job_id: str,
+    data: AdminDataJobAction,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).validate_data_job(
+        job_id,
+        reason=data.reason,
+        sample_size=data.sample_size,
+        source_item_ids=data.source_item_ids,
+    )
+
+
+@router.post("/data-jobs/{job_id}/discard")
+def discard_data_job(
+    job_id: str,
+    data: AdminDataJobAction,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).discard_data_job(job_id, reason=data.reason)
+
+
+@router.post("/data-jobs/{job_id}/cancel")
+def cancel_data_job(
+    job_id: str,
+    data: AdminDataJobAction,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).cancel_data_job(job_id, reason=data.reason)
+
+
+@router.post("/data-jobs/{job_id}/retry")
+def retry_data_job(
+    job_id: str,
+    data: AdminDataJobAction,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).retry_data_job(job_id, reason=data.reason)
 
 
 @router.get("/businesses/overview")

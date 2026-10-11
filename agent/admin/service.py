@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from admin.schemas import AdminBusinessCreate, AdminBusinessUpdate
+from admin.schemas import AdminBusinessCreate, AdminBusinessUpdate, AdminDataJobCreate
 from auth.context import AuthContext
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from db.base import Base
@@ -18,14 +18,23 @@ from db.models import (
     BusinessNicheMembershipModel,
     BusinessPublicationModel,
     NicheModel,
+    QueueJobModel,
     SourceItemModel,
     ValidationResultModel,
 )
 from publication.validation import BusinessValidationService
+from job_queue.schemas import JobStatus, JobType
+from job_queue.service import QueueService
 from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, normalize_url, utcnow
-from source_items.repository import source_item_content_hash
-from source_items.schemas import SourceItemCreate
+from source_items.repository import SourceItemRepository, source_item_content_hash
+from source_items.schemas import (
+    SourceItemCreate,
+    SourceItemDecisionCreate,
+    SourceItemDecisionValue,
+    SourceItemStage,
+    SourceItemState,
+)
 
 
 REQUIRED_VALIDATIONS = {"identity", "business_identity", "trade", "location"}
@@ -45,6 +54,262 @@ class AdminDataService:
     def __init__(self, session: Session, auth: AuthContext) -> None:
         self.session = session
         self.auth = auth
+
+    def list_data_segments(self) -> list[dict[str, Any]]:
+        rows = self.session.execute(
+            select(BusinessIndexSegmentModel, NicheModel)
+            .join(NicheModel, NicheModel.id == BusinessIndexSegmentModel.niche_id)
+            .order_by(NicheModel.label, BusinessIndexSegmentModel.market_label)
+        )
+        return [
+            {
+                "id": segment.id,
+                "niche_slug": niche.slug,
+                "niche_label": niche.label,
+                "market_key": segment.market_key,
+                "market_label": segment.market_label,
+                "status": segment.status,
+                "source_count": len(segment.source_plan or []),
+                "target_business_count": segment.target_business_count,
+            }
+            for segment, niche in rows
+        ]
+
+    def list_data_jobs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        roots = list(
+            self.session.scalars(
+                select(QueueJobModel)
+                .where(QueueJobModel.type == JobType.BUSINESS_INDEX_REFRESH.value)
+                .order_by(QueueJobModel.created_at.desc())
+                .limit(max(limit * 5, limit))
+            )
+        )
+        admin_roots = [job for job in roots if (job.payload or {}).get("admin_requested")]
+        return [self._data_job_summary(job) for job in admin_roots[:limit]]
+
+    def create_data_job(self, data: AdminDataJobCreate) -> dict[str, Any]:
+        segment = self.session.get(BusinessIndexSegmentModel, data.segment_id)
+        if segment is None:
+            raise NotFoundError("business index segment not found", {"segment_id": data.segment_id})
+        if segment.status != "active":
+            raise ConflictError("Only active business index segments can be refreshed")
+        active_jobs = list(
+            self.session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type.in_([
+                        JobType.BUSINESS_INDEX_REFRESH.value,
+                        JobType.SOURCE_FETCH.value,
+                    ]),
+                    QueueJobModel.status.in_([
+                        JobStatus.QUEUED.value,
+                        JobStatus.RUNNING.value,
+                    ]),
+                )
+            )
+        )
+        if any(str((job.payload or {}).get("segment_id")) == segment.id for job in active_jobs):
+            raise ConflictError("This segment already has collection work in progress")
+        job = QueueService(self.session).enqueue_business_index_refresh(
+            segment_id=segment.id,
+            processing_mode=data.processing_mode,
+            admin_requested=True,
+            requested_by=self.auth.user_id,
+            reason=data.reason,
+        )
+        self._audit(
+            "data_job:create",
+            job.id,
+            data.reason,
+            None,
+            {"segment_id": segment.id, "processing_mode": data.processing_mode},
+            entity_type="data_job",
+        )
+        self.session.commit()
+        return self._data_job_summary(job)
+
+    def data_job_detail(self, job_id: str) -> dict[str, Any]:
+        return self._data_job_summary(self._data_job(job_id), include_samples=True)
+
+    def validate_data_job(
+        self,
+        job_id: str,
+        *,
+        reason: str,
+        sample_size: int | None = None,
+        source_item_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        root = self._data_job(job_id)
+        if (root.payload or {}).get("processing_mode") != "review_first":
+            raise ConflictError("Automatic jobs do not have a manual validation gate")
+        children, items = self._data_job_records(root)
+        if any(job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value} for job in children):
+            raise ConflictError("Collection must finish before validation can start")
+        eligible = [
+            item for item in items
+            if item.business_id is None
+            and item.state in {SourceItemState.FETCHED.value, SourceItemState.RELEVANT.value}
+        ]
+        eligible.sort(key=lambda item: (item.provider_id, item.fetched_at, item.id))
+        requested_ids = set(source_item_ids or [])
+        if requested_ids:
+            batch_ids = {item.id for item in items}
+            unknown_ids = requested_ids - batch_ids
+            if unknown_ids:
+                raise ValidationError(
+                    "One or more selected source items do not belong to this fetch",
+                    {"source_item_ids": sorted(unknown_ids)},
+                )
+            eligible_by_id = {item.id: item for item in eligible}
+            unavailable_ids = requested_ids - set(eligible_by_id)
+            if unavailable_ids:
+                raise ConflictError(
+                    "One or more selected source items have already been processed",
+                    {"source_item_ids": sorted(unavailable_ids)},
+                )
+            selected = [eligible_by_id[item_id] for item_id in source_item_ids or []]
+        else:
+            selected = eligible[:sample_size] if sample_size else eligible
+        if not selected:
+            raise ConflictError("This batch has no unprocessed source items")
+        queue = QueueService(self.session)
+        for item in selected:
+            original_state = item.state
+            item.state = SourceItemState.VALIDATION_QUEUED.value
+            if original_state == SourceItemState.RELEVANT.value:
+                queue.enqueue_business_identity_resolve(
+                    source_item_id=item.id,
+                    segment_id=item.segment_id,
+                )
+            else:
+                queue.enqueue_source_item_classify(
+                    source_item_id=item.id,
+                    segment_id=item.segment_id,
+                )
+        remaining = len(eligible) - len(selected)
+        root.payload = {
+            **(root.payload or {}),
+            "review_state": "sample_processing" if remaining else "approved",
+            "reviewed_at": utcnow().isoformat(),
+            "reviewed_by": self.auth.user_id,
+            "approved_count": int((root.payload or {}).get("approved_count", 0)) + len(selected),
+        }
+        self._audit(
+            (
+                "data_job:validate_selected"
+                if requested_ids
+                else "data_job:validate_sample"
+                if remaining
+                else "data_job:validate_all"
+            ),
+            root.id,
+            reason,
+            None,
+            {"queued_count": len(selected), "remaining_count": remaining},
+            entity_type="data_job",
+        )
+        self.session.commit()
+        return self._data_job_summary(root, include_samples=True)
+
+    def discard_data_job(self, job_id: str, *, reason: str) -> dict[str, Any]:
+        root = self._data_job(job_id)
+        if (root.payload or {}).get("processing_mode") != "review_first":
+            raise ConflictError("Only review-first jobs can discard staged source items")
+        children, items = self._data_job_records(root)
+        if any(job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value} for job in children):
+            raise ConflictError("Collection must finish before staged items can be discarded")
+        repository = SourceItemRepository(self.session)
+        pending = [
+            item for item in items
+            if item.business_id is None
+            and item.state in {SourceItemState.FETCHED.value, SourceItemState.RELEVANT.value}
+        ]
+        for item in pending:
+            repository.add_decision(
+                item.id,
+                SourceItemDecisionCreate(
+                    stage=SourceItemStage.RELEVANCE,
+                    decision=SourceItemDecisionValue.REJECTED,
+                    reason=reason,
+                    actor_type="user",
+                    actor_id=self.auth.user_id,
+                    details={"admin_batch_discard": root.id},
+                ),
+                next_state=SourceItemState.REJECTED,
+                commit=False,
+            )
+        root.payload = {
+            **(root.payload or {}),
+            "review_state": "discarded",
+            "reviewed_at": utcnow().isoformat(),
+            "reviewed_by": self.auth.user_id,
+        }
+        self._audit(
+            "data_job:discard",
+            root.id,
+            reason,
+            None,
+            {"discarded_count": len(pending)},
+            entity_type="data_job",
+        )
+        self.session.commit()
+        return self._data_job_summary(root, include_samples=True)
+
+    def cancel_data_job(self, job_id: str, *, reason: str) -> dict[str, Any]:
+        root = self._data_job(job_id)
+        children, _ = self._data_job_records(root)
+        jobs = [root, *children]
+        if any(job.status == JobStatus.RUNNING.value for job in jobs):
+            raise ConflictError(
+                "A running fetch cannot be interrupted safely; retry cancellation when it finishes"
+            )
+        canceled = 0
+        for job in jobs:
+            if job.status == JobStatus.QUEUED.value:
+                job.status = JobStatus.CANCELED.value
+                job.last_error = f"Canceled by administrator: {reason}"
+                canceled += 1
+        if not canceled:
+            raise ConflictError("This data job has no queued work to cancel")
+        root.payload = {**(root.payload or {}), "review_state": "canceled"}
+        self._audit(
+            "data_job:cancel",
+            root.id,
+            reason,
+            None,
+            {"canceled_job_count": canceled},
+            entity_type="data_job",
+        )
+        self.session.commit()
+        return self._data_job_summary(root, include_samples=True)
+
+    def retry_data_job(self, job_id: str, *, reason: str) -> dict[str, Any]:
+        root = self._data_job(job_id)
+        children, _ = self._data_job_records(root)
+        retryable = [
+            job for job in [root, *children]
+            if job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
+        ]
+        if not retryable:
+            raise ConflictError("This data job has no failed work to retry")
+        for job in retryable:
+            job.status = JobStatus.QUEUED.value
+            job.attempts = 0
+            job.run_after = utcnow()
+            job.locked_at = None
+            job.dead_lettered_at = None
+            job.last_error = None
+            job.completed_at = None
+        root.payload = {**(root.payload or {}), "review_state": "pending"}
+        self._audit(
+            "data_job:retry",
+            root.id,
+            reason,
+            None,
+            {"retried_job_count": len(retryable)},
+            entity_type="data_job",
+        )
+        self.session.commit()
+        return self._data_job_summary(root, include_samples=True)
 
     def overview(self) -> dict[str, Any]:
         businesses = list(self.session.scalars(select(BusinessModel)))
@@ -438,6 +703,201 @@ class AdminDataService:
             raise NotFoundError("business not found", {"business_id": business_id})
         return business
 
+    def _data_job(self, job_id: str) -> QueueJobModel:
+        job = self.session.get(QueueJobModel, job_id)
+        if (
+            job is None
+            or job.type != JobType.BUSINESS_INDEX_REFRESH.value
+            or not (job.payload or {}).get("admin_requested")
+        ):
+            raise NotFoundError("admin data job not found", {"job_id": job_id})
+        return job
+
+    def _data_job_records(
+        self,
+        root: QueueJobModel,
+    ) -> tuple[list[QueueJobModel], list[SourceItemModel]]:
+        children = list(
+            self.session.scalars(
+                select(QueueJobModel)
+                .where(
+                    QueueJobModel.parent_run_id == root.id,
+                    QueueJobModel.type == JobType.SOURCE_FETCH.value,
+                )
+                .order_by(QueueJobModel.created_at)
+            )
+        )
+        child_ids = [job.id for job in children]
+        items = [] if not child_ids else list(
+            self.session.scalars(
+                select(SourceItemModel)
+                .where(SourceItemModel.job_id.in_(child_ids))
+                .order_by(SourceItemModel.fetched_at.desc(), SourceItemModel.id)
+            )
+        )
+        return children, items
+
+    def _data_job_summary(
+        self,
+        root: QueueJobModel,
+        *,
+        include_samples: bool = False,
+    ) -> dict[str, Any]:
+        segment = self.session.get(
+            BusinessIndexSegmentModel,
+            str((root.payload or {}).get("segment_id")),
+        )
+        children, items = self._data_job_records(root)
+        state_counts = Counter(item.state for item in items)
+        source_counts = Counter(item.provider_id for item in items)
+        child_statuses = Counter(job.status for job in children)
+        pending_states = {SourceItemState.FETCHED.value, SourceItemState.RELEVANT.value}
+        processing_states = {
+            SourceItemState.VALIDATION_QUEUED.value,
+            SourceItemState.IDENTITY_RESOLVED.value,
+            SourceItemState.VALIDATING.value,
+            SourceItemState.AUDIT_PENDING.value,
+        }
+        validated_states = {
+            SourceItemState.VALIDATED.value,
+            SourceItemState.AUDITED.value,
+            SourceItemState.ELIGIBLE.value,
+        }
+        review_state = str((root.payload or {}).get("review_state", "pending"))
+        status = self._data_job_status(
+            root,
+            child_statuses=child_statuses,
+            state_counts=state_counts,
+            review_state=review_state,
+        )
+        raw_completeness = {
+            "with_title": sum(bool(item.title) for item in items),
+            "with_source_url": sum(bool(item.source_url) for item in items),
+            "with_external_id": sum(bool(item.external_id) for item in items),
+            "with_address": sum(
+                _payload_has(item.raw_payload, {"address", "formatted_address"})
+                for item in items
+            ),
+            "with_phone": sum(
+                _payload_has(item.raw_payload, {"phone", "phone_number", "telephone"})
+                for item in items
+            ),
+            "with_website": sum(
+                _payload_has(item.raw_payload, {"website", "website_url", "domain"})
+                for item in items
+            ),
+        }
+        result = {
+            "id": root.id,
+            "segment_id": segment.id if segment else (root.payload or {}).get("segment_id"),
+            "segment_label": (
+                f"{segment.niche.label} · {segment.market_label}" if segment else "Unknown segment"
+            ),
+            "processing_mode": (root.payload or {}).get("processing_mode", "automatic"),
+            "status": status,
+            "review_state": review_state,
+            "reason": (root.payload or {}).get("reason"),
+            "created_at": root.created_at,
+            "updated_at": root.updated_at,
+            "completed_at": root.completed_at,
+            "source_job_counts": dict(child_statuses),
+            "source_counts": dict(source_counts),
+            "state_counts": dict(state_counts),
+            "total_items": len(items),
+            "pending_review": sum(state_counts[state] for state in pending_states),
+            "processing": sum(state_counts[state] for state in processing_states),
+            "validated": sum(state_counts[state] for state in validated_states),
+            "needs_attention": sum(
+                state_counts[state]
+                for state in {
+                    SourceItemState.NEEDS_REVIEW.value,
+                    SourceItemState.REJECTED.value,
+                    SourceItemState.EXCLUDED.value,
+                    SourceItemState.FAILED.value,
+                }
+            ),
+            "businesses_created": len({item.business_id for item in items if item.business_id}),
+            "completeness": raw_completeness,
+            "errors": [job.last_error for job in [root, *children] if job.last_error],
+        }
+        if include_samples:
+            result["source_items"] = [
+                {
+                    "id": item.id,
+                    "provider": item.provider_id,
+                    "state": item.state,
+                    "title": item.title,
+                    "source_url": item.source_url,
+                    "external_id": item.external_id,
+                    "business_id": item.business_id,
+                    "fetched_at": item.fetched_at,
+                    "address": _payload_value(item.raw_payload, {"address", "formatted_address"}),
+                    "phone": _payload_value(
+                        item.raw_payload,
+                        {"phone", "phone_number", "telephone"},
+                    ),
+                    "website": _payload_value(
+                        item.raw_payload,
+                        {"website", "website_url", "domain"},
+                    ),
+                }
+                for item in items[:200]
+            ]
+            result["source_items_truncated"] = len(items) > 200
+        return result
+
+    def _data_job_status(
+        self,
+        root: QueueJobModel,
+        *,
+        child_statuses: Counter,
+        state_counts: Counter,
+        review_state: str,
+    ) -> str:
+        if review_state in {"discarded", "canceled"}:
+            return review_state
+        if root.status == JobStatus.CANCELED.value:
+            return "canceled"
+        if root.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}:
+            return "failed"
+        if root.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value}:
+            return "queued" if root.status == JobStatus.QUEUED.value else "collecting"
+        if child_statuses[JobStatus.QUEUED.value] or child_statuses[JobStatus.RUNNING.value]:
+            return "collecting"
+        if child_statuses[JobStatus.FAILED.value] or child_statuses[JobStatus.DEAD_LETTER.value]:
+            return "failed"
+        if (root.payload or {}).get("processing_mode") == "review_first":
+            pending = (
+                state_counts[SourceItemState.FETCHED.value]
+                + state_counts[SourceItemState.RELEVANT.value]
+            )
+            processing = sum(
+                state_counts[state]
+                for state in {
+                    SourceItemState.VALIDATION_QUEUED.value,
+                    SourceItemState.IDENTITY_RESOLVED.value,
+                    SourceItemState.VALIDATING.value,
+                    SourceItemState.AUDIT_PENDING.value,
+                }
+            )
+            if review_state == "sample_processing":
+                return "validating_sample" if processing else "sample_ready"
+            if pending and review_state != "approved":
+                return "awaiting_review"
+        if any(
+            state_counts[state]
+            for state in {
+                SourceItemState.FETCHED.value,
+                SourceItemState.RELEVANT.value,
+                SourceItemState.VALIDATION_QUEUED.value,
+                SourceItemState.IDENTITY_RESOLVED.value,
+                SourceItemState.VALIDATING.value,
+                SourceItemState.AUDIT_PENDING.value,
+            }
+        ):
+            return "validating"
+        return "completed"
+
     def _validation_states(self, business_ids: list[str]) -> dict[str, dict[str, Any]]:
         grouped: dict[str, dict[str, ValidationResultModel]] = defaultdict(dict)
         if business_ids:
@@ -541,6 +1001,8 @@ class AdminDataService:
         reason: str,
         before: dict[str, Any] | None,
         after: dict[str, Any] | None,
+        *,
+        entity_type: str = "business",
     ) -> None:
         self.session.add(
             AdminAuditEventModel(
@@ -548,7 +1010,7 @@ class AdminDataService:
                 actor_id=self.auth.user_id,
                 actor_email=self.auth.email,
                 action=action,
-                entity_type="business",
+                entity_type=entity_type,
                 entity_id=entity_id,
                 reason=reason,
                 before=before,
@@ -575,6 +1037,31 @@ def _business_dict(business: BusinessModel) -> dict[str, Any]:
         "is_agency": business.is_agency,
         "status": business.status,
     }
+
+
+def _payload_value(payload: Any, keys: set[str]) -> Any:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key.lower() in keys and _payload_value_present(value):
+                return value
+        for value in payload.values():
+            found = _payload_value(value, keys)
+            if _payload_value_present(found):
+                return found
+    elif isinstance(payload, list):
+        for value in payload:
+            found = _payload_value(value, keys)
+            if _payload_value_present(found):
+                return found
+    return None
+
+
+def _payload_has(payload: Any, keys: set[str]) -> bool:
+    return _payload_value(payload, keys) is not None
+
+
+def _payload_value_present(value: Any) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
 
 
 def _fact_value(fact: BusinessFactModel) -> Any:

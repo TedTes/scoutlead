@@ -27,6 +27,7 @@ class JobStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     DEAD_LETTER = "dead_letter"
+    CANCELED = "canceled"
 
 
 class QueueJobRead(BaseModel):

@@ -82,7 +82,13 @@ class BusinessIndexPipelineService:
             discovery_config=discovery_config,
         )
 
-    def plan_refresh(self, segment_id: str) -> dict[str, Any]:
+    def plan_refresh(
+        self,
+        segment_id: str,
+        *,
+        processing_mode: str = "automatic",
+        parent_job_id: str | None = None,
+    ) -> dict[str, Any]:
         segment = self._segment(segment_id)
         product = ProductRead.model_validate(
             ProductRepository(self.session).get(segment.product_id)
@@ -97,10 +103,12 @@ class BusinessIndexPipelineService:
                 segment_id=segment.id,
                 source_index=index,
                 task=task_data,
+                processing_mode=processing_mode,
+                parent_run_id=parent_job_id,
             )
             for index, task_data in enumerate(segment.source_plan or [])
         ]
-        audit_jobs = [
+        audit_jobs = [] if processing_mode == "review_first" else [
             self.queue.enqueue_business_opportunity_audit(
                 source_item_id=None,
                 segment_id=segment.id,
@@ -123,6 +131,7 @@ class BusinessIndexPipelineService:
         source_index: int,
         task_data: dict[str, Any],
         job_id: str,
+        processing_mode: str = "automatic",
     ) -> dict[str, Any]:
         segment = self._segment(segment_id)
         product = ProductRead.model_validate(
@@ -176,6 +185,30 @@ class BusinessIndexPipelineService:
             self._carry_forward_human_decision(item)
             source_items.append(item)
         self.session.commit()
+        if processing_mode == "review_first":
+            self.segments.record_source_result(
+                segment,
+                provider_id=state_key,
+                state={
+                    "provider_id": task.provider_id,
+                    "query": task.query,
+                    "quota": task.max_results,
+                    "fetched_count": len(rows),
+                    "persisted_count": len(source_items),
+                    "cost_usd": result.cost_usd,
+                    "cursor": (result.raw or {}).get("next_page_token"),
+                    "last_attempt_at": attempted_at.isoformat(),
+                    "last_success_at": utcnow().isoformat(),
+                    "failure": None,
+                    "processing_mode": processing_mode,
+                },
+            )
+            self._maybe_complete(segment, current_job_id=job_id)
+            return {
+                "fetched_count": len(rows),
+                "processing_job_count": 0,
+                "awaiting_review_count": len(source_items),
+            }
         queued = 0
         for item in source_items:
             latest_decision = item.decisions[-1] if item.decisions else None

@@ -9,6 +9,7 @@ class SourceItemState(StrEnum):
     FETCHED = "fetched"
     NEEDS_REVIEW = "needs_review"
     RELEVANT = "relevant"
+    VALIDATION_QUEUED = "validation_queued"
     REJECTED = "rejected"
     IDENTITY_RESOLVED = "identity_resolved"
     VALIDATING = "validating"
