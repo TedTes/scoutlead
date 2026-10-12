@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from agent_runs.repository import AgentRunRepository
 from agents.embeddings import EmbeddingClient, MissingEmbeddingClient
 from agents.llm import LLMClient, MissingLLMClient
-from agents.runner import ToolAction
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
@@ -46,12 +43,10 @@ from memory.repository import MemoryRepository
 from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
-from orchestration.hit_rate import calculate_hit_rates
 from products.discovery_policy import validate_google_places_query
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from shared.errors import ConflictError
-from shared.utils import truncate
 from source_presets.service import SourcePresetService
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
@@ -69,94 +64,6 @@ from tools.base import ToolSlot
 from territories.dedupe import exclude_previously_delivered_rows
 from territories.opportunity_audit import BusinessOpportunityAuditor
 from workspaces.repository import WorkspaceRepository
-
-
-class RecordingBrowserTool:
-    def __init__(
-        self,
-        *,
-        browser: DirectHttpBrowserTool,
-        agent_runs: AgentRunRepository,
-        run_id: str,
-        campaign_id: str,
-        step_id: str | None,
-    ) -> None:
-        self.browser = browser
-        self.agent_runs = agent_runs
-        self.run_id = run_id
-        self.campaign_id = campaign_id
-        self.step_id = step_id
-
-    def inspect(self, url: str):
-        tool_call = self.agent_runs.start_tool_call(
-            run_id=self.run_id,
-            campaign_id=self.campaign_id,
-            step_id=self.step_id,
-            tool_name="browser:inspect",
-            reason="inspect lead website for public evidence",
-            args={"url": url},
-        )
-        try:
-            result = self.browser.inspect(url)
-        except Exception as exc:
-            self.agent_runs.fail_tool_call(tool_call.id, str(exc))
-            raise
-        self.agent_runs.complete_tool_call(tool_call.id, CampaignService._json_safe(result))
-        return result
-
-
-class RecordingLLMClient:
-    def __init__(
-        self,
-        *,
-        llm: LLMClient,
-        agent_runs: AgentRunRepository,
-        run_id: str,
-        campaign_id: str,
-        step_id: str | None,
-    ) -> None:
-        self.llm = llm
-        self.agent_runs = agent_runs
-        self.run_id = run_id
-        self.campaign_id = campaign_id
-        self.step_id = step_id
-
-    def generate_object(
-        self,
-        *,
-        task: str,
-        system: str,
-        prompt: str,
-        response_model: type[BaseModel],
-        context: dict[str, Any] | None = None,
-    ) -> BaseModel:
-        llm_call = self.agent_runs.start_llm_call(
-            run_id=self.run_id,
-            campaign_id=self.campaign_id,
-            step_id=self.step_id,
-            task=task,
-            reason=system,
-            args={
-                "task": task,
-                "response_model": response_model.__name__,
-                "system": system,
-                "prompt": truncate(prompt, 30000),
-                "context": CampaignService._json_safe(context or {}),
-            },
-        )
-        try:
-            result = self.llm.generate_object(
-                task=task,
-                system=system,
-                prompt=prompt,
-                response_model=response_model,
-                context=context,
-            )
-        except Exception as exc:
-            self.agent_runs.fail_tool_call(llm_call.id, str(exc))
-            raise
-        self.agent_runs.complete_tool_call(llm_call.id, CampaignService._json_safe(result))
-        return result
 
 
 class CampaignService:
@@ -222,7 +129,6 @@ class CampaignService:
         self.products = ProductRepository(session, workspace_id=workspace_id)
         self.campaigns = CampaignRepository(session, workspace_id=workspace_id)
         self.campaign_sources = CampaignSourceRepository(session)
-        self.agent_runs = AgentRunRepository(session)
         self.icp_presets = ICPPresetService()
         self.source_presets = SourcePresetService()
         self.discovery_candidates = DiscoveryCandidateRepository(session)
@@ -445,7 +351,6 @@ class CampaignService:
         self,
         campaign_id: str,
         *,
-        agent_run_id: str | None = None,
         draft_outreach: bool = True,
     ) -> CampaignRunSummary:
         campaign = self.campaigns.get(campaign_id)
@@ -453,229 +358,127 @@ class CampaignService:
         campaign_read = CampaignRead.model_validate(campaign)
         preset = self.icp_presets.get(campaign_read.icp_preset_id)
 
-        try:
-            self._assert_runnable_campaign(campaign_read)
-            self._assert_preflight_ready(campaign_read, product)
-            if agent_run_id:
-                self.agent_runs.start(agent_run_id)
+        self._assert_runnable_campaign(campaign_read)
+        self._assert_preflight_ready(campaign_read, product)
 
-            discovered = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=CampaignStage.DISCOVERY.value,
-                sequence=1,
-                objective="Discover potential customers that match the product ICP.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda step_id: DiscoveryWorkflow(
-                    campaigns=self.campaigns,
-                    campaign_sources=self.campaign_sources,
-                    candidates=self.discovery_candidates,
-                    leads=self.leads,
-                    memory=self.memory,
-                    search_tool=self.search_tool,
-                    google_places_api_key=self.google_places_api_key,
-                    google_places_api_endpoint=self.google_places_api_endpoint,
-                    apify_api_token=self.apify_api_token,
-                    apify_api_base_url=self.apify_api_base_url,
-                    apify_source_provider_id=self.apify_source_provider_id,
-                    apify_actor_id=self.apify_actor_id,
-                    apify_actor_input_template=self.apify_actor_input_template,
-                    apify_actor_result_mapping=self.apify_actor_result_mapping,
-                    apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
-                    apify_sources=self.apify_sources,
-                    embedding=self.embedding,
-                    semantic_cache_min_score=self.semantic_cache_min_score,
-                    semantic_cache_min_results=self.semantic_cache_min_results,
-                    timeout_seconds=self.timeout_seconds,
-                    **self._tool_call_callbacks(
-                        agent_run_id=agent_run_id,
-                        campaign_id=campaign_id,
-                        step_id=step_id,
-                    ),
-                ).run(product, campaign_read),
-            )
+        discovered = DiscoveryWorkflow(
+            campaigns=self.campaigns,
+            campaign_sources=self.campaign_sources,
+            candidates=self.discovery_candidates,
+            leads=self.leads,
+            memory=self.memory,
+            search_tool=self.search_tool,
+            google_places_api_key=self.google_places_api_key,
+            google_places_api_endpoint=self.google_places_api_endpoint,
+            apify_api_token=self.apify_api_token,
+            apify_api_base_url=self.apify_api_base_url,
+            apify_source_provider_id=self.apify_source_provider_id,
+            apify_actor_id=self.apify_actor_id,
+            apify_actor_input_template=self.apify_actor_input_template,
+            apify_actor_result_mapping=self.apify_actor_result_mapping,
+            apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
+            apify_sources=self.apify_sources,
+            embedding=self.embedding,
+            semantic_cache_min_score=self.semantic_cache_min_score,
+            semantic_cache_min_results=self.semantic_cache_min_results,
+            timeout_seconds=self.timeout_seconds,
+        ).run(product, campaign_read)
 
+        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        if self._requires_digital_opportunity(campaign_read):
+            self._audit_digital_opportunity(campaign_read)
+
+        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        researched = ResearchWorkflow(
+            campaigns=self.campaigns,
+            leads=self.leads,
+            memory=self.memory,
+            browser=self.browser,
+            llm=self.llm,
+        ).run(product, campaign_read)
+
+        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        contacted = ContactWorkflow(
+            campaigns=self.campaigns,
+            leads=self.leads,
+            memory=self.memory,
+            slot_config=preset.slot_config(ToolSlot.CONTACT),
+        ).run(product, campaign_read)
+
+        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        verified = VerifyWorkflow(
+            campaigns=self.campaigns,
+            leads=self.leads,
+            memory=self.memory,
+            slot_config=preset.slot_config(ToolSlot.VERIFY),
+            verification_tool=self._verification_tool(),
+        ).run(product, campaign_read)
+
+        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        signaled = SignalWorkflow(
+            campaigns=self.campaigns,
+            leads=self.leads,
+            memory=self.memory,
+            slot_config=preset.slot_config(ToolSlot.SIGNAL),
+        ).run(product, campaign_read)
+
+        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
+        qualified = QualificationWorkflow(
+            campaigns=self.campaigns,
+            leads=self.leads,
+            memory=self.memory,
+            llm=self.llm,
+        ).run(product, campaign_read)
+
+        if draft_outreach:
             campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            if self._requires_digital_opportunity(campaign_read):
-                self._run_agent_step(
-                    agent_run_id=agent_run_id,
-                    campaign_id=campaign_id,
-                    phase="opportunity_audit",
-                    sequence=2,
-                    objective="Audit candidate websites for observable digital opportunities.",
-                    input_snapshot=self._campaign_step_input(product, campaign_read),
-                    action=lambda _step_id: self._audit_digital_opportunity(campaign_read),
-                )
-
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            researched = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=CampaignStage.RESEARCH.value,
-                sequence=3,
-                objective="Research discovered leads with available public information.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: ResearchWorkflow(
-                    campaigns=self.campaigns,
-                    leads=self.leads,
-                    memory=self.memory,
-                    browser=self._browser_for_step(agent_run_id, campaign_id, _step_id),
-                    llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
-                ).run(product, campaign_read),
+            drafts = OutreachWorkflow(
+                campaigns=self.campaigns,
+                leads=self.leads,
+                messages=self.messages,
+                memory=self.memory,
+                llm=self.llm,
+            ).run(product, campaign_read)
+        else:
+            drafts = []
+            self.campaigns.update_status(
+                campaign_id,
+                CampaignStatus.COMPLETED,
+                stage=CampaignStage.COMPLETE,
             )
 
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            contacted = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=ToolSlot.CONTACT.value,
-                sequence=4,
-                objective="Find the first good reachable contact point for each researched lead.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: ContactWorkflow(
-                    campaigns=self.campaigns,
-                    leads=self.leads,
-                    memory=self.memory,
-                    slot_config=preset.slot_config(ToolSlot.CONTACT),
-                    **self._slot_tool_call_callbacks(
-                        agent_run_id=agent_run_id,
-                        campaign_id=campaign_id,
-                        step_id=_step_id,
-                    ),
-                ).run(product, campaign_read),
-            )
-
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            verified = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=ToolSlot.VERIFY.value,
-                sequence=5,
-                objective="Verify contact points before qualification and outreach drafting.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: VerifyWorkflow(
-                    campaigns=self.campaigns,
-                    leads=self.leads,
-                    memory=self.memory,
-                    slot_config=preset.slot_config(ToolSlot.VERIFY),
-                    verification_tool=self._verification_tool(),
-                    **self._slot_tool_call_callbacks(
-                        agent_run_id=agent_run_id,
-                        campaign_id=campaign_id,
-                        step_id=_step_id,
-                    ),
-                ).run(product, campaign_read),
-            )
-
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            signaled = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=ToolSlot.SIGNAL.value,
-                sequence=6,
-                objective="Accumulate public signals used by qualification and campaign insights.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: SignalWorkflow(
-                    campaigns=self.campaigns,
-                    leads=self.leads,
-                    memory=self.memory,
-                    slot_config=preset.slot_config(ToolSlot.SIGNAL),
-                    **self._slot_tool_call_callbacks(
-                        agent_run_id=agent_run_id,
-                        campaign_id=campaign_id,
-                        step_id=_step_id,
-                    ),
-                ).run(product, campaign_read),
-            )
-
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            qualified = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=CampaignStage.QUALIFICATION.value,
-                sequence=7,
-                objective="Score researched leads against the product qualification criteria.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: QualificationWorkflow(
-                    campaigns=self.campaigns,
-                    leads=self.leads,
-                    memory=self.memory,
-                    llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
-                ).run(product, campaign_read),
-            )
-
-            if draft_outreach:
-                campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-                drafts = self._run_agent_step(
-                    agent_run_id=agent_run_id,
-                    campaign_id=campaign_id,
-                    phase=CampaignStage.OUTREACH.value,
-                    sequence=8,
-                    objective="Draft personalized outreach and queue messages for human approval.",
-                    input_snapshot=self._campaign_step_input(product, campaign_read),
-                    action=lambda _step_id: OutreachWorkflow(
-                        campaigns=self.campaigns,
-                        leads=self.leads,
-                        messages=self.messages,
-                        memory=self.memory,
-                        llm=self._llm_for_step(agent_run_id, campaign_id, _step_id),
-                    ).run(product, campaign_read),
-                )
-            else:
-                drafts = []
-                self.campaigns.update_status(
-                    campaign_id,
-                    CampaignStatus.COMPLETED,
-                    stage=CampaignStage.COMPLETE,
-                )
-
-            if agent_run_id:
-                self._log_hit_rates(agent_run_id=agent_run_id, campaign_id=campaign_id, product_id=product.id)
-
-            summary = CampaignRunSummary(
-                campaign=CampaignRead.model_validate(self.campaigns.get(campaign_id)),
-                discovered_lead_count=len(discovered),
-                researched_lead_count=len(researched),
-                contacted_lead_count=len(contacted),
-                verified_lead_count=len(verified),
-                signaled_lead_count=len(signaled),
-                qualified_lead_count=sum(
-                    1
-                    for lead in qualified
-                    if lead.qualification and lead.qualification.qualified
-                ),
-                drafted_message_count=len(drafts),
-            )
-            if agent_run_id:
-                self.agent_runs.complete(agent_run_id, summary.model_dump(mode="json"))
-            return summary
-        except Exception as exc:
-            if agent_run_id:
-                self.agent_runs.fail(agent_run_id, str(exc))
-            raise
+        return CampaignRunSummary(
+            campaign=CampaignRead.model_validate(self.campaigns.get(campaign_id)),
+            discovered_lead_count=len(discovered),
+            researched_lead_count=len(researched),
+            contacted_lead_count=len(contacted),
+            verified_lead_count=len(verified),
+            signaled_lead_count=len(signaled),
+            qualified_lead_count=sum(
+                1
+                for lead in qualified
+                if lead.qualification and lead.qualification.qualified
+            ),
+            drafted_message_count=len(drafts),
+        )
 
     def run_contact_listing(
         self,
         campaign_id: str,
-        *,
-        agent_run_id: str | None = None,
     ) -> CampaignRunSummary:
         campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
         if not self._requires_digital_opportunity(campaign):
-            cached_summary = self._run_cached_contact_listing(campaign_id, agent_run_id=agent_run_id)
+            cached_summary = self._run_cached_contact_listing(campaign_id)
             if cached_summary is not None:
                 return cached_summary
         return self.run_campaign(
             campaign_id,
-            agent_run_id=agent_run_id,
             draft_outreach=False,
         )
 
     def _run_cached_contact_listing(
         self,
         campaign_id: str,
-        *,
-        agent_run_id: str | None,
     ) -> CampaignRunSummary | None:
         campaign = self.campaigns.get(campaign_id)
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
@@ -691,38 +494,19 @@ class CampaignService:
             return None
 
         try:
-            if agent_run_id:
-                self.agent_runs.start(agent_run_id)
-
             self.campaigns.update_status(
                 campaign_id,
                 CampaignStatus.DISCOVERING,
                 stage=CampaignStage.DISCOVERY,
             )
-            discovered = self._run_agent_step(
-                agent_run_id=agent_run_id,
-                campaign_id=campaign_id,
-                phase=CampaignStage.DISCOVERY.value,
-                sequence=1,
-                objective="List contacts from the cached canonical business pool.",
-                input_snapshot=self._campaign_step_input(product, campaign_read),
-                action=lambda _step_id: self._create_existing_match_listing(
-                    product=product,
-                    campaign=campaign_read,
-                    assessed_rows=assessed_rows,
-                ),
+            discovered = self._create_existing_match_listing(
+                product=product,
+                campaign=campaign_read,
+                assessed_rows=assessed_rows,
             )
 
             if self._requires_digital_opportunity(campaign_read):
-                self._run_agent_step(
-                    agent_run_id=agent_run_id,
-                    campaign_id=campaign_id,
-                    phase="opportunity_audit",
-                    sequence=2,
-                    objective="Audit candidate websites for observable digital opportunities.",
-                    input_snapshot=self._campaign_step_input(product, campaign_read),
-                    action=lambda _step_id: self._audit_digital_opportunity(campaign_read),
-                )
+                self._audit_digital_opportunity(campaign_read)
 
             self.campaigns.update_status(
                 campaign_id,
@@ -753,12 +537,8 @@ class CampaignService:
                 ),
                 drafted_message_count=0,
             )
-            if agent_run_id:
-                self.agent_runs.complete(agent_run_id, summary.model_dump(mode="json"))
             return summary
-        except Exception as exc:
-            if agent_run_id:
-                self.agent_runs.fail(agent_run_id, str(exc))
+        except Exception:
             raise
 
     @staticmethod
@@ -921,36 +701,6 @@ class CampaignService:
     def _create_cached_contact_listing(self, **kwargs) -> list[LeadRead]:
         """Compatibility alias for the legacy campaign execution path."""
         return self._create_existing_match_listing(**kwargs)
-
-    def _log_hit_rates(self, *, agent_run_id: str, campaign_id: str, product_id: str) -> None:
-        """Surface per-provider hit-rate for this run as a readable observation.
-
-        This is manual feedback for the operator (see ICP integration model) --
-        it is logged, never used to auto-tune preset selection.
-        """
-        rows = [
-            tool_call.observation
-            for tool_call in self.agent_runs.list_tool_calls(agent_run_id)
-            if isinstance(tool_call.observation, dict)
-            and "confidence" in tool_call.observation
-            and "slot" in tool_call.observation
-        ]
-        if not rows:
-            return
-        hit_rates = calculate_hit_rates(rows)
-        summary_line = "; ".join(
-            f"{rate.slot}/{rate.provider}: {rate.accepted}/{rate.calls} accepted"
-            for rate in hit_rates
-        )
-        self.memory.create_observation(
-            CampaignMemoryCreate(
-                product_id=product_id,
-                campaign_id=campaign_id,
-                type=ObservationType.TOOL_HIT_RATE,
-                content=f"Tool hit-rate for this run: {summary_line}",
-                tags=["hit_rate"],
-            )
-        )
 
     def _verification_tool(self) -> EmailVerificationTool:
         return EmailVerificationTool(
@@ -1163,191 +913,6 @@ class CampaignService:
                 "campaign can only be run from draft or paused status",
                 {"campaign_id": campaign.id, "status": campaign.status.value},
             )
-
-    def _run_agent_step(
-        self,
-        *,
-        agent_run_id: str | None,
-        campaign_id: str,
-        phase: str,
-        sequence: int,
-        objective: str,
-        input_snapshot: dict[str, Any],
-        action: Callable[[str | None], Any],
-    ) -> Any:
-        if not agent_run_id:
-            return action(None)
-
-        step = self.agent_runs.start_step(
-            run_id=agent_run_id,
-            campaign_id=campaign_id,
-            phase=phase,
-            sequence=sequence,
-            objective=objective,
-            input_snapshot=input_snapshot,
-        )
-        try:
-            result = action(step.id)
-        except Exception as exc:
-            self.agent_runs.fail_step(step.id, str(exc))
-            raise
-
-        output_snapshot = self._result_snapshot(result)
-        self.agent_runs.complete_step(
-            step.id,
-            output_snapshot=output_snapshot,
-            observation={
-                "phase": phase,
-                "completed": True,
-                **output_snapshot,
-            },
-        )
-        return result
-
-    @staticmethod
-    def _campaign_step_input(product: ProductRead, campaign: CampaignRead) -> dict[str, Any]:
-        return {
-            "product_id": product.id,
-            "product_name": product.product_name,
-            "campaign_id": campaign.id,
-            "campaign_status": campaign.status.value,
-            "campaign_stage": campaign.stage.value,
-            "goal_type": campaign.goal_type.value,
-            "icp_preset_id": campaign.icp_preset_id,
-            "source_preset_id": campaign.source_preset_id,
-            "max_leads": campaign.max_leads,
-        }
-
-    @staticmethod
-    def _result_snapshot(result: Any) -> dict[str, Any]:
-        if isinstance(result, list):
-            ids = [getattr(row, "id", None) for row in result]
-            return {
-                "count": len(result),
-                "ids": [row_id for row_id in ids if row_id is not None][:50],
-            }
-        return {"result": CampaignService._json_safe(result)}
-
-    def _tool_call_callbacks(
-        self,
-        *,
-        agent_run_id: str | None,
-        campaign_id: str,
-        step_id: str | None,
-    ) -> dict[str, Callable[..., Any] | None]:
-        if agent_run_id is None:
-            return {
-                "on_tool_start": None,
-                "on_tool_success": None,
-                "on_tool_error": None,
-            }
-
-        def on_tool_start(action: ToolAction, iteration: int) -> str:
-            tool_call = self.agent_runs.start_tool_call(
-                run_id=agent_run_id,
-                campaign_id=campaign_id,
-                step_id=step_id,
-                tool_name=action.tool_name,
-                reason=action.reason,
-                args={"iteration": iteration, **self._json_safe(action.args)},
-            )
-            return tool_call.id
-
-        def on_tool_success(tool_call_id: str, observation: Any) -> None:
-            self.agent_runs.complete_tool_call(tool_call_id, self._json_safe(observation))
-
-        def on_tool_error(tool_call_id: str, error: Exception) -> None:
-            self.agent_runs.fail_tool_call(tool_call_id, str(error))
-
-        return {
-            "on_tool_start": on_tool_start,
-            "on_tool_success": on_tool_success,
-            "on_tool_error": on_tool_error,
-        }
-
-    def _slot_tool_call_callbacks(
-        self,
-        *,
-        agent_run_id: str | None,
-        campaign_id: str,
-        step_id: str | None,
-    ) -> dict[str, Callable[..., Any] | None]:
-        if agent_run_id is None:
-            return {
-                "on_tool_start": None,
-                "on_tool_success": None,
-                "on_tool_error": None,
-            }
-
-        def on_tool_start(tool_name: str, args: dict[str, Any], reason: str) -> str:
-            tool_call = self.agent_runs.start_tool_call(
-                run_id=agent_run_id,
-                campaign_id=campaign_id,
-                step_id=step_id,
-                tool_name=tool_name,
-                reason=reason,
-                args=self._json_safe(args),
-            )
-            return tool_call.id
-
-        def on_tool_success(tool_call_id: str, observation: Any) -> None:
-            self.agent_runs.complete_tool_call(tool_call_id, self._json_safe(observation))
-
-        def on_tool_error(tool_call_id: str, error: Exception) -> None:
-            self.agent_runs.fail_tool_call(tool_call_id, str(error))
-
-        return {
-            "on_tool_start": on_tool_start,
-            "on_tool_success": on_tool_success,
-            "on_tool_error": on_tool_error,
-        }
-
-    def _llm_for_step(
-        self,
-        agent_run_id: str | None,
-        campaign_id: str,
-        step_id: str | None,
-    ) -> LLMClient:
-        if agent_run_id is None:
-            return self.llm
-        return RecordingLLMClient(
-            llm=self.llm,
-            agent_runs=self.agent_runs,
-            run_id=agent_run_id,
-            campaign_id=campaign_id,
-            step_id=step_id,
-        )
-
-    def _browser_for_step(
-        self,
-        agent_run_id: str | None,
-        campaign_id: str,
-        step_id: str | None,
-    ) -> DirectHttpBrowserTool:
-        if agent_run_id is None:
-            return self.browser
-        return RecordingBrowserTool(
-            browser=self.browser,
-            agent_runs=self.agent_runs,
-            run_id=agent_run_id,
-            campaign_id=campaign_id,
-            step_id=step_id,
-        )
-
-    @staticmethod
-    def _json_safe(value: Any) -> Any:
-        if hasattr(value, "model_dump"):
-            return value.model_dump(mode="json")
-        if isinstance(value, list):
-            return [CampaignService._json_safe(item) for item in value]
-        if isinstance(value, tuple):
-            return [CampaignService._json_safe(item) for item in value]
-        if isinstance(value, dict):
-            return {str(key): CampaignService._json_safe(item) for key, item in value.items()}
-        if value is None or isinstance(value, str | int | float | bool):
-            return value
-        return str(value)
-
 
 def email_provider_setup_hint(provider: str) -> str:
     if provider == "gmail":

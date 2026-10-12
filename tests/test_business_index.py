@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agent_runs.service import AgentRunService
 from business_index.refresh import (
     BusinessIndexRefreshService,
     _audit_candidate_priority,
@@ -222,7 +221,6 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
         request_service = SourceRequestService(
             products=ProductRepository(session),
             campaigns=campaigns,
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             google_places_configured=True,
             search_configured=True,
@@ -516,7 +514,6 @@ def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:
         created = SourceRequestService(
             products=ProductRepository(session),
             campaigns=campaigns,
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             google_places_configured=False,
             search_configured=False,
@@ -548,7 +545,6 @@ def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:
         next_search = SourceRequestService(
             products=ProductRepository(session),
             campaigns=campaigns,
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             google_places_configured=False,
             search_configured=False,

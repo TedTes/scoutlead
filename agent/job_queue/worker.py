@@ -4,7 +4,6 @@ from time import monotonic, sleep
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agent_runs.repository import AgentRunRepository
 from audience_runs.scheduler import enqueue_waiting_audience_runs
 from audience_runs.service import AudienceRunService
 from app.config import get_settings
@@ -66,17 +65,7 @@ def run_once() -> bool:
         if job is None:
             if PipelineOutboxDispatcher(session).dispatch_one():
                 return True
-            agent_run = AgentRunRepository(session).claim_next()
-            if agent_run is None:
-                return False
-            try:
-                _campaign_service(session=session, services=services).run_campaign(
-                    agent_run.campaign_id,
-                    agent_run_id=agent_run.id,
-                )
-            except Exception:
-                logger.exception("agent_run_failed run_id=%s", agent_run.id)
-            return True
+            return False
         try:
             if job.type == JobType.CAMPAIGN_RUN.value:
                 _campaign_service(session=session, services=services).run_campaign(

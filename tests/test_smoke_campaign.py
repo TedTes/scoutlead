@@ -2,8 +2,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import pytest
 
-from agent_runs.schemas import AgentRunCreate
-from agent_runs.service import AgentRunService
 from campaign_sources.repository import CampaignSourceRepository
 from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
@@ -418,8 +416,7 @@ def test_delete_product_removes_related_workflow_records() -> None:
         campaign = campaign_service.create(
             CampaignCreate(product_id=product.id, name="Product delete campaign", max_leads=3)
         )
-        agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
-        campaign_service.run_campaign(campaign.id, agent_run_id=agent_run.id)
+        campaign_service.run_campaign(campaign.id)
 
         message_id = session.execute(text("select id from messages")).scalar_one()
         message_service = MessageService(session=session, email=EmailTool())
@@ -432,9 +429,6 @@ def test_delete_product_removes_related_workflow_records() -> None:
         assert session.execute(text("select count(*) from messages")).scalar_one() == 1
         assert session.execute(text("select count(*) from conversations")).scalar_one() == 1
         assert session.execute(text("select count(*) from conversation_events")).scalar_one() == 1
-        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 1
-        assert session.execute(text("select count(*) from agent_steps")).scalar_one() > 0
-        assert session.execute(text("select count(*) from tool_calls")).scalar_one() > 0
         assert session.execute(text("select count(*) from campaign_memory")).scalar_one() > 0
 
         product_repository.delete(product.id)
@@ -445,14 +439,11 @@ def test_delete_product_removes_related_workflow_records() -> None:
         assert session.execute(text("select count(*) from messages")).scalar_one() == 0
         assert session.execute(text("select count(*) from conversations")).scalar_one() == 0
         assert session.execute(text("select count(*) from conversation_events")).scalar_one() == 0
-        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 0
-        assert session.execute(text("select count(*) from agent_steps")).scalar_one() == 0
-        assert session.execute(text("select count(*) from tool_calls")).scalar_one() == 0
         assert session.execute(text("select count(*) from campaign_memory")).scalar_one() == 0
         assert session.execute(text("select count(*) from learning_summaries")).scalar_one() == 0
 
 
-def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
+def test_campaign_run_completes_without_legacy_execution_records() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -489,70 +480,14 @@ def test_campaign_run_records_agent_steps_and_tool_calls() -> None:
         campaign = campaign_service.create(
             CampaignCreate(product_id=product.id, name="Agent run campaign", max_leads=3)
         )
-        agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
-
-        summary = campaign_service.run_campaign(campaign.id, agent_run_id=agent_run.id)
-        detail = AgentRunService(session).get(agent_run.id)
-        trace = AgentRunService(session).trace_by_campaign(campaign.id)
+        summary = campaign_service.run_campaign(campaign.id)
 
         assert summary.discovered_lead_count == 1
-        assert detail.status == "completed"
-        assert trace.run_count == 1
-        assert trace.latest_run is not None
-        assert trace.latest_run.id == agent_run.id
-        assert [step.phase for step in detail.steps] == [
-            "discovery",
-            "research",
-            "contact",
-            "verify",
-            "signal",
-            "qualification",
-            "outreach",
-        ]
-        assert all(step.status == "completed" for step in detail.steps)
-        assert detail.tool_call_count == 5
-        assert detail.llm_call_count == 3
-        assert len(detail.tool_calls) == 8
-        assert [tool_call.tool_name for tool_call in detail.tool_calls] == [
-            "campaign_source",
-            "browser:inspect",
-            "llm:lead_research",
-            "public_email",
-            "email_syntax",
-            "public_page_signals",
-            "llm:lead_qualification",
-            "llm:outreach_draft",
-        ]
-        assert all(tool_call.status == "completed" for tool_call in detail.tool_calls)
-        search_call = next(
-            tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "campaign_source"
-        )
-        assert search_call.args["source"]["provider_id"] == "seed"
-        assert search_call.args["source"]["input"]["source_type"] == "seed"
-        assert (
-            search_call.args["source"]["input"]["query"]
-            == "Agentic Lead|https://example.com|Matches target customer|Test geography|hello@example.com"
-        )
-        assert isinstance(search_call.observation, dict)
-        assert search_call.observation["provider"] == "seed"
-        assert isinstance(search_call.observation["data"], list)
-        research_call = next(
-            tool_call for tool_call in trace.latest_run.tool_calls if tool_call.tool_name == "llm:lead_research"
-        )
-        assert research_call.args["system"] == "Extract structured lead research from public evidence only."
-        assert "Classify this search result as a potential customer" in research_call.args["prompt"]
-        assert research_call.observation["summary"] == "Matches target customer"
 
-        with pytest.raises(ConflictError, match="draft or paused"):
-            AgentRunService(session).create(AgentRunCreate(campaign_id=campaign.id))
         with pytest.raises(ConflictError, match="draft or paused"):
             campaign_service.run_campaign(campaign.id)
-        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 1
 
         campaign_service.delete(campaign.id)
-        assert session.execute(text("select count(*) from agent_runs")).scalar_one() == 0
-        assert session.execute(text("select count(*) from agent_steps")).scalar_one() == 0
-        assert session.execute(text("select count(*) from tool_calls")).scalar_one() == 0
 
 
 def test_google_places_source_preset_creates_campaign_source_row() -> None:

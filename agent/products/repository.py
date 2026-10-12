@@ -4,8 +4,6 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from db.models import (
-    AgentRunModel,
-    AgentStepModel,
     BusinessIndexSegmentModel,
     CampaignInsightModel,
     CampaignMemoryModel,
@@ -24,7 +22,6 @@ from db.models import (
     QueueJobModel,
     SourceItemDecisionModel,
     SourceItemModel,
-    ToolCallModel,
     WebhookDeliveryModel,
     WorkspaceModel,
 )
@@ -291,9 +288,6 @@ class ProductRepository:
             self.session.execute(delete(ConversationEventModel).where(or_(*event_conditions)))
 
         if campaign_ids:
-            self.session.execute(delete(ToolCallModel).where(ToolCallModel.campaign_id.in_(campaign_ids)))
-            self.session.execute(delete(AgentStepModel).where(AgentStepModel.campaign_id.in_(campaign_ids)))
-            self.session.execute(delete(AgentRunModel).where(AgentRunModel.campaign_id.in_(campaign_ids)))
             self.session.execute(delete(CampaignSourceModel).where(CampaignSourceModel.campaign_id.in_(campaign_ids)))
             self.session.execute(
                 delete(QueueJobModel).where(QueueJobModel.payload["campaign_id"].as_string().in_(campaign_ids))

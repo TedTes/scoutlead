@@ -2,14 +2,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
-from agent_runs.schemas import AgentRunCreate, AgentRunRead
-from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary, CampaignUpdate
 from campaigns.service import CampaignService
 from evaluation.schemas import CampaignMetrics
+from job_queue.schemas import QueueJobRead
+from job_queue.service import QueueService
 from shared.errors import ConflictError
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -142,11 +142,10 @@ def run_campaign(
 ):
     service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(campaign_id))
-    agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=campaign_id))
-    return service.run_campaign(campaign_id, agent_run_id=agent_run.id)
+    return service.run_campaign(campaign_id)
 
 
-@router.post("/{campaign_id}/enqueue", response_model=AgentRunRead)
+@router.post("/{campaign_id}/enqueue", response_model=QueueJobRead)
 def enqueue_campaign_run(
     campaign_id: str,
     session: DbSession,
@@ -155,7 +154,7 @@ def enqueue_campaign_run(
 ):
     service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(campaign_id))
-    return AgentRunService(session).create(AgentRunCreate(campaign_id=campaign_id))
+    return QueueService(session).enqueue_campaign_run(campaign_id)
 
 
 @router.get("/{campaign_id}/preflight", response_model=CampaignPreflightRead)

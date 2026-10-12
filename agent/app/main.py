@@ -5,7 +5,6 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.dependencies import create_app_services
-from agent_runs.routes import router as agent_runs_router
 from admin.routes import router as admin_router
 from audience_runs.routes import router as audience_runs_router
 from auth.middleware import AuthMiddleware
@@ -60,7 +59,6 @@ def create_app() -> FastAPI:
     app.include_router(products_router)
     app.include_router(admin_router)
     app.include_router(quality_router)
-    app.include_router(agent_runs_router)
     app.include_router(audience_runs_router)
     app.include_router(campaigns_router)
     app.include_router(discovery_runs_router)

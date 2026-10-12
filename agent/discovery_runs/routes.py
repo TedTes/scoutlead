@@ -2,8 +2,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
-from agent_runs.schemas import AgentRunCreate, AgentRunDetail, AgentRunRead, CampaignTrace
-from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from app.service_factory import campaign_service
 from campaign_sources.repository import CampaignSourceRepository
@@ -23,6 +21,8 @@ from discovery.schemas import DiscoveryCandidateRead
 from evaluation.schemas import CampaignMetrics
 from insights.schemas import CampaignInsightRead
 from insights.service import CampaignInsightService
+from job_queue.schemas import QueueJobRead
+from job_queue.service import QueueService
 from leads.repository import LeadRepository
 from leads.export import leads_csv
 from leads.selection import select_campaign_results
@@ -275,11 +275,10 @@ def run_discovery(
 ):
     service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(run_id))
-    agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=run_id))
-    return service.run_campaign(run_id, agent_run_id=agent_run.id)
+    return service.run_campaign(run_id)
 
 
-@router.post("/{run_id}/enqueue", response_model=AgentRunRead)
+@router.post("/{run_id}/enqueue", response_model=QueueJobRead)
 def enqueue_discovery_run(
     run_id: str,
     session: DbSession,
@@ -288,7 +287,7 @@ def enqueue_discovery_run(
 ):
     service = _service(session, services, auth)
     _assert_preflight_ready(service.preflight(run_id))
-    return AgentRunService(session).create(AgentRunCreate(campaign_id=run_id))
+    return QueueService(session).enqueue_campaign_run(run_id)
 
 
 @router.get("/{run_id}/preflight", response_model=CampaignPreflightRead)
@@ -431,28 +430,6 @@ def send_discovery_campaign_drafts(
         email=services.email,
         workspace_id=auth.workspace_id,
     ).send_campaign_messages(run_id, send)
-
-
-@router.get("/{run_id}/agent-runs", response_model=list[AgentRunRead])
-def list_discovery_agent_runs(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    _service(session, services, auth).get(run_id)
-    return AgentRunService(session).list_by_campaign(run_id)
-
-
-@router.get("/{run_id}/trace", response_model=CampaignTrace)
-def get_discovery_trace(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    _service(session, services, auth).get(run_id)
-    return AgentRunService(session).trace_by_campaign(run_id)
 
 
 @router.get("/{run_id}/insights", response_model=CampaignInsightRead)

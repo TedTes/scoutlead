@@ -2,8 +2,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
-from agent_runs.schemas import AgentRunCreate
-from agent_runs.service import AgentRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaigns.schemas import CampaignCreate, CampaignRunSummary
 from campaigns.service import CampaignService
@@ -144,8 +142,7 @@ def start_product_discovery(
             channels=["email"],
         )
     )
-    agent_run = AgentRunService(session).create(AgentRunCreate(campaign_id=run.id))
-    return campaign_service.run_campaign(run.id, agent_run_id=agent_run.id)
+    return campaign_service.run_campaign(run.id)
 
 
 @router.get("", response_model=list[ProductRead])

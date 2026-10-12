@@ -45,7 +45,6 @@ class SourceRequestService:
         *,
         products: ProductRepository,
         campaigns: CampaignService,
-        agent_runs: Any | None = None,
         llm: Any | None = None,
         apify_source_provider_id: str = "apify_actor",
         apify_source_label: str = "Kijiji",
@@ -57,7 +56,6 @@ class SourceRequestService:
     ) -> None:
         self.products = products
         self.campaigns = campaigns
-        del agent_runs
         self.llm = llm or campaigns.llm
         self.intent_interpreter = SearchIntentInterpreter(self.llm)
         self.compiler = SourceRequestCompiler()

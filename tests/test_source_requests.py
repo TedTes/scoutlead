@@ -2,7 +2,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import pytest
 
-from agent_runs.service import AgentRunService
 from campaign_sources.repository import CampaignSourceRepository
 from business_index.schemas import SearchContract
 from campaigns.schemas import CampaignCreate
@@ -65,7 +64,6 @@ def test_source_request_creates_structured_google_places_run_without_running() -
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
         ).create(request)
 
@@ -248,7 +246,6 @@ def test_auto_source_request_expands_ranked_discovery_tasks() -> None:
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             google_places_configured=True,
             search_configured=True,
@@ -301,7 +298,6 @@ def test_opportunity_source_request_preserves_requested_result_limit() -> None:
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
         ).create(
             SourceRequestCreate(
@@ -347,7 +343,6 @@ def test_explicit_no_website_request_uses_strict_missing_policy() -> None:
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
         ).create(
             SourceRequestCreate(
@@ -384,7 +379,6 @@ def test_explicit_present_website_request_overrides_product_opportunity_default(
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
         ).create(
             SourceRequestCreate(
@@ -611,7 +605,6 @@ def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
         )
         first = service.create(
@@ -652,7 +645,6 @@ def test_source_request_creates_configured_apify_run_without_running() -> None:
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             apify_sources=[
                 {
@@ -703,7 +695,6 @@ def test_source_request_accepts_multiple_apify_sources() -> None:
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             apify_sources=[
                 {
@@ -752,7 +743,6 @@ def test_source_request_rejects_unconfigured_source_adapter() -> None:
                     search_tool=SearchTool(),
                     browser=DirectHttpBrowserTool(timeout_seconds=0.1),
                 ),
-                agent_runs=AgentRunService(session),
                 llm=FakeWorkflowLLM(),
                 apify_source_provider_id="configured_apify",
             ).plan(
@@ -833,7 +823,6 @@ def test_broad_source_request_returns_existing_category_and_market_match() -> No
                 semantic_cache_min_score=0.2,
                 semantic_cache_min_results=1,
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
         ).create(
             SourceRequestCreate(
@@ -902,7 +891,6 @@ def test_source_request_compiles_url_actor_input_from_source_template() -> None:
                 search_tool=SearchTool(),
                 browser=DirectHttpBrowserTool(timeout_seconds=0.1),
             ),
-            agent_runs=AgentRunService(session),
             llm=FakeWorkflowLLM(),
             apify_sources=[
                 {

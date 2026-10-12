@@ -6,8 +6,6 @@ from sqlalchemy.orm import Session
 from campaigns.schemas import CampaignCreate, CampaignStage, CampaignStatus, CampaignUpdate
 from campaigns.state import assert_campaign_transition
 from db.models import (
-    AgentRunModel,
-    AgentStepModel,
     CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
@@ -22,7 +20,6 @@ from db.models import (
     ProductModel,
     QueueJobModel,
     TerritoryModel,
-    ToolCallModel,
 )
 from shared.errors import NotFoundError
 from shared.utils import new_id, utcnow
@@ -87,9 +84,6 @@ class CampaignRepository:
                     ConversationEventModel.conversation_id.in_(conversation_ids)
                 )
             )
-        self.session.execute(delete(ToolCallModel).where(ToolCallModel.campaign_id == campaign_id))
-        self.session.execute(delete(AgentStepModel).where(AgentStepModel.campaign_id == campaign_id))
-        self.session.execute(delete(AgentRunModel).where(AgentRunModel.campaign_id == campaign_id))
         self.session.execute(delete(CampaignSourceModel).where(CampaignSourceModel.campaign_id == campaign_id))
         self.session.execute(delete(ConversationModel).where(ConversationModel.campaign_id == campaign_id))
         self.session.execute(delete(MessageModel).where(MessageModel.campaign_id == campaign_id))
