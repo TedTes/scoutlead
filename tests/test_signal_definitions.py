@@ -202,3 +202,92 @@ def test_domain_age_signal_collects_registration_age_from_rdap(monkeypatch) -> N
         fact = next(fact for fact in business.facts if fact.fact_key == definition.key)
         assert fact.value_number > 2000
         assert fact.quality_state == "staged"
+
+
+def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
+    calls = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "analysisUTCTimestamp": "2026-10-12T12:00:00Z",
+                "loadingExperience": {
+                    "metrics": {"INTERACTION_TO_NEXT_PAINT": {"percentile": 180}}
+                },
+                "lighthouseResult": {
+                    "finalUrl": "https://example-painting.ca/",
+                    "lighthouseVersion": "12.0.0",
+                    "categories": {
+                        "performance": {"score": 0.64},
+                        "accessibility": {"score": 0.91},
+                        "best-practices": {"score": 0.87},
+                        "seo": {"score": 0.95},
+                    },
+                    "audits": {
+                        "largest-contentful-paint": {"numericValue": 3100},
+                        "cumulative-layout-shift": {"numericValue": 0.12},
+                        "total-blocking-time": {"numericValue": 240},
+                    },
+                },
+            }
+
+    def fake_get(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Response()
+
+    monkeypatch.setattr("signal_collection.service.httpx.get", fake_get)
+    factory = _session_factory()
+    with factory() as session:
+        business = _business(session)
+        business.website_url = "https://example-painting.ca"
+        definitions = [
+            SignalDefinitionModel(
+                id=new_id("signal"),
+                key="mobile_performance_score",
+                label="Mobile performance score",
+                value_type="number",
+                category="performance",
+                unit="score",
+                status="active",
+                collector_key="pagespeed_mobile",
+                extractor_key="pagespeed_performance_score",
+                freshness_days=30,
+                opportunity_direction="lower_is_opportunity",
+                config={"opportunity_threshold": 70, "auto_publish": True},
+                version=1,
+            ),
+            SignalDefinitionModel(
+                id=new_id("signal"),
+                key="accessibility_score",
+                label="Accessibility score",
+                value_type="number",
+                category="accessibility",
+                unit="score",
+                status="active",
+                collector_key="pagespeed_mobile",
+                extractor_key="pagespeed_accessibility_score",
+                freshness_days=30,
+                opportunity_direction="lower_is_opportunity",
+                config={"opportunity_threshold": 90, "auto_publish": True},
+                version=1,
+            ),
+        ]
+        session.add_all(definitions)
+        session.commit()
+
+        service = SignalCollectionService(session)
+        for definition in definitions:
+            service.collect(
+                definition.id,
+                expected_version=1,
+                business_ids=[business.id],
+            )
+
+        assert len(calls) == 1
+        facts = {fact.fact_key: fact for fact in business.facts}
+        assert facts["mobile_performance_score"].value_number == 64
+        assert facts["accessibility_score"].value_number == 91
+        assert facts["mobile_performance_score"].quality_state == "published"

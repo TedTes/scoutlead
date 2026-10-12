@@ -26,6 +26,8 @@ RESOLVER_VERSION = 1
 WEBSITE_COLLECTORS = {"website_http", "website_dom"}
 GOOGLE_SOURCES = {"google_places", "google_places_seed"}
 DOMAIN_COLLECTORS = {"domain_rdap"}
+PAGESPEED_COLLECTORS = {"pagespeed_mobile"}
+PAGESPEED_SOURCE = "pagespeed_mobile"
 
 
 class SignalCollectionService:
@@ -36,6 +38,10 @@ class SignalCollectionService:
         timeout_seconds: float = 12.0,
         browser_render_endpoint: str | None = None,
         browser_render_api_key: str | None = None,
+        pagespeed_api_key: str | None = None,
+        pagespeed_api_endpoint: str = (
+            "https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed"
+        ),
     ) -> None:
         self.session = session
         self.website = WebsiteEnrichmentClient(
@@ -45,6 +51,8 @@ class SignalCollectionService:
             browser_render_endpoint=browser_render_endpoint,
             browser_render_api_key=browser_render_api_key,
         )
+        self.pagespeed_api_key = pagespeed_api_key
+        self.pagespeed_api_endpoint = pagespeed_api_endpoint
 
     def collect(
         self,
@@ -116,6 +124,17 @@ class SignalCollectionService:
         business: BusinessModel,
     ) -> SourceObservationModel | None:
         if definition.collector_key in WEBSITE_COLLECTORS:
+            if definition.collector_key == "website_dom" and not business.website_url:
+                return None
+            existing = self._recent_observation(
+                business.id,
+                sources={"company_website_signal"},
+                freshness_days=definition.freshness_days,
+            )
+            if existing is not None and _extract_value(
+                definition, existing.raw_payload or {}
+            ) is not None:
+                return existing
             enrichment = self.website.inspect(business)
             raw = _website_payload(business, definition, enrichment)
             link = CanonicalRepository(self.session).record_business_evidence(
@@ -125,6 +144,8 @@ class SignalCollectionService:
                 contact_email=enrichment.best_email,
             )
             return self.session.get(SourceObservationModel, link.source_observation_id)
+        if definition.collector_key in PAGESPEED_COLLECTORS:
+            return self._pagespeed_observation(definition, business)
         if definition.collector_key in DOMAIN_COLLECTORS:
             return self._domain_observation(definition, business)
         statement = select(SourceObservationModel).where(
@@ -135,6 +156,105 @@ class SignalCollectionService:
         return self.session.scalar(
             statement.order_by(SourceObservationModel.observed_at.desc()).limit(1)
         )
+
+    def _recent_observation(
+        self,
+        business_id: str,
+        *,
+        sources: set[str],
+        freshness_days: int,
+    ) -> SourceObservationModel | None:
+        return self.session.scalar(
+            select(SourceObservationModel)
+            .where(
+                SourceObservationModel.business_id == business_id,
+                SourceObservationModel.source.in_(sources),
+                SourceObservationModel.observed_at
+                >= utcnow() - timedelta(days=freshness_days),
+            )
+            .order_by(SourceObservationModel.observed_at.desc())
+            .limit(1)
+        )
+
+    def _pagespeed_observation(
+        self,
+        definition: SignalDefinitionModel,
+        business: BusinessModel,
+    ) -> SourceObservationModel | None:
+        existing = self._recent_observation(
+            business.id,
+            sources={PAGESPEED_SOURCE},
+            freshness_days=definition.freshness_days,
+        )
+        if existing is not None:
+            error = _payload_path(existing.raw_payload or {}, "pagespeed_mobile.error")
+            if error is None or existing.observed_at >= utcnow() - timedelta(days=1):
+                return existing
+        if not business.website_url:
+            return None
+        params: list[tuple[str, str]] = [
+            ("url", business.website_url),
+            ("strategy", "mobile"),
+            ("category", "performance"),
+            ("category", "accessibility"),
+            ("category", "best-practices"),
+            ("category", "seo"),
+        ]
+        if self.pagespeed_api_key:
+            params.append(("key", self.pagespeed_api_key))
+        try:
+            response = httpx.get(
+                self.pagespeed_api_endpoint,
+                params=params,
+                timeout=max(self.website.timeout_seconds, 60),
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            return self._record_pagespeed_observation(
+                definition,
+                business,
+                {"error": str(exc), "website_url": business.website_url},
+            )
+        normalized = _normalized_pagespeed_payload(payload)
+        if normalized is None:
+            return self._record_pagespeed_observation(
+                definition,
+                business,
+                {
+                    "error": "PageSpeed response did not contain a usable Lighthouse result.",
+                    "website_url": business.website_url,
+                },
+            )
+        return self._record_pagespeed_observation(definition, business, normalized)
+
+    def _record_pagespeed_observation(
+        self,
+        definition: SignalDefinitionModel,
+        business: BusinessModel,
+        normalized: dict[str, Any],
+    ) -> SourceObservationModel:
+        raw = {
+            "company_name": business.display_name,
+            "website_url": business.website_url,
+            "source": PAGESPEED_SOURCE,
+            "source_url": business.website_url,
+            "external_id": f"pagespeed:{business.id}",
+            "signal_collection": {
+                "signal_definition_id": definition.id,
+                "signal_key": definition.key,
+                "signal_version": definition.version,
+                "collector_key": definition.collector_key,
+            },
+            "pagespeed_mobile": normalized,
+        }
+        link = CanonicalRepository(self.session).record_business_evidence(
+            business=business,
+            source=PAGESPEED_SOURCE,
+            raw=raw,
+        )
+        return self.session.get(SourceObservationModel, link.source_observation_id)
 
     def _domain_observation(
         self,
@@ -253,6 +373,7 @@ def _website_payload(
             "has_booking_form": enrichment.has_booking_form,
             "uses_https": enrichment.uses_https,
             "has_mobile_viewport": enrichment.has_mobile_viewport,
+            **enrichment.page_signals,
             "quote_signals": enrichment.quote_signals,
             "service_signals": enrichment.service_signals,
             "errors": enrichment.errors[:5],
@@ -279,6 +400,38 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
         ),
         "business_operational": lambda: _operational_value(payload),
         "domain_age_days": lambda: _payload_path(payload, "domain_rdap.age_days"),
+        "uses_https": lambda: enrichment.get("uses_https"),
+        "mobile_viewport": lambda: enrichment.get("has_mobile_viewport"),
+        "primary_cta": lambda: enrichment.get("has_primary_cta"),
+        "click_to_call": lambda: enrichment.get("has_click_to_call"),
+        "online_payment_or_financing": lambda: enrichment.get(
+            "has_online_payment_or_financing"
+        ),
+        "service_area_pages": lambda: enrichment.get("has_service_area_pages"),
+        "testimonials": lambda: enrichment.get("has_testimonials"),
+        "privacy_policy": lambda: enrichment.get("has_privacy_policy"),
+        "complete_contact_details": lambda: enrichment.get(
+            "has_complete_contact_details"
+        ),
+        "pagespeed_performance_score": lambda: _payload_path(
+            payload, "pagespeed_mobile.performance_score"
+        ),
+        "pagespeed_accessibility_score": lambda: _payload_path(
+            payload, "pagespeed_mobile.accessibility_score"
+        ),
+        "pagespeed_best_practices_score": lambda: _payload_path(
+            payload, "pagespeed_mobile.best_practices_score"
+        ),
+        "pagespeed_seo_score": lambda: _payload_path(
+            payload, "pagespeed_mobile.seo_score"
+        ),
+        "pagespeed_quality_score": lambda: _payload_path(
+            payload, "pagespeed_mobile.website_quality_score"
+        ),
+        "pagespeed_lcp_ms": lambda: _payload_path(payload, "pagespeed_mobile.lcp_ms"),
+        "pagespeed_cls": lambda: _payload_path(payload, "pagespeed_mobile.cls"),
+        "pagespeed_inp_ms": lambda: _payload_path(payload, "pagespeed_mobile.inp_ms"),
+        "pagespeed_tbt_ms": lambda: _payload_path(payload, "pagespeed_mobile.tbt_ms"),
     }
     extractor = extractors.get(definition.extractor_key or "")
     return extractor() if extractor else None
@@ -379,3 +532,66 @@ def _operational_value(payload: dict[str, Any]) -> bool | None:
     if normalized in {"CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY"}:
         return False
     return None
+
+
+def _normalized_pagespeed_payload(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    lighthouse = payload.get("lighthouseResult")
+    if not isinstance(lighthouse, dict) or lighthouse.get("runtimeError"):
+        return None
+    categories = lighthouse.get("categories")
+    audits = lighthouse.get("audits")
+    if not isinstance(categories, dict) or not isinstance(audits, dict):
+        return None
+
+    def category_score(key: str) -> float | None:
+        category = categories.get(key)
+        score = category.get("score") if isinstance(category, dict) else None
+        return round(float(score) * 100, 1) if isinstance(score, (int, float)) else None
+
+    def audit_value(key: str) -> float | None:
+        audit = audits.get(key)
+        value = audit.get("numericValue") if isinstance(audit, dict) else None
+        return round(float(value), 3) if isinstance(value, (int, float)) else None
+
+    scores = {
+        "performance_score": category_score("performance"),
+        "accessibility_score": category_score("accessibility"),
+        "best_practices_score": category_score("best-practices"),
+        "seo_score": category_score("seo"),
+    }
+    available_scores = [value for value in scores.values() if value is not None]
+    loading_experience = payload.get("loadingExperience")
+    metrics = (
+        loading_experience.get("metrics")
+        if isinstance(loading_experience, dict)
+        else None
+    )
+    inp = (
+        metrics.get("INTERACTION_TO_NEXT_PAINT")
+        or metrics.get("INTERACTION_TO_NEXT_PAINT_MS")
+        if isinstance(metrics, dict)
+        else None
+    )
+    inp_percentile = inp.get("percentile") if isinstance(inp, dict) else None
+    return {
+        **scores,
+        "website_quality_score": (
+            round(sum(available_scores) / len(available_scores), 1)
+            if available_scores
+            else None
+        ),
+        "lcp_ms": audit_value("largest-contentful-paint"),
+        "cls": audit_value("cumulative-layout-shift"),
+        "tbt_ms": audit_value("total-blocking-time"),
+        "inp_ms": (
+            float(inp_percentile)
+            if isinstance(inp_percentile, (int, float))
+            else None
+        ),
+        "final_url": lighthouse.get("finalUrl") or payload.get("id"),
+        "lighthouse_version": lighthouse.get("lighthouseVersion"),
+        "analyzed_at": payload.get("analysisUTCTimestamp") or lighthouse.get("fetchTime"),
+        "warnings": list(lighthouse.get("runWarnings") or [])[:10],
+    }

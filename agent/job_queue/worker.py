@@ -212,6 +212,8 @@ def run_once() -> bool:
                     timeout_seconds=services.settings.request_timeout_seconds,
                     browser_render_endpoint=services.settings.browser_render_endpoint,
                     browser_render_api_key=services.settings.browser_render_api_key,
+                    pagespeed_api_key=services.settings.pagespeed_api_key,
+                    pagespeed_api_endpoint=services.settings.pagespeed_api_endpoint,
                 ).collect(
                     str(job.payload["signal_definition_id"]),
                     expected_version=int(job.payload["signal_version"]),

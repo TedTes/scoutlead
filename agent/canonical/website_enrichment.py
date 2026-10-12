@@ -237,6 +237,7 @@ class BusinessWebsiteEnrichment:
     errors: list[str]
     availability_status: str
     availability_reason: str
+    page_signals: dict[str, bool] = field(default_factory=dict)
 
     @property
     def found_signal(self) -> bool:
@@ -804,6 +805,12 @@ def _enrichment_from_pages(
     has_contact_form = any(page.has_form for page in pages)
     has_quote_form = any(page.has_quote_form for page in pages)
     has_booking_form = any(page.has_booking_form for page in pages)
+    page_signals = _page_signals(
+        pages,
+        has_contact_form=has_contact_form,
+        emails=emails,
+        phones=phones,
+    )
     contact_name, contact_role = _extract_contact_name(combined_text)
     best_email = _best_email(emails, business.website_url)
     source_url = _best_source_url(pages)
@@ -848,7 +855,64 @@ def _enrichment_from_pages(
         errors=errors,
         availability_status=availability_status,
         availability_reason=availability_reason,
+        page_signals=page_signals,
     )
+
+
+def _page_signals(
+    pages: list[WebsitePage],
+    *,
+    has_contact_form: bool,
+    emails: list[str],
+    phones: list[str],
+) -> dict[str, bool]:
+    text = " ".join(
+        f"{page.title} {page.description} {page.text}" for page in pages
+    ).lower()
+    html = " ".join(page.html for page in pages).lower()
+    links = [link.lower() for page in pages for link in page.links]
+
+    def contains(*terms: str) -> bool:
+        return any(term in text or term in html for term in terms)
+
+    return {
+        "has_primary_cta": contains(
+            "get a quote",
+            "request a quote",
+            "free estimate",
+            "book now",
+            "schedule service",
+            "contact us",
+            "call now",
+            "get started",
+        ),
+        "has_click_to_call": any(link.startswith("tel:") for link in links),
+        "has_online_payment_or_financing": contains(
+            "pay online",
+            "online payment",
+            "payment plan",
+            "financing available",
+            "apply for financing",
+            "financeit",
+            "affirm",
+        ),
+        "has_service_area_pages": contains(
+            "service area",
+            "areas we serve",
+            "locations served",
+            "communities we serve",
+        ),
+        "has_testimonials": contains(
+            "testimonials",
+            "customer reviews",
+            "client reviews",
+            "what our customers say",
+            "what our clients say",
+        ),
+        "has_privacy_policy": any("privacy" in link for link in links)
+        or contains("privacy policy"),
+        "has_complete_contact_details": bool(phones and (emails or has_contact_form)),
+    }
 
 
 def _failed_availability(checks: list[WebsitePage]) -> tuple[str, str]:
@@ -1004,6 +1068,7 @@ def _raw_payload(
             "has_booking_form": enrichment.has_booking_form,
             "uses_https": enrichment.uses_https,
             "has_mobile_viewport": enrichment.has_mobile_viewport,
+            **enrichment.page_signals,
             "quote_signals": enrichment.quote_signals,
             "service_signals": enrichment.service_signals,
             "errors": enrichment.errors[:5],

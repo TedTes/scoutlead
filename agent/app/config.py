@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     discovery_source_recipes: str | None = None
     google_places_api_key: str | None = None
     google_places_api_endpoint: str | None = None
+    pagespeed_api_key: str | None = None
+    pagespeed_api_endpoint: str = (
+        "https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed"
+    )
     openstreetmap_enabled: bool = True
     apify_api_token: str | None = None
     apify_api_base_url: str = "https://api.apify.com/v2"

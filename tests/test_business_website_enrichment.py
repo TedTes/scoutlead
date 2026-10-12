@@ -67,6 +67,14 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert observation.business_id == business.id
         assert observation.raw_payload["website_enrichment"]["best_email"] == "owner@paint.testsite.ca"
         assert observation.raw_payload["website_enrichment"]["has_quote_form"] is True
+        enrichment = observation.raw_payload["website_enrichment"]
+        assert enrichment["has_primary_cta"] is True
+        assert enrichment["has_click_to_call"] is False
+        assert enrichment["has_online_payment_or_financing"] is False
+        assert enrichment["has_service_area_pages"] is False
+        assert enrichment["has_testimonials"] is False
+        assert enrichment["has_privacy_policy"] is False
+        assert enrichment["has_complete_contact_details"] is True
         assert observation.raw_payload["digital_opportunity"]["score"] == 15
         assert observation.raw_payload["digital_opportunity"]["level"] == "low"
 
