@@ -12,7 +12,7 @@ import type {
   ProfileTrade,
 } from "../types/domain";
 
-const SIGNALS: Array<{ value: ProfileSignal; label: string }> = [
+const FALLBACK_SIGNALS: Array<{ value: ProfileSignal; label: string }> = [
   { value: "website_unavailable", label: "Missing or unavailable website" },
   { value: "no_quote_flow", label: "No quote or booking flow" },
   { value: "no_contact_form", label: "No contact form" },
@@ -78,6 +78,12 @@ export function AudienceProfileScreen() {
   }, [territoryApi]);
 
   const businessTypes = profileOptions?.business_types || [];
+  const signalOptions = profileOptions?.opportunity_signals?.length
+    ? profileOptions.opportunity_signals.map((signal) => ({
+        value: signal.key,
+        label: signal.label,
+      }))
+    : FALLBACK_SIGNALS;
 
   if (selectedProfile) {
     const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
@@ -325,7 +331,7 @@ export function AudienceProfileScreen() {
           </div>
           <div className="audience-row-control">
             <div className="audience-option-grid">
-              {SIGNALS.map((signal) => (
+              {signalOptions.map((signal) => (
                 <label key={signal.value}>
                   <input type="checkbox" checked={signals.includes(signal.value)} onChange={() => setSignals(toggleValue(signals, signal.value))} />
                   <span>{signal.label}</span>

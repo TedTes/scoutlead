@@ -14808,6 +14808,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .admin-form-grid label span,
 .admin-delete-dialog label span { color: #697383; font-size: 9px; font-weight: 800; text-transform: uppercase; }
 .admin-form-grid input,
+.admin-form-grid select,
 .admin-form-grid textarea,
 .admin-delete-dialog input,
 .admin-delete-dialog textarea { width: 100%; min-height: 36px; border: 1px solid #cbd2dc; border-radius: 6px; padding: 8px 9px; font: inherit; font-size: 12px; box-sizing: border-box; }
@@ -14897,6 +14898,35 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .admin-data-job-form fieldset strong { font-size: 11px; }
 .admin-data-job-form fieldset small { margin-top: 3px; color: #7b8492; font-size: 9px; line-height: 1.4; }
 
+.admin-signals-workspace { grid-template-columns: minmax(600px, 1.15fr) minmax(340px, .85fr); }
+.admin-signals-table th:nth-child(1) { width: 31%; }
+.admin-signals-table th:nth-child(2) { width: 22%; }
+.admin-signals-table th:nth-child(3) { width: 29%; }
+.admin-signals-table th:nth-child(4) { width: 18%; }
+.admin-signal-inspector { max-height: 690px; overflow: auto; }
+.admin-signal-details { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-bottom: 1px solid #dfe3e9; }
+.admin-signal-details div { min-width: 0; padding: 11px 13px; border-right: 1px solid #e2e6ec; border-bottom: 1px solid #e2e6ec; }
+.admin-signal-details div:nth-child(2n) { border-right: 0; }
+.admin-signal-details dt { color: #929cab; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.admin-signal-details dd { margin: 5px 0 0; overflow: hidden; color: #343a42; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.admin-signal-description { margin: 0; padding: 14px; color: #667085; font-size: 11px; line-height: 1.55; }
+.admin-signal-dialog { width: min(720px, 100%); }
+.admin-signal-row { padding: 11px 14px; border-bottom: 1px solid #e3e7ec; }
+.admin-signal-row-heading,
+.admin-signal-row-value { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.admin-signal-row-heading strong,
+.admin-signal-row-heading small { display: block; }
+.admin-signal-row-heading strong { font-size: 11px; }
+.admin-signal-row-heading small,
+.admin-signal-row > small { margin-top: 3px; color: #929cab; font-size: 9px; text-transform: capitalize; }
+.admin-signal-row-value { margin: 8px 0 5px; color: #4f5b6b; font-size: 11px; }
+.admin-signal-row-value button { min-height: 27px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid #cbd2dc; border-radius: 5px; background: #fff; color: #343a42; font: inherit; font-size: 9px; font-weight: 750; cursor: pointer; }
+.admin-signal-row-actions { display: flex; align-items: center; gap: 5px; }
+.admin-signal-row-value button.danger { color: #b32b2b; }
+.admin-status-pill.is-current { border-color: #a9e1c5; background: #eaf8f1; color: #078a56; }
+.admin-status-pill.is-stale { border-color: #efd19d; background: #fff7e8; color: #9a620b; }
+.admin-status-pill.is-missing { border-color: #d5dae2; background: #f1f3f5; color: #697383; }
+
 @media (max-width: 1050px) {
   .admin-shell-layout { grid-template-columns: 160px minmax(0, 1fr); }
   .admin-workspace { grid-template-columns: 1fr; }
@@ -14948,6 +14978,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .admin-job-source-list,
   .admin-job-completeness { grid-template-columns: repeat(2, 1fr); }
   .admin-data-job-form fieldset { grid-template-columns: 1fr; }
+  .admin-signals-screen .admin-overview-header > .admin-primary-button { margin-left: 0; }
+  .admin-signals-screen .admin-overview-header { justify-content: space-between; }
+  .admin-signals-table th:nth-child(1) { width: 68%; }
+  .admin-signals-table th:nth-child(2),
+  .admin-signals-table td:nth-child(2),
+  .admin-signals-table th:nth-child(3),
+  .admin-signals-table td:nth-child(3) { display: none; }
+  .admin-signals-table th:nth-child(4) { width: 32%; }
+  .admin-signal-details { grid-template-columns: 1fr; }
+  .admin-signal-details div,
+  .admin-signal-details div:nth-child(2n) { border-right: 0; }
+  .admin-signal-dialog { padding: 15px; }
 }
 
 @media (max-width: 440px) {

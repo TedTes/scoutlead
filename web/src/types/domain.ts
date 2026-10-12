@@ -358,13 +358,18 @@ export type Territory = {
 
 export type ProfileTrade = "painters" | "hvac" | "roofers" | "plumbers" | "electricians";
 export type ProfileCustomerKind = "residential" | "commercial";
-export type ProfileSignal = "website_unavailable" | "no_quote_flow" | "no_contact_form" | "reviews_under_15";
+export type ProfileSignal = string;
 export type ProfileExclusion = "closed" | "chains" | "franchises" | "directories" | "agencies";
 
 export type ProfileOptions = {
   business_types: Array<{
     key: ProfileTrade;
     label: string;
+  }>;
+  opportunity_signals: Array<{
+    key: string;
+    label: string;
+    category: string;
   }>;
 };
 
@@ -901,10 +906,26 @@ export type AdminBusinessDetail = AdminBusinessSummary & {
   memberships: Array<Record<string, unknown>>;
   validations: AdminValidation[];
   facts: Array<Record<string, unknown>>;
+  signals: AdminBusinessSignal[];
   sources: Array<Record<string, unknown>>;
   publications: Array<Record<string, unknown>>;
   audit: Array<Record<string, unknown>>;
   delete_dependencies: Record<string, number>;
+};
+
+export type AdminBusinessSignal = {
+  definition_id: string;
+  key: string;
+  label: string;
+  category: string;
+  value_type: "boolean" | "number" | "text";
+  unit?: string | null;
+  status: "current" | "stale" | "missing";
+  value: unknown;
+  confidence?: number | null;
+  quality_state?: string | null;
+  observed_at?: string | null;
+  expires_at?: string | null;
 };
 
 export type AdminBusinessPage = {
@@ -963,4 +984,44 @@ export type AdminDataJob = {
   errors: string[];
   source_items?: AdminDataJobSample[];
   source_items_truncated?: boolean;
+};
+
+export type AdminSignalDefinition = {
+  id: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  value_type: "boolean" | "number" | "text";
+  category: string;
+  unit?: string | null;
+  status: "draft" | "active" | "inactive";
+  collector_key?: string | null;
+  extractor_key?: string | null;
+  freshness_days: number;
+  opportunity_direction: string;
+  config: Record<string, unknown>;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  collection_jobs?: Array<{
+    id: string;
+    status: string;
+    business_count: number;
+    batch_number: number;
+  }>;
+};
+
+export type AdminSignalDefinitionInput = {
+  key: string;
+  label: string;
+  description?: string;
+  value_type: "boolean" | "number" | "text";
+  category: string;
+  unit?: string;
+  collector_key?: string;
+  extractor_key?: string;
+  freshness_days: number;
+  opportunity_direction: string;
+  config: Record<string, unknown>;
+  reason: string;
 };

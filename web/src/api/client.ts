@@ -4,6 +4,8 @@ import type {
   AdminOverview,
   AdminDataJob,
   AdminDataSegment,
+  AdminSignalDefinition,
+  AdminSignalDefinitionInput,
   ApiHealth,
   AgentRun,
   AgentRunDetail,
@@ -158,6 +160,46 @@ export class ApiClient {
     return this.request<AdminDataJob>(`/admin/data-jobs/${id}/retry`, {
       method: "POST",
       body: { reason },
+    });
+  }
+
+  getAdminSignals(status = "") {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    return this.request<AdminSignalDefinition[]>(`/admin/signals${query}`);
+  }
+
+  createAdminSignal(body: AdminSignalDefinitionInput) {
+    return this.request<AdminSignalDefinition>("/admin/signals", { method: "POST", body });
+  }
+
+  changeAdminSignalStatus(id: string, status: "draft" | "active" | "inactive", reason: string) {
+    return this.request<AdminSignalDefinition>(`/admin/signals/${id}/status`, {
+      method: "POST",
+      body: { status, reason, scope: "all", batch_size: 25 },
+    });
+  }
+
+  collectAdminSignal(id: string, reason: string, businessIds: string[] = []) {
+    return this.request<{ signal: AdminSignalDefinition; collection_jobs: AdminSignalDefinition["collection_jobs"] }>(`/admin/signals/${id}/collect`, {
+      method: "POST",
+      body: {
+        reason,
+        scope: businessIds.length ? "selected" : "all",
+        business_ids: businessIds,
+        batch_size: 25,
+      },
+    });
+  }
+
+  validateAdminSignal(id: string, decision: "approve" | "reject", reason: string, businessIds: string[] = []) {
+    return this.request<{ signal: AdminSignalDefinition; decision: string; affected_count: number; business_ids: string[] }>(`/admin/signals/${id}/validate`, {
+      method: "POST",
+      body: {
+        decision,
+        reason,
+        scope: businessIds.length ? "selected" : "all",
+        business_ids: businessIds,
+      },
     });
   }
 

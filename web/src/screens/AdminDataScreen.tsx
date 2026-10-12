@@ -1,4 +1,5 @@
 import {
+  Activity,
   Archive,
   CheckCircle2,
   ChevronLeft,
@@ -213,7 +214,7 @@ function BusinessInspector({
   onDelete: () => void;
   onRefresh: (value?: AdminBusinessDetail) => Promise<void>;
 }) {
-  const [tab, setTab] = useState<"validation" | "facts" | "sources" | "history">("validation");
+  const [tab, setTab] = useState<"validation" | "signals" | "facts" | "sources" | "history">("validation");
   const [busy, setBusy] = useState(false);
   if (!detail) return <aside className="admin-inspector is-empty">Select a business to inspect its evidence.</aside>;
 
@@ -226,6 +227,30 @@ function BusinessInspector({
         ? await api.revalidateAdminBusiness(detail.id, reason)
         : await api.changeAdminBusinessStatus(detail.id, status || "active", reason);
       await onRefresh(result);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const collectSignal = async (definitionId: string, label: string) => {
+    const reason = window.prompt(`Reason for collecting ${label} for this business`);
+    if (!reason?.trim()) return;
+    setBusy(true);
+    try {
+      await api.collectAdminSignal(definitionId, reason, [detail.id]);
+      await onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const validateSignal = async (definitionId: string, label: string, decision: "approve" | "reject") => {
+    const reason = window.prompt(`Reason to ${decision} ${label} for this business`);
+    if (!reason?.trim()) return;
+    setBusy(true);
+    try {
+      await api.validateAdminSignal(definitionId, decision, reason, [detail.id]);
+      await onRefresh();
     } finally {
       setBusy(false);
     }
@@ -254,10 +279,11 @@ function BusinessInspector({
         <div><dt>Coordinates</dt><dd>{detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored"}</dd></div>
       </dl>
       <nav className="admin-tabs">
-        {(["validation", "facts", "sources", "history"] as const).map((value) => <button className={tab === value ? "active" : ""} key={value} type="button" onClick={() => setTab(value)}>{value}</button>)}
+        {(["validation", "signals", "facts", "sources", "history"] as const).map((value) => <button className={tab === value ? "active" : ""} key={value} type="button" onClick={() => setTab(value)}>{value}</button>)}
       </nav>
       <div className="admin-inspector-content">
         {tab === "validation" ? detail.validations.map((item) => <article className="admin-validation-row" key={item.type}><div><strong>{item.type.replace(/_/g, " ")}</strong><StatusPill value={item.status} /></div><p>{item.reason}</p><small>{item.confidence}% confidence · {new Date(item.observed_at).toLocaleDateString()}</small></article>) : null}
+        {tab === "signals" ? detail.signals.map((signal) => <article className="admin-signal-row" key={signal.definition_id}><div className="admin-signal-row-heading"><div><strong>{signal.label}</strong><small>{signal.category}{signal.quality_state ? ` · ${signal.quality_state}` : ""}</small></div><StatusPill value={signal.status} /></div><div className="admin-signal-row-value"><span>{signal.status === "missing" ? "No observation" : formatValue(signal.value)}{signal.unit && signal.value != null ? ` ${signal.unit}` : ""}</span><div className="admin-signal-row-actions">{signal.quality_state === "staged" ? <><button disabled={busy} type="button" onClick={() => void validateSignal(signal.definition_id, signal.label, "approve")}><CheckCircle2 size={13} /> Approve</button><button className="danger" disabled={busy} type="button" onClick={() => void validateSignal(signal.definition_id, signal.label, "reject")}><X size={13} /> Reject</button></> : null}<button disabled={busy} title={`Collect ${signal.label}`} type="button" onClick={() => void collectSignal(signal.definition_id, signal.label)}><Activity size={13} /> Collect</button></div></div>{signal.observed_at ? <small>{signal.confidence}% confidence · observed {new Date(signal.observed_at).toLocaleDateString()}</small> : null}</article>) : null}
         {tab === "facts" ? <KeyValueRows rows={detail.facts} primary="key" secondary="value" /> : null}
         {tab === "sources" ? detail.sources.map((source) => <article className="admin-source-row" key={String(source.id)}><div><strong>{String(source.provider)}</strong><StatusPill value={String(source.state)} /></div><p>{String(source.title || "Untitled source")}</p>{source.source_url ? <a href={String(source.source_url)} target="_blank" rel="noreferrer">Open evidence <ExternalLink size={12} /></a> : null}</article>) : null}
         {tab === "history" ? <KeyValueRows rows={detail.audit} primary="action" secondary="reason" /> : null}
