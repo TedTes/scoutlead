@@ -2,12 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ApiClient } from "../api/client";
 import { getApiBaseUrl, getStaticApiToken } from "../config/env";
 import type {
-  AgentRunDetail,
   DiscoveryRun,
   DiscoveryRunCreateInput,
   DiscoveryResult,
   DiscoverySnapshot,
-  DiscoveryTrace,
   CampaignMessageBatchResult,
   CampaignOutreachDraftInput,
   GmailAuthorizationUrl,
@@ -117,7 +115,6 @@ const emptySnapshot: DiscoverySnapshot = {
   results: [],
   discoveryCandidates: [],
   messages: [],
-  agentRuns: [],
 };
 
 const activeSourcesStorageKey = "scoutlead.activeSourceIds";
@@ -138,32 +135,6 @@ function readStoredActiveSourceIds() {
     return Array.isArray(parsed) ? parsed.filter((value): value is SourceRequestSource => typeof value === "string") : [];
   } catch {
     return [];
-  }
-}
-
-async function getTraceWithFallback(api: ApiClient, runId: string): Promise<DiscoveryTrace | undefined> {
-  try {
-    return await api.getDiscoveryTrace(runId);
-  } catch {
-    const runs = await api.getDiscoveryRunAgentRuns(runId).catch(() => []);
-    if (!runs.length) return undefined;
-
-    const details = await Promise.all(
-      runs.map(async (run): Promise<AgentRunDetail> => {
-        try {
-          return await api.getAgentRun(run.id);
-        } catch {
-          return { ...run, steps: [], tool_calls: [] };
-        }
-      }),
-    );
-
-    return {
-      campaign_id: runId,
-      run_count: details.length,
-      latest_run: details[0] ?? null,
-      runs: details,
-    };
   }
 }
 
@@ -284,7 +255,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         messages,
         metrics,
         preflight,
-        trace,
       ] = await Promise.all([
         api.getDiscoveryRun(targetRunId),
         api.getDiscoveryRunSources(targetRunId).catch(() => []),
@@ -293,10 +263,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         api.getMessages(targetRunId),
         api.getMetrics(targetRunId),
         api.getDiscoveryRunPreflight(targetRunId),
-        getTraceWithFallback(api, targetRunId),
       ]);
-      const latestAgentRun = trace?.latest_run ?? undefined;
-      const agentRuns = trace?.runs ?? [];
       return {
         run,
         sourceConfigs,
@@ -305,9 +272,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         messages,
         metrics,
         preflight,
-        trace,
-        agentRuns,
-        latestAgentRun,
       };
     },
     [api],

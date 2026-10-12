@@ -11,7 +11,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Card, StatusPill } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { RunDiagnostics, RunPipelineEvent, SourceItem, ToolCall } from "../types/domain";
+import type { RunDiagnostics, RunPipelineEvent, SourceItem } from "../types/domain";
 import { statusTone } from "../utils/status";
 
 type TraceDebugScreenProps = {
@@ -46,7 +46,6 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
   const [reviewingItemId, setReviewingItemId] = useState("");
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const latestRun = snapshot.latestAgentRun || snapshot.trace?.latest_run || snapshot.trace?.runs?.[0];
 
   useEffect(() => {
     if (runId || !selectedDiscoveryRunId) return;
@@ -295,7 +294,6 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
             </div>
           </Card>
 
-          {latestRun ? <LegacyTrace runId={latestRun.id} steps={latestRun.steps || []} toolCalls={latestRun.tool_calls || []} /> : null}
         </>
       ) : null}
     </div>
@@ -329,10 +327,6 @@ function PipelineEventRow({ event }: { event: RunPipelineEvent }) {
     <div><strong>{stageLabels[event.stage] || event.stage}</strong><p>{event.event_type}{event.provider_id ? ` · ${event.provider_id}` : ""} · {formatTime(event.created_at)}</p>{event.reason ? <em>{event.reason}</em> : null}<details><summary>Input / output</summary><div className="trace-request-response"><JsonPanel label="Input" value={event.request_payload} /><JsonPanel label="Output" value={event.response_payload} /></div></details></div>
     <StatusPill tone={statusTone(event.status)}>{event.status}</StatusPill>
   </article>;
-}
-
-function LegacyTrace({ runId, steps, toolCalls }: { runId: string; steps: Array<{ id: string; phase: string; status: string; objective: string; error?: string | null }>; toolCalls: ToolCall[] }) {
-  return <details className="legacy-trace"><summary>Legacy agent trace · {runId}</summary><div className="trace-stack">{steps.map((step) => <article className="trace-step" key={step.id}><Database size={15} /><div><strong>{step.phase}</strong><p>{step.objective}</p>{step.error ? <em>{step.error}</em> : null}</div><StatusPill tone={statusTone(step.status)}>{step.status}</StatusPill></article>)}{toolCalls.map((call) => <article className="trace-call compact" key={call.id}><header><div><strong>{call.tool_name}</strong><span>{call.reason || "No reason recorded"}</span></div><StatusPill tone={statusTone(call.status)}>{call.status}</StatusPill></header>{call.error ? <p className="trace-error">{call.error}</p> : null}<div className="trace-request-response"><JsonPanel label="Request" value={call.args} /><JsonPanel label="Response" value={call.observation ?? call.error ?? null} /></div></article>)}</div></details>;
 }
 
 function JsonPanel({ label, value }: { label: string; value: unknown }) {

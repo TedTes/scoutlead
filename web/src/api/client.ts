@@ -7,14 +7,11 @@ import type {
   AdminSignalDefinition,
   AdminSignalDefinitionInput,
   ApiHealth,
-  AgentRun,
-  AgentRunDetail,
   DiscoveryRun,
   DiscoveryRunCreateInput,
   DiscoveryPreflight,
   DiscoveryRunSummary,
   DiscoveryRunSource,
-  DiscoveryTrace,
   DiscoveryCandidate,
   DiscoveryResult,
   RunDiagnostics,
@@ -35,6 +32,7 @@ import type {
   ProfileFactChange,
   ProfileOptions,
   ProfileQueued,
+  QueueJob,
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
@@ -408,15 +406,7 @@ export class ApiClient {
   }
 
   enqueueDiscoveryRun(id: string) {
-    return this.request<AgentRun>(`/discovery-runs/${id}/enqueue`, { method: "POST" });
-  }
-
-  getDiscoveryRunAgentRuns(runId: string) {
-    return this.request<AgentRun[]>(`/discovery-runs/${runId}/agent-runs`);
-  }
-
-  getDiscoveryTrace(runId: string) {
-    return this.request<DiscoveryTrace>(`/discovery-runs/${runId}/trace`);
+    return this.request<QueueJob>(`/discovery-runs/${id}/enqueue`, { method: "POST" });
   }
 
   getDiscoveryRunDiagnostics(runId: string) {
@@ -436,10 +426,6 @@ export class ApiClient {
       method: "POST",
       body: { action },
     });
-  }
-
-  getAgentRun(id: string) {
-    return this.request<AgentRunDetail>(`/agent-runs/${id}`);
   }
 
   pauseDiscoveryRun(id: string) {
