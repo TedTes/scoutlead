@@ -38,7 +38,7 @@ export function AdminApp({ accountSlot, adminEmail, getAuthToken }: AdminAppProp
         </header>
         <div className="admin-shell-layout">
           <nav className="admin-section-nav" aria-label="Admin sections">
-            <button className={view === "businesses" ? "active" : ""} title="Business quality" type="button" onClick={() => setView("businesses")}><ListChecks size={15} /><span>Business quality</span></button>
+            <button className={view === "businesses" ? "active" : ""} title="Leads" type="button" onClick={() => setView("businesses")}><ListChecks size={15} /><span>Leads</span></button>
             <button className={view === "jobs" ? "active" : ""} title="Sources" type="button" onClick={() => setView("jobs")}><Database size={15} /><span>Sources</span></button>
             <button className={view === "signals" ? "active" : ""} title="Signals" type="button" onClick={() => setView("signals")}><Activity size={15} /><span>Signals</span></button>
             <div className="admin-sidebar-account">

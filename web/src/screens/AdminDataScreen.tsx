@@ -152,7 +152,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
 
       {error ? <div className="admin-error"><CircleAlert size={15} /> {error}</div> : null}
 
-      <div className="admin-workspace">
+      <div className="admin-workspace admin-leads-workspace">
         <div className="admin-table-pane">
           <table className="admin-business-table">
             <thead><tr><th>Business</th><th>Market</th><th>Validation</th><th>State</th></tr></thead>

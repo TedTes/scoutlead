@@ -14937,6 +14937,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .admin-data-job-form fieldset small { margin-top: 3px; color: #7b8492; font-size: 9px; line-height: 1.4; }
 
 .admin-signals-workspace { height: calc(100vh - 150px); min-height: 480px; grid-template-columns: minmax(600px, 1.15fr) minmax(340px, .85fr); }
+.admin-leads-workspace { height: calc(100vh - 214px); min-height: 480px; }
+.admin-leads-workspace .admin-table-pane { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.admin-leads-workspace .admin-business-table thead { position: sticky; top: 0; z-index: 2; background: #f7f8fa; }
+.admin-leads-workspace .admin-pagination { position: sticky; bottom: 0; z-index: 2; margin-top: auto; background: #fff; }
+.admin-leads-workspace > .admin-inspector { min-height: 0; overflow: hidden; }
+.admin-leads-workspace > .admin-inspector .admin-inspector-content { max-height: none; min-height: 0; flex: 1; }
 .admin-signals-workspace .admin-table-pane { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .admin-signals-workspace .admin-signals-table thead { position: sticky; top: 0; z-index: 2; background: #f7f8fa; }
 .admin-signals-workspace .admin-pagination { position: sticky; bottom: 0; z-index: 2; margin-top: auto; background: #fff; }
@@ -14979,6 +14985,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .admin-inspector { border-top: 1px solid #d8dde5; }
   .admin-metrics { grid-template-columns: repeat(3, 1fr); }
   .admin-signals-workspace { height: auto; min-height: 0; overflow: visible; }
+  .admin-leads-workspace { height: auto; min-height: 0; overflow: visible; }
+  .admin-leads-workspace .admin-table-pane { max-height: min(58vh, 620px); border-bottom: 1px solid #d8dde5; }
+  .admin-leads-workspace > .admin-inspector { max-height: min(68vh, 720px); }
   .admin-signals-workspace .admin-table-pane { max-height: min(58vh, 620px); border-bottom: 1px solid #d8dde5; }
   .admin-signal-inspector { max-height: min(58vh, 620px); }
 }
