@@ -31,6 +31,7 @@ from job_queue.service import QueueService
 from messages.service import MessageService
 from search_evaluations.service import SearchEvaluationService
 from signal_collection.service import SignalCollectionService
+from signal_validation.service import SignalValidationService
 from business_index.schemas import SearchContract
 from products.repository import ProductRepository
 from source_requests.service import SourceRequestService
@@ -207,7 +208,7 @@ def run_once() -> bool:
                     job_id=job.id,
                 )
             elif job.type == JobType.SIGNAL_COLLECTION.value:
-                SignalCollectionService(
+                summary = SignalCollectionService(
                     session,
                     timeout_seconds=services.settings.request_timeout_seconds,
                     browser_render_endpoint=services.settings.browser_render_endpoint,
@@ -215,6 +216,26 @@ def run_once() -> bool:
                     pagespeed_api_key=services.settings.pagespeed_api_key,
                     pagespeed_api_endpoint=services.settings.pagespeed_api_endpoint,
                 ).collect(
+                    str(job.payload["signal_definition_id"]),
+                    expected_version=int(job.payload["signal_version"]),
+                    business_ids=[
+                        str(value) for value in job.payload.get("business_ids", [])
+                    ],
+                )
+                if summary["claimed"]:
+                    QueueService(session).enqueue_signal_validation(
+                        signal_definition_id=str(
+                            job.payload["signal_definition_id"]
+                        ),
+                        signal_version=int(job.payload["signal_version"]),
+                        business_ids=[
+                            str(value)
+                            for value in job.payload.get("business_ids", [])
+                        ],
+                        collection_job_id=job.id,
+                    )
+            elif job.type == JobType.SIGNAL_VALIDATION.value:
+                SignalValidationService(session).validate(
                     str(job.payload["signal_definition_id"]),
                     expected_version=int(job.payload["signal_version"]),
                     business_ids=[

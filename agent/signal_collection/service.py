@@ -91,10 +91,7 @@ class SignalCollectionService:
                 summary["unknown"] += 1
                 continue
             summary["observed"] += 1
-            value = _coerce_value(
-                definition.value_type,
-                _extract_value(definition, observation.raw_payload or {}),
-            )
+            value = extract_signal_value(definition, observation.raw_payload or {})
             if value is None:
                 summary["unknown"] += 1
                 continue
@@ -326,8 +323,12 @@ class SignalCollectionService:
         conflicting = any(
             claim.value != newest.value and claim.confidence >= 90 for claim in claims
         )
+        config = definition.config or {}
+        requires_validation = bool(config.get("requires_validation", True))
         quality_state = (
-            "published" if bool((definition.config or {}).get("auto_publish")) else "staged"
+            "published"
+            if not requires_validation and bool(config.get("auto_publish"))
+            else "staged"
         )
         BusinessFactRepository(self.session).upsert(
             business_id,
@@ -435,6 +436,16 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
     }
     extractor = extractors.get(definition.extractor_key or "")
     return extractor() if extractor else None
+
+
+def extract_signal_value(
+    definition: SignalDefinitionModel,
+    payload: dict[str, Any],
+) -> str | float | bool | None:
+    return _coerce_value(
+        definition.value_type,
+        _extract_value(definition, payload),
+    )
 
 
 def _coerce_value(value_type: str, value: Any) -> str | float | bool | None:

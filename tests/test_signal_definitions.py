@@ -256,7 +256,11 @@ def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
                 extractor_key="pagespeed_performance_score",
                 freshness_days=30,
                 opportunity_direction="lower_is_opportunity",
-                config={"opportunity_threshold": 70, "auto_publish": True},
+                config={
+                    "opportunity_threshold": 70,
+                    "auto_publish": True,
+                    "requires_validation": False,
+                },
                 version=1,
             ),
             SignalDefinitionModel(
@@ -271,7 +275,11 @@ def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
                 extractor_key="pagespeed_accessibility_score",
                 freshness_days=30,
                 opportunity_direction="lower_is_opportunity",
-                config={"opportunity_threshold": 90, "auto_publish": True},
+                config={
+                    "opportunity_threshold": 90,
+                    "auto_publish": True,
+                    "requires_validation": False,
+                },
                 version=1,
             ),
         ]

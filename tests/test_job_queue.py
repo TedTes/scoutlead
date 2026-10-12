@@ -137,6 +137,29 @@ def test_signal_collection_idempotency_key_is_bounded_for_large_batches() -> Non
         assert first.payload["business_ids"] == business_ids
 
 
+def test_signal_validation_job_is_idempotent_for_a_collection_batch() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        business_ids = ["business_2", "business_1"]
+
+        first = QueueService(session).enqueue_signal_validation(
+            signal_definition_id="signal_mobile_viewport_present",
+            signal_version=2,
+            business_ids=business_ids,
+            collection_job_id="job_collection",
+        )
+        second = QueueService(session).enqueue_signal_validation(
+            signal_definition_id="signal_mobile_viewport_present",
+            signal_version=2,
+            business_ids=list(reversed(business_ids)),
+            collection_job_id="job_collection",
+        )
+
+        assert second.id == first.id
+        assert first.type == JobType.SIGNAL_VALIDATION.value
+        assert first.parent_run_id == "job_collection"
+
+
 def test_legacy_search_evaluation_jobs_are_consolidated_into_one_batch() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

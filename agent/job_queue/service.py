@@ -153,6 +153,32 @@ class QueueService:
             commit=commit,
         )
 
+    def enqueue_signal_validation(
+        self,
+        *,
+        signal_definition_id: str,
+        signal_version: int,
+        business_ids: list[str],
+        collection_job_id: str | None,
+        commit: bool = True,
+    ):
+        business_key = sha256(
+            "\0".join(sorted(set(business_ids))).encode("utf-8")
+        ).hexdigest()
+        return self.queue.enqueue_once(
+            JobType.SIGNAL_VALIDATION,
+            {
+                "signal_definition_id": signal_definition_id,
+                "signal_version": signal_version,
+                "business_ids": business_ids,
+                "collection_job_id": collection_job_id,
+            },
+            dedupe_key=f"{signal_definition_id}:{signal_version}:{business_key}",
+            parent_run_id=collection_job_id,
+            max_attempts=3,
+            commit=commit,
+        )
+
     def enqueue_business_validate(
         self,
         *,
