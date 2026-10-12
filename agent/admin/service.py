@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from admin.schemas import AdminBusinessCreate, AdminBusinessUpdate, AdminDataJobCreate
+from admin.schemas import (
+    AdminBusinessCreate,
+    AdminBusinessUpdate,
+    AdminDataJobCreate,
+    AdminSignalDefinitionCreate,
+    AdminSignalDefinitionUpdate,
+)
 from auth.context import AuthContext
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from db.base import Base
@@ -19,6 +26,7 @@ from db.models import (
     BusinessPublicationModel,
     NicheModel,
     QueueJobModel,
+    SignalDefinitionModel,
     SourceItemModel,
     ValidationResultModel,
 )
@@ -27,6 +35,7 @@ from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, normalize_url, utcnow
+from signal_definitions.repository import SignalDefinitionRepository
 from source_items.repository import SourceItemRepository, source_item_content_hash
 from source_items.schemas import (
     SourceItemCreate,
@@ -54,6 +63,191 @@ class AdminDataService:
     def __init__(self, session: Session, auth: AuthContext) -> None:
         self.session = session
         self.auth = auth
+
+    def list_signal_definitions(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        if status and status not in {"draft", "active", "inactive"}:
+            raise ValidationError("Unknown signal status", {"status": status})
+        return [
+            _signal_definition_dict(definition)
+            for definition in SignalDefinitionRepository(self.session).list(status=status)
+        ]
+
+    def create_signal_definition(
+        self,
+        data: AdminSignalDefinitionCreate,
+    ) -> dict[str, Any]:
+        repository = SignalDefinitionRepository(self.session)
+        if repository.get_by_key(data.key) is not None:
+            raise ConflictError("A signal with this key already exists", {"key": data.key})
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            **data.model_dump(exclude={"reason"}),
+            status="draft",
+            version=1,
+        )
+        self.session.add(definition)
+        self.session.flush()
+        after = _signal_definition_dict(definition)
+        self._audit(
+            "signal:create",
+            definition.id,
+            data.reason,
+            None,
+            after,
+            entity_type="signal_definition",
+        )
+        self.session.commit()
+        return after
+
+    def update_signal_definition(
+        self,
+        signal_id: str,
+        data: AdminSignalDefinitionUpdate,
+    ) -> dict[str, Any]:
+        definition = self._signal_definition(signal_id)
+        before = _signal_definition_dict(definition)
+        updates = data.model_dump(exclude={"reason"}, exclude_unset=True)
+        for field, value in updates.items():
+            setattr(definition, field, value)
+        definition.version += 1
+        after = _signal_definition_dict(definition)
+        self._audit(
+            "signal:update",
+            definition.id,
+            data.reason,
+            before,
+            after,
+            entity_type="signal_definition",
+        )
+        self.session.commit()
+        return after
+
+    def change_signal_definition_status(
+        self,
+        signal_id: str,
+        *,
+        status: str,
+        reason: str,
+        scope: str = "all",
+        business_ids: list[str] | None = None,
+        niche_slug: str | None = None,
+        market_key: str | None = None,
+        batch_size: int = 25,
+    ) -> dict[str, Any]:
+        definition = self._signal_definition(signal_id)
+        if status == "active" and (not definition.collector_key or not definition.extractor_key):
+            raise ValidationError(
+                "Active signals require a collector and extractor",
+                {"signal_id": signal_id},
+            )
+        if status == "active":
+            self._validate_signal_definition(definition)
+        before = _signal_definition_dict(definition)
+        definition.status = status
+        after = _signal_definition_dict(definition)
+        self._audit(
+            f"signal:status:{status}",
+            definition.id,
+            reason,
+            before,
+            after,
+            entity_type="signal_definition",
+        )
+        jobs = []
+        if status == "active":
+            jobs = self._enqueue_signal_collection(
+                definition,
+                reason=reason,
+                scope=scope,
+                business_ids=business_ids or [],
+                niche_slug=niche_slug,
+                market_key=market_key,
+                batch_size=batch_size,
+            )
+        self.session.commit()
+        return {**after, "collection_jobs": jobs}
+
+    def collect_signal_definition(
+        self,
+        signal_id: str,
+        *,
+        reason: str,
+        scope: str,
+        business_ids: list[str],
+        niche_slug: str | None,
+        market_key: str | None,
+        batch_size: int,
+    ) -> dict[str, Any]:
+        definition = self._signal_definition(signal_id)
+        if definition.status != "active":
+            raise ConflictError("Only active signals can be collected")
+        jobs = self._enqueue_signal_collection(
+            definition,
+            reason=reason,
+            scope=scope,
+            business_ids=business_ids,
+            niche_slug=niche_slug,
+            market_key=market_key,
+            batch_size=batch_size,
+        )
+        self._audit(
+            "signal:collect",
+            definition.id,
+            reason,
+            None,
+            {"scope": scope, "job_ids": [job["id"] for job in jobs]},
+            entity_type="signal_definition",
+        )
+        self.session.commit()
+        return {"signal": _signal_definition_dict(definition), "collection_jobs": jobs}
+
+    def validate_signal_facts(
+        self,
+        signal_id: str,
+        *,
+        decision: str,
+        reason: str,
+        scope: str,
+        business_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        definition = self._signal_definition(signal_id)
+        if decision not in {"approve", "reject"}:
+            raise ValidationError("Unknown signal validation decision")
+        if scope not in {"all", "selected"}:
+            raise ValidationError("Unknown signal validation scope", {"scope": scope})
+        selected_ids = list(dict.fromkeys(business_ids or []))
+        if scope == "selected" and not selected_ids:
+            raise ValidationError("Selected scope requires at least one business")
+        statement = select(BusinessFactModel).where(
+            BusinessFactModel.signal_definition_id == definition.id,
+            BusinessFactModel.quality_state == "staged",
+        )
+        if scope == "selected":
+            statement = statement.where(BusinessFactModel.business_id.in_(selected_ids))
+        facts = list(self.session.scalars(statement))
+        quality_state = "published" if decision == "approve" else "rejected"
+        for fact in facts:
+            fact.quality_state = quality_state
+        affected_ids = [fact.business_id for fact in facts]
+        self._audit(
+            f"signal:validate:{decision}",
+            definition.id,
+            reason,
+            None,
+            {
+                "scope": scope,
+                "affected_count": len(facts),
+                "business_ids": affected_ids[:100],
+            },
+            entity_type="signal_definition",
+        )
+        self.session.commit()
+        return {
+            "signal": _signal_definition_dict(definition),
+            "decision": decision,
+            "affected_count": len(facts),
+            "business_ids": affected_ids,
+        }
 
     def list_data_segments(self) -> list[dict[str, Any]]:
         rows = self.session.execute(
@@ -401,6 +595,13 @@ class AdminDataService:
                 .order_by(BusinessFactModel.fact_key)
             )
         )
+        active_signals = SignalDefinitionRepository(self.session).list(status="active")
+        facts_by_definition = {
+            fact.signal_definition_id: fact
+            for fact in facts
+            if fact.signal_definition_id is not None
+        }
+        facts_by_key = {fact.fact_key: fact for fact in facts}
         sources = list(
             self.session.scalars(
                 select(SourceItemModel)
@@ -460,6 +661,14 @@ class AdminDataService:
                     "expires_at": fact.expires_at,
                 }
                 for fact in facts
+            ],
+            "signals": [
+                _business_signal_dict(
+                    definition,
+                    facts_by_definition.get(definition.id)
+                    or facts_by_key.get(definition.key),
+                )
+                for definition in active_signals
             ],
             "sources": [
                 {
@@ -702,6 +911,118 @@ class AdminDataService:
         if business is None:
             raise NotFoundError("business not found", {"business_id": business_id})
         return business
+
+    def _signal_definition(self, signal_id: str) -> SignalDefinitionModel:
+        definition = SignalDefinitionRepository(self.session).get(signal_id)
+        if definition is None:
+            raise NotFoundError("signal definition not found", {"signal_id": signal_id})
+        return definition
+
+    def _validate_signal_definition(self, definition: SignalDefinitionModel) -> None:
+        config = definition.config or {}
+        if definition.extractor_key == "payload_path" and not str(
+            config.get("payload_path") or ""
+        ).strip():
+            raise ValidationError(
+                "Payload-path extractors require config.payload_path",
+                {"signal_id": definition.id},
+            )
+        if definition.opportunity_direction in {
+            "lower_is_opportunity",
+            "higher_is_opportunity",
+        } and (
+            not isinstance(config.get("opportunity_threshold"), (int, float))
+            or isinstance(config.get("opportunity_threshold"), bool)
+        ):
+            raise ValidationError(
+                "Numeric opportunity rules require config.opportunity_threshold",
+                {"signal_id": definition.id},
+            )
+        values = config.get("opportunity_values")
+        if definition.opportunity_direction == "missing_is_opportunity" and values is not None:
+            if not isinstance(values, list) or not all(
+                isinstance(value, str) and value.strip() for value in values
+            ):
+                raise ValidationError(
+                    "Text opportunity rules require a list of opportunity values",
+                    {"signal_id": definition.id},
+                )
+
+    def _enqueue_signal_collection(
+        self,
+        definition: SignalDefinitionModel,
+        *,
+        reason: str,
+        scope: str,
+        business_ids: list[str],
+        niche_slug: str | None,
+        market_key: str | None,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        target_ids = self._signal_collection_business_ids(
+            scope=scope,
+            business_ids=business_ids,
+            niche_slug=niche_slug,
+            market_key=market_key,
+        )
+        queue = QueueService(self.session)
+        jobs = []
+        for index in range(0, len(target_ids), batch_size):
+            batch = target_ids[index:index + batch_size]
+            job = queue.enqueue_signal_collection(
+                signal_definition_id=definition.id,
+                signal_version=definition.version,
+                business_ids=batch,
+                requested_by=self.auth.user_id,
+                reason=reason,
+                batch_number=(index // batch_size) + 1,
+                commit=False,
+            )
+            jobs.append(
+                {
+                    "id": job.id,
+                    "status": job.status,
+                    "business_count": len(batch),
+                    "batch_number": (index // batch_size) + 1,
+                }
+            )
+        return jobs
+
+    def _signal_collection_business_ids(
+        self,
+        *,
+        scope: str,
+        business_ids: list[str],
+        niche_slug: str | None,
+        market_key: str | None,
+    ) -> list[str]:
+        statement = select(BusinessModel.id).where(BusinessModel.status != "archived")
+        if scope == "selected":
+            if not business_ids:
+                raise ValidationError("Selected scope requires at least one business")
+            statement = statement.where(BusinessModel.id.in_(business_ids))
+        elif scope == "segment":
+            if not niche_slug or not market_key:
+                raise ValidationError("Segment scope requires niche_slug and market_key")
+            statement = (
+                statement.join(
+                    BusinessNicheMembershipModel,
+                    BusinessNicheMembershipModel.business_id == BusinessModel.id,
+                )
+                .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
+                .where(
+                    NicheModel.slug == niche_slug,
+                    BusinessNicheMembershipModel.market_key == market_key,
+                )
+            )
+        elif scope != "all":
+            raise ValidationError("Unknown signal collection scope", {"scope": scope})
+        found = list(self.session.scalars(statement.distinct().order_by(BusinessModel.id)))
+        if scope == "selected":
+            missing = set(business_ids) - set(found)
+            if missing:
+                raise NotFoundError("One or more businesses were not found", {"business_ids": sorted(missing)})
+        return found
 
     def _data_job(self, job_id: str) -> QueueJobModel:
         job = self.session.get(QueueJobModel, job_id)
@@ -1039,6 +1360,27 @@ def _business_dict(business: BusinessModel) -> dict[str, Any]:
     }
 
 
+def _signal_definition_dict(definition: SignalDefinitionModel) -> dict[str, Any]:
+    return {
+        "id": definition.id,
+        "key": definition.key,
+        "label": definition.label,
+        "description": definition.description,
+        "value_type": definition.value_type,
+        "category": definition.category,
+        "unit": definition.unit,
+        "status": definition.status,
+        "collector_key": definition.collector_key,
+        "extractor_key": definition.extractor_key,
+        "freshness_days": definition.freshness_days,
+        "opportunity_direction": definition.opportunity_direction,
+        "config": definition.config or {},
+        "version": definition.version,
+        "created_at": definition.created_at.isoformat() if definition.created_at else None,
+        "updated_at": definition.updated_at.isoformat() if definition.updated_at else None,
+    }
+
+
 def _payload_value(payload: Any, keys: set[str]) -> Any:
     if isinstance(payload, dict):
         for key, value in payload.items():
@@ -1070,3 +1412,33 @@ def _fact_value(fact: BusinessFactModel) -> Any:
     if fact.value_type == "number":
         return fact.value_number
     return fact.value_text
+
+
+def _business_signal_dict(
+    definition: SignalDefinitionModel,
+    fact: BusinessFactModel | None,
+) -> dict[str, Any]:
+    status = "missing"
+    if fact is not None:
+        status = "stale" if _datetime_is_past(fact.expires_at) else "current"
+    return {
+        "definition_id": definition.id,
+        "key": definition.key,
+        "label": definition.label,
+        "category": definition.category,
+        "value_type": definition.value_type,
+        "unit": definition.unit,
+        "status": status,
+        "value": _fact_value(fact) if fact is not None else None,
+        "confidence": fact.confidence if fact is not None else None,
+        "quality_state": fact.quality_state if fact is not None else None,
+        "observed_at": fact.observed_at if fact is not None else None,
+        "expires_at": fact.expires_at if fact is not None else None,
+    }
+
+
+def _datetime_is_past(value: datetime | None) -> bool:
+    if value is None:
+        return False
+    comparable = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return comparable <= utcnow()

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import BusinessFactChangeModel, BusinessFactModel
+from db.models import BusinessFactChangeModel, BusinessFactModel, SignalDefinitionModel
 from shared.utils import new_id
 
 
@@ -23,7 +23,7 @@ class BusinessFactKey(StrEnum):
 
 @dataclass(frozen=True)
 class BusinessFactValue:
-    key: BusinessFactKey
+    key: BusinessFactKey | str
     value: str | float | bool
     observed_at: datetime
     source_observation_id: str | None
@@ -61,10 +61,11 @@ class BusinessFactRepository:
         *,
         commit: bool = False,
     ) -> tuple[BusinessFactModel, bool]:
+        fact_key = _fact_key(fact.key)
         existing = self.session.scalar(
             select(BusinessFactModel).where(
                 BusinessFactModel.business_id == business_id,
-                BusinessFactModel.fact_key == fact.key.value,
+                BusinessFactModel.fact_key == fact_key,
             )
         )
         if (
@@ -81,7 +82,8 @@ class BusinessFactRepository:
             existing = BusinessFactModel(
                 id=new_id("business_fact"),
                 business_id=business_id,
-                fact_key=fact.key.value,
+                fact_key=fact_key,
+                signal_definition_id=self._signal_definition_id(fact_key),
                 value_type=value_type,
                 value_text=value_text,
                 value_number=value_number,
@@ -98,6 +100,8 @@ class BusinessFactRepository:
             )
             self.session.add(existing)
         else:
+            if existing.signal_definition_id is None:
+                existing.signal_definition_id = self._signal_definition_id(fact_key)
             existing.value_type = value_type
             existing.value_text = value_text
             existing.value_number = value_number
@@ -116,7 +120,7 @@ class BusinessFactRepository:
                 BusinessFactChangeModel(
                     id=new_id("fact_change"),
                     business_id=business_id,
-                    fact_key=fact.key.value,
+                    fact_key=fact_key,
                     previous_value=previous_value,
                     current_value=fact.value,
                     previous_confidence=previous_confidence,
@@ -131,6 +135,13 @@ class BusinessFactRepository:
         else:
             self.session.flush()
         return existing, value_changed
+
+    def _signal_definition_id(self, fact_key: str) -> str | None:
+        return self.session.scalar(
+            select(SignalDefinitionModel.id)
+            .where(SignalDefinitionModel.key == fact_key)
+            .limit(1)
+        )
 
     def map_for_businesses(
         self,
@@ -155,6 +166,10 @@ def fact_value(fact: BusinessFactModel | None) -> Any:
     if fact.value_type == "number":
         return fact.value_number
     return fact.value_text
+
+
+def _fact_key(key: BusinessFactKey | str) -> str:
+    return key.value if isinstance(key, BusinessFactKey) else key
 
 
 def _typed_value(value: str | float | bool) -> tuple[str, str | None, float | None, bool | None]:

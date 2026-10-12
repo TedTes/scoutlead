@@ -31,6 +31,7 @@ from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from messages.service import MessageService
 from search_evaluations.service import SearchEvaluationService
+from signal_collection.service import SignalCollectionService
 from business_index.schemas import SearchContract
 from products.repository import ProductRepository
 from source_requests.service import SourceRequestService
@@ -215,6 +216,19 @@ def run_once() -> bool:
                     business_id=str(job.payload["business_id"]),
                     segment_id=str(job.payload["segment_id"]),
                     job_id=job.id,
+                )
+            elif job.type == JobType.SIGNAL_COLLECTION.value:
+                SignalCollectionService(
+                    session,
+                    timeout_seconds=services.settings.request_timeout_seconds,
+                    browser_render_endpoint=services.settings.browser_render_endpoint,
+                    browser_render_api_key=services.settings.browser_render_api_key,
+                ).collect(
+                    str(job.payload["signal_definition_id"]),
+                    expected_version=int(job.payload["signal_version"]),
+                    business_ids=[
+                        str(value) for value in job.payload.get("business_ids", [])
+                    ],
                 )
             elif job.type == JobType.BUSINESS_SEARCH_EVALUATE.value:
                 if job.payload.get("campaign_id"):

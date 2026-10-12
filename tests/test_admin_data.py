@@ -5,21 +5,28 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from admin.service import AdminDataService
-from admin.schemas import AdminBusinessUpdate, AdminDataJobCreate
+from admin.schemas import (
+    AdminBusinessUpdate,
+    AdminDataJobCreate,
+    AdminSignalDefinitionCreate,
+    AdminSignalDefinitionUpdate,
+)
 from auth.context import AuthContext
 from db.models import (
     AdminAuditEventModel,
+    BusinessFactModel,
     BusinessModel,
     BusinessIndexSegmentModel,
     BusinessPublicationModel,
     NicheModel,
     ProductModel,
     QueueJobModel,
+    SignalDefinitionModel,
     SourceItemModel,
     ValidationResultModel,
 )
 from db.session import create_database
-from shared.errors import ConflictError
+from shared.errors import ConflictError, ValidationError
 from shared.utils import new_id, utcnow
 from source_items.repository import source_item_content_hash
 from source_items.schemas import SourceItemCreate
@@ -213,6 +220,239 @@ def test_admin_can_queue_review_first_data_job() -> None:
                 AdminAuditEventModel.entity_type == "data_job"
             )
         ).action == "data_job:create"
+
+
+def test_admin_can_create_update_and_activate_signal_definition() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        service = _service(session)
+        created = service.create_signal_definition(
+            AdminSignalDefinitionCreate(
+                key="primary_cta_present",
+                label="Primary CTA present",
+                value_type="boolean",
+                category="conversion",
+                collector_key="website_dom",
+                extractor_key="primary_cta",
+                freshness_days=30,
+                opportunity_direction="false_is_opportunity",
+                reason="Add a measurable conversion signal",
+            )
+        )
+
+        assert created["status"] == "draft"
+        updated = service.update_signal_definition(
+            created["id"],
+            AdminSignalDefinitionUpdate(
+                description="A visible primary action is available.",
+                reason="Clarify the signal definition",
+            ),
+        )
+        activated = service.change_signal_definition_status(
+            created["id"],
+            status="active",
+            reason="Ready for collection",
+        )
+
+        assert updated["version"] == 2
+        assert activated["status"] == "active"
+        assert session.get(SignalDefinitionModel, created["id"]).status == "active"
+        actions = list(
+            session.scalars(
+                select(AdminAuditEventModel)
+                .where(AdminAuditEventModel.entity_type == "signal_definition")
+                .order_by(AdminAuditEventModel.created_at)
+            )
+        )
+        assert [event.action for event in actions] == [
+            "signal:create",
+            "signal:update",
+            "signal:status:active",
+        ]
+
+
+def test_signal_without_collector_cannot_be_activated() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        created = _service(session).create_signal_definition(
+            AdminSignalDefinitionCreate(
+                key="manual_quality_note",
+                label="Manual quality note",
+                value_type="text",
+                category="quality",
+                reason="Prepare a manual review signal",
+            )
+        )
+
+        with pytest.raises(ValidationError):
+            _service(session).change_signal_definition_status(
+                created["id"],
+                status="active",
+                reason="Attempt activation",
+            )
+
+
+def test_activating_signal_queues_selected_business_collection() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        service = _service(session)
+        created = service.create_signal_definition(
+            AdminSignalDefinitionCreate(
+                key="mobile_viewport_present",
+                label="Mobile viewport present",
+                value_type="boolean",
+                category="performance",
+                collector_key="existing_observation",
+                extractor_key="payload_path",
+                config={"payload_path": "website_enrichment.has_mobile_viewport"},
+                opportunity_direction="false_is_opportunity",
+                reason="Add mobile readiness signal",
+            )
+        )
+
+        activated = service.change_signal_definition_status(
+            created["id"],
+            status="active",
+            reason="Collect the first business",
+            scope="selected",
+            business_ids=[business.id],
+        )
+
+        assert len(activated["collection_jobs"]) == 1
+        job = session.get(QueueJobModel, activated["collection_jobs"][0]["id"])
+        assert job.type == "signal.collection"
+        assert job.payload["business_ids"] == [business.id]
+
+
+def test_business_detail_reports_current_and_missing_signal_coverage() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        now = utcnow()
+        current = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="mobile_viewport_present",
+            label="Mobile viewport present",
+            value_type="boolean",
+            category="performance",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="payload_path",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"payload_path": "website_enrichment.has_mobile_viewport"},
+            version=1,
+        )
+        missing = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="domain_age_days",
+            label="Domain age",
+            value_type="number",
+            category="website",
+            unit="days",
+            status="active",
+            collector_key="existing_observation",
+            extractor_key="payload_path",
+            freshness_days=90,
+            opportunity_direction="none",
+            config={"payload_path": "domain.age_days"},
+            version=1,
+        )
+        session.add_all([current, missing])
+        session.flush()
+        session.add(
+            BusinessFactModel(
+                id=new_id("fact"),
+                business_id=business.id,
+                fact_key=current.key,
+                signal_definition_id=current.id,
+                value_type="boolean",
+                value_boolean=True,
+                confidence=95,
+                resolution_state="resolved",
+                supporting_claim_ids=[],
+                quality_state="published",
+                quality_policy_version=1,
+                observed_at=now,
+                expires_at=now + timedelta(days=30),
+                resolver_version=1,
+            )
+        )
+        session.commit()
+
+        signals = {
+            signal["key"]: signal
+            for signal in _service(session).detail(business.id)["signals"]
+        }
+
+        assert signals["mobile_viewport_present"]["status"] == "current"
+        assert signals["mobile_viewport_present"]["value"] is True
+        assert signals["domain_age_days"]["status"] == "missing"
+
+
+def test_admin_approval_publishes_only_selected_staged_signal_fact() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        first, _ = _business(session)
+        second = BusinessModel(
+            id=new_id("business"),
+            display_name="Second Painting",
+            normalized_name="second painting",
+            geography="Toronto",
+            market_key="toronto",
+            status="active",
+            first_seen_at=utcnow(),
+            last_seen_at=utcnow(),
+        )
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="mobile_viewport_present",
+            label="Mobile viewport present",
+            value_type="boolean",
+            category="performance",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="payload_path",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={},
+            version=1,
+        )
+        session.add_all([second, definition])
+        session.flush()
+        facts = []
+        for business in (first, second):
+            fact = BusinessFactModel(
+                id=new_id("fact"),
+                business_id=business.id,
+                fact_key=definition.key,
+                signal_definition_id=definition.id,
+                value_type="boolean",
+                value_boolean=False,
+                confidence=100,
+                resolution_state="confirmed",
+                supporting_claim_ids=[],
+                quality_state="staged",
+                quality_policy_version=1,
+                observed_at=utcnow(),
+                resolver_version=1,
+            )
+            session.add(fact)
+            facts.append(fact)
+        session.commit()
+
+        result = _service(session).validate_signal_facts(
+            definition.id,
+            decision="approve",
+            reason="Evidence inspected for the selected business",
+            scope="selected",
+            business_ids=[first.id],
+        )
+
+        assert result["affected_count"] == 1
+        assert facts[0].quality_state == "published"
+        assert facts[1].quality_state == "staged"
 
 
 def test_review_first_batch_only_enters_pipeline_after_admin_approval() -> None:

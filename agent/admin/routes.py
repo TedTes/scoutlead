@@ -8,6 +8,11 @@ from admin.schemas import (
     AdminDeleteRequest,
     AdminDataJobAction,
     AdminDataJobCreate,
+    AdminSignalDefinitionCreate,
+    AdminSignalCollectionRequest,
+    AdminSignalDefinitionStateChange,
+    AdminSignalDefinitionUpdate,
+    AdminSignalValidationRequest,
 )
 from admin.service import AdminDataService
 from app.dependencies import AdminAuth, DbSession
@@ -92,6 +97,87 @@ def retry_data_job(
     auth: AdminAuth,
 ):
     return _service(session, auth).retry_data_job(job_id, reason=data.reason)
+
+
+@router.get("/signals")
+def list_signal_definitions(
+    session: DbSession,
+    auth: AdminAuth,
+    status: str | None = None,
+):
+    return _service(session, auth).list_signal_definitions(status=status)
+
+
+@router.post("/signals")
+def create_signal_definition(
+    data: AdminSignalDefinitionCreate,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).create_signal_definition(data)
+
+
+@router.patch("/signals/{signal_id}")
+def update_signal_definition(
+    signal_id: str,
+    data: AdminSignalDefinitionUpdate,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).update_signal_definition(signal_id, data)
+
+
+@router.post("/signals/{signal_id}/status")
+def change_signal_definition_status(
+    signal_id: str,
+    data: AdminSignalDefinitionStateChange,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).change_signal_definition_status(
+        signal_id,
+        status=data.status,
+        reason=data.reason,
+        scope=data.scope,
+        business_ids=data.business_ids,
+        niche_slug=data.niche_slug,
+        market_key=data.market_key,
+        batch_size=data.batch_size,
+    )
+
+
+@router.post("/signals/{signal_id}/collect")
+def collect_signal_definition(
+    signal_id: str,
+    data: AdminSignalCollectionRequest,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).collect_signal_definition(
+        signal_id,
+        reason=data.reason,
+        scope=data.scope,
+        business_ids=data.business_ids,
+        niche_slug=data.niche_slug,
+        market_key=data.market_key,
+        batch_size=data.batch_size,
+    )
+
+
+@router.post("/signals/{signal_id}/validate")
+def validate_signal_facts(
+    signal_id: str,
+    data: AdminSignalValidationRequest,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).validate_signal_facts(
+        signal_id,
+        decision=data.decision,
+        reason=data.reason,
+        scope=data.scope,
+        business_ids=data.business_ids,
+    )
 
 
 @router.get("/businesses/overview")

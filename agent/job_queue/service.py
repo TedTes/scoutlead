@@ -122,6 +122,33 @@ class QueueService:
             max_attempts=3,
         )
 
+    def enqueue_signal_collection(
+        self,
+        *,
+        signal_definition_id: str,
+        signal_version: int,
+        business_ids: list[str],
+        requested_by: str | None,
+        reason: str,
+        batch_number: int,
+        commit: bool = True,
+    ):
+        business_key = ",".join(sorted(business_ids))
+        return self.queue.enqueue_once(
+            JobType.SIGNAL_COLLECTION,
+            {
+                "signal_definition_id": signal_definition_id,
+                "signal_version": signal_version,
+                "business_ids": business_ids,
+                "requested_by": requested_by,
+                "reason": reason,
+                "batch_number": batch_number,
+            },
+            dedupe_key=f"{signal_definition_id}:{signal_version}:{business_key}",
+            max_attempts=3,
+            commit=commit,
+        )
+
     def enqueue_business_validate(
         self,
         *,

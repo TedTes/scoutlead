@@ -234,6 +234,31 @@ class BusinessModel(TimestampMixin, Base):
     facts: Mapped[list["BusinessFactModel"]] = relationship(back_populates="business")
 
 
+class SignalDefinitionModel(TimestampMixin, Base):
+    __tablename__ = "signal_definitions"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_signal_definitions_key"),
+        Index("ix_signal_definitions_status_category", "status", "category"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    collector_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    extractor_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    freshness_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    opportunity_direction: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="none"
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 class BusinessFactModel(TimestampMixin, Base):
     __tablename__ = "business_facts"
     __table_args__ = (
@@ -253,6 +278,9 @@ class BusinessFactModel(TimestampMixin, Base):
         ForeignKey("businesses.id"), nullable=False, index=True
     )
     fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    signal_definition_id: Mapped[str | None] = mapped_column(
+        ForeignKey("signal_definitions.id"), nullable=True, index=True
+    )
     value_type: Mapped[str] = mapped_column(String(16), nullable=False)
     value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -275,6 +303,7 @@ class BusinessFactModel(TimestampMixin, Base):
 
     business: Mapped[BusinessModel] = relationship(back_populates="facts")
     source_observation: Mapped["SourceObservationModel | None"] = relationship()
+    signal_definition: Mapped["SignalDefinitionModel | None"] = relationship()
 
 
 class BusinessFactChangeModel(TimestampMixin, Base):
@@ -325,6 +354,9 @@ class FactClaimModel(TimestampMixin, Base):
         ForeignKey("businesses.id"), nullable=False, index=True
     )
     fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    signal_definition_id: Mapped[str | None] = mapped_column(
+        ForeignKey("signal_definitions.id"), nullable=True, index=True
+    )
     value: Mapped[Any] = mapped_column(JSON, nullable=False)
     source_observation_id: Mapped[str] = mapped_column(
         ForeignKey("source_observations.id"), nullable=False, index=True

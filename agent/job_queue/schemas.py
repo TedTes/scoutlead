@@ -19,6 +19,7 @@ class JobType(StrEnum):
     BUSINESS_SEARCH_EVALUATE = "business.search_evaluate"
     BUSINESS_SEARCH_EVALUATE_BATCH = "business.search_evaluate_batch"
     SEARCH_ELIGIBILITY_MATCH = "search.eligibility_match"
+    SIGNAL_COLLECTION = "signal.collection"
 
 
 class JobStatus(StrEnum):

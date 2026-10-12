@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import FactClaimModel
+from db.models import FactClaimModel, SignalDefinitionModel
 from shared.utils import new_id
 
 
@@ -22,6 +22,7 @@ class FactClaim:
     extractor_version: int
     observed_at: datetime
     expires_at: datetime
+    signal_definition_id: str | None = None
 
     @property
     def idempotency_key(self) -> str:
@@ -48,6 +49,14 @@ class FactClaimRepository:
             idempotency_key=claim.idempotency_key,
             business_id=claim.business_id,
             fact_key=claim.fact_key,
+            signal_definition_id=(
+                claim.signal_definition_id
+                or self.session.scalar(
+                    select(SignalDefinitionModel.id)
+                    .where(SignalDefinitionModel.key == claim.fact_key)
+                    .limit(1)
+                )
+            ),
             value=claim.value,
             source_observation_id=claim.source_observation_id,
             confidence=max(0, min(100, claim.confidence)),
