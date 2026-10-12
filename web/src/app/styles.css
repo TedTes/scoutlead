@@ -14936,7 +14936,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .admin-data-job-form fieldset strong { font-size: 11px; }
 .admin-data-job-form fieldset small { margin-top: 3px; color: #7b8492; font-size: 9px; line-height: 1.4; }
 
-.admin-signals-workspace { grid-template-columns: minmax(600px, 1.15fr) minmax(340px, .85fr); }
+.admin-signals-workspace { height: calc(100vh - 150px); min-height: 480px; grid-template-columns: minmax(600px, 1.15fr) minmax(340px, .85fr); }
+.admin-signals-workspace .admin-table-pane { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.admin-signals-workspace .admin-signals-table thead { position: sticky; top: 0; z-index: 2; background: #f7f8fa; }
+.admin-signals-workspace .admin-pagination { position: sticky; bottom: 0; z-index: 2; margin-top: auto; background: #fff; }
 .admin-header-actions { display: flex; align-items: center; gap: 7px; }
 .admin-header-actions button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid #cbd2dc; border-radius: 6px; background: #fff; color: #343a42; font: inherit; font-size: 10px; font-weight: 750; cursor: pointer; }
 .admin-header-actions button:disabled { opacity: .5; cursor: default; }
@@ -14945,7 +14948,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .admin-signals-table th:nth-child(2) { width: 22%; }
 .admin-signals-table th:nth-child(3) { width: 29%; }
 .admin-signals-table th:nth-child(4) { width: 18%; }
-.admin-signal-inspector { max-height: 690px; overflow: auto; }
+.admin-signal-inspector { min-height: 0; overflow: auto; }
 .admin-signal-details { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-bottom: 1px solid #dfe3e9; }
 .admin-signal-details div { min-width: 0; padding: 11px 13px; border-right: 1px solid #e2e6ec; border-bottom: 1px solid #e2e6ec; }
 .admin-signal-details div:nth-child(2n) { border-right: 0; }
@@ -14975,6 +14978,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .admin-table-pane { border-right: 0; }
   .admin-inspector { border-top: 1px solid #d8dde5; }
   .admin-metrics { grid-template-columns: repeat(3, 1fr); }
+  .admin-signals-workspace { height: auto; min-height: 0; overflow: visible; }
+  .admin-signals-workspace .admin-table-pane { max-height: min(58vh, 620px); border-bottom: 1px solid #d8dde5; }
+  .admin-signal-inspector { max-height: min(58vh, 620px); }
 }
 
 @media (max-width: 700px) {
