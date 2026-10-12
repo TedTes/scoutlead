@@ -107,7 +107,69 @@ function useRevealOnScroll<T extends HTMLElement>(rootMargin = "0px") {
   return [ref, active] as const;
 }
 
+const HERO_HIGHLIGHT_TEXT = "real evidence";
+
+function TypewriterHighlight({ active }: { active: boolean }) {
+  const [typed, setTyped] = useState(() => (prefersReducedMotion() ? HERO_HIGHLIGHT_TEXT.length : 0));
+  const [caretDone, setCaretDone] = useState(() => prefersReducedMotion());
+
+  useEffect(() => {
+    if (!active) return;
+
+    if (prefersReducedMotion()) {
+      setTyped(HERO_HIGHLIGHT_TEXT.length);
+      setCaretDone(true);
+      return;
+    }
+
+    setTyped(0);
+    setCaretDone(false);
+
+    let index = 0;
+    let timer: number;
+
+    const step = () => {
+      index += 1;
+      setTyped(index);
+      if (index >= HERO_HIGHLIGHT_TEXT.length) {
+        timer = window.setTimeout(() => setCaretDone(true), 700);
+        return;
+      }
+      timer = window.setTimeout(step, 100);
+    };
+
+    timer = window.setTimeout(step, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [active]);
+
+  const shown = HERO_HIGHLIGHT_TEXT.slice(0, typed);
+  const reserve = HERO_HIGHLIGHT_TEXT.slice(typed);
+  const done = typed >= HERO_HIGHLIGHT_TEXT.length;
+
+  return (
+    <span className="landing-hero-highlight-group">
+      <span className="landing-hero-highlight">
+        {shown}
+        {!caretDone && <span className="landing-hero-caret" aria-hidden="true" />}
+      </span>
+      {reserve && (
+        <span className="landing-hero-highlight-reserve" aria-hidden="true">
+          {reserve}
+        </span>
+      )}
+      {done ? "." : (
+        <span className="landing-hero-highlight-reserve" aria-hidden="true">
+          .
+        </span>
+      )}
+    </span>
+  );
+}
+
 function LandingPage({ authEnabled }: { authEnabled: boolean }) {
+  const [heroRef, heroActive] = useRevealOnScroll<HTMLElement>();
+
   useEffect(() => {
     document.body.classList.add("landing-route");
     return () => document.body.classList.remove("landing-route");
@@ -134,13 +196,15 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
           </div>
         </nav>
 
-        <section className="landing-hero">
+        <section className="landing-hero" ref={heroRef}>
           <div className="landing-hero-band" aria-hidden="true" />
           <div className="landing-hero-inner">
             <div className="landing-hero-head">
               <div className="landing-copy">
                 <p className="landing-eyebrow">Evidence-backed local business discovery</p>
-                <h1>Find the right local businesses, backed by real evidence.</h1>
+                <h1>
+                  Find the right local businesses, backed by <TypewriterHighlight active={heroActive} />
+                </h1>
                 <p className="landing-lede">
                   Define an audience once — trade, market, the signals that mean opportunity. ScoutLead returns
                   matching businesses with the evidence behind each.
