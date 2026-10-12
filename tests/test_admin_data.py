@@ -325,6 +325,50 @@ def test_activating_signal_queues_selected_business_collection() -> None:
         assert job.payload["business_ids"] == [business.id]
 
 
+def test_collect_active_signals_queues_each_definition() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        definitions = [
+            SignalDefinitionModel(
+                id=new_id("signal"),
+                key=key,
+                label=label,
+                value_type="boolean",
+                category="website",
+                status="active",
+                collector_key="website_dom",
+                extractor_key=extractor,
+                freshness_days=30,
+                opportunity_direction="false_is_opportunity",
+                config={"auto_publish": True},
+                version=1,
+            )
+            for key, label, extractor in (
+                ("uses_https", "HTTPS enabled", "uses_https"),
+                ("mobile_viewport_present", "Mobile viewport present", "mobile_viewport"),
+            )
+        ]
+        session.add_all(definitions)
+        session.commit()
+
+        result = _service(session).collect_active_signal_definitions(
+            reason="Backfill website quality signals",
+            scope="selected",
+            business_ids=[business.id],
+            niche_slug=None,
+            market_key=None,
+            batch_size=100,
+        )
+
+        assert result["definition_count"] == 2
+        assert result["job_count"] == 2
+        jobs = list(session.scalars(select(QueueJobModel)))
+        assert {job.payload["signal_definition_id"] for job in jobs} == {
+            definition.id for definition in definitions
+        }
+
+
 def test_business_detail_reports_current_and_missing_signal_coverage() -> None:
     factory = _session_factory()
     with factory() as session:

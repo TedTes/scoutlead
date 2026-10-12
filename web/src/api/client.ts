@@ -189,6 +189,13 @@ export class ApiClient {
     });
   }
 
+  collectActiveAdminSignals(reason: string) {
+    return this.request<{ definition_count: number; job_count: number }>("/admin/signals/collect-active", {
+      method: "POST",
+      body: { reason, scope: "all", batch_size: 100 },
+    });
+  }
+
   validateAdminSignal(id: string, decision: "approve" | "reject", reason: string, businessIds: string[] = []) {
     return this.request<{ signal: AdminSignalDefinition; decision: string; affected_count: number; business_ids: string[] }>(`/admin/signals/${id}/validate`, {
       method: "POST",

@@ -201,6 +201,47 @@ class AdminDataService:
         self.session.commit()
         return {"signal": _signal_definition_dict(definition), "collection_jobs": jobs}
 
+    def collect_active_signal_definitions(
+        self,
+        *,
+        reason: str,
+        scope: str,
+        business_ids: list[str],
+        niche_slug: str | None,
+        market_key: str | None,
+        batch_size: int,
+    ) -> dict[str, Any]:
+        definitions = SignalDefinitionRepository(self.session).list(status="active")
+        jobs: list[dict[str, Any]] = []
+        for definition in definitions:
+            definition_jobs = self._enqueue_signal_collection(
+                definition,
+                reason=reason,
+                scope=scope,
+                business_ids=business_ids,
+                niche_slug=niche_slug,
+                market_key=market_key,
+                batch_size=batch_size,
+            )
+            jobs.extend(
+                {**job, "signal_definition_id": definition.id, "signal_key": definition.key}
+                for job in definition_jobs
+            )
+        self._audit(
+            "signal:collect-active",
+            "active-signals",
+            reason,
+            None,
+            {
+                "scope": scope,
+                "definition_count": len(definitions),
+                "job_ids": [job["id"] for job in jobs],
+            },
+            entity_type="signal_definition",
+        )
+        self.session.commit()
+        return {"definition_count": len(definitions), "job_count": len(jobs), "collection_jobs": jobs}
+
     def validate_signal_facts(
         self,
         signal_id: str,

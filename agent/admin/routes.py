@@ -117,6 +117,22 @@ def create_signal_definition(
     return _service(session, auth).create_signal_definition(data)
 
 
+@router.post("/signals/collect-active")
+def collect_active_signal_definitions(
+    data: AdminSignalCollectionRequest,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).collect_active_signal_definitions(
+        reason=data.reason,
+        scope=data.scope,
+        business_ids=data.business_ids,
+        niche_slug=data.niche_slug,
+        market_key=data.market_key,
+        batch_size=data.batch_size,
+    )
+
+
 @router.patch("/signals/{signal_id}")
 def update_signal_definition(
     signal_id: str,

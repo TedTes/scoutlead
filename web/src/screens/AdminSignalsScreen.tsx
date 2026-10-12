@@ -52,6 +52,15 @@ export function AdminSignalsScreen({ api }: { api: ApiClient }) {
     finally { setBusy(false); }
   };
 
+  const collectActive = async () => {
+    const reason = window.prompt("Reason for collecting every active signal across existing businesses");
+    if (!reason?.trim()) return;
+    setBusy(true); setError("");
+    try { await api.collectActiveAdminSignals(reason); await load(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  };
+
   const validateStaged = async () => {
     if (!selected) return;
     const reason = window.prompt("Reason for approving all staged values for this signal");
@@ -69,7 +78,10 @@ export function AdminSignalsScreen({ api }: { api: ApiClient }) {
         <Metric label="Active" value={totals.active} tone="good" />
         <Metric label="Draft" value={totals.draft} />
       </div>
-      <button className="admin-primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={15} /> Add signal</button>
+      <div className="admin-header-actions">
+        <button disabled={busy || !totals.active} type="button" onClick={() => void collectActive()}><Activity size={15} /> Collect active</button>
+        <button className="admin-primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={15} /> Add signal</button>
+      </div>
     </header>
     {error ? <div className="admin-error"><CircleAlert size={15} /> {error}</div> : null}
     <div className="admin-workspace admin-signals-workspace">
