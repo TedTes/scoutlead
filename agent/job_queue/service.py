@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 from sqlalchemy.orm import Session
 
 from job_queue.repository import QueueRepository
@@ -133,7 +135,9 @@ class QueueService:
         batch_number: int,
         commit: bool = True,
     ):
-        business_key = ",".join(sorted(business_ids))
+        business_key = sha256(
+            "\0".join(sorted(set(business_ids))).encode("utf-8")
+        ).hexdigest()
         return self.queue.enqueue_once(
             JobType.SIGNAL_COLLECTION,
             {

@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from db.session import create_database
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
+from job_queue.service import QueueService
 from job_queue.worker import _consolidate_legacy_search_evaluations
 from shared.utils import utcnow
 
@@ -107,6 +108,33 @@ def test_completed_idempotent_job_can_be_enqueued_again() -> None:
         )
 
         assert second.id != first.id
+
+
+def test_signal_collection_idempotency_key_is_bounded_for_large_batches() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        business_ids = [f"business_{index:03d}_{'x' * 52}" for index in range(100)]
+
+        first = QueueService(session).enqueue_signal_collection(
+            signal_definition_id="signal_mobile_performance_score",
+            signal_version=1,
+            business_ids=business_ids,
+            requested_by="admin",
+            reason="Backfill active website signals",
+            batch_number=1,
+        )
+        second = QueueService(session).enqueue_signal_collection(
+            signal_definition_id="signal_mobile_performance_score",
+            signal_version=1,
+            business_ids=list(reversed(business_ids)),
+            requested_by="admin",
+            reason="Backfill active website signals",
+            batch_number=1,
+        )
+
+        assert second.id == first.id
+        assert len(first.idempotency_key or "") <= 500
+        assert first.payload["business_ids"] == business_ids
 
 
 def test_legacy_search_evaluation_jobs_are_consolidated_into_one_batch() -> None:
