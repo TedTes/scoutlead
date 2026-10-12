@@ -32,6 +32,7 @@ from db.models import (
     ProfileDeliveryItemModel,
     QueueJobModel,
     SeedBatchModel,
+    SignalDefinitionModel,
     TerritoryDeliveryModel,
     TerritoryModel,
 )
@@ -1201,6 +1202,69 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
                 "value": False,
             }
         ]
+
+
+def test_profile_can_rank_with_active_dynamic_signal_definition() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="mobile_viewport_present",
+            label="Mobile viewport present",
+            value_type="boolean",
+            category="performance",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="payload_path",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"payload_path": "website_enrichment.has_mobile_viewport"},
+            version=1,
+        )
+        session.add(definition)
+        session.flush()
+        BusinessFactRepository(session).upsert(
+            businesses[0].id,
+            BusinessFactValue(
+                key=definition.key,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+                quality_state="published",
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[definition.key],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [businesses[0].display_name]
+        evidence = rows[0]["raw"]["profile_match"]["signals"][definition.key]
+        assert evidence["matched"] is True
+        assert evidence["value"] is False
 
 
 def test_profile_learning_reorders_only_already_eligible_matches() -> None:

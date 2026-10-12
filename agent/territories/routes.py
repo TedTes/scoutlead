@@ -223,8 +223,10 @@ def list_profiles(session: DbSession, auth: CurrentAuth):
 
 @profiles_router.get("/options", response_model=ProfileOptionsRead)
 def profile_options(session: DbSession, auth: CurrentAuth):
+    service = _service(session, auth)
     return ProfileOptionsRead(
-        business_types=_service(session, auth).profile_options(),
+        business_types=service.profile_options(),
+        opportunity_signals=service.profile_signal_options(),
     )
 
 

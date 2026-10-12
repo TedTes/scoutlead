@@ -235,7 +235,7 @@ class ProfileCreate(BaseModel):
     trades: list[ProfileTrade] = Field(min_length=1, max_length=5)
     customer_kind: ProfileCustomerKind
     market: ProfileMarket
-    signals: list[ProfileSignal] = Field(default_factory=list)
+    signals: list[str] = Field(default_factory=list, max_length=20)
     exclude: list[ProfileExclusion] = Field(
         default_factory=lambda: list(ProfileExclusion)
     )
@@ -249,8 +249,15 @@ class ProfileBusinessTypeOptionRead(BaseModel):
     label: str
 
 
+class ProfileSignalOptionRead(BaseModel):
+    key: str
+    label: str
+    category: str
+
+
 class ProfileOptionsRead(BaseModel):
     business_types: list[ProfileBusinessTypeOptionRead]
+    opportunity_signals: list[ProfileSignalOptionRead] = Field(default_factory=list)
 
 
 class ProfileQueuedRead(BaseModel):

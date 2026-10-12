@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -21,6 +22,7 @@ from db.models import (
     ContactModel,
     OutcomeModel,
     ProfileDeliveryItemModel,
+    SignalDefinitionModel,
     SourceObservationModel,
 )
 from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adjustment
@@ -35,6 +37,14 @@ SIGNAL_FACTS = {
     "no_contact_form": "contact_form_present",
     "reviews_under_15": "google_review_count",
 }
+
+
+@dataclass(frozen=True)
+class SignalMatchSpec:
+    key: str
+    fact_key: str
+    opportunity_direction: str
+    config: dict[str, Any]
 
 EXCLUSION_FIELDS = {
     "chains": BusinessModel.is_chain,
@@ -127,26 +137,24 @@ class ProfileMatchService:
             statement = statement.where(or_(field.is_(False), field.is_(None)))
 
         selected_signals = list(dict.fromkeys(profile.signal_keys or []))
-        for signal in selected_signals:
-            fact_key = SIGNAL_FACTS.get(signal)
-            if fact_key is None:
-                continue
-            fact = aliased(BusinessFactModel, name=f"profile_fact_{signal}")
-            signal_aliases[signal] = fact
+        signal_specs = self._signal_specs(selected_signals)
+        for spec in signal_specs:
+            fact = aliased(BusinessFactModel, name=f"profile_fact_{spec.key}")
+            signal_aliases[spec.key] = fact
             statement = statement.outerjoin(
                 fact,
                 and_(
                     fact.business_id == BusinessModel.id,
-                    fact.fact_key == fact_key,
+                    fact.fact_key == spec.fact_key,
                     fact.observed_at >= cutoff,
                     or_(fact.expires_at.is_(None), fact.expires_at >= utcnow()),
                 ),
             )
-            condition = _signal_condition(signal, fact)
+            condition = _signal_condition(spec, fact)
             signal_conditions.append(condition)
             matched_signal_count += case((condition, 1), else_=0)
             confirmed_signal_count += case(
-                (_confirmed_signal_condition(signal, fact), 1),
+                (_confirmed_signal_condition(spec, fact), 1),
                 else_=0,
             )
 
@@ -234,6 +242,7 @@ class ProfileMatchService:
                     rank_position=rank_position,
                     profile=profile,
                     cutoff=cutoff,
+                    signal_specs=signal_specs,
                 ),
                 item,
             )
@@ -254,6 +263,42 @@ class ProfileMatchService:
         for rank_position, result in enumerate(final, start=1):
             result["raw"]["profile_match"]["rank_position"] = rank_position
         return final
+
+    def _signal_specs(self, selected_signals: list[str]) -> list[SignalMatchSpec]:
+        if not selected_signals:
+            return []
+        definitions = {
+            definition.key: definition
+            for definition in self.session.scalars(
+                select(SignalDefinitionModel).where(
+                    SignalDefinitionModel.key.in_(selected_signals),
+                    SignalDefinitionModel.status == "active",
+                )
+            )
+        }
+        specs: list[SignalMatchSpec] = []
+        for key in selected_signals:
+            if key in SIGNAL_FACTS:
+                specs.append(
+                    SignalMatchSpec(
+                        key=key,
+                        fact_key=SIGNAL_FACTS[key],
+                        opportunity_direction="legacy",
+                        config={},
+                    )
+                )
+                continue
+            definition = definitions.get(key)
+            if definition is not None and definition.opportunity_direction != "none":
+                specs.append(
+                    SignalMatchSpec(
+                        key=key,
+                        fact_key=definition.key,
+                        opportunity_direction=definition.opportunity_direction,
+                        config=definition.config or {},
+                    )
+                )
+        return specs
 
     def _active_outcome_weights(
         self,
@@ -297,6 +342,7 @@ class ProfileMatchService:
         rank_position: int,
         profile,
         cutoff: datetime,
+        signal_specs: list[SignalMatchSpec],
     ) -> dict[str, Any]:
         business = self.session.get(BusinessModel, business_id)
         if business is None:
@@ -341,14 +387,15 @@ class ProfileMatchService:
             None,
         )
         signal_evidence = {
-            signal: {
-                "fact_key": fact_key,
-                "value": fact_value(facts.get(fact_key)),
-                "matched": _signal_match_confidence(signal, facts.get(fact_key)) is not None,
-                "confidence": _signal_match_confidence(signal, facts.get(fact_key)),
+            spec.key: {
+                "fact_key": spec.fact_key,
+                "value": fact_value(facts.get(spec.fact_key)),
+                "matched": (
+                    _signal_match_confidence(spec, facts.get(spec.fact_key)) is not None
+                ),
+                "confidence": _signal_match_confidence(spec, facts.get(spec.fact_key)),
             }
-            for signal, fact_key in SIGNAL_FACTS.items()
-            if signal in set(profile.signal_keys or [])
+            for spec in signal_specs
         }
         matched_signals = [
             {
@@ -406,7 +453,8 @@ class ProfileMatchService:
         }
 
 
-def _signal_condition(signal: str, fact) -> Any:
+def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
+    signal = spec.key
     if signal == "website_unavailable":
         return and_(
             fact.resolution_state == "confirmed",
@@ -428,15 +476,46 @@ def _signal_condition(signal: str, fact) -> Any:
             fact.confidence >= 90,
             fact.value_number < 15.0,
         )
+    confirmed = and_(
+        fact.resolution_state == "confirmed",
+        fact.quality_state == "published",
+        fact.confidence >= int(spec.config.get("minimum_confidence", 90)),
+    )
+    if spec.opportunity_direction == "false_is_opportunity":
+        return and_(confirmed, fact.value_boolean.is_(False))
+    if spec.opportunity_direction == "true_is_opportunity":
+        return and_(confirmed, fact.value_boolean.is_(True))
+    if spec.opportunity_direction == "lower_is_opportunity":
+        threshold = spec.config.get("opportunity_threshold")
+        return (
+            and_(confirmed, fact.value_number < float(threshold))
+            if isinstance(threshold, (int, float))
+            else literal(False)
+        )
+    if spec.opportunity_direction == "higher_is_opportunity":
+        threshold = spec.config.get("opportunity_threshold")
+        return (
+            and_(confirmed, fact.value_number > float(threshold))
+            if isinstance(threshold, (int, float))
+            else literal(False)
+        )
+    if spec.opportunity_direction == "missing_is_opportunity":
+        values = spec.config.get("opportunity_values") or [
+            "missing",
+            "not_listed",
+            "unavailable",
+            "parked",
+        ]
+        return and_(confirmed, fact.value_text.in_(tuple(str(value) for value in values)))
     return literal(False)
 
 
-def _confirmed_signal_condition(signal: str, fact) -> Any:
-    return _signal_condition(signal, fact)
+def _confirmed_signal_condition(spec: SignalMatchSpec, fact) -> Any:
+    return _signal_condition(spec, fact)
 
 
 def _signal_match_confidence(
-    signal: str,
+    spec: SignalMatchSpec,
     fact: BusinessFactModel | None,
 ) -> str | None:
     if fact is None:
@@ -444,16 +523,46 @@ def _signal_match_confidence(
     if (
         fact.resolution_state != "confirmed"
         or fact.quality_state != "published"
-        or fact.confidence < 90
+        or fact.confidence < int(spec.config.get("minimum_confidence", 90))
     ):
         return None
     value = fact_value(fact)
+    signal = spec.key
     if signal == "website_unavailable":
         return "confirmed" if value in {"missing", "unavailable", "parked"} else None
     if signal in {"no_quote_flow", "no_contact_form"}:
         return "confirmed" if value is False else None
     if signal == "reviews_under_15":
         return "confirmed" if isinstance(value, (int, float)) and value < 15 else None
+    if spec.opportunity_direction == "false_is_opportunity":
+        return "confirmed" if value is False else None
+    if spec.opportunity_direction == "true_is_opportunity":
+        return "confirmed" if value is True else None
+    threshold = spec.config.get("opportunity_threshold")
+    if spec.opportunity_direction == "lower_is_opportunity":
+        return (
+            "confirmed"
+            if isinstance(value, (int, float))
+            and isinstance(threshold, (int, float))
+            and value < threshold
+            else None
+        )
+    if spec.opportunity_direction == "higher_is_opportunity":
+        return (
+            "confirmed"
+            if isinstance(value, (int, float))
+            and isinstance(threshold, (int, float))
+            and value > threshold
+            else None
+        )
+    if spec.opportunity_direction == "missing_is_opportunity":
+        values = spec.config.get("opportunity_values") or [
+            "missing",
+            "not_listed",
+            "unavailable",
+            "parked",
+        ]
+        return "confirmed" if value in values else None
     return None
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from canonical.semantics import semantic_key
 from business_index.schemas import OpportunityType, SearchContract
-from db.models import LeadOutcomeModel, NicheModel
+from db.models import LeadOutcomeModel, NicheModel, SignalDefinitionModel
 from outcomes.policy import POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
 from niches.resolver import resolve_niche
@@ -26,6 +26,7 @@ from territories.markets import market_center
 from territories.repository import TerritoryRepository
 from territories.schemas import (
     ProfileCreate,
+    ProfileSignal,
     TerritoryCreate,
     TerritoryResolveRequest,
     TerritoryResolutionRead,
@@ -166,7 +167,16 @@ class TerritoryService:
                     "reason": "A profile radius requires a stored market center.",
                 },
             )
-        signals = [signal.value for signal in data.signals]
+        signals = list(dict.fromkeys(data.signals))
+        allowed_signals = {
+            option["key"] for option in self.profile_signal_options()
+        } | {signal.value for signal in ProfileSignal}
+        unknown_signals = sorted(set(signals) - allowed_signals)
+        if unknown_signals:
+            raise ValidationError(
+                "profile contains inactive or unknown signals",
+                {"signal_keys": unknown_signals},
+            )
         exclusions = [exclusion.value for exclusion in data.exclude]
         criteria = {
             "trades": trade_keys,
@@ -232,6 +242,37 @@ class TerritoryService:
             {"key": spec.key, "label": spec.label}
             for spec in PROFILE_TRADE_CATALOG.values()
             if spec.niche_slug not in stored or stored[spec.niche_slug].active
+        ]
+
+    def profile_signal_options(self) -> list[dict[str, str]]:
+        definitions = list(
+            self.session.scalars(
+                select(SignalDefinitionModel)
+                .where(
+                    SignalDefinitionModel.status == "active",
+                    SignalDefinitionModel.opportunity_direction != "none",
+                )
+                .order_by(SignalDefinitionModel.category, SignalDefinitionModel.label)
+            )
+        )
+        if definitions:
+            return [
+                {
+                    "key": definition.key,
+                    "label": definition.label,
+                    "category": definition.category,
+                }
+                for definition in definitions
+            ]
+        labels = {
+            "website_unavailable": "Missing or unavailable website",
+            "no_quote_flow": "No quote or booking flow",
+            "no_contact_form": "No contact form",
+            "reviews_under_15": "Reviews under 15",
+        }
+        return [
+            {"key": signal.value, "label": labels[signal.value], "category": "legacy"}
+            for signal in ProfileSignal
         ]
 
     def list(self):
