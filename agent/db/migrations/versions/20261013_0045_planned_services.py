@@ -57,6 +57,21 @@ PLANNED_SERVICES = (
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        bind.execute(
+            sa.text(
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                  AND state <> 'idle'
+                  AND xact_start < now() - interval '2 minutes'
+                  AND query ~* '(profile_delivery_items|territory_deliveries)'
+                """
+            )
+        )
     now = datetime.now(timezone.utc)
     services = sa.table(
         "service_definitions",
