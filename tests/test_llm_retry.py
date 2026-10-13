@@ -1,11 +1,32 @@
 import httpx
 from pydantic import BaseModel
 
-from agents.llm import OpenAIStructuredLLMClient
+from agents.llm import AnthropicStructuredLLMClient, OpenAIStructuredLLMClient
 
 
 class Result(BaseModel):
     value: str
+
+
+def test_anthropic_client_returns_structured_tool_output(monkeypatch) -> None:
+    def fake_post(*args, **kwargs):
+        assert kwargs["json"]["tool_choice"]["name"] == "return_structured_result"
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+            json={
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "content": [{"type": "tool_use", "name": "return_structured_result", "input": {"value": "ok"}}],
+            },
+        )
+
+    monkeypatch.setattr("agents.llm.httpx.post", fake_post)
+    client = AnthropicStructuredLLMClient(api_key="test", model="test-model")
+
+    result = client.generate_object(task="test", system="Return data.", prompt="Test", response_model=Result)
+
+    assert result.value == "ok"
+    assert client.last_usage["output_tokens"] == 5
 
 
 def test_openai_client_retries_transient_timeout(monkeypatch) -> None:

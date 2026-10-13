@@ -11,6 +11,7 @@ from auth.middleware import AuthMiddleware
 from campaigns.routes import router as campaigns_router
 from db.session import create_database
 from discovery_runs.routes import router as discovery_runs_router
+from demo_sites.routes import public_router as public_demo_sites_router, router as demo_sites_router
 from email_connections.routes import router as email_connections_router
 from insights.routes import router as insights_router
 from leads.routes import router as leads_router
@@ -62,6 +63,8 @@ def create_app() -> FastAPI:
     app.include_router(audience_runs_router)
     app.include_router(campaigns_router)
     app.include_router(discovery_runs_router)
+    app.include_router(demo_sites_router)
+    app.include_router(public_demo_sites_router)
     app.include_router(email_connections_router)
     app.include_router(insights_router)
     app.include_router(leads_router)

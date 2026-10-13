@@ -200,6 +200,48 @@ class OpenAIStructuredLLMClient:
         raise ValueError("missing output text")
 
 
+class AnthropicStructuredLLMClient:
+    def __init__(self, *, api_key: str, model: str, timeout_seconds: float = 60.0,
+                 max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+                 retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self.max_attempts = max(1, max_attempts)
+        self.retry_backoff_seconds = max(0, retry_backoff_seconds)
+        self.last_usage: dict[str, Any] = {}
+
+    def generate_object(self, *, task: str, system: str, prompt: str,
+                        response_model: type[TModel],
+                        context: dict[str, Any] | None = None) -> TModel:
+        schema = response_model.model_json_schema()
+        response = _post_with_retry(
+            provider="anthropic", task=task, max_attempts=self.max_attempts,
+            backoff_seconds=self.retry_backoff_seconds,
+            request=lambda: httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                timeout=self.timeout_seconds,
+                json={
+                    "model": self.model,
+                    "max_tokens": 2400,
+                    "system": system,
+                    "messages": [{"role": "user", "content": f"{prompt}\n\nTask: {task}\nContext JSON: {context or {}}"}],
+                    "tools": [{"name": "return_structured_result", "description": "Return the validated result.",
+                               "input_schema": schema}],
+                    "tool_choice": {"type": "tool", "name": "return_structured_result"},
+                },
+            ),
+        )
+        payload = response.json()
+        self.last_usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+        for block in payload.get("content", []):
+            if block.get("type") == "tool_use" and block.get("name") == "return_structured_result":
+                return response_model.model_validate(block.get("input"))
+        raise ValueError("Anthropic response did not contain structured tool output")
+
+
 def _post_with_retry(
     *,
     provider: str,

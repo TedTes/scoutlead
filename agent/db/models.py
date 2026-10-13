@@ -652,6 +652,30 @@ class CoverageRequestModel(TimestampMixin, Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class DemoSiteModel(TimestampMixin, Base):
+    __tablename__ = "demo_sites"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "audience_result_id", name="uq_demo_sites_workspace_result"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
+    audience_result_id: Mapped[str] = mapped_column(ForeignKey("audience_results.id", ondelete="CASCADE"), nullable=False, index=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), nullable=False, index=True)
+    share_token: Mapped[str] = mapped_column(String(96), nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    outreach_message: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class BusinessSearchEvaluationModel(TimestampMixin, Base):
     __tablename__ = "business_search_evaluations"
     __table_args__ = (
