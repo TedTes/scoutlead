@@ -42,6 +42,7 @@ class TerritoryRepository:
                 existing.radius_km = data.radius_km
                 existing.trade_keys = data.trade_keys
                 existing.customer_kind = data.customer_kind.value
+                existing.service_keys = data.service_keys
                 existing.signal_keys = data.signal_keys
                 existing.exclusion_keys = data.exclusion_keys
                 existing.status = data.status.value
@@ -80,6 +81,7 @@ class TerritoryRepository:
             radius_km=data.radius_km,
             trade_keys=data.trade_keys,
             customer_kind=data.customer_kind.value,
+            service_keys=data.service_keys,
             signal_keys=data.signal_keys,
             exclusion_keys=data.exclusion_keys,
             label=data.label or f"{data.niche_label} · {data.market_key}",

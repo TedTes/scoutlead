@@ -79,6 +79,42 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert observation.raw_payload["digital_opportunity"]["level"] == "low"
 
 
+def test_website_enrichment_collects_multilingual_signals(monkeypatch) -> None:
+    html = """
+        <html lang="fr-CA"><head>
+          <link rel="alternate" hreflang="fr" href="/fr/services" />
+          <link rel="alternate" hreflang="en" href="/en/services" />
+        </head><body><button aria-label="Language">Français</button></body></html>
+    """
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda url, **kwargs: FakeResponse(url, html),
+    )
+
+    result = WebsiteEnrichmentClient(
+        max_pages_per_business=1,
+        page_delay_seconds=0,
+    ).inspect(
+        BusinessTarget(
+            id="business_localized",
+            display_name="Services Montréal",
+            website_url="https://localized.example",
+            phone=None,
+            address="Montréal, Québec",
+            geography="Montréal",
+            semantic_text=None,
+        )
+    )
+
+    assert result.page_signals["html_language_present"] is True
+    assert result.page_signals["hreflang_present"] is True
+    assert result.page_signals["language_selector_present"] is True
+    assert result.page_signals["translated_page_count"] == 2
+    assert result.page_signals["declared_languages"] == ["en", "fr"]
+    assert result.page_signals["expected_market_languages"] == ["fr"]
+    assert result.page_signals["market_language_supported"] is True
+
+
 def test_website_enrichment_records_review_and_conversion_opportunity(monkeypatch) -> None:
     session_factory = _session_factory()
 

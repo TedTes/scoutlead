@@ -414,6 +414,15 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
         "complete_contact_details": lambda: enrichment.get(
             "has_complete_contact_details"
         ),
+        "html_language_present": lambda: enrichment.get("html_language_present"),
+        "hreflang_present": lambda: enrichment.get("hreflang_present"),
+        "language_selector_present": lambda: enrichment.get(
+            "language_selector_present"
+        ),
+        "translated_page_count": lambda: enrichment.get("translated_page_count"),
+        "market_language_supported": lambda: enrichment.get(
+            "market_language_supported"
+        ),
         "pagespeed_performance_score": lambda: _payload_path(
             payload, "pagespeed_mobile.performance_score"
         ),

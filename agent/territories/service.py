@@ -15,6 +15,7 @@ from outcomes.policy import POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
 from niches.resolver import resolve_niche
 from products.repository import DEFAULT_WORKSPACE_ID, ProductRepository
+from service_definitions.repository import ServiceDefinitionRepository
 from shared.errors import NotFoundError, ValidationError
 from shared.utils import new_id, normalize_text, utcnow
 from territories.profile_catalog import (
@@ -41,6 +42,7 @@ class TerritoryService:
         self.workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
         self.products = ProductRepository(session, workspace_id=self.workspace_id)
         self.territories = TerritoryRepository(session, workspace_id=self.workspace_id)
+        self.services = ServiceDefinitionRepository(session)
 
     def resolve(self, request: TerritoryResolveRequest) -> TerritoryResolutionRead:
         product = self.products.get(request.product_id)
@@ -136,6 +138,7 @@ class TerritoryService:
                     if data.trade_keys
                     else _clean_keys(data.signal_keys)
                 ),
+                "service_keys": _clean_profile_keys(data.service_keys),
                 "exclusion_keys": (
                     _clean_profile_keys(data.exclusion_keys)
                     if data.trade_keys
@@ -167,7 +170,18 @@ class TerritoryService:
                     "reason": "A profile radius requires a stored market center.",
                 },
             )
-        signals = list(dict.fromkeys(data.signals))
+        service_keys = list(dict.fromkeys(data.services))
+        active_service_keys = {
+            service.key for service in self.services.list(status="active")
+        }
+        unknown_services = sorted(set(service_keys) - active_service_keys)
+        if unknown_services:
+            raise ValidationError(
+                "profile contains inactive or unknown services",
+                {"service_keys": unknown_services},
+            )
+        mapped_signals = self.services.signal_keys(service_keys)
+        signals = list(dict.fromkeys([*mapped_signals, *data.signals]))
         allowed_signals = {
             option["key"] for option in self.profile_signal_options()
         } | {signal.value for signal in ProfileSignal}
@@ -184,6 +198,7 @@ class TerritoryService:
             "city": semantic_key(city),
             "radius_km": data.market.radius_km,
             "signals": signals,
+            "services": service_keys,
             "exclude": exclusions,
             "limit": data.limit,
             "exclude_already_delivered": True,
@@ -202,6 +217,7 @@ class TerritoryService:
                 radius_km=data.market.radius_km,
                 trade_keys=trade_keys,
                 customer_kind=data.customer_kind,
+                service_keys=service_keys,
                 signal_keys=signals,
                 exclusion_keys=exclusions,
                 label=data.name or f"{trade_label} · {city}",
@@ -275,6 +291,29 @@ class TerritoryService:
             for signal in ProfileSignal
         ]
 
+    def profile_service_options(self) -> list[dict]:
+        return [
+            {
+                "key": service.key,
+                "label": service.label,
+                "description": service.description,
+                "signals": [
+                    {
+                        "key": mapping.signal_definition.key,
+                        "label": mapping.signal_definition.label,
+                        "weight": mapping.weight,
+                    }
+                    for mapping in sorted(
+                        service.signal_mappings,
+                        key=lambda item: item.sort_order,
+                    )
+                    if mapping.signal_definition.status == "active"
+                    and mapping.signal_definition.opportunity_direction != "none"
+                ],
+            }
+            for service in self.services.list(status="active")
+        ]
+
     def list(self):
         return [self._read(model) for model in self.territories.list()]
 
@@ -322,11 +361,25 @@ class TerritoryService:
             )
         if "customer_kind" in values and hasattr(values["customer_kind"], "value"):
             values["customer_kind"] = values["customer_kind"].value
+        if "service_keys" in values:
+            service_keys = _clean_profile_keys(values["service_keys"])
+            active_service_keys = {
+                service.key for service in self.services.list(status="active")
+            }
+            unknown_services = sorted(set(service_keys) - active_service_keys)
+            if unknown_services:
+                raise ValidationError(
+                    "Unknown or inactive services",
+                    {"service_keys": unknown_services},
+                )
+            values["service_keys"] = service_keys
+            values["signal_keys"] = self.services.signal_keys(service_keys)
         criteria_fields = {
             "city",
             "radius_km",
             "trade_keys",
             "customer_kind",
+            "service_keys",
             "signal_keys",
             "exclusion_keys",
             "batch_size",
@@ -346,6 +399,7 @@ class TerritoryService:
                 "radius_km": model.radius_km,
                 "trade_keys": model.trade_keys,
                 "customer_kind": model.customer_kind,
+                "service_keys": model.service_keys,
                 "signal_keys": model.signal_keys,
                 "exclusion_keys": model.exclusion_keys,
                 "batch_size": model.batch_size,
@@ -498,6 +552,7 @@ def _structured_profile_criteria(data: TerritoryCreate) -> dict:
         "customer_kind": data.customer_kind.value,
         "city": semantic_key(data.city or data.market_key),
         "radius_km": data.radius_km,
+        "services": list(data.service_keys),
         "signals": list(data.signal_keys),
         "exclude": list(data.exclusion_keys),
         "limit": data.batch_size,

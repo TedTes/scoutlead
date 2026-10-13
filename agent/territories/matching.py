@@ -22,6 +22,8 @@ from db.models import (
     ContactModel,
     OutcomeModel,
     ProfileDeliveryItemModel,
+    ServiceDefinitionModel,
+    ServiceSignalMappingModel,
     SignalDefinitionModel,
     SourceObservationModel,
 )
@@ -45,6 +47,13 @@ class SignalMatchSpec:
     fact_key: str
     opportunity_direction: str
     config: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ServiceMatchSpec:
+    key: str
+    label: str
+    signals: tuple[tuple[str, float], ...]
 
 EXCLUSION_FIELDS = {
     "chains": BusinessModel.is_chain,
@@ -138,6 +147,15 @@ class ProfileMatchService:
 
         selected_signals = list(dict.fromkeys(profile.signal_keys or []))
         signal_specs = self._signal_specs(selected_signals)
+        service_specs = self._service_specs(profile.service_keys or [])
+        signal_weights: dict[str, float] = {}
+        for service in service_specs:
+            for signal_key, weight in service.signals:
+                signal_weights[signal_key] = max(
+                    signal_weights.get(signal_key, 0.0),
+                    weight,
+                )
+        weighted_match_score = literal(0.0)
         for spec in signal_specs:
             fact = aliased(BusinessFactModel, name=f"profile_fact_{spec.key}")
             signal_aliases[spec.key] = fact
@@ -153,6 +171,10 @@ class ProfileMatchService:
             condition = _signal_condition(spec, fact)
             signal_conditions.append(condition)
             matched_signal_count += case((condition, 1), else_=0)
+            weighted_match_score += case(
+                (condition, signal_weights.get(spec.key, 1.0)),
+                else_=0.0,
+            )
             confirmed_signal_count += case(
                 (_confirmed_signal_condition(spec, fact), 1),
                 else_=0,
@@ -211,6 +233,7 @@ class ProfileMatchService:
         statement = statement.add_columns(
             matched_signal_count.label("matched_signal_count"),
             confirmed_signal_count.label("confirmed_signal_count"),
+            weighted_match_score.label("weighted_match_score"),
         )
         if distance_sq is not None:
             statement = statement.add_columns(
@@ -221,6 +244,7 @@ class ProfileMatchService:
         candidate_limit = min(max(limit * 4, 100), 400) if outcome_weights else limit
         statement = statement.group_by(*group_columns).order_by(
             confirmed_signal_count.desc(),
+            weighted_match_score.desc(),
             matched_signal_count.desc(),
             literal_column_nulls_last("distance_km"),
             func.max(BusinessNicheMembershipModel.confidence).desc(),
@@ -234,6 +258,7 @@ class ProfileMatchService:
                     business_id=str(item["id"]),
                     matched_signal_count=int(item["matched_signal_count"] or 0),
                     confirmed_signal_count=int(item["confirmed_signal_count"] or 0),
+                    weighted_match_score=float(item["weighted_match_score"] or 0),
                     distance_km=(
                         float(item["distance_km"])
                         if item["distance_km"] is not None
@@ -243,6 +268,7 @@ class ProfileMatchService:
                     profile=profile,
                     cutoff=cutoff,
                     signal_specs=signal_specs,
+                    service_specs=service_specs,
                 ),
                 item,
             )
@@ -300,6 +326,52 @@ class ProfileMatchService:
                 )
         return specs
 
+    def _service_specs(self, selected_services: list[str]) -> list[ServiceMatchSpec]:
+        if not selected_services:
+            return []
+        definitions = list(
+            self.session.scalars(
+                select(ServiceDefinitionModel)
+                .where(
+                    ServiceDefinitionModel.key.in_(selected_services),
+                    ServiceDefinitionModel.status == "active",
+                )
+                .order_by(ServiceDefinitionModel.sort_order)
+            )
+        )
+        mappings = list(
+            self.session.execute(
+                select(
+                    ServiceSignalMappingModel.service_definition_id,
+                    SignalDefinitionModel.key,
+                    ServiceSignalMappingModel.weight,
+                )
+                .join(
+                    SignalDefinitionModel,
+                    SignalDefinitionModel.id
+                    == ServiceSignalMappingModel.signal_definition_id,
+                )
+                .where(
+                    ServiceSignalMappingModel.service_definition_id.in_(
+                        [definition.id for definition in definitions]
+                    ),
+                    SignalDefinitionModel.status == "active",
+                )
+                .order_by(ServiceSignalMappingModel.sort_order)
+            )
+        ) if definitions else []
+        by_service: dict[str, list[tuple[str, float]]] = {}
+        for service_id, signal_key, weight in mappings:
+            by_service.setdefault(service_id, []).append((signal_key, float(weight)))
+        return [
+            ServiceMatchSpec(
+                key=definition.key,
+                label=definition.label,
+                signals=tuple(by_service.get(definition.id, [])),
+            )
+            for definition in definitions
+        ]
+
     def _active_outcome_weights(
         self,
         *,
@@ -338,11 +410,13 @@ class ProfileMatchService:
         business_id: str,
         matched_signal_count: int,
         confirmed_signal_count: int,
+        weighted_match_score: float,
         distance_km: float | None,
         rank_position: int,
         profile,
         cutoff: datetime,
         signal_specs: list[SignalMatchSpec],
+        service_specs: list[ServiceMatchSpec],
     ) -> dict[str, Any]:
         business = self.session.get(BusinessModel, business_id)
         if business is None:
@@ -406,6 +480,32 @@ class ProfileMatchService:
             for signal, evidence in signal_evidence.items()
             if evidence["matched"] is True
         ]
+        matched_services = []
+        for service in service_specs:
+            supporting_evidence = [
+                {
+                    "signal_key": signal_key,
+                    "fact_key": signal_evidence[signal_key]["fact_key"],
+                    "value": signal_evidence[signal_key]["value"],
+                    "confidence": signal_evidence[signal_key]["confidence"],
+                    "weight": weight,
+                }
+                for signal_key, weight in service.signals
+                if signal_key in signal_evidence
+                and signal_evidence[signal_key]["matched"] is True
+            ]
+            if supporting_evidence:
+                matched_services.append(
+                    {
+                        "service_key": service.key,
+                        "label": service.label,
+                        "score": round(
+                            sum(float(item["weight"]) for item in supporting_evidence),
+                            2,
+                        ),
+                        "supporting_evidence": supporting_evidence,
+                    }
+                )
         classifications = {
             "customer_kind": business.customer_kind,
             "is_chain": business.is_chain,
@@ -424,11 +524,13 @@ class ProfileMatchService:
             "profile_match": {
                 "status": "matched",
                 "score": matched_signal_count,
+                "service_score": round(weighted_match_score, 2),
                 "selected_signal_count": len(signal_evidence),
                 "matched_signal_count": matched_signal_count,
                 "confirmed_signal_count": confirmed_signal_count,
                 "possible_signal_count": matched_signal_count - confirmed_signal_count,
                 "matched_signals": matched_signals,
+                "matched_services": matched_services,
                 "rank_position": rank_position,
                 "distance_km": round(distance_km, 2) if distance_km is not None else None,
                 "location_evidence": (

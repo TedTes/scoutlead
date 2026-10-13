@@ -209,6 +209,10 @@ class WebsitePage:
     has_quote_form: bool = False
     has_booking_form: bool = False
     has_mobile_viewport: bool = False
+    html_language: str | None = None
+    alternate_languages: list[str] = field(default_factory=list)
+    alternate_language_urls: list[str] = field(default_factory=list)
+    has_language_selector: bool = False
     error: str = ""
     status_code: int | None = None
     failure_kind: str | None = None
@@ -237,7 +241,7 @@ class BusinessWebsiteEnrichment:
     errors: list[str]
     availability_status: str
     availability_reason: str
-    page_signals: dict[str, bool] = field(default_factory=dict)
+    page_signals: dict[str, Any] = field(default_factory=dict)
 
     @property
     def found_signal(self) -> bool:
@@ -410,6 +414,36 @@ class WebsiteEnrichmentClient:
             response_url = str(response.url)
             response_status = getattr(response, "status_code", 200)
         soup = BeautifulSoup(html, "html.parser")
+        html_tag = soup.find("html")
+        html_language = _normalized_language_code(
+            str(html_tag.get("lang") or "") if html_tag else ""
+        )
+        alternate_links = [
+            link
+            for link in soup.find_all("link", href=True)
+            if "alternate" in {
+                str(value).lower()
+                for value in (link.get("rel") or [])
+            }
+            and str(link.get("hreflang") or "").strip()
+        ]
+        alternate_languages = sorted(
+            {
+                language
+                for link in alternate_links
+                if (language := _normalized_language_code(str(link.get("hreflang") or "")))
+                and language != "x-default"
+            }
+        )
+        alternate_language_urls = sorted(
+            {
+                urljoin(response_url, str(link.get("href") or ""))
+                for link in alternate_links
+                if _normalized_language_code(str(link.get("hreflang") or ""))
+                != "x-default"
+            }
+        )
+        has_language_selector = _has_language_selector(soup, alternate_languages)
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
         title = normalize_text(soup.title.string if soup.title else "")
@@ -449,6 +483,10 @@ class WebsiteEnrichmentClient:
                 or booking_embed
             ),
             has_mobile_viewport=viewport is not None,
+            html_language=html_language,
+            alternate_languages=alternate_languages,
+            alternate_language_urls=alternate_language_urls,
+            has_language_selector=has_language_selector,
             status_code=response_status,
         )
 
@@ -807,6 +845,7 @@ def _enrichment_from_pages(
     has_booking_form = any(page.has_booking_form for page in pages)
     page_signals = _page_signals(
         pages,
+        business=business,
         has_contact_form=has_contact_form,
         emails=emails,
         phones=phones,
@@ -862,15 +901,31 @@ def _enrichment_from_pages(
 def _page_signals(
     pages: list[WebsitePage],
     *,
+    business: BusinessModel | BusinessTarget,
     has_contact_form: bool,
     emails: list[str],
     phones: list[str],
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     text = " ".join(
         f"{page.title} {page.description} {page.text}" for page in pages
     ).lower()
     html = " ".join(page.html for page in pages).lower()
     links = [link.lower() for page in pages for link in page.links]
+    declared_languages = sorted(
+        {
+            language
+            for page in pages
+            for language in [page.html_language, *page.alternate_languages]
+            if language
+        }
+    )
+    translated_urls = {
+        url
+        for page in pages
+        for url in page.alternate_language_urls
+        if url
+    }
+    expected_market_languages = _market_languages(business)
 
     def contains(*terms: str) -> bool:
         return any(term in text or term in html for term in terms)
@@ -912,7 +967,75 @@ def _page_signals(
         "has_privacy_policy": any("privacy" in link for link in links)
         or contains("privacy policy"),
         "has_complete_contact_details": bool(phones and (emails or has_contact_form)),
+        "html_language_present": any(page.html_language for page in pages),
+        "hreflang_present": any(page.alternate_languages for page in pages),
+        "language_selector_present": any(page.has_language_selector for page in pages),
+        "translated_page_count": len(translated_urls),
+        "declared_languages": declared_languages,
+        "expected_market_languages": expected_market_languages,
+        "market_language_supported": bool(
+            set(expected_market_languages).intersection(declared_languages)
+        ),
     }
+
+
+def _normalized_language_code(value: str) -> str | None:
+    normalized = normalize_text(value).lower().replace("_", "-")
+    if not normalized:
+        return None
+    if normalized == "x-default":
+        return normalized
+    code = normalized.split("-", 1)[0]
+    return code if re.fullmatch(r"[a-z]{2,3}", code) else None
+
+
+def _has_language_selector(soup: BeautifulSoup, alternate_languages: list[str]) -> bool:
+    if len(set(alternate_languages)) >= 2:
+        return True
+    language_terms = {
+        "language",
+        "languages",
+        "lang",
+        "english",
+        "francais",
+        "français",
+        "french",
+        "espanol",
+        "español",
+        "spanish",
+    }
+    for element in soup.find_all(["a", "button", "select"]):
+        attributes = " ".join(
+            str(element.get(name) or "")
+            for name in ("id", "class", "aria-label", "title", "name")
+        )
+        text = normalize_text(element.get_text(" ")).lower()
+        tokens = set(re.findall(r"[a-zà-ÿ]+", f"{attributes} {text}".lower()))
+        if tokens.intersection(language_terms):
+            return True
+    return False
+
+
+def _market_languages(business: BusinessModel | BusinessTarget) -> list[str]:
+    market = normalize_text(
+        " ".join(
+            value
+            for value in (business.geography, business.address, business.semantic_text)
+            if value
+        )
+    ).lower()
+    french_markets = (
+        "quebec",
+        "québec",
+        "montreal",
+        "montréal",
+        "laval",
+        "gatineau",
+        "sherbrooke",
+        "trois-rivieres",
+        "trois-rivières",
+    )
+    return ["fr"] if any(term in market for term in french_markets) else ["en"]
 
 
 def _failed_availability(checks: list[WebsitePage]) -> tuple[str, str]:

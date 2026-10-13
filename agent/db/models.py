@@ -259,6 +259,53 @@ class SignalDefinitionModel(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class ServiceDefinitionModel(TimestampMixin, Base):
+    __tablename__ = "service_definitions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    signal_mappings: Mapped[list["ServiceSignalMappingModel"]] = relationship(
+        back_populates="service_definition",
+        cascade="all, delete-orphan",
+    )
+
+
+class ServiceSignalMappingModel(TimestampMixin, Base):
+    __tablename__ = "service_signal_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "service_definition_id",
+            "signal_definition_id",
+            name="uq_service_signal_mappings_service_signal",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    service_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("service_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    signal_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("signal_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    service_definition: Mapped[ServiceDefinitionModel] = relationship(
+        back_populates="signal_mappings"
+    )
+    signal_definition: Mapped[SignalDefinitionModel] = relationship()
+
+
 class BusinessFactModel(TimestampMixin, Base):
     __tablename__ = "business_facts"
     __table_args__ = (
@@ -687,6 +734,7 @@ class TerritoryModel(TimestampMixin, Base):
     customer_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="residential", index=True
     )
+    service_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     signal_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     exclusion_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     label: Mapped[str] = mapped_column(String(255), nullable=False)

@@ -226,6 +226,7 @@ def profile_options(session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
     return ProfileOptionsRead(
         business_types=service.profile_options(),
+        services=service.profile_service_options(),
         opportunity_signals=service.profile_signal_options(),
     )
 

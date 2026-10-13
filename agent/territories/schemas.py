@@ -113,6 +113,7 @@ class TerritoryCreate(BaseModel):
     radius_km: int = Field(default=25, ge=1, le=250)
     trade_keys: list[str] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
+    service_keys: list[str] = Field(default_factory=list)
     signal_keys: list[str] = Field(default_factory=list)
     exclusion_keys: list[str] = Field(default_factory=list)
     label: str | None = Field(default=None, min_length=1)
@@ -140,6 +141,7 @@ class TerritoryUpdate(BaseModel):
     radius_km: int | None = Field(default=None, ge=1, le=250)
     trade_keys: list[ProfileTrade] | None = Field(default=None, min_length=1)
     customer_kind: ProfileCustomerKind | None = None
+    service_keys: list[str] | None = None
     signal_keys: list[str] | None = None
     exclusion_keys: list[str] | None = None
     refill_policy: TerritoryRefillPolicy | None = None
@@ -159,6 +161,7 @@ class TerritoryRead(BaseModel):
     radius_km: int
     trade_keys: list[str] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
+    service_keys: list[str] = Field(default_factory=list)
     signal_keys: list[str] = Field(default_factory=list)
     exclusion_keys: list[str] = Field(default_factory=list)
     label: str
@@ -235,7 +238,8 @@ class ProfileCreate(BaseModel):
     trades: list[ProfileTrade] = Field(min_length=1, max_length=5)
     customer_kind: ProfileCustomerKind
     market: ProfileMarket
-    signals: list[str] = Field(default_factory=list, max_length=20)
+    services: list[str] = Field(default_factory=list, max_length=20)
+    signals: list[str] = Field(default_factory=list, max_length=50)
     exclude: list[ProfileExclusion] = Field(
         default_factory=lambda: list(ProfileExclusion)
     )
@@ -255,8 +259,22 @@ class ProfileSignalOptionRead(BaseModel):
     category: str
 
 
+class ProfileServiceSignalRead(BaseModel):
+    key: str
+    label: str
+    weight: float = 1.0
+
+
+class ProfileServiceOptionRead(BaseModel):
+    key: str
+    label: str
+    description: str | None = None
+    signals: list[ProfileServiceSignalRead] = Field(default_factory=list)
+
+
 class ProfileOptionsRead(BaseModel):
     business_types: list[ProfileBusinessTypeOptionRead]
+    services: list[ProfileServiceOptionRead] = Field(default_factory=list)
     opportunity_signals: list[ProfileSignalOptionRead] = Field(default_factory=list)
 
 

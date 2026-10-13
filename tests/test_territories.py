@@ -33,6 +33,8 @@ from db.models import (
     QueueJobModel,
     SeedBatchModel,
     SignalDefinitionModel,
+    ServiceDefinitionModel,
+    ServiceSignalMappingModel,
     TerritoryDeliveryModel,
     TerritoryModel,
 )
@@ -1265,6 +1267,91 @@ def test_profile_can_rank_with_active_dynamic_signal_definition() -> None:
         evidence = rows[0]["raw"]["profile_match"]["signals"][definition.key]
         assert evidence["matched"] is True
         assert evidence["value"] is False
+
+
+def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        business = session.scalar(select(BusinessModel).order_by(BusinessModel.display_name))
+        signal = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="html_language_present",
+            label="HTML language declared",
+            value_type="boolean",
+            category="localization",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="html_language_present",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={},
+            version=1,
+        )
+        service_definition = ServiceDefinitionModel(
+            id=new_id("service"),
+            key="multilingual_localization",
+            label="Multilingual localization",
+            status="active",
+            sort_order=10,
+            version=1,
+        )
+        service_definition.signal_mappings.append(
+            ServiceSignalMappingModel(
+                id=new_id("service_signal"),
+                signal_definition=signal,
+                weight=1.5,
+                sort_order=0,
+            )
+        )
+        session.add(service_definition)
+        session.flush()
+        BusinessFactRepository(session).upsert(
+            business.id,
+            BusinessFactValue(
+                key=signal.key,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+                quality_state="published",
+            ),
+        )
+        session.commit()
+
+        profile = TerritoryService(session, workspace_id="workspace:first").create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                services=[service_definition.key],
+                limit=25,
+            )
+        )
+        rows = ProfileMatchService(session).match(
+            profile=profile, niche_ids=[profile.niche_id], limit=25
+        )
+
+        assert profile.service_keys == [service_definition.key]
+        assert profile.signal_keys == [signal.key]
+        assert rows[0]["raw"]["profile_match"]["matched_services"] == [
+            {
+                "service_key": service_definition.key,
+                "label": service_definition.label,
+                "score": 1.5,
+                "supporting_evidence": [
+                    {
+                        "signal_key": signal.key,
+                        "fact_key": signal.key,
+                        "value": False,
+                        "confidence": "confirmed",
+                        "weight": 1.5,
+                    }
+                ],
+            }
+        ]
 
 
 def test_profile_learning_reorders_only_already_eligible_matches() -> None:

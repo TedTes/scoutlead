@@ -45,6 +45,7 @@ NONNEGATIVE_KEYS = {
     "cls_score",
     "inp_ms",
     "tbt_ms",
+    "translated_page_count",
 }
 WEBSITE_STATUSES = {"present", "missing", "unavailable", "parked", "unknown"}
 
