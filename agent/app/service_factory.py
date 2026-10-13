@@ -5,7 +5,6 @@ from business_index.refresh import BusinessIndexRefreshService
 from business_index.pipeline import BusinessIndexPipelineService
 from campaigns.service import CampaignService
 from territories.opportunity_audit import BusinessOpportunityAuditor
-from territories.refresh import TerritoryRefreshService
 from tools.verify import EmailVerificationTool
 from tools.source_registry import SourceAdapterRegistry
 
@@ -53,23 +52,6 @@ def campaign_service(
             browser_render_endpoint=settings.browser_render_endpoint,
             browser_render_api_key=settings.browser_render_api_key,
         ),
-    )
-
-
-def territory_refresh_service(
-    *,
-    session: Session,
-    services: AppServices,
-    workspace_id: str,
-) -> TerritoryRefreshService:
-    return TerritoryRefreshService(
-        session=session,
-        campaigns=campaign_service(
-            session=session,
-            services=services,
-            workspace_id=workspace_id,
-        ),
-        workspace_id=workspace_id,
     )
 
 

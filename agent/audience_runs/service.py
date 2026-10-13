@@ -19,6 +19,7 @@ from db.models import (
     BusinessModel,
     CoverageRequestModel,
     LeadModel,
+    NicheModel,
     TerritoryModel,
 )
 from shared.errors import ConflictError, NotFoundError
@@ -27,7 +28,7 @@ from canonical.normalization import normalize_domain, normalize_email, normalize
 from leads.schemas import LeadContactPolicyUpdate, ContactPolicyStatus
 from suppressions.repository import ContactSuppressionRepository
 from territories.matching import ProfileMatchService
-from territories.refresh import _territory_niches
+from territories.profile_catalog import profile_trade_spec
 
 
 class AudienceRunService:
@@ -102,7 +103,6 @@ class AudienceRunService:
             profile=audience,
             niche_ids=[niche.id for niche in niches],
             limit=min(max(run.requested_count * 8, 100), 500),
-            exclude_legacy_deliveries=False,
         )
         previously_delivered = set(
             self.session.scalars(
@@ -173,10 +173,12 @@ class AudienceRunService:
         if run.result_count >= run.requested_count:
             run.state = AudienceRunState.READY.value
             run.completed_at = now
+            audience.last_run_at = now
             self._complete_coverage(run.id)
         elif now >= run.deadline_at:
             run.state = AudienceRunState.PARTIAL.value
             run.completed_at = now
+            audience.last_run_at = now
             self._complete_coverage(run.id)
         else:
             run.state = AudienceRunState.WAITING_VALIDATION.value
@@ -212,7 +214,15 @@ class AudienceRunService:
         self._audience(audience_id)
         run = self.session.scalar(
             select(AudienceRunModel)
-            .where(AudienceRunModel.audience_id == audience_id)
+            .where(
+                AudienceRunModel.audience_id == audience_id,
+                AudienceRunModel.state.in_(
+                    [AudienceRunState.READY.value, AudienceRunState.PARTIAL.value]
+                ),
+                select(AudienceResultModel.id)
+                .where(AudienceResultModel.run_id == AudienceRunModel.id)
+                .exists(),
+            )
             .order_by(AudienceRunModel.created_at.desc())
             .limit(1)
         )
@@ -271,6 +281,9 @@ class AudienceRunService:
             result.shortlisted_at = now if values["shortlisted"] else None
         self.session.commit()
         self.session.refresh(result)
+        from territories.refill import enqueue_refill_if_depleted
+
+        enqueue_refill_if_depleted(self.session, result.audience_id)
         return self._lead_read(result)
 
     def update_contact_policy(
@@ -505,6 +518,20 @@ class AudienceRunService:
 
 def _business_id(row: dict) -> str:
     return str(row["raw"]["canonical_business_id"])
+
+
+def _territory_niches(session: Session, territory: TerritoryModel) -> list[NicheModel]:
+    keys = list(territory.trade_keys or [])
+    if keys:
+        slugs = [profile_trade_spec(key).niche_slug for key in keys]
+        niches = list(
+            session.scalars(select(NicheModel).where(NicheModel.slug.in_(slugs)))
+        )
+        by_slug = {niche.slug: niche for niche in niches if niche.active}
+        return [by_slug[slug] for slug in slugs if slug in by_slug]
+
+    primary = session.get(NicheModel, territory.niche_id)
+    return [primary] if primary is not None and primary.active else []
 
 
 def _optional_string(value) -> str | None:

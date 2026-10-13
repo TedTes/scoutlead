@@ -34,15 +34,6 @@ class TerritoryMinFit(StrEnum):
     MAYBE = "maybe"
 
 
-class TerritoryDeliveryStatus(StrEnum):
-    SCHEDULED = "scheduled"
-    RUNNING = "running"
-    READY = "ready"
-    EMPTY = "empty"
-    PARTIAL = "partial"
-    FAILED = "failed"
-
-
 class ProfileBatchState(StrEnum):
     SETUP = "setup"
     SCORING = "scoring"
@@ -177,34 +168,11 @@ class TerritoryRead(BaseModel):
     criteria_version: int = 1
     next_run_at: datetime | None = None
     last_run_at: datetime | None = None
-    last_delivery_count: int = 0
-    unviewed_delivery_count: int = 0
+    last_batch_count: int = 0
+    unreviewed_batch_count: int = 0
     positive_outcome_rate: float = 0.0
     created_at: datetime
     updated_at: datetime
-
-
-class TerritoryDeliveryRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    workspace_id: str
-    territory_id: str
-    campaign_id: str
-    scheduled_for: datetime | None = None
-    started_at: datetime | None = None
-    delivered_at: datetime | None = None
-    viewed_at: datetime | None = None
-    new_contact_count: int
-    status: TerritoryDeliveryStatus
-    failure_reason: str | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class TerritoryRefreshRead(BaseModel):
-    territory: TerritoryRead
-    delivery: TerritoryDeliveryRead
 
 
 class ProfileMarket(BaseModel):
@@ -287,7 +255,6 @@ class ProfileQueuedRead(BaseModel):
 
 class ProfileBatchRead(BaseModel):
     profile: TerritoryRead
-    delivery: TerritoryDeliveryRead | None = None
     audience_run_id: str | None = None
     outreach_campaign_id: str | None = None
     leads: list[AudienceLeadRead] = Field(default_factory=list)

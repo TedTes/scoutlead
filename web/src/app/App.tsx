@@ -1155,12 +1155,12 @@ function RunHistoryItem({
           <span className="run-title">{title}</span>
           <span className="run-meta">
             <span className={`run-dot ${runDotClass(run)}`} />
-            {territory?.unviewed_delivery_count ? (
-              <span className="run-new-badge">New {territory.unviewed_delivery_count}</span>
+            {territory?.unreviewed_batch_count ? (
+              <span className="run-new-badge">New {territory.unreviewed_batch_count}</span>
             ) : null}
             <span className="run-yield">
               {territory?.last_run_at
-                ? `${territory.last_delivery_count} delivered`
+                ? `${territory.last_batch_count} leads`
                 : runYield(run, contacts)}
             </span>
             <span className={territory?.status === "paused" ? "run-status is-paused" : "run-status"}>

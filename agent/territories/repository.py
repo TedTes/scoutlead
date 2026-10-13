@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import TerritoryDeliveryModel, TerritoryModel
+from db.models import TerritoryModel
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 from territories.schemas import TerritoryCreate, TerritoryUpdate
@@ -148,70 +146,6 @@ class TerritoryRepository:
         model.next_run_at = None
         model.updated_at = utcnow()
         self.session.commit()
-
-    def list_deliveries(self, territory_id: str) -> list[TerritoryDeliveryModel]:
-        self.get(territory_id)
-        statement = (
-            select(TerritoryDeliveryModel)
-            .where(
-                TerritoryDeliveryModel.workspace_id == self.workspace_id,
-                TerritoryDeliveryModel.territory_id == territory_id,
-            )
-            .order_by(TerritoryDeliveryModel.created_at.desc())
-        )
-        return list(self.session.scalars(statement))
-
-    def latest_delivery(self, territory_id: str) -> TerritoryDeliveryModel | None:
-        self.get(territory_id)
-        return self.session.scalar(
-            select(TerritoryDeliveryModel)
-            .where(
-                TerritoryDeliveryModel.workspace_id == self.workspace_id,
-                TerritoryDeliveryModel.territory_id == territory_id,
-            )
-            .order_by(TerritoryDeliveryModel.created_at.desc())
-            .limit(1)
-        )
-
-    def latest_nonempty_delivery(self, territory_id: str) -> TerritoryDeliveryModel | None:
-        self.get(territory_id)
-        return self.session.scalar(
-            select(TerritoryDeliveryModel)
-            .where(
-                TerritoryDeliveryModel.workspace_id == self.workspace_id,
-                TerritoryDeliveryModel.territory_id == territory_id,
-                TerritoryDeliveryModel.status.in_(("ready", "partial")),
-                TerritoryDeliveryModel.new_contact_count > 0,
-            )
-            .order_by(TerritoryDeliveryModel.created_at.desc())
-            .limit(1)
-        )
-
-    def get_delivery(self, territory_id: str, delivery_id: str) -> TerritoryDeliveryModel:
-        self.get(territory_id)
-        model = self.session.scalar(
-            select(TerritoryDeliveryModel).where(
-                TerritoryDeliveryModel.id == delivery_id,
-                TerritoryDeliveryModel.territory_id == territory_id,
-                TerritoryDeliveryModel.workspace_id == self.workspace_id,
-            )
-        )
-        if model is None:
-            raise NotFoundError("territory delivery not found", {"delivery_id": delivery_id})
-        return model
-
-    def delivery_for_schedule(
-        self,
-        territory_id: str,
-        scheduled_for: datetime,
-    ) -> TerritoryDeliveryModel | None:
-        return self.session.scalar(
-            select(TerritoryDeliveryModel).where(
-                TerritoryDeliveryModel.workspace_id == self.workspace_id,
-                TerritoryDeliveryModel.territory_id == territory_id,
-                TerritoryDeliveryModel.scheduled_for == scheduled_for,
-            )
-        )
 
     def _scope(self, statement):
         return statement.where(TerritoryModel.workspace_id == self.workspace_id)

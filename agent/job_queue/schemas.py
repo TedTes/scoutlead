@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class JobType(StrEnum):
     CAMPAIGN_RUN = "campaign.run"
     MESSAGE_SEND = "message.send"
-    TERRITORY_REFRESH = "territory.refresh"
     AUDIENCE_RUN = "audience.run"
     BUSINESS_INDEX_REFRESH = "business_index.refresh"
     SOURCE_FETCH = "source.fetch"

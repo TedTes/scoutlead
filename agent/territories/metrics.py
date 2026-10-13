@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import LeadModel, LeadOutcomeModel, TerritoryDeliveryModel
+from db.models import AudienceResultModel, AudienceRunModel, LeadOutcomeModel
 from outcomes.schemas import LeadOutcome
 from territories.repository import TerritoryRepository
 
@@ -42,46 +42,54 @@ class TerritoryMetricsService:
         self.territories.get(territory_id)
         now = datetime.now(timezone.utc)
         start = _week_start(now) - timedelta(weeks=weeks - 1)
-        deliveries = list(
+        runs = list(
             self.session.scalars(
-                select(TerritoryDeliveryModel).where(
-                    TerritoryDeliveryModel.workspace_id == self.workspace_id,
-                    TerritoryDeliveryModel.territory_id == territory_id,
-                    TerritoryDeliveryModel.delivered_at >= start,
+                select(AudienceRunModel).where(
+                    AudienceRunModel.workspace_id == self.workspace_id,
+                    AudienceRunModel.audience_id == territory_id,
+                    AudienceRunModel.state.in_(("ready", "partial")),
+                    AudienceRunModel.completed_at >= start,
                 )
             )
         )
-        campaign_week = {
-            delivery.campaign_id: _week_start(_aware(delivery.delivered_at or delivery.created_at))
-            for delivery in deliveries
+        run_week = {
+            run.id: _week_start(_aware(run.completed_at or run.created_at))
+            for run in runs
         }
-        leads = list(
+        results = list(
             self.session.scalars(
-                select(LeadModel).where(LeadModel.campaign_id.in_(campaign_week))
+                select(AudienceResultModel).where(AudienceResultModel.run_id.in_(run_week))
             )
-        ) if campaign_week else []
+        ) if run_week else []
+        outreach_lead_ids = [
+            result.outreach_lead_id for result in results if result.outreach_lead_id
+        ]
         events = list(
             self.session.scalars(
                 select(LeadOutcomeModel).where(
                     LeadOutcomeModel.workspace_id == self.workspace_id,
-                    LeadOutcomeModel.lead_id.in_([lead.id for lead in leads]),
+                    LeadOutcomeModel.lead_id.in_(outreach_lead_ids),
                 )
             )
-        ) if leads else []
+        ) if outreach_lead_ids else []
         events_by_lead: dict[str, set[LeadOutcome]] = defaultdict(set)
         for event in events:
             events_by_lead[event.lead_id].add(LeadOutcome(event.outcome))
-        leads_by_week: dict[datetime, list[LeadModel]] = defaultdict(list)
-        for lead in leads:
-            leads_by_week[campaign_week[lead.campaign_id]].append(lead)
+        results_by_week: dict[datetime, list[AudienceResultModel]] = defaultdict(list)
+        for result in results:
+            results_by_week[run_week[result.run_id]].append(result)
         rows = [
-            _metrics_row(week_start=week, leads=leads_by_week.get(week, []), events=events_by_lead)
+            _metrics_row(
+                week_start=week,
+                results=results_by_week.get(week, []),
+                events=events_by_lead,
+            )
             for week in (start + timedelta(weeks=index) for index in range(weeks))
         ]
         return TerritoryMetricsRead(
             territory_id=territory_id,
             weeks=weeks,
-            totals=_metrics_row(week_start=start, leads=leads, events=events_by_lead),
+            totals=_metrics_row(week_start=start, results=results, events=events_by_lead),
             by_week=rows,
         )
 
@@ -89,11 +97,16 @@ class TerritoryMetricsService:
 def _metrics_row(
     *,
     week_start: datetime,
-    leads: list[LeadModel],
+    results: list[AudienceResultModel],
     events: dict[str, set[LeadOutcome]],
 ) -> TerritoryWeekMetrics:
-    delivered = len(leads)
-    event_sets = [events.get(lead.id, set()) for lead in leads]
+    delivered = len(results)
+    event_sets = [
+        events.get(result.outreach_lead_id, set())
+        if result.outreach_lead_id
+        else set()
+        for result in results
+    ]
     contacted = sum(LeadOutcome.CONTACTED in values for values in event_sets)
     replied = sum(
         bool(values & {LeadOutcome.REPLIED_POSITIVE, LeadOutcome.REPLIED_NEGATIVE})
@@ -102,7 +115,10 @@ def _metrics_row(
     positive = sum(LeadOutcome.REPLIED_POSITIVE in values for values in event_sets)
     meetings = sum(LeadOutcome.MEETING_BOOKED in values for values in event_sets)
     won = sum(LeadOutcome.WON in values for values in event_sets)
-    not_fit = sum(LeadOutcome.NOT_A_FIT in values for values in event_sets)
+    not_fit = sum(
+        result.review_status == "not_fit" or LeadOutcome.NOT_A_FIT in values
+        for result, values in zip(results, event_sets, strict=True)
+    )
     quality = sum(
         bool(values & {LeadOutcome.WRONG_CONTACT, LeadOutcome.BOUNCED})
         for values in event_sets

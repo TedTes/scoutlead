@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timezone
 from time import monotonic, sleep
 
 from sqlalchemy import select
@@ -11,7 +11,6 @@ from app.dependencies import AppServices, create_app_services
 from app.service_factory import (
     business_index_pipeline_service,
     campaign_service,
-    territory_refresh_service,
 )
 from business_index.scheduler import enqueue_due_business_index_refreshes
 from campaigns.repository import CampaignRepository
@@ -76,41 +75,6 @@ def run_once() -> bool:
                 MessageService(session=session, email=services.email).send(
                     str(job.payload["message_id"])
                 )
-            elif job.type == JobType.TERRITORY_REFRESH.value:
-                territory_id = str(job.payload["territory_id"])
-                territory = session.get(TerritoryModel, territory_id)
-                if territory is None:
-                    raise ValueError(f"territory not found: {territory_id}")
-                queued_version = int(
-                    job.payload.get("criteria_version", territory.criteria_version)
-                )
-                if queued_version != territory.criteria_version:
-                    logger.info(
-                        "territory_refresh_skipped_stale_criteria territory_id=%s queued_version=%s current_version=%s",
-                        territory_id,
-                        queued_version,
-                        territory.criteria_version,
-                    )
-                    queue.complete(job.id)
-                    return True
-                if job.payload.get("scheduled_for"):
-                    scheduled_for = datetime.fromisoformat(
-                        str(job.payload["scheduled_for"])
-                    )
-                    if scheduled_for.tzinfo is None:
-                        scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
-                else:
-                    # Backward compatibility for jobs queued before timestamped batches.
-                    scheduled_for = datetime.combine(
-                        date.fromisoformat(str(job.payload["scheduled_date"])),
-                        time.min,
-                        tzinfo=timezone.utc,
-                    )
-                territory_refresh_service(
-                    session=session,
-                    services=services,
-                    workspace_id=territory.workspace_id,
-                ).refresh(territory_id, scheduled_for=scheduled_for)
             elif job.type == JobType.AUDIENCE_RUN.value:
                 audience_run = session.get(
                     AudienceRunModel,
@@ -305,7 +269,7 @@ def run_once() -> bool:
             failed_job = queue.fail(
                 job.id,
                 str(exc),
-                retry_delay_seconds=(3600 if job.type == JobType.TERRITORY_REFRESH.value else None),
+                retry_delay_seconds=None,
             )
             if failed_job.status in {
                 JobStatus.FAILED.value,

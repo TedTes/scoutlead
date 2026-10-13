@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from canonical.semantics import semantic_key
 from business_index.schemas import OpportunityType, SearchContract
-from db.models import LeadOutcomeModel, NicheModel, SignalDefinitionModel
+from db.models import (
+    AudienceResultModel,
+    AudienceRunModel,
+    LeadOutcomeModel,
+    NicheModel,
+    SignalDefinitionModel,
+)
 from outcomes.policy import POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
 from niches.resolver import resolve_niche
@@ -430,11 +436,27 @@ class TerritoryService:
     def delete(self, territory_id: str) -> None:
         self.territories.delete(territory_id)
 
-    def list_deliveries(self, territory_id: str):
-        return self.territories.list_deliveries(territory_id)
-
     def _read(self, model) -> TerritoryRead:
-        deliveries = self.territories.list_deliveries(model.id)
+        latest_run = self.session.scalar(
+            select(AudienceRunModel)
+            .where(
+                AudienceRunModel.audience_id == model.id,
+                AudienceRunModel.state.in_(("ready", "partial")),
+            )
+            .order_by(AudienceRunModel.created_at.desc())
+            .limit(1)
+        )
+        batch_results = (
+            list(
+                self.session.scalars(
+                    select(AudienceResultModel).where(
+                        AudienceResultModel.run_id == latest_run.id
+                    )
+                )
+            )
+            if latest_run is not None
+            else []
+        )
         outcomes = list(
             self.session.scalars(
                 select(LeadOutcomeModel).where(
@@ -455,10 +477,10 @@ class TerritoryService:
         }
         return TerritoryRead.model_validate(model).model_copy(
             update={
-                "last_delivery_count": deliveries[0].new_contact_count if deliveries else 0,
-                "unviewed_delivery_count": sum(
-                    delivery.viewed_at is None and delivery.status in {"ready", "partial"}
-                    for delivery in deliveries
+                "last_batch_count": len(batch_results),
+                "unreviewed_batch_count": sum(
+                    result.review_status == "unreviewed"
+                    for result in batch_results
                 ),
                 "positive_outcome_rate": (
                     round(len(contacted & positive) / len(contacted), 4)

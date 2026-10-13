@@ -3,9 +3,8 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from db.models import LeadModel, TerritoryDeliveryModel, TerritoryModel
+from db.models import AudienceResultModel, AudienceRunModel, TerritoryModel
 from job_queue.service import QueueService
-from shared.utils import utcnow
 
 
 def enqueue_refill_if_depleted(
@@ -21,33 +20,40 @@ def enqueue_refill_if_depleted(
         or territory.refill_policy != "when_depleted"
     ):
         return False
-    delivery = session.scalar(
-        select(TerritoryDeliveryModel)
-        .where(TerritoryDeliveryModel.territory_id == territory.id)
-        .order_by(TerritoryDeliveryModel.created_at.desc())
+    latest_run = session.scalar(
+        select(AudienceRunModel)
+        .where(
+            AudienceRunModel.audience_id == territory.id,
+            AudienceRunModel.state.in_(("ready", "partial")),
+        )
+        .order_by(AudienceRunModel.created_at.desc())
         .limit(1)
     )
-    if delivery is None or delivery.status not in {"ready", "partial"}:
+    if latest_run is None:
         return False
     remaining = session.scalar(
         select(func.count())
-        .select_from(LeadModel)
+        .select_from(AudienceResultModel)
         .where(
-            LeadModel.campaign_id == delivery.campaign_id,
-            LeadModel.shortlisted_at.is_(None),
-            LeadModel.last_contacted_at.is_(None),
-            or_(LeadModel.review_status.is_(None), LeadModel.review_status != "not_fit"),
+            AudienceResultModel.run_id == latest_run.id,
+            AudienceResultModel.shortlisted_at.is_(None),
+            AudienceResultModel.contacted_at.is_(None),
+            or_(
+                AudienceResultModel.review_status.is_(None),
+                AudienceResultModel.review_status != "not_fit",
+            ),
         )
     ) or 0
     threshold = max(1, min(5, territory.batch_size // 5))
     if remaining > threshold:
         return False
-    QueueService(session).enqueue_territory_refresh(
-        territory.id,
-        utcnow().replace(microsecond=0).isoformat(),
-        criteria_version=territory.criteria_version,
-        dedupe_key=(
-            f"depleted:{territory.id}:{delivery.id}:{territory.criteria_version}"
-        ),
-    )
+    # Import locally because audience result updates invoke this check.
+    from audience_runs.service import AudienceRunService
+
+    run = AudienceRunService(
+        session,
+        workspace_id=territory.workspace_id,
+    ).create(territory.id, commit=False)
+    QueueService(session).enqueue_audience_run(run.id, commit=False)
+    session.commit()
     return True

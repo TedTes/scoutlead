@@ -303,7 +303,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       setSwitchingProfileId(profileId);
       try {
         const batch = await api.getProfileBatch(profileId);
-        const runId = batch.outreach_campaign_id || batch.delivery?.campaign_id || "";
+        const runId = batch.outreach_campaign_id || "";
         const [run, nextSnapshot] = runId
           ? await Promise.all([api.getDiscoveryRun(runId), fetchSnapshot(runId)])
           : [null, emptySnapshot] as const;
@@ -341,7 +341,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       const batch = await api.getProfileBatch(targetProfileId);
       if (targetProfileId === selectedProfileIdRef.current) {
         setProfileBatch(batch);
-        if (!batch.outreach_campaign_id && !batch.delivery?.campaign_id) {
+        if (!batch.outreach_campaign_id) {
           localStorage.setItem("selectedDiscoveryRunId", "");
           selectedDiscoveryRunIdRef.current = "";
           setSelectedDiscoveryRunIdState("");
@@ -349,10 +349,10 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         }
       }
       if (
-        (batch.outreach_campaign_id || batch.delivery?.campaign_id)
+        batch.outreach_campaign_id
         && targetProfileId === selectedProfileIdRef.current
       ) {
-        const runId = batch.outreach_campaign_id || batch.delivery!.campaign_id;
+        const runId = batch.outreach_campaign_id;
         const run = await api.getDiscoveryRun(runId);
         setDiscoveryRuns((current) => upsertDiscoveryRun(current, run));
         localStorage.setItem("selectedDiscoveryRunId", run.id);
@@ -448,7 +448,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         : null;
       setProfileBatch(nextBatch);
       const effectiveRunId = nextBatch
-        ? nextBatch.outreach_campaign_id || nextBatch.delivery?.campaign_id || ""
+        ? nextBatch.outreach_campaign_id || ""
         : nextRunId;
       if (effectiveRunId !== nextRunId) {
         setSelectedDiscoveryRunIdState(effectiveRunId);
@@ -505,7 +505,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     }, delay);
     return () => window.clearInterval(timer);
   }, [
-    profileBatch?.delivery?.status,
     profileBatch?.state,
     refreshProfileBatch,
     selectedProfileIdState,

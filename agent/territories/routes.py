@@ -1,23 +1,18 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Response, status
-from sqlalchemy import and_, select
+from sqlalchemy import select
 
 from audience_runs.schemas import AudienceRunState
 from audience_runs.service import AudienceRunService
 from app.dependencies import CurrentAuth, DbSession
 from db.models import (
+    AudienceResultModel,
     AudienceRunModel,
-    LeadModel,
-    ProfileDeliveryItemModel,
     QueueJobModel,
-    TerritoryDeliveryModel,
 )
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
-from leads.schemas import LeadRead
-from leads.export import leads_csv
-from shared.utils import utcnow
 from territories.metrics import (
     TerritoryMetricsRead,
     TerritoryMetricsService,
@@ -31,14 +26,11 @@ from territories.schemas import (
     ProfileOptionsRead,
     ProfileQueuedRead,
     TerritoryCreate,
-    TerritoryDeliveryRead,
-    TerritoryMinFit,
     TerritoryRead,
     TerritoryResolveRequest,
     TerritoryResolutionRead,
     TerritoryUpdate,
 )
-from territories.refresh import eligible_delivery_leads
 from territories.service import TerritoryService
 
 
@@ -90,11 +82,6 @@ def delete_territory(territory_id: str, session: DbSession, auth: CurrentAuth):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{territory_id}/deliveries", response_model=list[TerritoryDeliveryRead])
-def list_territory_deliveries(territory_id: str, session: DbSession, auth: CurrentAuth):
-    return _service(session, auth).list_deliveries(territory_id)
-
-
 @router.get("/{territory_id}/metrics", response_model=TerritoryMetricsRead)
 def territory_metrics(
     territory_id: str,
@@ -140,62 +127,14 @@ def refresh_territory(
 ):
     service = _service(session, auth)
     territory = service.get(territory_id)
-    job = QueueService(session).enqueue_territory_refresh(
+    run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
         territory.id,
-        utcnow().replace(microsecond=0).isoformat(),
-        criteria_version=territory.criteria_version,
+        commit=False,
     )
+    job = QueueService(session).enqueue_audience_run(run.id, commit=False)
+    session.commit()
+    session.refresh(job)
     return ProfileQueuedRead(profile=service.get_read(territory.id), job=job)
-
-
-@router.get(
-    "/{territory_id}/deliveries/{delivery_id}/contacts",
-    response_model=list[LeadRead],
-)
-def list_delivery_contacts(
-    territory_id: str,
-    delivery_id: str,
-    session: DbSession,
-    auth: CurrentAuth,
-):
-    territory_service = _service(session, auth)
-    territory = territory_service.get(territory_id)
-    delivery = territory_service.territories.get_delivery(territory_id, delivery_id)
-    if delivery.viewed_at is None:
-        delivery.viewed_at = utcnow()
-        session.commit()
-    return _delivery_contacts(
-        session,
-        campaign_id=delivery.campaign_id,
-        min_fit=TerritoryMinFit(territory.min_fit),
-    )
-
-
-@router.get("/{territory_id}/deliveries/{delivery_id}/export.csv")
-def export_delivery_contacts(
-    territory_id: str,
-    delivery_id: str,
-    session: DbSession,
-    auth: CurrentAuth,
-):
-    territory_service = _service(session, auth)
-    territory = territory_service.get(territory_id)
-    delivery = territory_service.territories.get_delivery(territory_id, delivery_id)
-    contacts = _delivery_contacts(
-        session,
-        campaign_id=delivery.campaign_id,
-        min_fit=TerritoryMinFit(territory.min_fit),
-    )
-    return Response(
-        content=leads_csv(
-            contacts,
-            scoutlead_path=f"/territories/{territory_id}/deliveries/{delivery_id}",
-        ),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="{territory_id}-{delivery_id}.csv"'
-        },
-    )
 
 
 @profiles_router.post(
@@ -300,6 +239,18 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         .order_by(AudienceRunModel.created_at.desc())
         .limit(1)
     )
+    result_run = session.scalar(
+        select(AudienceRunModel)
+        .join(AudienceResultModel, AudienceResultModel.run_id == AudienceRunModel.id)
+        .where(
+            AudienceRunModel.audience_id == profile.id,
+            AudienceRunModel.state.in_(
+                [AudienceRunState.READY.value, AudienceRunState.PARTIAL.value]
+            ),
+        )
+        .order_by(AudienceRunModel.created_at.desc())
+        .limit(1)
+    )
     latest_job = _latest_profile_job(
         session,
         latest_run.id if latest_run is not None else None,
@@ -344,10 +295,9 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         state = ProfileBatchState.SCORING
     return ProfileBatchRead(
         profile=service.get_read(profile.id),
-        delivery=None,
         audience_run_id=latest_run.id if latest_run is not None else None,
         outreach_campaign_id=(
-            latest_run.outreach_campaign_id if latest_run is not None else None
+            result_run.outreach_campaign_id if result_run is not None else None
         ),
         leads=leads,
         state=state,
@@ -403,15 +353,3 @@ def _failure_class(error: str | None) -> str:
     if "429" in normalized or "rate limit" in normalized or "rate_limit" in normalized:
         return "rate_limit"
     return "other"
-
-
-def _delivery_contacts(
-    session: DbSession,
-    *,
-    campaign_id: str,
-    min_fit: TerritoryMinFit,
-) -> list[LeadRead]:
-    leads = list(
-        session.scalars(select(LeadModel).where(LeadModel.campaign_id == campaign_id))
-    )
-    return eligible_delivery_leads(leads, min_fit=min_fit)

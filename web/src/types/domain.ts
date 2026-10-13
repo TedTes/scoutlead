@@ -350,8 +350,8 @@ export type Territory = {
   criteria_hash: string;
   next_run_at?: string | null;
   last_run_at?: string | null;
-  last_delivery_count: number;
-  unviewed_delivery_count: number;
+  last_batch_count: number;
+  unreviewed_batch_count: number;
   positive_outcome_rate: number;
   created_at: string;
   updated_at: string;
@@ -438,7 +438,6 @@ export type ProfileQueued = {
 
 export type ProfileBatch = {
   profile: Territory;
-  delivery?: TerritoryDelivery | null;
   audience_run_id?: string | null;
   outreach_campaign_id?: string | null;
   leads: DiscoveryResult[];
@@ -462,19 +461,6 @@ export type TerritoryResolution = {
   confidence: number;
   existing_niche: boolean;
   requires_confirmation: boolean;
-};
-
-export type TerritoryDelivery = {
-  id: string;
-  territory_id: string;
-  campaign_id: string;
-  scheduled_for?: string | null;
-  started_at?: string | null;
-  delivered_at?: string | null;
-  viewed_at?: string | null;
-  new_contact_count: number;
-  status: "scheduled" | "running" | "ready" | "empty" | "partial" | "failed";
-  failure_reason?: string | null;
 };
 
 export type TerritoryWeekMetrics = {

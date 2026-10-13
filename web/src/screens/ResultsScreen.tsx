@@ -49,7 +49,6 @@ import type {
   SenderProfile,
   SearchIntent,
   Territory,
-  TerritoryDelivery,
   TerritoryMetrics,
   TerritoryResolution,
 } from "../types/domain";
@@ -171,10 +170,7 @@ export function ResultsScreen({
   const [profileDetailsOpen, setProfileDetailsOpen] = useState(false);
   const [scheduleResolution, setScheduleResolution] = useState<TerritoryResolution | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
-  const [deliveries, setDeliveries] = useState<TerritoryDelivery[]>([]);
-  const [deliveryContacts, setDeliveryContacts] = useState<DiscoveryResult[] | null>(null);
   const [territoryMetrics, setTerritoryMetrics] = useState<TerritoryMetrics | null>(null);
-  const [exportingDelivery, setExportingDelivery] = useState(false);
   const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const [bulkPopoverStyle, setBulkPopoverStyle] = useState<CSSProperties>({});
@@ -191,12 +187,8 @@ export function ResultsScreen({
   const selectedRunMatchesActiveProfile = Boolean(
     activeProfile && selectedDiscoveryRun?.territory_id === activeProfile.id,
   );
-  const selectedDelivery = selectedRunMatchesActiveProfile && selectedTerritory
-    ? deliveries.find((delivery) => delivery.campaign_id === selectedDiscoveryRunId)
-    : undefined;
   const visibleProfileBatch =
     profileBatch?.profile.id === selectedProfileId
-    && (!selectedDelivery || profileBatch.delivery?.id === selectedDelivery.id)
       ? profileBatch
       : null;
   const isProfileAggregate = Boolean(visibleProfileBatch);
@@ -206,10 +198,9 @@ export function ResultsScreen({
   const sourceContacts = visibleProfileBatch
     ? visibleProfileBatch.leads
     : selectedRunMatchesActiveProfile && selectedDiscoveryRunId
-      ? selectedDelivery && deliveryContacts ? deliveryContacts : snapshot.results
+      ? snapshot.results
       : [];
   const contacts = useMemo(() => deduplicateContacts(sourceContacts), [sourceContacts]);
-  const isDeliveryScoped = Boolean(!isProfileAggregate && selectedDelivery && deliveryContacts);
   const thisWeekCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = runPrompt;
@@ -236,7 +227,7 @@ export function ResultsScreen({
   const outreachReadyContacts = shortlistedContactRows.filter(isBulkOutreachReadyContact);
   const outreachSkippedContacts = shortlistedContactRows.filter((contact) => !isBulkOutreachReadyContact(contact));
   const workflowContext = {
-    includeAllLeads: isProfileAggregate || isDeliveryScoped,
+    includeAllLeads: isProfileAggregate,
     thisWeekCutoffMs,
   };
   const workflowCounts = useMemo<LeadWorkflowCounts>(() => ({
@@ -246,7 +237,7 @@ export function ResultsScreen({
     contacted: contacts.filter((contact) => matchesWorkflowView(contact, "contacted", workflowContext)).length,
     dismissed: contacts.filter((contact) => matchesWorkflowView(contact, "dismissed", workflowContext)).length,
     all: contacts.length,
-  }), [contacts, isDeliveryScoped, isProfileAggregate, thisWeekCutoffMs]);
+  }), [contacts, isProfileAggregate, thisWeekCutoffMs]);
   const workflowContacts = contacts.filter((contact) =>
     matchesWorkflowView(contact, workflowView, workflowContext),
   );
@@ -332,34 +323,13 @@ export function ResultsScreen({
 
   useEffect(() => {
     if (!selectedTerritory) {
-      setDeliveries([]);
-      setDeliveryContacts(null);
       setTerritoryMetrics(null);
       return;
     }
-    void Promise.all([
-      territoryApi.getTerritoryDeliveries(selectedTerritory.id),
-      territoryApi.getTerritoryMetrics(selectedTerritory.id),
-    ]).then(([nextDeliveries, nextMetrics]) => {
-      setDeliveries(nextDeliveries);
-      setTerritoryMetrics(nextMetrics);
-    }).catch(() => {
-      setDeliveries([]);
-      setTerritoryMetrics(null);
-    });
+    void territoryApi.getTerritoryMetrics(selectedTerritory.id)
+      .then(setTerritoryMetrics)
+      .catch(() => setTerritoryMetrics(null));
   }, [selectedTerritory?.id, territoryApi]);
-
-  useEffect(() => {
-    setDeliveryContacts(null);
-    if (!selectedTerritory || !selectedDelivery) return;
-    void territoryApi
-      .getTerritoryDeliveryContacts(selectedTerritory.id, selectedDelivery.id)
-      .then((nextContacts) => {
-        setDeliveryContacts(nextContacts);
-        if (!selectedDelivery.viewed_at) void refreshAll({ showLoading: false });
-      })
-      .catch(() => setDeliveryContacts(null));
-  }, [refreshAll, selectedDelivery?.id, selectedTerritory?.id, territoryApi]);
 
   useEffect(() => {
     setRunMenuOpen(false);
@@ -617,10 +587,7 @@ export function ResultsScreen({
   };
 
   const generateContactApproach = async (leadId: string) => {
-    const updated = await territoryApi.generateLeadApproach(leadId);
-    setDeliveryContacts((current) => (
-      current?.map((contact) => contact.id === updated.id ? updated : contact) || current
-    ));
+    await territoryApi.generateLeadApproach(leadId);
     await refreshAll({ showLoading: false });
   };
 
@@ -700,22 +667,7 @@ export function ResultsScreen({
   };
 
   const exportCurrentContacts = async () => {
-    if (!selectedTerritory || !selectedDelivery) {
-      beginContactsExport(contacts, exportName);
-      return;
-    }
-    if (exportingDelivery) return;
-    setExportingDelivery(true);
-    setRunMenuOpen(false);
-    try {
-      const blob = await territoryApi.downloadTerritoryDeliveryCsv(selectedTerritory.id, selectedDelivery.id);
-      downloadBlob(blob, defaultExportFileName(selectedTerritory.label, "call-sheet"));
-      showToast({ title: "Call sheet exported", message: `${contacts.length} contacts downloaded.`, tone: "green" });
-    } catch (err) {
-      showToast({ title: "Export failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
-    } finally {
-      setExportingDelivery(false);
-    }
+    beginContactsExport(contacts, exportName);
   };
 
   const confirmContactsExport = () => {
@@ -845,11 +797,11 @@ export function ResultsScreen({
                 )}
                 <button
                   type="button"
-                  disabled={!contacts.length || exportingDelivery}
+                  disabled={!contacts.length}
                   onClick={() => void exportCurrentContacts()}
                 >
                   <Download size={14} />
-                  {selectedDelivery ? "Export call sheet" : "Export all contacts"}
+                  Export all contacts
                 </button>
                 <button
                   type="button"
@@ -4106,17 +4058,6 @@ function exportContactsCsv(contacts: DiscoveryResult[], fileName: string) {
 function csvCell(value: string | number | undefined) {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
-}
-
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = normalizeExportFileName(fileName);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 function formatVerificationDetails(details: Record<string, unknown> | null | undefined) {

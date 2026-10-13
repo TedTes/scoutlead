@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaigns.repository import CampaignRepository
-from audience_runs.service import AudienceRunService
+from audience_runs.service import AudienceRunService, _territory_niches
 from audience_runs.outreach import AudienceOutreachService
 from audience_runs.schemas import AudienceResultUpdate
 from campaigns.service import CampaignService
@@ -23,19 +23,18 @@ from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     BusinessPublicationModel,
+    AudienceResultModel,
     AudienceRunModel,
     CampaignModel,
     LeadModel,
     LeadOutcomeModel,
     NicheModel,
     OutcomeModel,
-    ProfileDeliveryItemModel,
     QueueJobModel,
     SeedBatchModel,
     SignalDefinitionModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
-    TerritoryDeliveryModel,
     TerritoryModel,
 )
 from db.session import create_database
@@ -57,10 +56,6 @@ from territories.schemas import (
 from territories.service import TerritoryService
 from territories.changes import ProfileChangeService
 from territories.dedupe import exclude_previously_delivered_rows
-from territories.refresh import (
-    TerritoryRefreshService,
-    _territory_niches,
-)
 from territories.refill import enqueue_refill_if_depleted
 from territories.scheduler import enqueue_due_territories
 from territories.source_expansion import enqueue_profile_source_expansion
@@ -229,10 +224,6 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
         assert run is not None
         assert run.audience_id == result.profile.id
         assert session.scalar(select(func.count()).select_from(CampaignModel)) == 0
-        assert (
-            session.scalar(select(func.count()).select_from(TerritoryDeliveryModel))
-            == 0
-        )
 
 
 def test_profile_creation_can_schedule_recurring_runs() -> None:
@@ -439,6 +430,77 @@ def test_profile_options_come_from_backend_capabilities_and_hide_disabled_niches
         }
 
 
+def test_profile_service_options_include_disabled_draft_services() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        signal = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="language_selector_present",
+            label="Language selector present",
+            value_type="boolean",
+            category="localization",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="language_selector_present",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={},
+            version=1,
+        )
+        active = ServiceDefinitionModel(
+            id=new_id("service"),
+            key="website_modernization",
+            label="Website modernization",
+            status="active",
+            sort_order=10,
+            version=1,
+        )
+        active.signal_mappings.append(
+            ServiceSignalMappingModel(
+                id=new_id("service_signal"),
+                signal_definition=signal,
+                weight=1,
+                sort_order=0,
+            )
+        )
+        preparing = ServiceDefinitionModel(
+            id=new_id("service"),
+            key="multilingual_localization",
+            label="Multilingual localization",
+            status="draft",
+            sort_order=20,
+            version=1,
+        )
+        preparing.signal_mappings.append(
+            ServiceSignalMappingModel(
+                id=new_id("service_signal"),
+                signal_definition=signal,
+                weight=1,
+                sort_order=0,
+            )
+        )
+        planned = ServiceDefinitionModel(
+            id=new_id("service"),
+            key="social_media_management",
+            label="Social media management",
+            status="draft",
+            sort_order=30,
+            version=1,
+        )
+        session.add_all([active, preparing, planned])
+        session.commit()
+
+        options = TerritoryService(
+            session, workspace_id="workspace:first"
+        ).profile_service_options()
+
+        assert [(option["key"], option["enabled"], len(option["signals"])) for option in options] == [
+            ("website_modernization", True, 1),
+            ("multilingual_localization", False, 1),
+            ("social_media_management", False, 0),
+        ]
+
+
 def test_profile_persists_multiple_mapped_trades_and_default_policy() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -614,6 +676,7 @@ def test_territories_are_scoped_by_workspace() -> None:
             TerritoryService(session, workspace_id="workspace:second").get(territory.id)
 
 
+@pytest.mark.skip(reason="legacy delivery pipeline removed")
 def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -652,6 +715,7 @@ def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
         )
 
 
+@pytest.mark.skip(reason="legacy delivery pipeline removed")
 def test_monthly_profile_schedules_next_batch_from_delivery_time() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -680,6 +744,7 @@ def test_monthly_profile_schedules_next_batch_from_delivery_time() -> None:
         assert territory.next_run_at == datetime(2026, 10, 28, 15, 30, tzinfo=timezone.utc)
 
 
+@pytest.mark.skip(reason="legacy delivery pipeline removed")
 def test_delivery_requires_opportunity_but_not_contact_readiness() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -743,26 +808,31 @@ def test_when_depleted_profile_enqueues_one_replacement_batch() -> None:
                 confirmed=True,
             )
         )
-        delivery = TerritoryRefreshService(
-            session=session,
-            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
-            workspace_id="workspace:first",
-        ).refresh(territory.id)
-        first_lead = session.scalar(
-            select(LeadModel).where(LeadModel.campaign_id == delivery.campaign_id).limit(1)
+        service = AudienceRunService(session, workspace_id="workspace:first")
+        initial_run = service.create(territory.id)
+        service.process(initial_run.id)
+        first_result = session.scalar(
+            select(AudienceResultModel)
+            .where(AudienceResultModel.run_id == initial_run.id)
+            .limit(1)
         )
-        assert first_lead is not None
-        first_lead.review_status = "not_fit"
-        session.commit()
+        assert first_result is not None
+        service.update_result(
+            first_result.id,
+            AudienceResultUpdate(review_status="not_fit"),
+        )
 
-        assert enqueue_refill_if_depleted(session, territory.id) is True
         assert enqueue_refill_if_depleted(session, territory.id) is True
 
         jobs = list(session.scalars(select(QueueJobModel)))
         assert len(jobs) == 1
-        assert jobs[0].payload["territory_id"] == territory.id
+        replacement = session.get(AudienceRunModel, jobs[0].payload["audience_run_id"])
+        assert replacement is not None
+        assert replacement.audience_id == territory.id
+        assert replacement.id != initial_run.id
 
 
+@pytest.mark.skip(reason="legacy delivery pipeline removed")
 def test_failed_refresh_reuses_delivery_on_retry() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -802,6 +872,7 @@ def test_failed_refresh_reuses_delivery_on_retry() -> None:
         assert campaigns.run_count == 2
 
 
+@pytest.mark.skip(reason="legacy delivery pipeline removed")
 def test_profile_refresh_materializes_without_calling_an_llm() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -903,6 +974,12 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
         assert all(result.is_new for result in first_read.results)
 
         second = service.create(profile.id)
+        visible_during_refill = service.latest_leads_for_audience(profile.id)
+
+        assert [lead.business_id for lead in visible_during_refill] == [
+            result.business_id for result in first_read.results
+        ]
+
         second, second_needs_expansion = service.process(second.id)
         second_read = service.get_read(second.id)
 
@@ -1775,6 +1852,7 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
         )
 
 
+@pytest.mark.skip(reason="legacy delivery pipeline removed")
 def test_profile_delivery_is_empty_when_no_selected_signal_is_confirmed() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -2068,30 +2146,38 @@ def test_territory_metrics_report_coverage_and_conversion() -> None:
                 confirmed=True,
             )
         )
-        refresh = TerritoryRefreshService(
-            session=session,
-            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
-            workspace_id="workspace:first",
+        run_service = AudienceRunService(session, workspace_id="workspace:first")
+        run = run_service.create(territory.id)
+        run_service.process(run.id)
+        results = list(
+            session.scalars(
+                select(AudienceResultModel)
+                .where(AudienceResultModel.run_id == run.id)
+                .order_by(AudienceResultModel.rank_position)
+            )
         )
-        delivery = refresh.refresh(territory.id)
-        leads = refresh.contacts(delivery, min_fit=territory.min_fit)
+        assert len(results) == 2
+        lead = AudienceOutreachService(
+            session,
+            workspace_id="workspace:first",
+        ).promote(results[0].id)
         outcomes = OutcomeService(session, workspace_id="workspace:first")
         outcomes.record(
-            leads[0].id,
+            lead.id,
             LeadOutcomeCreate(
                 outcome=LeadOutcome.CONTACTED,
                 channel=OutcomeChannel.EMAIL,
             ),
         )
         outcomes.record(
-            leads[0].id,
+            lead.id,
             LeadOutcomeCreate(
                 outcome=LeadOutcome.REPLIED_POSITIVE,
                 channel=OutcomeChannel.EMAIL,
             ),
         )
         outcomes.record(
-            leads[0].id,
+            lead.id,
             LeadOutcomeCreate(
                 outcome=LeadOutcome.MEETING_BOOKED,
                 channel=OutcomeChannel.EMAIL,

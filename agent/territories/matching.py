@@ -21,7 +21,6 @@ from db.models import (
     BusinessPublicationModel,
     ContactModel,
     OutcomeModel,
-    ProfileDeliveryItemModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     SignalDefinitionModel,
@@ -75,7 +74,6 @@ class ProfileMatchService:
         profile,
         niche_ids: list[str],
         limit: int,
-        exclude_legacy_deliveries: bool = True,
     ) -> list[dict[str, Any]]:
         if not niche_ids or limit <= 0:
             return []
@@ -118,16 +116,6 @@ class ProfileMatchService:
             .where(BusinessNicheMembershipModel.niche_id.in_(niche_ids))
             .where(active_membership_condition())
         )
-        if exclude_legacy_deliveries:
-            statement = statement.where(
-                ~select(ProfileDeliveryItemModel.id)
-                .where(
-                    ProfileDeliveryItemModel.profile_id == profile.id,
-                    ProfileDeliveryItemModel.business_id == BusinessModel.id,
-                )
-                .exists()
-            )
-
         if profile.trade_keys:
             statement = statement.where(
                 or_(

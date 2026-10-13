@@ -42,7 +42,6 @@ import type {
   GmailConnectionStatus,
   WebhookDelivery,
   Territory,
-  TerritoryDelivery,
   TerritoryMetrics,
   TerritoryResolution,
   LeadOutcomeValue,
@@ -360,24 +359,6 @@ export class ApiClient {
 
   refreshTerritory(id: string) {
     return this.request<ProfileQueued>(`/territories/${id}/refresh`, { method: "POST" });
-  }
-
-  getTerritoryDeliveries(id: string) {
-    return this.request<TerritoryDelivery[]>(`/territories/${id}/deliveries`);
-  }
-
-  getTerritoryDeliveryContacts(territoryId: string, deliveryId: string) {
-    return this.request<DiscoveryResult[]>(`/territories/${territoryId}/deliveries/${deliveryId}/contacts`);
-  }
-
-  async downloadTerritoryDeliveryCsv(territoryId: string, deliveryId: string) {
-    const authToken = (await this.options.getToken?.()) || this.options.token;
-    const path = `/territories/${territoryId}/deliveries/${deliveryId}/export.csv`;
-    const response = await fetch(`${this.options.baseUrl.replace(/\/$/, "")}${path}`, {
-      headers: authToken ? { authorization: `Bearer ${authToken}` } : {},
-    });
-    if (!response.ok) throw new Error(`Export failed with ${response.status}`);
-    return response.blob();
   }
 
   getTerritoryMetrics(id: string, weeks = 8) {
