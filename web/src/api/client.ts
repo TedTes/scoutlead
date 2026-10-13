@@ -193,7 +193,7 @@ export class ApiClient {
   collectActiveAdminSignals(reason: string) {
     return this.request<{ definition_count: number; job_count: number }>("/admin/signals/collect-active", {
       method: "POST",
-      body: { reason, scope: "all", batch_size: 100 },
+      body: { reason, scope: "all", batch_size: 10 },
     });
   }
 
@@ -232,7 +232,7 @@ export class ApiClient {
   collectAdminService(id: string, reason: string) {
     return this.request<{ service: AdminServiceDefinition; signal_count: number; collection_jobs: unknown[] }>(`/admin/services/${id}/collect`, {
       method: "POST",
-      body: { reason, scope: "all", business_ids: [], batch_size: 100 },
+      body: { reason, scope: "all", business_ids: [], batch_size: 10 },
     });
   }
 

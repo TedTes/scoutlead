@@ -66,6 +66,12 @@ def run_once() -> bool:
             if PipelineOutboxDispatcher(session).dispatch_one():
                 return True
             return False
+        logger.info(
+            "job_started job_id=%s job_type=%s attempt=%s",
+            job.id,
+            job.type,
+            job.attempts,
+        )
         try:
             if job.type == JobType.CAMPAIGN_RUN.value:
                 _campaign_service(session=session, services=services).run_campaign(
@@ -311,6 +317,7 @@ def run_once() -> bool:
                 )
             return True
         queue.complete(job.id)
+        logger.info("job_completed job_id=%s job_type=%s", job.id, job.type)
         return True
     finally:
         generator.close()

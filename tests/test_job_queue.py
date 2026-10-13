@@ -110,6 +110,44 @@ def test_completed_idempotent_job_can_be_enqueued_again() -> None:
         assert second.id != first.id
 
 
+def test_interactive_jobs_are_claimed_before_bulk_signal_collection() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        queue = QueueRepository(session)
+        queue.enqueue(
+            JobType.SIGNAL_COLLECTION,
+            {"signal_definition_id": "signal_1"},
+        )
+        audience = queue.enqueue(
+            JobType.AUDIENCE_RUN,
+            {"audience_run_id": "audience_run_1"},
+        )
+
+        claimed = queue.claim_next()
+
+        assert claimed is not None
+        assert claimed.id == audience.id
+
+
+def test_pipeline_jobs_are_claimed_before_bulk_signal_collection() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        queue = QueueRepository(session)
+        queue.enqueue(
+            JobType.SIGNAL_COLLECTION,
+            {"signal_definition_id": "signal_1"},
+        )
+        source_fetch = queue.enqueue(
+            JobType.SOURCE_FETCH,
+            {"segment_id": "segment_1", "source_index": 0},
+        )
+
+        claimed = queue.claim_next()
+
+        assert claimed is not None
+        assert claimed.id == source_fetch.id
+
+
 def test_signal_collection_idempotency_key_is_bounded_for_large_batches() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

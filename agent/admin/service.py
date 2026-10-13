@@ -1225,6 +1225,9 @@ class AdminDataService:
         market_key: str | None,
         batch_size: int,
     ) -> list[dict[str, Any]]:
+        # Website collection can inspect several pages per business. Keep each
+        # bulk unit small enough to yield the worker to interactive requests.
+        batch_size = min(batch_size, 10)
         target_ids = self._signal_collection_business_ids(
             scope=scope,
             business_ids=business_ids,

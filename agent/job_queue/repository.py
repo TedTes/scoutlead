@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -98,11 +98,26 @@ class QueueRepository:
         return model
 
     def claim_next(self) -> QueueJobModel | None:
+        priority = case(
+            (
+                QueueJobModel.type.in_(
+                    [JobType.MESSAGE_SEND.value, JobType.AUDIENCE_RUN.value]
+                ),
+                0,
+            ),
+            (
+                QueueJobModel.type.in_(
+                    [JobType.SIGNAL_COLLECTION.value, JobType.SIGNAL_VALIDATION.value]
+                ),
+                20,
+            ),
+            else_=10,
+        )
         statement = (
             select(QueueJobModel)
             .where(QueueJobModel.status == JobStatus.QUEUED.value)
             .where(QueueJobModel.run_after <= utcnow())
-            .order_by(QueueJobModel.created_at)
+            .order_by(priority, QueueJobModel.created_at)
             .with_for_update(skip_locked=True)
             .limit(1)
         )
