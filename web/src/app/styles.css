@@ -543,6 +543,28 @@ a {
   display: none;
 }
 
+.landing-workspace-preview .audience-builder-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.landing-workspace-preview .audience-builder-footer {
+  margin-top: auto;
+}
+
+.landing-workspace-preview .preview-match-loading {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.landing-workspace-preview .preview-match-loading-body {
+  flex: 1;
+  justify-content: center;
+  min-height: 0;
+}
+
 .preview-audience-bar {
   align-items: center;
   border-bottom: 1px solid var(--line);
@@ -638,7 +660,7 @@ a {
 }
 
 .landing-workspace-scenes > .preview-scene {
-  align-self: start;
+  align-self: stretch;
 }
 
 .preview-match-loading {

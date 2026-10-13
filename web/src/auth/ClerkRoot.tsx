@@ -442,6 +442,29 @@ const PREVIEW_LEADS = [
       website: "Website listed",
     },
   },
+  {
+    name: "North York Comfort Systems",
+    category: "local service provider",
+    location: "North York, ON, Canada",
+    score: 85,
+    status: "Verified",
+    statusTone: "green",
+    fit: "Strong fit",
+    body: "The business has 11 public reviews.",
+    missing: "",
+    detail: {
+      address: "212 Finch Ave W, North York, ON",
+      contact: "Public business profile",
+      email: "No email found",
+      emailStatus: "Email · unavailable",
+      why: "The business has 11 public reviews, below this audience's threshold of 15.",
+      opportunityLabel: "Confirmed",
+      contactLabel: "Phone only",
+      contactTone: "tone-amber",
+      phone: "Public phone found",
+      website: "Website listed",
+    },
+  },
 ];
 
 const PREVIEW_LEAD_TOTAL = PREVIEW_LEADS.length;
@@ -453,12 +476,12 @@ const PREVIEW_RUNS = [
   { title: "Toronto Electricians - Low Reviews", meta: "15 · 11 verified", count: "", date: "Sep 30", tone: "green" },
   { title: "Toronto Painters Missing Website", meta: "25 leads", count: "", date: "Oct 3", tone: "green" },
   { title: "Toronto HVAC No Quote Flow", meta: "9 found", count: "researching", date: "Oct 1", tone: "amber" },
-  { title: "Toronto HVAC Low Reviews", meta: "4 leads", count: "", date: "Oct 1", tone: "green" },
+  { title: "Toronto HVAC Low Reviews", meta: "5 leads", count: "", date: "Oct 1", tone: "green" },
 ];
 
 function AnimatedPreview() {
   const [screen, setScreen] = useState<"results" | "builder" | "loading">("results");
-  const [visibleLeads, setVisibleLeads] = useState(4);
+  const [visibleLeads, setVisibleLeads] = useState(5);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [cursorIndex, setCursorIndex] = useState(-1);
   const [cursorPressed, setCursorPressed] = useState(false);
@@ -476,7 +499,7 @@ function AnimatedPreview() {
   useEffect(() => {
     if (prefersReducedMotion()) {
       setScreen("results");
-      setVisibleLeads(4);
+      setVisibleLeads(5);
       setSelectedIndex(0);
       setCriteriaStep(3);
       setReviewStage(3);
@@ -489,7 +512,7 @@ function AnimatedPreview() {
     const compactLayout = window.matchMedia("(max-width: 680px)").matches;
 
     setScreen("results");
-    setVisibleLeads(compactLayout ? 0 : 4);
+    setVisibleLeads(compactLayout ? 0 : 5);
     setSelectedIndex(-1);
     setCursorIndex(-1);
     setCursorPressed(false);
@@ -504,7 +527,7 @@ function AnimatedPreview() {
     setShortlisted(false);
 
     if (compactLayout) {
-      setVisibleLeads(4);
+      setVisibleLeads(5);
       at(450, () => setNewAudienceCursor(true));
       at(850, () => setNewAudiencePressed(true));
       at(1080, () => {
@@ -534,7 +557,7 @@ function AnimatedPreview() {
         setScreen("loading");
       });
       at(4700, () => setScreen("results"));
-      for (let index = 0; index < 4; index += 1) {
+      for (let index = 0; index < 5; index += 1) {
         at(4900 + index * 220, () => setVisibleLeads(index + 1));
       }
       at(6000, () => setCursorIndex(0));
@@ -586,7 +609,7 @@ function AnimatedPreview() {
       setVisibleLeads(0);
       setScreen("results");
     });
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       at(6500 + index * 220, () => setVisibleLeads(index + 1));
     }
     at(7800, () => setCursorIndex(0));
@@ -672,7 +695,7 @@ function AnimatedPreview() {
                 cursorPressed={cursorPressed}
                 detailIndex={selectedIndex < 0 ? 0 : selectedIndex}
                 drawerVisible={selectedIndex >= 0}
-                leadLimit={4}
+                leadLimit={5}
                 reviewStage={reviewStage}
                 shortlisted={shortlisted}
                 showDrawer={selectedIndex >= 0}
