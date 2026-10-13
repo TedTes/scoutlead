@@ -170,7 +170,11 @@ export function AudienceProfileScreen() {
               ? "ScoutLead is scoring indexed businesses for this audience. You can leave this page."
               : activeBatch && ["ready", "partial"].includes(activeBatch.state)
                 ? `${activeBatch.remaining_count} leads remain for review.`
-                : "The initial batch is queued for worker processing."}
+                : activeBatch?.state === "setup"
+                  ? "No lead batch has been generated for this audience yet."
+                  : activeBatch?.state === "failed"
+                    ? "The latest batch could not be completed."
+                    : "No indexed businesses matched this audience."}
           </p>
         </div>
       </section>

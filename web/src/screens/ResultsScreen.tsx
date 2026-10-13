@@ -3453,10 +3453,16 @@ function emptyBatchCopy(
       detail: "The previous attempt failed. The worker has queued an automatic retry.",
     };
   }
-  if (state === "scoring" || state === "setup") {
+  if (state === "scoring") {
     return {
       title: "Building this lead batch.",
       detail: "Candidate evaluation is still running. Results will appear automatically.",
+    };
+  }
+  if (state === "setup") {
+    return {
+      title: "No lead batch has been generated yet.",
+      detail: "Run this audience to evaluate indexed businesses against its current criteria.",
     };
   }
   if (state === "failed") {
