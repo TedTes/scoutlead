@@ -11,46 +11,82 @@ import type {
   ProfileTrade,
 } from "../types/domain";
 
-const FALLBACK_SERVICES = [
+const FALLBACK_SERVICES: ProfileOptions["services"] = [
   {
     key: "website_modernization",
     label: "Website presence and modernization",
     description: "Missing, insecure, or low-quality website.",
+    status: "active", enabled: true, signals: [],
   },
   {
     key: "lead_capture",
     label: "Lead capture and conversion",
     description: "Missing contact paths, calls to action, or business details.",
+    status: "active", enabled: true, signals: [],
   },
   {
     key: "booking_payments",
     label: "Quotes, booking, and payments",
     description: "Missing quote, scheduling, payment, or financing flows.",
+    status: "active", enabled: true, signals: [],
   },
   {
     key: "performance_accessibility",
     label: "Mobile performance and accessibility",
     description: "Slow, unstable, inaccessible, or poorly adapted mobile experience.",
+    status: "active", enabled: true, signals: [],
   },
   {
     key: "local_visibility",
     label: "Local SEO and service-area visibility",
     description: "Weak search readiness or missing local service content.",
+    status: "active", enabled: true, signals: [],
   },
   {
     key: "reputation_trust",
     label: "Reputation and trust",
     description: "Weak reviews or missing customer and compliance signals.",
+    status: "active", enabled: true, signals: [],
   },
-] as const;
-
-const EXCLUSIONS: Array<{ value: ProfileExclusion; label: string }> = [
-  { value: "closed", label: "Closed or inactive" },
-  { value: "chains", label: "Chains" },
-  { value: "franchises", label: "Franchises" },
-  { value: "directories", label: "Directories" },
-  { value: "agencies", label: "Marketing agencies" },
+  {
+    key: "multilingual_localization",
+    label: "Multilingual website localization",
+    description: "Missing language declarations, alternate pages, or local-language support.",
+    status: "draft", enabled: false, signals: [{ key: "market_language_supported", label: "Market language supported", weight: 1 }],
+  },
+  {
+    key: "crm_follow_up_automation",
+    label: "CRM and follow-up automation",
+    description: "Missed responses, inconsistent follow-up, or manual lead handling.",
+    status: "draft", enabled: false, signals: [],
+  },
+  {
+    key: "social_media_management",
+    label: "Social media management",
+    description: "Inactive profiles, inconsistent publishing, or weak social engagement.",
+    status: "draft", enabled: false, signals: [],
+  },
+  {
+    key: "branding_creative",
+    label: "Branding and creative services",
+    description: "Outdated or inconsistent branding across public customer touchpoints.",
+    status: "draft", enabled: false, signals: [],
+  },
+  {
+    key: "recruiting_employer_branding",
+    label: "Recruiting and employer branding",
+    description: "Active hiring with weak recruiting pages or employer positioning.",
+    status: "draft", enabled: false, signals: [],
+  },
+  {
+    key: "maintenance_plan_consulting",
+    label: "Maintenance-plan consulting",
+    description: "No visible recurring service or customer-retention offering.",
+    status: "draft", enabled: false, signals: [],
+  },
 ];
+
+const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
 
 const CITY_SUGGESTIONS = [
   "Toronto",
@@ -74,9 +110,7 @@ export function AudienceProfileScreen() {
   const [city, setCity] = useState("");
   const [radiusKm, setRadiusKm] = useState<10 | 25 | 50>(25);
   const [batchSize, setBatchSize] = useState<15 | 25 | 40>(25);
-  const [refillPolicy, setRefillPolicy] = useState<ProfileCreateInput["refill_policy"]>("when_depleted");
   const [services, setServices] = useState<string[]>([]);
-  const [exclusions, setExclusions] = useState<ProfileExclusion[]>(EXCLUSIONS.map((item) => item.value));
   const [saving, setSaving] = useState(false);
   const audienceDefined = Boolean(trades.length && city.trim().length >= 2);
   const valid = Boolean(selectedProductId && audienceDefined && services.length);
@@ -103,9 +137,11 @@ export function AudienceProfileScreen() {
   }, [territoryApi]);
 
   const businessTypes = profileOptions?.business_types || [];
-  const serviceOptions = profileOptions?.services?.length
-    ? profileOptions.services
-    : FALLBACK_SERVICES;
+  const serviceOptions = useMemo(() => {
+    const merged = new Map(FALLBACK_SERVICES.map((service) => [service.key, service]));
+    for (const service of profileOptions?.services || []) merged.set(service.key, service);
+    return [...merged.values()];
+  }, [profileOptions?.services]);
 
   if (selectedProfile) {
     const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
@@ -132,7 +168,7 @@ export function AudienceProfileScreen() {
           <p>
             {scoring
               ? "ScoutLead is scoring indexed businesses for this audience. You can leave this page."
-              : activeBatch?.delivery
+              : activeBatch && ["ready", "partial"].includes(activeBatch.state)
                 ? `${activeBatch.remaining_count} leads remain for review.`
                 : "The initial batch is queued for worker processing."}
           </p>
@@ -151,9 +187,9 @@ export function AudienceProfileScreen() {
       market: { city: city.trim(), radius_km: radiusKm },
       services,
       signals: [],
-      exclude: exclusions,
+      exclude: SYSTEM_EXCLUSIONS,
       limit: batchSize,
-      refill_policy: refillPolicy,
+      refill_policy: "when_depleted",
       exclude_already_delivered: true,
     };
     setSaving(true);
@@ -330,20 +366,6 @@ export function AudienceProfileScreen() {
                 {[15, 25, 40].map((value) => <option key={value} value={value}>{value} leads</option>)}
               </select>
             </label>
-            <label className="audience-field">
-              <span>Refresh</span>
-              <select
-                className="audience-input"
-                value={refillPolicy}
-                onChange={(event) => setRefillPolicy(event.target.value as ProfileCreateInput["refill_policy"])}
-              >
-                <option value="when_depleted">When reviewed</option>
-                <option value="manual">On demand</option>
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Every two weeks</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
           </div>
         </section>
 
@@ -356,37 +378,23 @@ export function AudienceProfileScreen() {
             <div className="audience-focus-list" role="group" aria-labelledby="audience-signals-title">
               {serviceOptions.map((service) => {
                 const selected = services.includes(service.key);
+                const enabled = service.enabled ?? (service.status ? service.status === "active" : true);
+                const availability = service.signals.length ? "Preparing data" : "Coming soon";
                 return (
-                  <label className={selected ? "is-selected" : ""} key={service.key}>
+                  <label className={`${selected ? "is-selected" : ""}${enabled ? "" : " is-disabled"}`} key={service.key}>
                     <input
                       type="checkbox"
                       checked={selected}
+                      disabled={!enabled}
                       onChange={() => setServices(toggleValue(services, service.key))}
                     />
                     <span>
-                      <strong>{service.label}</strong>
+                      <strong>{service.label}{!enabled ? <em>{availability}</em> : null}</strong>
                       <small>{service.description}</small>
                     </span>
                   </label>
                 );
               })}
-            </div>
-          </div>
-        </section>
-
-        <section className="audience-form-row" aria-labelledby="audience-exclude-title">
-          <div className="audience-row-copy">
-            <h2 id="audience-exclude-title">Exclude</h2>
-            <p>Left out of every batch.</p>
-          </div>
-          <div className="audience-row-control">
-            <div className="audience-option-grid">
-              {EXCLUSIONS.map((exclusion) => (
-                <label key={exclusion.value}>
-                  <input type="checkbox" checked={exclusions.includes(exclusion.value)} onChange={() => setExclusions(toggleValue(exclusions, exclusion.value))} />
-                  <span>{exclusion.label}</span>
-                </label>
-              ))}
             </div>
           </div>
         </section>

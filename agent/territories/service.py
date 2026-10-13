@@ -292,27 +292,30 @@ class TerritoryService:
         ]
 
     def profile_service_options(self) -> list[dict]:
-        return [
-            {
+        options = []
+        for service in self.services.list():
+            signals = [
+                {
+                    "key": mapping.signal_definition.key,
+                    "label": mapping.signal_definition.label,
+                    "weight": mapping.weight,
+                }
+                for mapping in sorted(
+                    service.signal_mappings,
+                    key=lambda item: item.sort_order,
+                )
+                if mapping.signal_definition.status == "active"
+                and mapping.signal_definition.opportunity_direction != "none"
+            ]
+            options.append({
                 "key": service.key,
                 "label": service.label,
                 "description": service.description,
-                "signals": [
-                    {
-                        "key": mapping.signal_definition.key,
-                        "label": mapping.signal_definition.label,
-                        "weight": mapping.weight,
-                    }
-                    for mapping in sorted(
-                        service.signal_mappings,
-                        key=lambda item: item.sort_order,
-                    )
-                    if mapping.signal_definition.status == "active"
-                    and mapping.signal_definition.opportunity_direction != "none"
-                ],
-            }
-            for service in self.services.list(status="active")
-        ]
+                "status": service.status,
+                "enabled": service.status == "active" and bool(signals),
+                "signals": signals,
+            })
+        return options
 
     def list(self):
         return [self._read(model) for model in self.territories.list()]

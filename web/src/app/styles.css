@@ -8725,6 +8725,10 @@ body.is-resizing-navigation .rail {
   color: var(--green);
 }
 
+.audience-focus-list label.is-disabled { cursor: default; opacity: .62; }
+.audience-focus-list label.is-disabled:hover strong { color: var(--text); }
+.audience-focus-list strong em { margin-left: 7px; padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 8px; font-style: normal; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+
 .audience-focus-list input {
   accent-color: var(--green);
   margin: 2px 0 0;

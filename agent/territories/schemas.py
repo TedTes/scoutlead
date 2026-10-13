@@ -269,6 +269,8 @@ class ProfileServiceOptionRead(BaseModel):
     key: str
     label: str
     description: str | None = None
+    status: Literal["draft", "active", "inactive"]
+    enabled: bool
     signals: list[ProfileServiceSignalRead] = Field(default_factory=list)
 
 

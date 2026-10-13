@@ -371,6 +371,8 @@ export type ProfileOptions = {
     key: string;
     label: string;
     description?: string | null;
+    status: "draft" | "active" | "inactive";
+    enabled: boolean;
     signals: Array<{
       key: string;
       label: string;
