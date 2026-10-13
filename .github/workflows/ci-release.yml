@@ -210,6 +210,7 @@ jobs:
 
       - name: Run database migrations
         if: steps.changes.outputs.migrations == 'true'
+        timeout-minutes: 5
         env:
           DATABASE_URL: ${{ env.RAILWAY_MIGRATION_DATABASE_URL }}
         run: python -m alembic upgrade head
