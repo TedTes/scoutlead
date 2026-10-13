@@ -2282,6 +2282,7 @@ function ContactDrawer({
                       <h3>Why this lead?</h3>
                       <span>{opportunity.label}</span>
                     </div>
+                    {opportunity.services?.length ? <div className="drawer-matched-services">{opportunity.services.map((service) => <span key={service}>{service}</span>)}</div> : null}
                     {opportunityReasons.length ? (
                       <ul>
                         {opportunityReasons.slice(0, 4).map((reason) => (
@@ -3676,6 +3677,7 @@ type ContactOpportunity = {
   level: "high" | "moderate" | "low" | "none" | "unknown";
   score: number;
   signals: string[];
+  services?: string[];
 };
 
 function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportunity {
@@ -3742,15 +3744,21 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
     const profileMatch = getRawValue(raw, "profile_match");
     if (!isRecord(profileMatch)) continue;
     const evidence = isRecord(profileMatch.signals) ? profileMatch.signals : {};
+    const services = Array.isArray(profileMatch.matched_services)
+      ? profileMatch.matched_services
+          .filter(isRecord)
+          .map((service) => rawValueToString(service.label))
+          .filter(Boolean)
+      : [];
     const selectedSignals = Object.entries(evidence).flatMap(([key, value]) =>
       isRecord(value) ? [[key, value] as const] : [],
     );
     if (!selectedSignals.length) {
-      return { label: "Not requested", level: "unknown", score: 0, signals: [] };
+      return { label: "Not requested", level: "unknown", score: 0, signals: [], services };
     }
     const matchedSignals = selectedSignals.filter(([, value]) => value.matched === true);
     if (!matchedSignals.length) {
-      return { label: "No clear signal", level: "none", score: 0, signals: [] };
+      return { label: "No clear signal", level: "none", score: 0, signals: [], services };
     }
     const confirmedSignals = matchedSignals.filter(([, value]) =>
       rawValueToString(value.confidence || "confirmed") === "confirmed",
@@ -3761,6 +3769,7 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
         level: "moderate",
         score: Math.min(65, 50 + (matchedSignals.length - 1) * 5),
         signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
+        services,
       };
     }
     return {
@@ -3768,6 +3777,7 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
       level: "high",
       score: Math.min(100, 70 + (matchedSignals.length - 1) * 10),
       signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
+      services,
     };
   }
   return null;

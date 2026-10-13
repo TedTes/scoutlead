@@ -8,16 +8,41 @@ import type {
   ProfileCustomerKind,
   ProfileExclusion,
   ProfileOptions,
-  ProfileSignal,
   ProfileTrade,
 } from "../types/domain";
 
-const FALLBACK_SIGNALS: Array<{ value: ProfileSignal; label: string }> = [
-  { value: "website_unavailable", label: "Missing or unavailable website" },
-  { value: "no_quote_flow", label: "No quote or booking flow" },
-  { value: "no_contact_form", label: "No contact form" },
-  { value: "reviews_under_15", label: "Reviews under 15" },
-];
+const FALLBACK_SERVICES = [
+  {
+    key: "website_modernization",
+    label: "Website presence and modernization",
+    description: "Missing, insecure, or low-quality website.",
+  },
+  {
+    key: "lead_capture",
+    label: "Lead capture and conversion",
+    description: "Missing contact paths, calls to action, or business details.",
+  },
+  {
+    key: "booking_payments",
+    label: "Quotes, booking, and payments",
+    description: "Missing quote, scheduling, payment, or financing flows.",
+  },
+  {
+    key: "performance_accessibility",
+    label: "Mobile performance and accessibility",
+    description: "Slow, unstable, inaccessible, or poorly adapted mobile experience.",
+  },
+  {
+    key: "local_visibility",
+    label: "Local SEO and service-area visibility",
+    description: "Weak search readiness or missing local service content.",
+  },
+  {
+    key: "reputation_trust",
+    label: "Reputation and trust",
+    description: "Weak reviews or missing customer and compliance signals.",
+  },
+] as const;
 
 const EXCLUSIONS: Array<{ value: ProfileExclusion; label: string }> = [
   { value: "closed", label: "Closed or inactive" },
@@ -50,11 +75,11 @@ export function AudienceProfileScreen() {
   const [radiusKm, setRadiusKm] = useState<10 | 25 | 50>(25);
   const [batchSize, setBatchSize] = useState<15 | 25 | 40>(25);
   const [refillPolicy, setRefillPolicy] = useState<ProfileCreateInput["refill_policy"]>("when_depleted");
-  const [signals, setSignals] = useState<ProfileSignal[]>([]);
+  const [services, setServices] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<ProfileExclusion[]>(EXCLUSIONS.map((item) => item.value));
   const [saving, setSaving] = useState(false);
   const audienceDefined = Boolean(trades.length && city.trim().length >= 2);
-  const valid = Boolean(selectedProductId && audienceDefined);
+  const valid = Boolean(selectedProductId && audienceDefined && services.length);
 
   const activeBatch = useMemo(
     () => profileBatch?.profile.id === selectedProfile?.id ? profileBatch : null,
@@ -78,12 +103,9 @@ export function AudienceProfileScreen() {
   }, [territoryApi]);
 
   const businessTypes = profileOptions?.business_types || [];
-  const signalOptions = profileOptions?.opportunity_signals?.length
-    ? profileOptions.opportunity_signals.map((signal) => ({
-        value: signal.key,
-        label: signal.label,
-      }))
-    : FALLBACK_SIGNALS;
+  const serviceOptions = profileOptions?.services?.length
+    ? profileOptions.services
+    : FALLBACK_SERVICES;
 
   if (selectedProfile) {
     const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
@@ -127,7 +149,8 @@ export function AudienceProfileScreen() {
       trades,
       customer_kind: customerKind,
       market: { city: city.trim(), radius_km: radiusKm },
-      signals,
+      services,
+      signals: [],
       exclude: exclusions,
       limit: batchSize,
       refill_policy: refillPolicy,
@@ -144,7 +167,7 @@ export function AudienceProfileScreen() {
     }
   };
 
-  const formHint = getFormHint(trades, city);
+  const formHint = getFormHint(trades, city, services);
 
   return (
     <section className="audience-setup-screen">
@@ -326,17 +349,27 @@ export function AudienceProfileScreen() {
 
         <section className="audience-form-row" aria-labelledby="audience-signals-title">
           <div className="audience-row-copy">
-            <h2 id="audience-signals-title">Opportunity signals</h2>
-            <p>Optional. Gaps to look for in each business.</p>
+            <h2 id="audience-signals-title">Services you provide</h2>
+            <p>ScoutLead prioritizes businesses showing evidence they need them.</p>
           </div>
           <div className="audience-row-control">
-            <div className="audience-option-grid">
-              {signalOptions.map((signal) => (
-                <label key={signal.value}>
-                  <input type="checkbox" checked={signals.includes(signal.value)} onChange={() => setSignals(toggleValue(signals, signal.value))} />
-                  <span>{signal.label}</span>
-                </label>
-              ))}
+            <div className="audience-focus-list" role="group" aria-labelledby="audience-signals-title">
+              {serviceOptions.map((service) => {
+                const selected = services.includes(service.key);
+                return (
+                  <label className={selected ? "is-selected" : ""} key={service.key}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => setServices(toggleValue(services, service.key))}
+                    />
+                    <span>
+                      <strong>{service.label}</strong>
+                      <small>{service.description}</small>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </div>
         </section>
@@ -389,12 +422,13 @@ function joinLabels(labels: string[]) {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
-function getFormHint(trades: ProfileTrade[], city: string) {
+function getFormHint(trades: ProfileTrade[], city: string, services: string[]) {
   const needsBusinessType = trades.length === 0;
   const needsCity = city.trim().length < 2;
   if (needsBusinessType && needsCity) return "Choose a business type and enter a city to continue.";
   if (needsBusinessType) return "Choose a business type to continue.";
   if (needsCity) return "Enter a city to continue.";
+  if (!services.length) return "Choose at least one service to prioritize relevant leads.";
   return "Ready to create this audience.";
 }
 

@@ -334,6 +334,7 @@ export type Territory = {
   radius_km: number;
   trade_keys: ProfileTrade[];
   customer_kind: ProfileCustomerKind;
+  service_keys: string[];
   signal_keys: string[];
   exclusion_keys: string[];
   label: string;
@@ -366,6 +367,16 @@ export type ProfileOptions = {
     key: ProfileTrade;
     label: string;
   }>;
+  services: Array<{
+    key: string;
+    label: string;
+    description?: string | null;
+    signals: Array<{
+      key: string;
+      label: string;
+      weight: number;
+    }>;
+  }>;
   opportunity_signals: Array<{
     key: string;
     label: string;
@@ -396,6 +407,7 @@ export type ProfileCreateInput = {
     city: string;
     radius_km: 10 | 25 | 50;
   };
+  services: string[];
   signals: ProfileSignal[];
   exclude: ProfileExclusion[];
   limit: 15 | 25 | 40;
@@ -944,5 +956,33 @@ export type AdminSignalDefinitionInput = {
   freshness_days: number;
   opportunity_direction: string;
   config: Record<string, unknown>;
+  reason: string;
+};
+
+export type AdminServiceDefinition = {
+  id: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  status: "draft" | "active" | "inactive";
+  sort_order: number;
+  version: number;
+  signals: Array<{
+    definition_id: string;
+    key: string;
+    label: string;
+    status: string;
+    weight: number;
+  }>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminServiceDefinitionInput = {
+  key: string;
+  label: string;
+  description?: string;
+  sort_order: number;
+  mappings: Array<{ signal_definition_id: string; weight: number }>;
   reason: string;
 };

@@ -6,6 +6,8 @@ import type {
   AdminDataSegment,
   AdminSignalDefinition,
   AdminSignalDefinitionInput,
+  AdminServiceDefinition,
+  AdminServiceDefinitionInput,
   ApiHealth,
   DiscoveryRun,
   DiscoveryRunCreateInput,
@@ -205,6 +207,33 @@ export class ApiClient {
         scope: businessIds.length ? "selected" : "all",
         business_ids: businessIds,
       },
+    });
+  }
+
+  getAdminServices(status = "") {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    return this.request<AdminServiceDefinition[]>(`/admin/services${query}`);
+  }
+
+  createAdminService(body: AdminServiceDefinitionInput) {
+    return this.request<AdminServiceDefinition>("/admin/services", { method: "POST", body });
+  }
+
+  updateAdminService(id: string, body: Omit<AdminServiceDefinitionInput, "key">) {
+    return this.request<AdminServiceDefinition>(`/admin/services/${id}`, { method: "PATCH", body });
+  }
+
+  changeAdminServiceStatus(id: string, status: "draft" | "active" | "inactive", reason: string) {
+    return this.request<AdminServiceDefinition>(`/admin/services/${id}/status`, {
+      method: "POST",
+      body: { status, reason },
+    });
+  }
+
+  collectAdminService(id: string, reason: string) {
+    return this.request<{ service: AdminServiceDefinition; signal_count: number; collection_jobs: unknown[] }>(`/admin/services/${id}/collect`, {
+      method: "POST",
+      body: { reason, scope: "all", business_ids: [], batch_size: 100 },
     });
   }
 
