@@ -10,8 +10,11 @@ from admin.schemas import (
     AdminDataJobCreate,
     AdminSignalDefinitionCreate,
     AdminSignalDefinitionUpdate,
+    AdminServiceDefinitionCreate,
+    AdminServiceSignalMappingInput,
 )
 from auth.context import AuthContext
+from business_facts.repository import BusinessFactRepository, BusinessFactValue
 from db.models import (
     AdminAuditEventModel,
     BusinessFactModel,
@@ -22,6 +25,7 @@ from db.models import (
     ProductModel,
     QueueJobModel,
     SignalDefinitionModel,
+    ServiceDefinitionModel,
     SourceItemModel,
     ValidationResultModel,
 )
@@ -269,6 +273,72 @@ def test_admin_can_create_update_and_activate_signal_definition() -> None:
             "signal:update",
             "signal:status:active",
         ]
+
+
+def test_admin_creates_service_mapping_and_collects_its_signals() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        signal = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="html_language_present",
+            label="HTML language declared",
+            value_type="boolean",
+            category="localization",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="html_language_present",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={},
+            version=1,
+        )
+        session.add(signal)
+        session.commit()
+        service = _service(session)
+
+        created = service.create_service_definition(
+            AdminServiceDefinitionCreate(
+                key="multilingual_localization",
+                label="Multilingual localization",
+                mappings=[
+                    AdminServiceSignalMappingInput(
+                        signal_definition_id=signal.id,
+                        weight=1.5,
+                    )
+                ],
+                reason="Offer localization from measurable website evidence",
+            )
+        )
+        collected = service.collect_service_signals(
+            created["id"],
+            reason="Backfill localization evidence",
+            scope="selected",
+            business_ids=[business.id],
+            niche_slug=None,
+            market_key=None,
+            batch_size=25,
+        )
+        BusinessFactRepository(session).upsert(
+            business.id,
+            BusinessFactValue(
+                key=signal.key,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=None,
+                quality_state="published",
+            ),
+        )
+        session.commit()
+        activated = service.change_service_definition_status(
+            created["id"], status="active", reason="Collector is ready"
+        )
+
+        assert created["signals"][0]["weight"] == 1.5
+        assert activated["status"] == "active"
+        assert collected["signal_count"] == 1
+        assert len(collected["collection_jobs"]) == 1
+        assert session.get(ServiceDefinitionModel, created["id"]).status == "active"
 
 
 def test_signal_without_collector_cannot_be_activated() -> None:

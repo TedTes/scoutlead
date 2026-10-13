@@ -13,6 +13,9 @@ from admin.schemas import (
     AdminSignalDefinitionStateChange,
     AdminSignalDefinitionUpdate,
     AdminSignalValidationRequest,
+    AdminServiceDefinitionCreate,
+    AdminServiceDefinitionStateChange,
+    AdminServiceDefinitionUpdate,
 )
 from admin.service import AdminDataService
 from app.dependencies import AdminAuth, DbSession
@@ -193,6 +196,66 @@ def validate_signal_facts(
         reason=data.reason,
         scope=data.scope,
         business_ids=data.business_ids,
+    )
+
+
+@router.get("/services")
+def list_service_definitions(
+    session: DbSession,
+    auth: AdminAuth,
+    status: str | None = None,
+):
+    return _service(session, auth).list_service_definitions(status=status)
+
+
+@router.post("/services")
+def create_service_definition(
+    data: AdminServiceDefinitionCreate,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).create_service_definition(data)
+
+
+@router.patch("/services/{service_id}")
+def update_service_definition(
+    service_id: str,
+    data: AdminServiceDefinitionUpdate,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).update_service_definition(service_id, data)
+
+
+@router.post("/services/{service_id}/status")
+def change_service_definition_status(
+    service_id: str,
+    data: AdminServiceDefinitionStateChange,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).change_service_definition_status(
+        service_id,
+        status=data.status,
+        reason=data.reason,
+    )
+
+
+@router.post("/services/{service_id}/collect")
+def collect_service_signals(
+    service_id: str,
+    data: AdminSignalCollectionRequest,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).collect_service_signals(
+        service_id,
+        reason=data.reason,
+        scope=data.scope,
+        business_ids=data.business_ids,
+        niche_slug=data.niche_slug,
+        market_key=data.market_key,
+        batch_size=data.batch_size,
     )
 
 

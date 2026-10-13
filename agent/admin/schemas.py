@@ -127,3 +127,30 @@ class AdminSignalValidationRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
     scope: Literal["all", "selected"] = "selected"
     business_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+class AdminServiceSignalMappingInput(BaseModel):
+    signal_definition_id: str = Field(min_length=1, max_length=64)
+    weight: float = Field(default=1.0, gt=0, le=10)
+
+
+class AdminServiceDefinitionCreate(BaseModel):
+    key: str = Field(min_length=2, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=2, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    mappings: list[AdminServiceSignalMappingInput] = Field(default_factory=list, max_length=50)
+    sort_order: int = Field(default=0, ge=0, le=10000)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class AdminServiceDefinitionUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=2, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    mappings: list[AdminServiceSignalMappingInput] | None = Field(default=None, max_length=50)
+    sort_order: int | None = Field(default=None, ge=0, le=10000)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class AdminServiceDefinitionStateChange(BaseModel):
+    status: Literal["draft", "active", "inactive"]
+    reason: str = Field(min_length=3, max_length=1000)

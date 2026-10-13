@@ -11,6 +11,8 @@ from admin.schemas import (
     AdminBusinessCreate,
     AdminBusinessUpdate,
     AdminDataJobCreate,
+    AdminServiceDefinitionCreate,
+    AdminServiceDefinitionUpdate,
     AdminSignalDefinitionCreate,
     AdminSignalDefinitionUpdate,
 )
@@ -26,6 +28,8 @@ from db.models import (
     BusinessPublicationModel,
     NicheModel,
     QueueJobModel,
+    ServiceDefinitionModel,
+    ServiceSignalMappingModel,
     SignalDefinitionModel,
     SourceItemModel,
     ValidationResultModel,
@@ -35,6 +39,7 @@ from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, normalize_url, utcnow
+from service_definitions.repository import ServiceDefinitionRepository
 from signal_definitions.repository import SignalDefinitionRepository
 from source_items.repository import SourceItemRepository, source_item_content_hash
 from source_items.schemas import (
@@ -71,6 +76,226 @@ class AdminDataService:
             _signal_definition_dict(definition)
             for definition in SignalDefinitionRepository(self.session).list(status=status)
         ]
+
+    def list_service_definitions(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        if status and status not in {"draft", "active", "inactive"}:
+            raise ValidationError("Unknown service status", {"status": status})
+        return [
+            _service_definition_dict(service)
+            for service in ServiceDefinitionRepository(self.session).list(status=status)
+        ]
+
+    def create_service_definition(
+        self,
+        data: AdminServiceDefinitionCreate,
+    ) -> dict[str, Any]:
+        repository = ServiceDefinitionRepository(self.session)
+        if repository.get_by_key(data.key) is not None:
+            raise ConflictError("Service key already exists", {"key": data.key})
+        mappings = self._service_mappings(data.mappings)
+        service = ServiceDefinitionModel(
+            id=new_id("service"),
+            key=data.key,
+            label=data.label,
+            description=data.description,
+            status="draft",
+            sort_order=data.sort_order,
+            version=1,
+        )
+        self.session.add(service)
+        self.session.flush()
+        for index, (signal, weight) in enumerate(mappings):
+            self.session.add(
+                ServiceSignalMappingModel(
+                    id=new_id("service_signal"),
+                    service_definition_id=service.id,
+                    signal_definition_id=signal.id,
+                    weight=weight,
+                    sort_order=index,
+                )
+            )
+        self.session.flush()
+        created = repository.get(service.id)
+        assert created is not None
+        after = _service_definition_dict(created)
+        self._audit(
+            "service:create",
+            service.id,
+            data.reason,
+            None,
+            after,
+            entity_type="service_definition",
+        )
+        self.session.commit()
+        return after
+
+    def update_service_definition(
+        self,
+        service_id: str,
+        data: AdminServiceDefinitionUpdate,
+    ) -> dict[str, Any]:
+        repository = ServiceDefinitionRepository(self.session)
+        service = repository.get(service_id)
+        if service is None:
+            raise NotFoundError("service definition not found", {"service_id": service_id})
+        before = _service_definition_dict(service)
+        values = data.model_dump(exclude_unset=True, exclude={"reason", "mappings"})
+        for key, value in values.items():
+            setattr(service, key, value)
+        if data.mappings is not None:
+            replacements = self._service_mappings(data.mappings)
+            service.signal_mappings.clear()
+            self.session.flush()
+            for index, (signal, weight) in enumerate(replacements):
+                service.signal_mappings.append(
+                    ServiceSignalMappingModel(
+                        id=new_id("service_signal"),
+                        signal_definition_id=signal.id,
+                        weight=weight,
+                        sort_order=index,
+                    )
+                )
+            if service.status == "active":
+                service.status = "draft"
+        service.version += 1
+        self.session.flush()
+        updated = repository.get(service.id)
+        assert updated is not None
+        after = _service_definition_dict(updated)
+        self._audit(
+            "service:update",
+            service.id,
+            data.reason,
+            before,
+            after,
+            entity_type="service_definition",
+        )
+        self.session.commit()
+        return after
+
+    def change_service_definition_status(
+        self,
+        service_id: str,
+        *,
+        status: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if status not in {"draft", "active", "inactive"}:
+            raise ValidationError("Unknown service status", {"status": status})
+        repository = ServiceDefinitionRepository(self.session)
+        service = repository.get(service_id)
+        if service is None:
+            raise NotFoundError("service definition not found", {"service_id": service_id})
+        if status == "active":
+            active_mappings = [
+                mapping
+                for mapping in service.signal_mappings
+                if mapping.signal_definition.status == "active"
+                and mapping.signal_definition.opportunity_direction != "none"
+            ]
+            if not active_mappings:
+                raise ValidationError(
+                    "Active services require at least one active opportunity signal",
+                    {"service_id": service_id},
+                )
+            uncovered = [
+                mapping.signal_definition.key
+                for mapping in active_mappings
+                if not self.session.scalar(
+                    select(BusinessFactModel.id)
+                    .where(
+                        BusinessFactModel.signal_definition_id
+                        == mapping.signal_definition_id,
+                        BusinessFactModel.quality_state == "published",
+                    )
+                    .limit(1)
+                )
+            ]
+            if uncovered:
+                raise ValidationError(
+                    "Collect and validate every mapped signal before activating the service",
+                    {"signal_keys": uncovered},
+                )
+        before = _service_definition_dict(service)
+        service.status = status
+        service.version += 1
+        self.session.flush()
+        after = _service_definition_dict(service)
+        self._audit(
+            f"service:status:{status}",
+            service.id,
+            reason,
+            before,
+            after,
+            entity_type="service_definition",
+        )
+        self.session.commit()
+        return after
+
+    def collect_service_signals(
+        self,
+        service_id: str,
+        *,
+        reason: str,
+        scope: str,
+        business_ids: list[str],
+        niche_slug: str | None,
+        market_key: str | None,
+        batch_size: int,
+    ) -> dict[str, Any]:
+        service = ServiceDefinitionRepository(self.session).get(service_id)
+        if service is None:
+            raise NotFoundError("service definition not found", {"service_id": service_id})
+        if service.status == "inactive":
+            raise ConflictError("Inactive services cannot collect signals")
+        jobs: list[dict[str, Any]] = []
+        signal_ids: list[str] = []
+        for mapping in sorted(service.signal_mappings, key=lambda item: item.sort_order):
+            definition = mapping.signal_definition
+            if definition.status != "active":
+                continue
+            signal_ids.append(definition.id)
+            jobs.extend(
+                self._enqueue_signal_collection(
+                    definition,
+                    reason=reason,
+                    scope=scope,
+                    business_ids=business_ids,
+                    niche_slug=niche_slug,
+                    market_key=market_key,
+                    batch_size=batch_size,
+                )
+            )
+        self._audit(
+            "service:collect",
+            service.id,
+            reason,
+            None,
+            {"scope": scope, "signal_ids": signal_ids, "job_ids": [job["id"] for job in jobs]},
+            entity_type="service_definition",
+        )
+        self.session.commit()
+        return {
+            "service": _service_definition_dict(service),
+            "signal_count": len(signal_ids),
+            "collection_jobs": jobs,
+        }
+
+    def _service_mappings(self, mappings) -> list[tuple[SignalDefinitionModel, float]]:
+        seen: set[str] = set()
+        resolved: list[tuple[SignalDefinitionModel, float]] = []
+        for mapping in mappings:
+            if mapping.signal_definition_id in seen:
+                continue
+            signal = self.session.get(SignalDefinitionModel, mapping.signal_definition_id)
+            if signal is None:
+                raise ValidationError(
+                    "Service mapping references an unknown signal",
+                    {"signal_definition_id": mapping.signal_definition_id},
+                )
+            seen.add(signal.id)
+            resolved.append((signal, mapping.weight))
+        return resolved
 
     def create_signal_definition(
         self,
@@ -1417,6 +1642,33 @@ def _signal_definition_dict(definition: SignalDefinitionModel) -> dict[str, Any]
         "opportunity_direction": definition.opportunity_direction,
         "config": definition.config or {},
         "version": definition.version,
+        "created_at": definition.created_at.isoformat() if definition.created_at else None,
+        "updated_at": definition.updated_at.isoformat() if definition.updated_at else None,
+    }
+
+
+def _service_definition_dict(definition: ServiceDefinitionModel) -> dict[str, Any]:
+    return {
+        "id": definition.id,
+        "key": definition.key,
+        "label": definition.label,
+        "description": definition.description,
+        "status": definition.status,
+        "sort_order": definition.sort_order,
+        "version": definition.version,
+        "signals": [
+            {
+                "definition_id": mapping.signal_definition.id,
+                "key": mapping.signal_definition.key,
+                "label": mapping.signal_definition.label,
+                "status": mapping.signal_definition.status,
+                "weight": mapping.weight,
+            }
+            for mapping in sorted(
+                definition.signal_mappings,
+                key=lambda item: item.sort_order,
+            )
+        ],
         "created_at": definition.created_at.isoformat() if definition.created_at else None,
         "updated_at": definition.updated_at.isoformat() if definition.updated_at else None,
     }
