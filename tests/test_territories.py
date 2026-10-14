@@ -25,6 +25,7 @@ from db.models import (
     AudienceResultModel,
     AudienceRunModel,
     CampaignModel,
+    CoverageRequestModel,
     LeadModel,
     LeadOutcomeModel,
     NicheModel,
@@ -988,6 +989,39 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
             result.business_id for result in first_read.results
         ]
         assert all(not result.is_new for result in second_read.results)
+
+
+def test_audience_run_returns_partial_results_without_waiting_for_expansion() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=25,
+            )
+        )
+        service = AudienceRunService(session, workspace_id="workspace:first")
+
+        run = service.create(profile.id)
+        run, needs_expansion = service.process(run.id)
+
+        assert run.state == "partial"
+        assert run.result_count == 2
+        assert run.completed_at is not None
+        assert needs_expansion is False
+        assert len(service.latest_leads_for_audience(profile.id)) == 2
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
 
 
 def test_audience_result_creates_outreach_records_only_after_user_action() -> None:

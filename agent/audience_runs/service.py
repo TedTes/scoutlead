@@ -160,14 +160,11 @@ class AudienceRunService:
             run.completed_at = now
             audience.last_run_at = now
             self._complete_coverage(run.id)
-        elif now >= run.deadline_at:
+        else:
             run.state = AudienceRunState.PARTIAL.value
             run.completed_at = now
             audience.last_run_at = now
             self._complete_coverage(run.id)
-        else:
-            run.state = AudienceRunState.WAITING_VALIDATION.value
-            needs_expansion = self._request_coverage(run, audience, niches)
         self.session.commit()
         self.session.refresh(run)
         return run, needs_expansion
