@@ -81,27 +81,3 @@ class CampaignRead(CampaignCreate):
     completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-
-
-class CampaignRunSummary(BaseModel):
-    campaign: CampaignRead
-    discovered_lead_count: int
-    researched_lead_count: int
-    contacted_lead_count: int = 0
-    verified_lead_count: int = 0
-    signaled_lead_count: int = 0
-    qualified_lead_count: int
-    drafted_message_count: int
-
-
-class CampaignPreflightCheck(BaseModel):
-    name: str
-    status: str
-    detail: str
-    required: bool = True
-
-
-class CampaignPreflightRead(BaseModel):
-    campaign_id: str
-    ready: bool
-    checks: list[CampaignPreflightCheck]

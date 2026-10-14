@@ -1,18 +1,14 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from types import SimpleNamespace
 import pytest
 
-from auth.context import AuthContext
 from db.session import create_database
-from products.routes import start_product_discovery
 from products.schemas import (
     DiscoverySource,
     DiscoverySourceType,
     ProductCreate,
     ProductDescriptionCreate,
     ProductDiscoveryPlan,
-    ProductDiscoveryStart,
     ProductProfileCreate,
     ProductSourceCreate,
     ProductSourceEvidence,
@@ -25,7 +21,7 @@ from products.discovery_policy import (
     validate_google_places_query,
 )
 from products.service import ProductService
-from shared.errors import ConfigurationError, ConflictError, ValidationError
+from shared.errors import ConflictError, ValidationError
 from tools.browser import WebsiteInspection
 from tools.search import SearchResult
 
@@ -171,34 +167,6 @@ class DiscoveryPlanLLM:
             region_code="CA",
             outreach_objective="Ask for a customer discovery conversation.",
             rationale="Local painters are discoverable through Google Places.",
-        )
-
-
-class BroadDiscoveryPlanLLM:
-    def generate_object(
-        self,
-        *,
-        task: str,
-        system: str,
-        prompt: str,
-        response_model,
-        context: dict | None = None,
-    ):
-        assert response_model is ProductDiscoveryPlan
-        return ProductDiscoveryPlan(
-            product_name="QuoteVan",
-            product_description="Quote workflow for solo painters.",
-            target_customer="Solo painters",
-            problem_being_solved="Quoting takes too long.",
-            value_proposition="Send quotes faster.",
-            target_geography="United States, Canada",
-            validation_goal="Book customer discovery interviews.",
-            qualification_criteria=[QualificationCriterion(label="Solo painter")],
-            discovery_query=(
-                "solo painter OR independent painter OR field service technician"
-            ),
-            outreach_objective="Ask for a customer discovery conversation.",
-            rationale="This is intentionally too broad.",
         )
 
 
@@ -627,37 +595,6 @@ def test_product_discovery_query_policy_requires_enough_query_context() -> None:
 
     validate_google_places_query("residential painters Toronto ON")
     assert normalize_places_region_code("Canada") == "CA"
-
-
-def test_product_discovery_rejects_broad_plan_before_persisting_profile() -> None:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    create_database(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    with session_factory() as session:
-        service = ProductService(session, llm=None, browser=ExplodingBrowser())
-        product = service.create_from_description(
-            ProductDescriptionCreate(
-                product_name="QuoteVan",
-                description=(
-                    "QuoteVan helps solo painters send professional quotes faster. "
-                    "The operator has not provided a concrete test market."
-                ),
-            )
-        )
-
-        with pytest.raises(ValidationError):
-            start_product_discovery(
-                product.id,
-                ProductDiscoveryStart(max_results=10),
-                session,
-                SimpleNamespace(llm=BroadDiscoveryPlanLLM(), browser=None, search=None),
-                AuthContext(),
-            )
-
-        unchanged = service.get(product.id)
-        assert unchanged.preferred_discovery_sources == []
-        assert unchanged.source_evidence["config_generated_by"] == "deterministic_draft"
 
 
 def test_product_description_creation_succeeds_without_llm() -> None:

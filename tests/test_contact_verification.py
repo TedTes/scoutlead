@@ -6,16 +6,12 @@ import pytest
 
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, LeadSeedInput
-from campaigns.service import CampaignService
 from db.session import create_database
 from leads.policy import is_verified_lead
 from leads.repository import LeadRepository
 from leads.schemas import ContactVerificationStatus, LeadRead, LeadVerification
 from products.repository import ProductRepository
 from tests.test_discovery_candidates import product_input
-from tests.test_smoke_campaign import FakeWorkflowLLM
-from tools.browser import DirectHttpBrowserTool
-from tools.search import SearchTool
 from tools.verify import EmailVerificationTool
 
 
@@ -169,27 +165,6 @@ def test_bouncer_payment_error_disables_more_calls_for_the_run(monkeypatch) -> N
     assert calls == 1
 
 
-def test_bouncer_preflight_requires_api_key() -> None:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    create_database(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    with session_factory() as session:
-        service = CampaignService(
-            session=session,
-            llm=FakeWorkflowLLM(),
-            search_tool=SearchTool(),
-            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
-            contact_verification_provider="bouncer",
-        )
-
-        assert service._contact_verification_check() == (
-            "failed",
-            "Configure BOUNCER_API_KEY for Bouncer contact verification.",
-            True,
-        )
-
-
 def test_zerobounce_provider_maps_valid_response(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -264,27 +239,6 @@ def test_zerobounce_provider_maps_non_verified_statuses(
 def test_zerobounce_provider_requires_api_key() -> None:
     with pytest.raises(ValueError, match="ZEROBOUNCE_API_KEY"):
         EmailVerificationTool(provider="zerobounce").run({"email": "owner@example.com"})
-
-
-def test_zerobounce_preflight_requires_api_key() -> None:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    create_database(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    with session_factory() as session:
-        service = CampaignService(
-            session=session,
-            llm=FakeWorkflowLLM(),
-            search_tool=SearchTool(),
-            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
-            contact_verification_provider="zerobounce",
-        )
-
-        assert service._contact_verification_check() == (
-            "failed",
-            "Configure ZEROBOUNCE_API_KEY for ZeroBounce contact verification.",
-            True,
-        )
 
 
 def test_verified_status_is_persisted_on_lead() -> None:

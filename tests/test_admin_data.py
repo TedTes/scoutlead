@@ -222,7 +222,7 @@ def test_admin_revalidation_makes_passed_business_searchable_without_publication
             id=new_id("source_item"),
             **source_value.model_dump(),
             content_hash=source_item_content_hash(source_value),
-            state="validated",
+            state="eligible",
             business_id=business.id,
         )
         session.add(source)
@@ -257,7 +257,7 @@ def test_permanent_delete_is_blocked_when_related_records_exist() -> None:
                 id=new_id("source_item"),
                 **source_value.model_dump(),
                 content_hash=source_item_content_hash(source_value),
-                state="validated",
+                state="eligible",
                 business_id=business.id,
             )
         )
@@ -705,10 +705,10 @@ def test_review_first_batch_only_enters_pipeline_after_admin_approval() -> None:
         )
 
         queued = session.scalar(
-            select(QueueJobModel).where(QueueJobModel.type == "source_item.classify")
+            select(QueueJobModel).where(QueueJobModel.type == "business.identity_resolve")
         )
         assert queued is not None
         assert queued.payload["source_item_id"] == source.id
         assert source.business_id is None
-        assert source.state == "validation_queued"
+        assert source.state == "resolution_queued"
         assert after["review_state"] == "approved"

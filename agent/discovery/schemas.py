@@ -18,16 +18,6 @@ class DiscoveryCandidateType(StrEnum):
     UNKNOWN = "unknown"
 
 
-class CandidateAssessment(BaseModel):
-    candidate_type: DiscoveryCandidateType
-    confidence: int = Field(ge=0, le=100)
-    rejection_reason: str | None = None
-
-    @property
-    def is_promotable(self) -> bool:
-        return self.candidate_type == DiscoveryCandidateType.TARGET_BUSINESS and self.confidence >= 65
-
-
 class DiscoveryCandidateCreate(BaseModel):
     campaign_id: str
     product_id: str

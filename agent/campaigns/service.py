@@ -5,37 +5,29 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient, MissingEmbeddingClient
-from agents.llm import LLMClient, MissingLLMClient
+from agents.llm import LLMClient
 from campaign_sources.repository import CampaignSourceRepository
-from campaign_sources.schemas import CampaignSourceRead, CampaignSourceSlot
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import (
     CampaignCreate,
-    CampaignPreflightCheck,
-    CampaignPreflightRead,
     CampaignRead,
-    CampaignRunSummary,
     CampaignStage,
     CampaignStatus,
     CampaignUpdate,
 )
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
-from canonical.repository import CanonicalRepository
 from db.models import CampaignModel
 from discovery.repository import DiscoveryCandidateRepository
-from discovery.classifier import assess_discovery_candidate
-from discovery.schemas import DiscoveryCandidateCreate
+from discovery.schemas import DiscoveryCandidateCreate, DiscoveryCandidateType
 from evaluation.campaign_metrics import calculate_campaign_metrics
 from evaluation.lead_scoring import build_cached_lead_research, score_cached_lead
-from evaluation.digital_opportunity import source_inputs_require_digital_opportunity
 from evaluation.schemas import CampaignMetrics
 from icp.service import ICPPresetService
 from leads.repository import LeadRepository
 from leads.selection import select_campaign_results
 from leads.schemas import (
     AgentFitStatus,
-    ContactVerificationStatus,
     LeadRead,
     QualificationResult,
 )
@@ -46,24 +38,11 @@ from messages.schemas import MessageRead
 from products.discovery_policy import validate_google_places_query
 from products.repository import ProductRepository
 from products.schemas import ProductRead
-from shared.errors import ConflictError
 from source_presets.service import SourcePresetService
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
-from tools.verify import EmailVerificationTool
 from tools.search import SearchResult, SearchTool
-from tools.source_registry import SourceAdapterRegistry
-from workflows.discovery import DiscoveryWorkflow, _rows_with_semantic_context, _rows_with_source_context
-from workflows.contact import ContactWorkflow
-from workflows.outreach import OutreachWorkflow
-from workflows.qualification import QualificationWorkflow
-from workflows.research import ResearchWorkflow
-from workflows.signal import SignalWorkflow
-from workflows.verify import VerifyWorkflow
-from tools.base import ToolSlot
-from territories.dedupe import exclude_previously_delivered_rows
 from territories.opportunity_audit import BusinessOpportunityAuditor
-from workspaces.repository import WorkspaceRepository
 
 
 class CampaignService:
@@ -196,11 +175,11 @@ class CampaignService:
         """Append eligible database matches without invoking external tools."""
         campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
-        assessed_rows = self._assessed_cached_rows(product=product, rows=rows)
+        indexed_rows = self._indexed_cached_rows(rows=rows)
         return self._create_existing_match_listing(
             product=product,
             campaign=campaign,
-            assessed_rows=assessed_rows,
+            indexed_rows=indexed_rows,
         )
 
     def materialize_profile_matches(
@@ -320,16 +299,6 @@ class CampaignService:
     def delete(self, campaign_id: str) -> None:
         self.campaigns.delete(campaign_id)
 
-    def preflight(self, campaign_id: str) -> CampaignPreflightRead:
-        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        product = ProductRead.model_validate(self.products.get(campaign.product_id))
-        checks = self._preflight_checks(campaign, product)
-        return CampaignPreflightRead(
-            campaign_id=campaign_id,
-            ready=all(check.status != "failed" for check in checks if check.required),
-            checks=checks,
-        )
-
     def pause(self, campaign_id: str) -> CampaignModel:
         return self.campaigns.update_status(campaign_id, CampaignStatus.PAUSED)
 
@@ -347,300 +316,23 @@ class CampaignService:
             campaign_id, stage_to_status.get(campaign.stage, CampaignStatus.TRACKING)
         )
 
-    def run_campaign(
-        self,
-        campaign_id: str,
-        *,
-        draft_outreach: bool = True,
-    ) -> CampaignRunSummary:
-        campaign = self.campaigns.get(campaign_id)
-        product = ProductRead.model_validate(self.products.get(campaign.product_id))
-        campaign_read = CampaignRead.model_validate(campaign)
-        preset = self.icp_presets.get(campaign_read.icp_preset_id)
-
-        self._assert_runnable_campaign(campaign_read)
-        self._assert_preflight_ready(campaign_read, product)
-
-        discovered = DiscoveryWorkflow(
-            campaigns=self.campaigns,
-            campaign_sources=self.campaign_sources,
-            candidates=self.discovery_candidates,
-            leads=self.leads,
-            memory=self.memory,
-            search_tool=self.search_tool,
-            google_places_api_key=self.google_places_api_key,
-            google_places_api_endpoint=self.google_places_api_endpoint,
-            apify_api_token=self.apify_api_token,
-            apify_api_base_url=self.apify_api_base_url,
-            apify_source_provider_id=self.apify_source_provider_id,
-            apify_actor_id=self.apify_actor_id,
-            apify_actor_input_template=self.apify_actor_input_template,
-            apify_actor_result_mapping=self.apify_actor_result_mapping,
-            apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
-            apify_sources=self.apify_sources,
-            embedding=self.embedding,
-            semantic_cache_min_score=self.semantic_cache_min_score,
-            semantic_cache_min_results=self.semantic_cache_min_results,
-            timeout_seconds=self.timeout_seconds,
-        ).run(product, campaign_read)
-
-        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        if self._requires_digital_opportunity(campaign_read):
-            self._audit_digital_opportunity(campaign_read)
-
-        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        researched = ResearchWorkflow(
-            campaigns=self.campaigns,
-            leads=self.leads,
-            memory=self.memory,
-            browser=self.browser,
-            llm=self.llm,
-        ).run(product, campaign_read)
-
-        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        contacted = ContactWorkflow(
-            campaigns=self.campaigns,
-            leads=self.leads,
-            memory=self.memory,
-            slot_config=preset.slot_config(ToolSlot.CONTACT),
-        ).run(product, campaign_read)
-
-        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        verified = VerifyWorkflow(
-            campaigns=self.campaigns,
-            leads=self.leads,
-            memory=self.memory,
-            slot_config=preset.slot_config(ToolSlot.VERIFY),
-            verification_tool=self._verification_tool(),
-        ).run(product, campaign_read)
-
-        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        signaled = SignalWorkflow(
-            campaigns=self.campaigns,
-            leads=self.leads,
-            memory=self.memory,
-            slot_config=preset.slot_config(ToolSlot.SIGNAL),
-        ).run(product, campaign_read)
-
-        campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        qualified = QualificationWorkflow(
-            campaigns=self.campaigns,
-            leads=self.leads,
-            memory=self.memory,
-            llm=self.llm,
-        ).run(product, campaign_read)
-
-        if draft_outreach:
-            campaign_read = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-            drafts = OutreachWorkflow(
-                campaigns=self.campaigns,
-                leads=self.leads,
-                messages=self.messages,
-                memory=self.memory,
-                llm=self.llm,
-            ).run(product, campaign_read)
-        else:
-            drafts = []
-            self.campaigns.update_status(
-                campaign_id,
-                CampaignStatus.COMPLETED,
-                stage=CampaignStage.COMPLETE,
-            )
-
-        return CampaignRunSummary(
-            campaign=CampaignRead.model_validate(self.campaigns.get(campaign_id)),
-            discovered_lead_count=len(discovered),
-            researched_lead_count=len(researched),
-            contacted_lead_count=len(contacted),
-            verified_lead_count=len(verified),
-            signaled_lead_count=len(signaled),
-            qualified_lead_count=sum(
-                1
-                for lead in qualified
-                if lead.qualification and lead.qualification.qualified
-            ),
-            drafted_message_count=len(drafts),
-        )
-
-    def run_contact_listing(
-        self,
-        campaign_id: str,
-    ) -> CampaignRunSummary:
-        campaign = CampaignRead.model_validate(self.campaigns.get(campaign_id))
-        if not self._requires_digital_opportunity(campaign):
-            cached_summary = self._run_cached_contact_listing(campaign_id)
-            if cached_summary is not None:
-                return cached_summary
-        return self.run_campaign(
-            campaign_id,
-            draft_outreach=False,
-        )
-
-    def _run_cached_contact_listing(
-        self,
-        campaign_id: str,
-    ) -> CampaignRunSummary | None:
-        campaign = self.campaigns.get(campaign_id)
-        product = ProductRead.model_validate(self.products.get(campaign.product_id))
-        campaign_read = CampaignRead.model_validate(campaign)
-        self._assert_runnable_campaign(campaign_read)
-
-        cached_rows = self._cached_discovery_rows(product=product, campaign=campaign_read)
-        if not cached_rows:
-            return None
-
-        assessed_rows = self._assessed_cached_rows(product=product, rows=cached_rows)
-        if not any(assessment.is_promotable for _, _, assessment in assessed_rows):
-            return None
-
-        try:
-            self.campaigns.update_status(
-                campaign_id,
-                CampaignStatus.DISCOVERING,
-                stage=CampaignStage.DISCOVERY,
-            )
-            discovered = self._create_existing_match_listing(
-                product=product,
-                campaign=campaign_read,
-                assessed_rows=assessed_rows,
-            )
-
-            if self._requires_digital_opportunity(campaign_read):
-                self._audit_digital_opportunity(campaign_read)
-
-            self.campaigns.update_status(
-                campaign_id,
-                CampaignStatus.RESEARCHING,
-                stage=CampaignStage.RESEARCH,
-            )
-            self.campaigns.update_status(
-                campaign_id,
-                CampaignStatus.QUALIFYING,
-                stage=CampaignStage.QUALIFICATION,
-            )
-            completed_campaign = self.campaigns.update_status(campaign_id, CampaignStatus.COMPLETED)
-            summary = CampaignRunSummary(
-                campaign=CampaignRead.model_validate(completed_campaign),
-                discovered_lead_count=len(discovered),
-                researched_lead_count=len(discovered),
-                contacted_lead_count=sum(1 for lead in discovered if lead.contact_email),
-                verified_lead_count=sum(
-                    1
-                    for lead in discovered
-                    if lead.verification_status != ContactVerificationStatus.UNVERIFIED
-                ),
-                signaled_lead_count=len(discovered),
-                qualified_lead_count=sum(
-                    1
-                    for lead in discovered
-                    if lead.qualification and lead.qualification.qualified
-                ),
-                drafted_message_count=0,
-            )
-            return summary
-        except Exception:
-            raise
-
     @staticmethod
-    def _requires_digital_opportunity(campaign: CampaignRead) -> bool:
-        return source_inputs_require_digital_opportunity(campaign.source_inputs)
-
-    def _audit_digital_opportunity(self, campaign: CampaignRead):
-        if self.opportunity_auditor is None:
-            raise RuntimeError("digital opportunity auditor is not configured")
-        intent = (campaign.source_inputs or {}).get("source_request_intent")
-        intent = intent if isinstance(intent, dict) else {}
-        return self.opportunity_auditor.audit_campaign(
-            campaign.id,
-            category=_optional_text(intent.get("business_category")),
-            market=_optional_text(intent.get("location") or intent.get("country")),
-        )
-
-    def _cached_discovery_rows(
-        self,
-        *,
-        product: ProductRead,
-        campaign: CampaignRead,
-    ) -> list[dict[str, Any]]:
-        sources = [
-            CampaignSourceRead.model_validate(source)
-            for source in self.campaign_sources.list_by_campaign(
-                campaign.id,
-                slot=CampaignSourceSlot.DISCOVERY,
-                enabled_only=True,
-            )
-        ]
-        canonical = CanonicalRepository(self.session, embedding=self.embedding)
-        min_results = min(self.semantic_cache_min_results, campaign.max_leads)
-        for source in sources:
-            source_query = str(source.input.get("query") or campaign.source_input or "").strip()
-            semantic_rows = canonical.list_existing_matches(
-                source_inputs=source.input,
-                source_input=source_query,
-                limit=campaign.max_leads,
-                min_score=self.semantic_cache_min_score,
-                min_results=min_results,
-            )
-            if semantic_rows:
-                rows = exclude_previously_delivered_rows(
-                    self.session,
-                    campaign_id=campaign.id,
-                    territory_id=campaign.territory_id,
-                    rows=_rows_with_semantic_context(semantic_rows),
-                )
-                if campaign.territory_id and len(rows) < campaign.max_leads:
-                    return []
-                return rows
-
-        cached_results: list[dict[str, Any]] = []
-        for source in sources:
-            limit = int(source.config.get("limit") or campaign.max_leads)
-            cached_rows = canonical.list_exact_index_matches(
-                source=source.provider_id,
-                source_input=source.input,
-                limit=limit,
-            )
-            if cached_rows:
-                cached_results.extend(
-                    _rows_with_source_context(
-                        rows=cached_rows,
-                        source=source,
-                        from_cache=True,
-                    )
-                )
-        cached_results = exclude_previously_delivered_rows(
-            self.session,
-            campaign_id=campaign.id,
-            territory_id=campaign.territory_id,
-            rows=cached_results,
-        )
-        if len(cached_results) < min_results:
-            return []
-        if campaign.territory_id and len(cached_results) < campaign.max_leads:
-            return []
-        return cached_results[: campaign.max_leads]
-
-    @staticmethod
-    def _assessed_cached_rows(
-        *,
-        product: ProductRead,
-        rows: list[dict[str, Any]],
-    ):
-        assessed = []
+    def _indexed_cached_rows(*, rows: list[dict[str, Any]]):
+        indexed = []
         for row in rows:
             search_result = SearchResult.model_validate(row)
-            assessed.append((row, search_result, assess_discovery_candidate(search_result, product)))
-        return assessed
+            indexed.append((row, search_result))
+        return indexed
 
     def _create_existing_match_listing(
         self,
         *,
         product: ProductRead,
         campaign: CampaignRead,
-        assessed_rows,
+        indexed_rows,
     ) -> list[LeadRead]:
         discovered: list[LeadRead] = []
-        for row, search_result, assessment in assessed_rows:
+        for row, search_result in indexed_rows:
             candidate = self.discovery_candidates.create(
                 DiscoveryCandidateCreate(
                     campaign_id=campaign.id,
@@ -653,12 +345,12 @@ class CampaignService:
                     contact_email=search_result.contact_email,
                     source=search_result.source,
                     raw=row,
-                    candidate_type=assessment.candidate_type,
-                    confidence=assessment.confidence,
-                    rejection_reason=assessment.rejection_reason,
+                    candidate_type=DiscoveryCandidateType.TARGET_BUSINESS,
+                    confidence=100,
+                    rejection_reason=None,
                 )
             )
-            if not assessment.is_promotable or len(discovered) >= campaign.max_leads:
+            if len(discovered) >= campaign.max_leads:
                 continue
             lead = self.leads.create_from_existing_match(
                 campaign_id=campaign.id,
@@ -672,7 +364,7 @@ class CampaignService:
                     product=product,
                     lead=LeadRead.model_validate(lead),
                     row=row,
-                    confidence=assessment.confidence,
+                    confidence=100,
                 ),
             )
             lead = self.leads.attach_qualification(
@@ -681,7 +373,7 @@ class CampaignService:
                     product=product,
                     lead=LeadRead.model_validate(lead),
                     row=row,
-                    confidence=assessment.confidence,
+                    confidence=100,
                     signal_vocabulary=self.leads.signal_vocabulary_for_lead(lead.id),
                 ),
             )
@@ -697,22 +389,6 @@ class CampaignService:
             )
         )
         return discovered
-
-    def _create_cached_contact_listing(self, **kwargs) -> list[LeadRead]:
-        """Compatibility alias for the legacy campaign execution path."""
-        return self._create_existing_match_listing(**kwargs)
-
-    def _verification_tool(self) -> EmailVerificationTool:
-        return EmailVerificationTool(
-            provider=self.contact_verification_provider,
-            endpoint=self.email_verification_endpoint,
-            api_key=self.email_verification_api_key,
-            bouncer_api_key=self.bouncer_api_key,
-            bouncer_api_endpoint=self.bouncer_api_endpoint,
-            zerobounce_api_key=self.zerobounce_api_key,
-            zerobounce_api_endpoint=self.zerobounce_api_endpoint,
-            timeout_seconds=self.timeout_seconds,
-        )
 
     def metrics(self, campaign_id: str) -> CampaignMetrics:
         leads = [
@@ -734,198 +410,6 @@ class CampaignService:
             conversations=conversations,
             goal_type=campaign.goal_type,
         )
-
-    def _assert_preflight_ready(self, campaign: CampaignRead, product: ProductRead) -> None:
-        preflight = CampaignPreflightRead(
-            campaign_id=campaign.id,
-            ready=True,
-            checks=self._preflight_checks(campaign, product),
-        )
-        failures = [check for check in preflight.checks if check.required and check.status == "failed"]
-        if failures:
-            raise ConflictError(
-                "discovery run cannot start until required integrations are configured",
-                {"failures": [failure.model_dump(mode="json") for failure in failures]},
-            )
-
-    def _preflight_checks(
-        self, campaign: CampaignRead, product: ProductRead
-    ) -> list[CampaignPreflightCheck]:
-        sources = [
-            CampaignSourceRead.model_validate(source)
-            for source in self.campaign_sources.list_by_campaign(
-                campaign.id,
-                slot=CampaignSourceSlot.DISCOVERY,
-                enabled_only=True,
-            )
-        ]
-        checks = [
-            CampaignPreflightCheck(
-                name="Run status",
-                status="ok" if campaign.status in {CampaignStatus.DRAFT, CampaignStatus.PAUSED} else "failed",
-                detail=f"Run is {campaign.status.value}.",
-            )
-        ]
-
-        if sources:
-            registry = SourceAdapterRegistry(
-                search_tool=self.search_tool,
-                google_places_api_key=self.google_places_api_key,
-                google_places_api_endpoint=self.google_places_api_endpoint,
-                apify_api_token=self.apify_api_token,
-                apify_api_base_url=self.apify_api_base_url,
-                apify_source_provider_id=self.apify_source_provider_id,
-                apify_actor_id=self.apify_actor_id,
-                apify_actor_input_template=self.apify_actor_input_template,
-                apify_actor_result_mapping=self.apify_actor_result_mapping,
-                apify_actor_max_charge_usd=self.apify_actor_max_charge_usd,
-                apify_sources=self.apify_sources,
-                timeout_seconds=self.timeout_seconds,
-            )
-            provider_ids = list(dict.fromkeys(source.provider_id for source in sources))
-            unregistered = [provider_id for provider_id in provider_ids if provider_id not in registry.adapters]
-            missing_config = registry.missing_configuration(provider_ids)
-            if "configured_search" in provider_ids and not self.search_tool.is_configured:
-                missing_config.append("configured_search")
-            missing_config = list(dict.fromkeys(missing_config))
-            required_missing_config = [
-                provider_id
-                for provider_id in missing_config
-                if provider_id != "configured_search" or self.search_tool.require_config
-            ]
-            failures = [*unregistered, *missing_config]
-            required_failures = [*unregistered, *required_missing_config]
-            checks.append(
-                CampaignPreflightCheck(
-                    name="Discovery sources",
-                    status="ok" if not failures else "failed" if required_failures else "warning",
-                    detail=(
-                        f"{len(sources)} discovery source(s): {', '.join(provider_ids)}"
-                        if not failures
-                        else f"Missing or unavailable source provider(s): {', '.join(failures)}"
-                    ),
-                    required=bool(required_failures),
-                )
-            )
-        else:
-            checks.append(
-                CampaignPreflightCheck(
-                    name="Discovery sources",
-                    status="failed",
-                    detail="No discovery sources configured.",
-                    required=True,
-                )
-            )
-
-        if isinstance(self.llm, MissingLLMClient):
-            llm_status = "failed"
-            llm_detail = "Configure OPENAI_API_KEY or LLM_JSON_ENDPOINT."
-        else:
-            llm_status = "ok"
-            llm_detail = self.llm.__class__.__name__
-        checks.append(CampaignPreflightCheck(name="LLM provider", status=llm_status, detail=llm_detail))
-
-        checks.append(
-            CampaignPreflightCheck(
-                name="Email provider",
-                status="ok" if self.messages_can_send_real_email() else "failed",
-                detail=(
-                    f"{self.email.provider} email provider ready"
-                    if self.messages_can_send_real_email()
-                    else email_provider_setup_hint(self.email.provider)
-                ),
-                required=False,
-            )
-        )
-
-        if self.email.compliance_enabled:
-            profile = WorkspaceRepository(
-                self.session,
-                workspace_id=product.workspace_id,
-            ).sender_profile()
-            compliance_ready = bool(
-                profile.complete
-                and self.email.unsubscribe_signing_secret
-                and self.email.public_api_base
-            )
-            checks.append(
-                CampaignPreflightCheck(
-                    name="Sender compliance",
-                    status="ok" if compliance_ready else "failed",
-                    detail=(
-                        "Sender identity and unsubscribe handling are configured."
-                        if compliance_ready
-                        else "Complete sender identity and unsubscribe configuration before outreach."
-                    ),
-                    required=True,
-                )
-            )
-
-        verification_status, verification_detail, verification_required = self._contact_verification_check()
-        checks.append(
-            CampaignPreflightCheck(
-                name="Contact verification",
-                status=verification_status,
-                detail=verification_detail,
-                required=verification_required,
-            )
-        )
-
-        checks.append(
-            CampaignPreflightCheck(
-                name="Website inspection",
-                status="ok",
-                detail="Direct HTTP website inspection is enabled.",
-                required=False,
-            )
-        )
-        return checks
-
-    def messages_can_send_real_email(self) -> bool:
-        return self.email.is_configured
-
-    def _contact_verification_check(self) -> tuple[str, str, bool]:
-        provider = (self.contact_verification_provider or "syntax").strip().lower()
-        if provider in {"syntax", "local"}:
-            return (
-                "warning",
-                "Local syntax-only verification is enabled; deliverability is not externally checked.",
-                False,
-            )
-        if provider == "http":
-            if self.email_verification_endpoint:
-                return "ok", "Generic HTTP contact verification is configured.", True
-            return "failed", "Configure EMAIL_VERIFICATION_ENDPOINT for generic HTTP verification.", True
-        if provider == "bouncer":
-            if self.bouncer_api_key or self.email_verification_api_key:
-                return "ok", "Bouncer contact verification is configured.", True
-            return "failed", "Configure BOUNCER_API_KEY for Bouncer contact verification.", True
-        if provider == "zerobounce":
-            if self.zerobounce_api_key or self.email_verification_api_key:
-                return "ok", "ZeroBounce contact verification is configured.", True
-            return "failed", "Configure ZEROBOUNCE_API_KEY for ZeroBounce contact verification.", True
-        return "failed", f"Unknown contact verification provider: {provider}.", True
-
-    @staticmethod
-    def _assert_runnable_campaign(campaign: CampaignRead) -> None:
-        if campaign.status not in {CampaignStatus.DRAFT, CampaignStatus.PAUSED}:
-            raise ConflictError(
-                "campaign can only be run from draft or paused status",
-                {"campaign_id": campaign.id, "status": campaign.status.value},
-            )
-
-def email_provider_setup_hint(provider: str) -> str:
-    if provider == "gmail":
-        return (
-            "Configure EMAIL_PROVIDER=gmail with Google OAuth credentials, "
-            "GOOGLE_TOKEN_ENCRYPTION_KEY, and a connected Gmail account."
-        )
-    if provider == "resend":
-        return "Configure EMAIL_PROVIDER=resend with RESEND_API_KEY and EMAIL_FROM_ADDRESS."
-    if provider == "http":
-        return "Configure EMAIL_PROVIDER=http with EMAIL_PROVIDER_ENDPOINT."
-    return "Configure EMAIL_PROVIDER with a real sender before outreach."
-
 
 def _profile_signal_evidence(signal_key: str, evidence: Any) -> str:
     if not isinstance(evidence, dict):

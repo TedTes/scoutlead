@@ -9,9 +9,7 @@ from campaign_sources.schemas import CampaignSourceRead
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import (
     CampaignCreate,
-    CampaignPreflightRead,
     CampaignRead,
-    CampaignRunSummary,
     CampaignUpdate,
     LeadSeedInput,
 )
@@ -21,8 +19,6 @@ from discovery.schemas import DiscoveryCandidateRead
 from evaluation.schemas import CampaignMetrics
 from insights.schemas import CampaignInsightRead
 from insights.service import CampaignInsightService
-from job_queue.schemas import QueueJobRead
-from job_queue.service import QueueService
 from leads.repository import LeadRepository
 from leads.export import leads_csv
 from leads.selection import select_campaign_results
@@ -39,7 +35,7 @@ from messages.service import MessageService
 from products.repository import ProductRepository
 from run_diagnostics.schemas import RunDiagnostics
 from run_diagnostics.service import build_run_diagnostics
-from shared.errors import ConflictError, NotFoundError
+from shared.errors import NotFoundError
 from source_requests.schemas import (
     SourceProviderRead,
     SourceRequestCreate,
@@ -266,40 +262,6 @@ def resume_discovery_run(
     return _service(session, services, auth).resume(run_id)
 
 
-@router.post("/{run_id}/run", response_model=CampaignRunSummary)
-def run_discovery(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    service = _service(session, services, auth)
-    _assert_preflight_ready(service.preflight(run_id))
-    return service.run_campaign(run_id)
-
-
-@router.post("/{run_id}/enqueue", response_model=QueueJobRead)
-def enqueue_discovery_run(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    service = _service(session, services, auth)
-    _assert_preflight_ready(service.preflight(run_id))
-    return QueueService(session).enqueue_campaign_run(run_id)
-
-
-@router.get("/{run_id}/preflight", response_model=CampaignPreflightRead)
-def discovery_run_preflight(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    return _service(session, services, auth).preflight(run_id)
-
-
 @router.get("/{run_id}/metrics", response_model=CampaignMetrics)
 def discovery_run_metrics(
     run_id: str,
@@ -460,13 +422,3 @@ def generate_discovery_insights(
         llm=services.llm,
         workspace_id=auth.workspace_id,
     ).generate(run_id)
-
-
-def _assert_preflight_ready(preflight: CampaignPreflightRead) -> None:
-    if preflight.ready:
-        return
-    failures = [check for check in preflight.checks if check.required and check.status == "failed"]
-    raise ConflictError(
-        "discovery run cannot start until required integrations are configured",
-        {"failures": [failure.model_dump(mode="json") for failure in failures]},
-    )

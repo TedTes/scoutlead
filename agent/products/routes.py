@@ -3,22 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
-from campaigns.schemas import CampaignCreate, CampaignRunSummary
-from campaigns.service import CampaignService
 from products.schemas import (
     ProductCreate,
     ProductDescriptionCreate,
-    ProductDiscoveryStart,
     ProductProfileCreate,
     ProductRead,
     ProductUpdate,
 )
-from products.discovery_policy import (
-    normalize_places_region_code,
-    validate_google_places_query,
-)
 from products.service import ProductService
-from shared.utils import utcnow
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -33,42 +25,6 @@ def _service(
         llm=services.llm,
         browser=services.browser,
         search=services.search,
-        workspace_id=auth.workspace_id,
-    )
-
-
-def _campaign_service(
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-) -> CampaignService:
-    return CampaignService(
-        session=session,
-        llm=services.llm,
-        search_tool=services.search,
-        browser=services.browser,
-        email=services.email,
-        google_places_api_key=services.settings.google_places_api_key,
-        google_places_api_endpoint=services.settings.google_places_api_endpoint,
-        apify_api_token=services.settings.apify_api_token,
-        apify_api_base_url=services.settings.apify_api_base_url,
-        apify_source_provider_id=services.settings.apify_source_provider_id,
-        apify_actor_id=services.settings.apify_actor_id,
-        apify_actor_input_template=services.settings.apify_actor_input_template,
-        apify_actor_result_mapping=services.settings.apify_actor_result_mapping,
-        apify_actor_max_charge_usd=services.settings.apify_actor_max_charge_usd,
-        apify_sources=services.settings.apify_source_configs,
-        contact_verification_provider=services.settings.contact_verification_provider,
-        email_verification_endpoint=services.settings.email_verification_endpoint,
-        email_verification_api_key=services.settings.email_verification_api_key,
-        bouncer_api_key=services.settings.bouncer_api_key,
-        bouncer_api_endpoint=services.settings.bouncer_api_endpoint,
-        zerobounce_api_key=services.settings.zerobounce_api_key,
-        zerobounce_api_endpoint=services.settings.zerobounce_api_endpoint,
-        embedding=services.embedding,
-        semantic_cache_min_score=services.settings.semantic_cache_min_score,
-        semantic_cache_min_results=services.settings.semantic_cache_min_results,
-        timeout_seconds=services.settings.request_timeout_seconds,
         workspace_id=auth.workspace_id,
     )
 
@@ -101,48 +57,6 @@ def create_product_from_profile(
     auth: CurrentAuth,
 ):
     return _service(session, services, auth).create_from_profile(request)
-
-
-@router.post("/{product_id}/discover", response_model=CampaignRunSummary)
-def start_product_discovery(
-    product_id: str,
-    request: ProductDiscoveryStart,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    product_service = _service(session, services, auth)
-    plan = product_service.plan_discovery(product_id)
-    validate_google_places_query(plan.discovery_query)
-    product = ProductRead.model_validate(product_service.apply_discovery_plan(product_id, plan))
-    campaign_service = _campaign_service(session, services, auth)
-    region_code = normalize_places_region_code(plan.region_code) or normalize_places_region_code(
-        plan.target_geography
-    )
-    source_selection_reason = (
-        "Product discovery uses the precise local-business discovery source and does not "
-        "fall back to broad web search."
-    )
-    run = campaign_service.create(
-        CampaignCreate(
-            product_id=product.id,
-            name=f"{product.product_name} discovery {utcnow().strftime('%Y-%m-%d %H:%M')}",
-            source_preset_id="google-places-local-business",
-            source_input=plan.discovery_query,
-            source_inputs={
-                key: value
-                for key, value in {
-                    "region_code": region_code,
-                    "source_selection": "google_places_local_business",
-                    "source_selection_reason": source_selection_reason,
-                }.items()
-                if value
-            },
-            max_leads=request.max_results,
-            channels=["email"],
-        )
-    )
-    return campaign_service.run_campaign(run.id)
 
 
 @router.get("", response_model=list[ProductRead])

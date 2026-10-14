@@ -183,7 +183,7 @@ def _source_diagnostics(
                 1
                 for item in durable_items
                 if item.state
-                in {"relevant", "identity_resolved", "audit_pending", "audited", "eligible"}
+                in {"relevant", "resolution_queued", "audit_pending", "audited", "eligible"}
             )
             if durable_items
             else (

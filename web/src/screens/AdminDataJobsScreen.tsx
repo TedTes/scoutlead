@@ -72,8 +72,8 @@ export function AdminDataJobsScreen({ api }: { api: ApiClient }) {
   const action = async (kind: "selected" | "all" | "discard" | "cancel" | "retry", sourceItemIds: string[] = []) => {
     if (!detail) return;
     const labels = {
-      selected: `Reason for validating ${sourceItemIds.length} selected sources`,
-      all: "Reason for validating all remaining items",
+      selected: `Reason for resolving ${sourceItemIds.length} selected sources`,
+      all: "Reason for resolving all remaining items",
       discard: "Reason for discarding the remaining staged items",
       cancel: "Reason for canceling queued collection work",
       retry: "Reason for retrying failed collection work",
@@ -105,7 +105,7 @@ export function AdminDataJobsScreen({ api }: { api: ApiClient }) {
         <div className="admin-metrics admin-job-metrics" aria-label="Source fetch overview">
           <Metric label="Returned sources" value={totals.items} />
           <Metric label="Active fetches" value={totals.active} />
-          <Metric label="Awaiting validation" value={totals.review} tone="warn" />
+          <Metric label="Awaiting review" value={totals.review} tone="warn" />
           <Metric label="Failed fetches" value={totals.failed} tone={totals.failed ? "bad" : "good"} />
         </div>
         <button className="admin-primary-button" type="button" onClick={() => setShowCreate(true)}>
@@ -164,19 +164,19 @@ function JobInspector({ detail, busy, onAction }: { detail: AdminDataJob | null;
   const toggle = (id: string) => setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   return (
     <aside className="admin-inspector admin-job-inspector">
-      <header><div><h2>{detail.segment_label}</h2><p>{detail.processing_mode === "review_first" ? "Review before validation" : "Automatic validation"}</p></div><JobPill value={detail.status} /></header>
+      <header><div><h2>{detail.segment_label}</h2><p>{detail.processing_mode === "review_first" ? "Review before indexing" : "Automatic indexing"}</p></div><JobPill value={detail.status} /></header>
       <div className="admin-inspector-actions">
-        {canReview ? <button disabled={busy || !selectedIds.length} type="button" onClick={() => void onAction("selected", selectedIds)}><ShieldCheck size={14} /> Validate selected ({selectedIds.length})</button> : null}
-        {canReview ? <button disabled={busy} type="button" onClick={() => void onAction("all")}><CheckCircle2 size={14} /> Validate all</button> : null}
+        {canReview ? <button disabled={busy || !selectedIds.length} type="button" onClick={() => void onAction("selected", selectedIds)}><ShieldCheck size={14} /> Index selected ({selectedIds.length})</button> : null}
+        {canReview ? <button disabled={busy} type="button" onClick={() => void onAction("all")}><CheckCircle2 size={14} /> Index all</button> : null}
         {detail.status === "failed" ? <button disabled={busy} type="button" onClick={() => void onAction("retry")}><RotateCcw size={14} /> Retry failed</button> : null}
         {canCancel ? <button disabled={busy} type="button" onClick={() => void onAction("cancel")}><Ban size={14} /> Cancel</button> : null}
         {canReview ? <button className="danger" disabled={busy} type="button" onClick={() => void onAction("discard")}><Trash2 size={14} /> Discard staged</button> : null}
       </div>
       <div className="admin-job-summary-grid">
         <Summary label="Collected" value={detail.total_items} />
-        <Summary label="Awaiting validation" value={detail.pending_review} />
+        <Summary label="Awaiting review" value={detail.pending_review} />
         <Summary label="Processing" value={detail.processing} />
-        <Summary label="Validated" value={detail.validated} />
+        <Summary label="Indexed" value={detail.validated} />
         <Summary label="Needs attention" value={detail.needs_attention} />
         <Summary label="Businesses created" value={detail.businesses_created} />
       </div>
@@ -197,7 +197,7 @@ function JobInspector({ detail, busy, onAction }: { detail: AdminDataJob | null;
           <span>{sourceItems.length} of {detail.total_items}</span>
         </div>
         {sourceItems.map((item) => <article key={item.id}><input aria-label={`Select ${item.title || "source"}`} checked={selectedIds.includes(item.id)} disabled={!canReview || !selectableIds.includes(item.id)} type="checkbox" onChange={() => toggle(item.id)} /><div className="admin-source-result-main"><div><strong>{item.title || "Untitled source item"}</strong><JobPill value={item.state} /></div><p>{[item.provider, item.address, item.phone, item.website].filter(Boolean).join(" · ")}</p>{item.source_url ? <a href={item.source_url} rel="noreferrer" target="_blank">Open source <ExternalLink size={11} /></a> : null}</div></article>)}
-        {detail.source_items_truncated ? <p className="admin-source-limit">Showing the first 200 sources. Validate all applies to every returned source.</p> : null}
+        {detail.source_items_truncated ? <p className="admin-source-limit">Showing the first 200 sources. Index all applies to every returned source.</p> : null}
         {!sourceItems.length ? <p className="admin-empty">Returned sources appear here after fetching.</p> : null}
       </section>
       {detail.errors.length ? <div className="admin-error"><CircleAlert size={15} /><div>{detail.errors.map((value) => <p key={value}>{value}</p>)}</div></div> : null}
@@ -221,7 +221,7 @@ function CreateDataJobDialog({ api, segments, onClose, onCreated }: { api: ApiCl
     try { onCreated(await api.createAdminDataJob({ segment_id: segmentId, processing_mode: mode, reason })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setSaving(false); }
   };
-  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-data-job-dialog" role="dialog" aria-modal="true"><header><div><h2>Fetch sources</h2><p>Fetch business records now, then inspect them before they enter validation.</p></div><button className="admin-icon-button" title="Close" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-data-job-form"><label><span>Business segment</span><select value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>{activeSegments.map((segment) => <option key={segment.id} value={segment.id}>{segment.niche_label} · {segment.market_label} · {segment.source_count} sources</option>)}</select></label><fieldset><legend>After fetching</legend><label><input checked={mode === "review_first"} name="mode" type="radio" onChange={() => setMode("review_first")} /><span><strong>Review returned sources</strong><small>Choose selected sources or all sources for validation.</small></span></label><label><input checked={mode === "automatic"} name="mode" type="radio" onChange={() => setMode("automatic")} /><span><strong>Validate automatically</strong><small>Continue through the existing validation pipeline.</small></span></label></fieldset><label><span>Reason</span><textarea placeholder="What sources are you fetching and why?" value={reason} onChange={(event) => setReason(event.target.value)} /></label></div>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-primary-button" disabled={saving || !segmentId || reason.trim().length < 3} type="button" onClick={() => void create()}>{saving ? "Fetching..." : "Fetch sources"}</button></footer></div></div>;
+  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-data-job-dialog" role="dialog" aria-modal="true"><header><div><h2>Fetch sources</h2><p>Fetch business records now, then optionally review them before indexing.</p></div><button className="admin-icon-button" title="Close" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-data-job-form"><label><span>Business segment</span><select value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>{activeSegments.map((segment) => <option key={segment.id} value={segment.id}>{segment.niche_label} · {segment.market_label} · {segment.source_count} sources</option>)}</select></label><fieldset><legend>After fetching</legend><label><input checked={mode === "review_first"} name="mode" type="radio" onChange={() => setMode("review_first")} /><span><strong>Review returned sources</strong><small>Choose selected sources or all sources to index.</small></span></label><label><input checked={mode === "automatic"} name="mode" type="radio" onChange={() => setMode("automatic")} /><span><strong>Index automatically</strong><small>Resolve businesses, index them, then collect signals.</small></span></label></fieldset><label><span>Reason</span><textarea placeholder="What sources are you fetching and why?" value={reason} onChange={(event) => setReason(event.target.value)} /></label></div>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-primary-button" disabled={saving || !segmentId || reason.trim().length < 3} type="button" onClick={() => void create()}>{saving ? "Fetching..." : "Fetch sources"}</button></footer></div></div>;
 }
 
 function dataJobError(cause: unknown) {

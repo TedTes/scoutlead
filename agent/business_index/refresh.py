@@ -20,8 +20,6 @@ from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import SOURCE_NAME as WEBSITE_AUDIT_SOURCE
 from db.models import BusinessModel, CampaignModel, SourceObservationModel
-from discovery.classifier import assess_discovery_candidate
-from discovery.schemas import DiscoveryCandidateType
 from products.repository import ProductRepository
 from products.schemas import ProductRead
 from run_diagnostics.repository import RunPipelineEventRepository
@@ -153,62 +151,6 @@ class BusinessIndexRefreshService:
                 written = 0
                 source_business_ids: list[str] = []
                 for source_item, normalized, search_result in persisted_rows:
-                    assessment = assess_discovery_candidate(search_result, product)
-                    if not assessment.is_promotable:
-                        reviewable = _assessment_needs_review(
-                            assessment.candidate_type,
-                            assessment.confidence,
-                            task.provider_id,
-                        )
-                        source_items.add_decision(
-                            source_item.id,
-                            SourceItemDecisionCreate(
-                                stage=SourceItemStage.RELEVANCE,
-                                decision=(
-                                    SourceItemDecisionValue.NEEDS_REVIEW
-                                    if reviewable
-                                    else SourceItemDecisionValue.REJECTED
-                                ),
-                                reason=assessment.rejection_reason,
-                                confidence=assessment.confidence,
-                                details={"candidate_type": assessment.candidate_type.value},
-                            ),
-                            next_state=(
-                                SourceItemState.NEEDS_REVIEW
-                                if reviewable
-                                else SourceItemState.REJECTED
-                            ),
-                            commit=False,
-                        )
-                        self._record_pipeline_events(
-                            pipeline_events,
-                            campaigns,
-                            segment_id=segment.id,
-                            job_id=job_id,
-                            stage="candidate_filter",
-                            event_type="candidate_decision",
-                            status="rejected",
-                            provider_id=task.provider_id,
-                            item_key=search_result.url or search_result.title,
-                            request_payload={"query": task.query},
-                            response_payload=search_result.model_dump(mode="json"),
-                            reason=assessment.rejection_reason
-                            or f"Classified as {assessment.candidate_type.value} ({assessment.confidence} confidence).",
-                            commit=False,
-                        )
-                        continue
-                    source_items.add_decision(
-                        source_item.id,
-                        SourceItemDecisionCreate(
-                            stage=SourceItemStage.RELEVANCE,
-                            decision=SourceItemDecisionValue.ACCEPTED,
-                            reason="Source item has sufficient evidence of a target business.",
-                            confidence=assessment.confidence,
-                            details={"candidate_type": assessment.candidate_type.value},
-                        ),
-                        next_state=SourceItemState.RELEVANT,
-                        commit=False,
-                    )
                     link = canonical.upsert_from_discovery_result(
                         company_name=search_result.title,
                         website_url=_canonical_website_url(
@@ -225,41 +167,73 @@ class BusinessIndexRefreshService:
                         raw=normalized["raw"],
                         allow_raw_contact_email=False,
                     )
-                    if link.business_id:
+                    if not link.business_id:
                         source_items.add_decision(
                             source_item.id,
                             SourceItemDecisionCreate(
                                 stage=SourceItemStage.IDENTITY,
-                                decision=SourceItemDecisionValue.RESOLVED,
-                                reason="Resolved to a canonical business.",
-                                details={"business_id": link.business_id},
+                                decision=SourceItemDecisionValue.NEEDS_REVIEW,
+                                reason="Source item did not resolve to a canonical business.",
                             ),
-                            next_state=SourceItemState.AUDIT_PENDING,
+                            next_state=SourceItemState.NEEDS_REVIEW,
+                            commit=False,
+                        )
+                        continue
+                    if link.identity_conflict:
+                        source_items.add_decision(
+                            source_item.id,
+                            SourceItemDecisionCreate(
+                                stage=SourceItemStage.IDENTITY,
+                                decision=SourceItemDecisionValue.NEEDS_REVIEW,
+                                reason=link.identity_conflict_reason,
+                                details={
+                                    "business_id": link.business_id,
+                                    "resolution": link.identity_resolution,
+                                    "candidate_business_ids": list(
+                                        link.identity_candidate_ids
+                                    ),
+                                },
+                            ),
+                            next_state=SourceItemState.NEEDS_REVIEW,
                             business_id=link.business_id,
                             commit=False,
                         )
-                        source_business_ids.append(link.business_id)
-                        written += 1
-                        self._record_pipeline_events(
-                            pipeline_events,
-                            campaigns,
-                            segment_id=segment.id,
-                            job_id=job_id,
-                            stage="candidate_filter",
-                            event_type="candidate_decision",
-                            status="accepted",
-                            provider_id=task.provider_id,
-                            business_id=link.business_id,
-                            item_key=search_result.url or search_result.title,
-                            request_payload={"query": task.query},
-                            response_payload={
-                                **search_result.model_dump(mode="json"),
-                                "candidate_type": assessment.candidate_type.value,
-                                "confidence": assessment.confidence,
-                            },
-                            reason="Written to the canonical business index.",
-                            commit=False,
-                        )
+                        continue
+                    self.segments.assign_business(
+                        segment,
+                        business_id=link.business_id,
+                        source_observation_id=link.source_observation_id,
+                    )
+                    source_items.add_decision(
+                        source_item.id,
+                        SourceItemDecisionCreate(
+                            stage=SourceItemStage.IDENTITY,
+                            decision=SourceItemDecisionValue.RESOLVED,
+                            reason="Resolved to a searchable canonical business.",
+                            details={"business_id": link.business_id},
+                        ),
+                        next_state=SourceItemState.AUDIT_PENDING,
+                        business_id=link.business_id,
+                        commit=False,
+                    )
+                    source_business_ids.append(link.business_id)
+                    written += 1
+                    self._record_pipeline_events(
+                        pipeline_events,
+                        campaigns,
+                        segment_id=segment.id,
+                        job_id=job_id,
+                        stage="identity_resolution",
+                        event_type="identity_resolved",
+                        status="accepted",
+                        provider_id=task.provider_id,
+                        business_id=link.business_id,
+                        item_key=search_result.url or search_result.title,
+                        request_payload={"query": task.query},
+                        response_payload=search_result.model_dump(mode="json"),
+                        reason="Resolved and assigned to the business index segment.",
+                        commit=False,
+                    )
                 self.session.commit()
                 provider_business_ids.append(source_business_ids)
                 successful_sources += 1
@@ -775,16 +749,3 @@ def _source_external_id(result: SearchResult) -> str | None:
         if value is not None and str(value).strip():
             return str(value).strip()[:500]
     return None
-
-
-def _assessment_needs_review(
-    candidate_type: DiscoveryCandidateType,
-    confidence: int,
-    provider_id: str,
-) -> bool:
-    if candidate_type == DiscoveryCandidateType.UNKNOWN and confidence >= 45:
-        return True
-    provider = provider_id.casefold()
-    return candidate_type == DiscoveryCandidateType.VENDOR and any(
-        marketplace in provider for marketplace in ("kijiji", "craigslist", "marketplace")
-    )

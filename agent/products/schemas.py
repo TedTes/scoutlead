@@ -109,10 +109,6 @@ class ProductDiscoveryPlan(BaseModel):
     rationale: str = Field(min_length=1)
 
 
-class ProductDiscoveryStart(BaseModel):
-    max_results: int = Field(default=10, gt=0, le=100)
-
-
 class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 

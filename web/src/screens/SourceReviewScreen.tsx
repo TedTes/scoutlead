@@ -150,7 +150,7 @@ function matchesFilter(item: SourceItem, filter: ReviewFilter): boolean {
   if (filter === "all") return true;
   if (filter === "needs_review") return item.state === "needs_review";
   if (filter === "rejected") return ["rejected", "excluded", "failed"].includes(item.state);
-  return ["relevant", "identity_resolved", "audit_pending", "audited", "eligible"].includes(item.state);
+  return ["relevant", "resolution_queued", "audit_pending", "audited", "eligible"].includes(item.state);
 }
 
 function filterLabel(filter: ReviewFilter): string {
@@ -170,6 +170,6 @@ function reviewLabel(action: "accept" | "reject" | "duplicate" | "reaudit"): str
 function itemTone(state: SourceItem["state"]): "green" | "amber" | "red" | "gray" {
   if (["rejected", "excluded", "failed"].includes(state)) return "red";
   if (state === "needs_review") return "amber";
-  if (["relevant", "identity_resolved", "audit_pending", "audited", "eligible"].includes(state)) return "green";
+  if (["relevant", "resolution_queued", "audit_pending", "audited", "eligible"].includes(state)) return "green";
   return "gray";
 }

@@ -5,18 +5,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobType(StrEnum):
-    CAMPAIGN_RUN = "campaign.run"
     MESSAGE_SEND = "message.send"
     AUDIENCE_RUN = "audience.run"
     BUSINESS_INDEX_REFRESH = "business_index.refresh"
     SOURCE_FETCH = "source.fetch"
-    SOURCE_ITEM_CLASSIFY = "source_item.classify"
     BUSINESS_IDENTITY_RESOLVE = "business.identity_resolve"
-    BUSINESS_VALIDATE = "business.validate"
     BUSINESS_OPPORTUNITY_AUDIT = "business.opportunity_audit"
     BUSINESS_SEARCH_EVALUATE = "business.search_evaluate"
     BUSINESS_SEARCH_EVALUATE_BATCH = "business.search_evaluate_batch"
-    SEARCH_ELIGIBILITY_MATCH = "search.eligibility_match"
     SIGNAL_COLLECTION = "signal.collection"
     SIGNAL_VALIDATION = "signal.validation"
 

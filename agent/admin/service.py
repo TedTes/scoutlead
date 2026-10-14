@@ -604,7 +604,7 @@ class AdminDataService:
             raise ConflictError("Automatic jobs do not have a manual validation gate")
         children, items = self._data_job_records(root)
         if any(job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value} for job in children):
-            raise ConflictError("Collection must finish before validation can start")
+            raise ConflictError("Collection must finish before indexing can start")
         eligible = [
             item for item in items
             if item.business_id is None
@@ -634,18 +634,11 @@ class AdminDataService:
             raise ConflictError("This batch has no unprocessed source items")
         queue = QueueService(self.session)
         for item in selected:
-            original_state = item.state
-            item.state = SourceItemState.VALIDATION_QUEUED.value
-            if original_state == SourceItemState.RELEVANT.value:
-                queue.enqueue_business_identity_resolve(
-                    source_item_id=item.id,
-                    segment_id=item.segment_id,
-                )
-            else:
-                queue.enqueue_source_item_classify(
-                    source_item_id=item.id,
-                    segment_id=item.segment_id,
-                )
+            item.state = SourceItemState.RESOLUTION_QUEUED.value
+            queue.enqueue_business_identity_resolve(
+                source_item_id=item.id,
+                segment_id=item.segment_id,
+            )
         remaining = len(eligible) - len(selected)
         root.payload = {
             **(root.payload or {}),
@@ -1333,13 +1326,10 @@ class AdminDataService:
         child_statuses = Counter(job.status for job in children)
         pending_states = {SourceItemState.FETCHED.value, SourceItemState.RELEVANT.value}
         processing_states = {
-            SourceItemState.VALIDATION_QUEUED.value,
-            SourceItemState.IDENTITY_RESOLVED.value,
-            SourceItemState.VALIDATING.value,
+            SourceItemState.RESOLUTION_QUEUED.value,
             SourceItemState.AUDIT_PENDING.value,
         }
         validated_states = {
-            SourceItemState.VALIDATED.value,
             SourceItemState.AUDITED.value,
             SourceItemState.ELIGIBLE.value,
         }
@@ -1454,9 +1444,7 @@ class AdminDataService:
             processing = sum(
                 state_counts[state]
                 for state in {
-                    SourceItemState.VALIDATION_QUEUED.value,
-                    SourceItemState.IDENTITY_RESOLVED.value,
-                    SourceItemState.VALIDATING.value,
+                    SourceItemState.RESOLUTION_QUEUED.value,
                     SourceItemState.AUDIT_PENDING.value,
                 }
             )
@@ -1469,9 +1457,7 @@ class AdminDataService:
             for state in {
                 SourceItemState.FETCHED.value,
                 SourceItemState.RELEVANT.value,
-                SourceItemState.VALIDATION_QUEUED.value,
-                SourceItemState.IDENTITY_RESOLVED.value,
-                SourceItemState.VALIDATING.value,
+                SourceItemState.RESOLUTION_QUEUED.value,
                 SourceItemState.AUDIT_PENDING.value,
             }
         ):

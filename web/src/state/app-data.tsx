@@ -69,7 +69,6 @@ type AppDataContextValue = {
   deleteProfile: (profileId: string) => Promise<void>;
   refillProfile: (profileId?: string) => Promise<ProfileQueued | null>;
   deleteProduct: (productId?: string) => Promise<void>;
-  discoverProduct: (productId?: string, maxResults?: number) => Promise<void>;
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
   rerunSourceRequest: (runId?: string) => Promise<SourceRequestRun | null>;
   sendApprovedShortlistWebhook: (runId?: string) => Promise<void>;
@@ -79,8 +78,6 @@ type AppDataContextValue = {
   createDiscoveryRun: (input: DiscoveryRunCreateInput) => Promise<DiscoveryRun | null>;
   renameDiscoveryRun: (runId: string, name: string) => Promise<void>;
   deleteDiscoveryRuns: (runIds: string[]) => Promise<void>;
-  runDiscovery: (runId?: string) => Promise<void>;
-  enqueueDiscoveryRun: (runId?: string) => Promise<void>;
   pauseDiscoveryRun: (runId?: string) => Promise<void>;
   resumeDiscoveryRun: (runId?: string) => Promise<void>;
   addSeedResults: (seeds: unknown[]) => Promise<void>;
@@ -254,7 +251,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         discoveryCandidates,
         messages,
         metrics,
-        preflight,
       ] = await Promise.all([
         api.getDiscoveryRun(targetRunId),
         api.getDiscoveryRunSources(targetRunId).catch(() => []),
@@ -262,7 +258,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         api.getDiscoveryCandidates(targetRunId).catch(() => []),
         api.getMessages(targetRunId),
         api.getMetrics(targetRunId),
-        api.getDiscoveryRunPreflight(targetRunId),
       ]);
       return {
         run,
@@ -271,7 +266,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         discoveryCandidates,
         messages,
         metrics,
-        preflight,
       };
     },
     [api],
@@ -664,12 +658,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
             localStorage.setItem("selectedDiscoveryRunId", "");
           }
         }),
-      discoverProduct: (productId = selectedProductIdState, maxResults = 10) =>
-        mutate(async () => {
-          if (!productId) return;
-          const summary = await api.discoverProduct(productId, maxResults);
-          localStorage.setItem("selectedDiscoveryRunId", summary.campaign.id);
-        }),
       runSourceRequest: async (input) => {
         let created: SourceRequestRun | null = null;
         setError("");
@@ -753,14 +741,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           if (runIds.includes(selectedDiscoveryRunIdState)) {
             localStorage.setItem("selectedDiscoveryRunId", "");
           }
-        }),
-      runDiscovery: (runId = selectedDiscoveryRunIdState) =>
-        mutate(async () => {
-          if (runId) await api.runDiscovery(runId);
-        }),
-      enqueueDiscoveryRun: (runId = selectedDiscoveryRunIdState) =>
-        mutate(async () => {
-          if (runId) await api.enqueueDiscoveryRun(runId);
         }),
       pauseDiscoveryRun: (runId = selectedDiscoveryRunIdState) =>
         mutate(async () => {

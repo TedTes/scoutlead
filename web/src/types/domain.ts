@@ -201,7 +201,6 @@ export type SourceRequestRun = {
     }>;
   };
   run: DiscoveryRun;
-  summary?: DiscoveryRunSummary | null;
   state: "ready" | "expanding";
   current_result_count: number;
   requested_result_count: number;
@@ -700,7 +699,7 @@ export type SourceItem = {
   raw_payload: Record<string, unknown>;
   fetched_at: string;
   content_hash: string;
-  state: "fetched" | "needs_review" | "relevant" | "rejected" | "identity_resolved" | "audit_pending" | "audited" | "eligible" | "excluded" | "failed";
+  state: "fetched" | "needs_review" | "relevant" | "resolution_queued" | "rejected" | "audit_pending" | "audited" | "eligible" | "excluded" | "failed";
   business_id?: string | null;
   last_error?: string | null;
   decisions: SourceItemDecision[];
@@ -765,19 +764,6 @@ export type RunDiagnostics = {
   caveats: string[];
 };
 
-export type DiscoveryPreflightCheck = {
-  name: string;
-  status: string;
-  detail: string;
-  required: boolean;
-};
-
-export type DiscoveryPreflight = {
-  campaign_id: string;
-  ready: boolean;
-  checks: DiscoveryPreflightCheck[];
-};
-
 export type DiscoverySnapshot = {
   run?: DiscoveryRun;
   sourceConfigs: DiscoveryRunSource[];
@@ -785,7 +771,6 @@ export type DiscoverySnapshot = {
   discoveryCandidates: DiscoveryCandidate[];
   messages: Message[];
   metrics?: Metrics;
-  preflight?: DiscoveryPreflight;
 };
 
 export type ApiHealth = {
@@ -793,16 +778,6 @@ export type ApiHealth = {
   service: string;
 };
 
-export type DiscoveryRunSummary = {
-  campaign: DiscoveryRun;
-  discovered_lead_count: number;
-  researched_lead_count: number;
-  contacted_lead_count: number;
-  verified_lead_count: number;
-  signaled_lead_count: number;
-  qualified_lead_count: number;
-  drafted_message_count: number;
-};
 export type AdminOverview = {
   total: number;
   active: number;

@@ -20,7 +20,6 @@ from campaigns.schemas import CampaignRead
 from db.models import (
     NicheModel,
     QueueJobModel,
-    RunPipelineEventModel,
     SourceItemDecisionModel,
     SourceItemModel,
 )
@@ -29,7 +28,6 @@ from job_queue.repository import QueueRepository
 from job_queue.schemas import JobType
 from products.repository import ProductRepository
 from leads.repository import LeadRepository
-from leads.schemas import LeadRead
 from run_diagnostics.service import build_run_diagnostics
 from seeding.service import BusinessSeedService
 from shared.utils import utcnow
@@ -298,7 +296,7 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert summary["successful_source_count"] == 3
     assert summary["filled_campaign_count"] == 0
     assert refreshed_run.status == "completed"
-    assert len(leads) == 2
+    assert len(leads) == 3
     assert all(
         lead.raw_sources[0]["raw"]["search_match"]["status"] == "unknown"
         for lead in leads
@@ -313,12 +311,8 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert diagnostics.retention == "exact"
     assert diagnostics.summary["final"] == 0
     assert len(source_items) == 3
-    assert sorted(item.state for item in source_items) == [
-        "audit_pending",
-        "audit_pending",
-        "rejected",
-    ]
-    assert len(source_item_decisions) == 5
+    assert all(item.state == "audit_pending" for item in source_items)
+    assert len(source_item_decisions) == 3
 
 
 def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
@@ -378,20 +372,14 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
                     task_data=job.payload["task"],
                     job_id=job.id,
                 )
-            elif job.type == JobType.SOURCE_ITEM_CLASSIFY.value:
-                pipeline.classify_source_item(job.payload["source_item_id"], job_id=job.id)
             elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
                 pipeline.resolve_identity(job.payload["source_item_id"])
-            elif job.type == JobType.BUSINESS_VALIDATE.value:
-                pipeline.validate_business(job.payload["source_item_id"])
             elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
                 pipeline.audit_opportunity(
                     job.payload["source_item_id"],
                     business_id=job.payload["business_id"],
                     job_id=job.id,
                 )
-            elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
-                pipeline.match_eligibility(segment_id, job_id=job.id)
             queue.complete(job.id)
 
         items = session.query(SourceItemModel).all()
@@ -400,12 +388,10 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
     assert planned["source_job_count"] == 3
     assert set(processed_types) == {
         JobType.SOURCE_FETCH.value,
-        JobType.SOURCE_ITEM_CLASSIFY.value,
         JobType.BUSINESS_IDENTITY_RESOLVE.value,
-        JobType.BUSINESS_VALIDATE.value,
         JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
     }
-    assert sorted(item.state for item in items) == ["eligible", "eligible", "rejected"]
+    assert all(item.state == "eligible" for item in items)
     assert segment is not None
     assert segment.next_refresh_at > segment.last_refresh_at
 

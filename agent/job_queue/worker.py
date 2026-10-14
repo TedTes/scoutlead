@@ -69,11 +69,7 @@ def run_once() -> bool:
             job.attempts,
         )
         try:
-            if job.type == JobType.CAMPAIGN_RUN.value:
-                _campaign_service(session=session, services=services).run_campaign(
-                    str(job.payload["campaign_id"])
-                )
-            elif job.type == JobType.MESSAGE_SEND.value:
+            if job.type == JobType.MESSAGE_SEND.value:
                 MessageService(session=session, email=services.email).send(
                     str(job.payload["message_id"])
                 )
@@ -141,24 +137,11 @@ def run_once() -> bool:
                     job_id=job.id,
                     processing_mode=str(job.payload.get("processing_mode", "automatic")),
                 )
-            elif job.type == JobType.SOURCE_ITEM_CLASSIFY.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).classify_source_item(
-                    str(job.payload["source_item_id"]),
-                    job_id=job.id,
-                )
             elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
                 business_index_pipeline_service(
                     session=session,
                     services=services,
                 ).resolve_identity(str(job.payload["source_item_id"]))
-            elif job.type == JobType.BUSINESS_VALIDATE.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).validate_business(str(job.payload["source_item_id"]))
             elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
                 business_index_pipeline_service(
                     session=session,
@@ -241,14 +224,6 @@ def run_once() -> bool:
                 )
                 _source_request_service(session, services).finalize_search_evaluations(
                     str(job.payload["campaign_id"])
-                )
-            elif job.type == JobType.SEARCH_ELIGIBILITY_MATCH.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).match_eligibility(
-                    str(job.payload["segment_id"]),
-                    job_id=job.id,
                 )
             else:
                 raise ValueError(f"unknown job type: {job.type}")
@@ -497,11 +472,8 @@ def _record_source_item_failure(
         source_item_id,
         SourceItemDecisionCreate(
             stage={
-                JobType.SOURCE_ITEM_CLASSIFY.value: SourceItemStage.RELEVANCE,
                 JobType.BUSINESS_IDENTITY_RESOLVE.value: SourceItemStage.IDENTITY,
-                JobType.BUSINESS_VALIDATE.value: SourceItemStage.VALIDATION,
                 JobType.BUSINESS_OPPORTUNITY_AUDIT.value: SourceItemStage.OPPORTUNITY,
-                JobType.SEARCH_ELIGIBILITY_MATCH.value: SourceItemStage.ELIGIBILITY,
             }.get(job_type, SourceItemStage.IDENTITY),
             decision=SourceItemDecisionValue.FAILED,
             reason=reason,

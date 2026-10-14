@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from agents.embeddings import EmbeddingClient
 from business_index.refresh import (
     BusinessIndexRefreshService,
-    _assessment_needs_review,
     _campaign_source,
     _canonical_contact_email,
     _canonical_website_url,
@@ -23,18 +22,15 @@ from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessFactModel,
-    BusinessModel,
     QueueJobModel,
     SourceItemModel,
     SourceObservationModel,
 )
-from discovery.classifier import assess_discovery_candidate
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from products.repository import ProductRepository
 from products.schemas import ProductRead
-from business_validation.validation import BusinessValidationService
 from shared.utils import utcnow
 from source_items.repository import SourceItemRepository
 from source_items.schemas import (
@@ -230,20 +226,9 @@ class BusinessIndexPipelineService:
                     business_id=item.business_id,
                 )
                 queued += 1
-            elif item.state == SourceItemState.RELEVANT.value:
+            else:
+                item.state = SourceItemState.RESOLUTION_QUEUED.value
                 self.queue.enqueue_business_identity_resolve(
-                    source_item_id=item.id,
-                    segment_id=segment.id,
-                )
-                queued += 1
-            elif item.state in {
-                SourceItemState.FETCHED.value,
-                SourceItemState.FAILED.value,
-                SourceItemState.REJECTED.value,
-                SourceItemState.NEEDS_REVIEW.value,
-                SourceItemState.EXCLUDED.value,
-            }:
-                self.queue.enqueue_source_item_classify(
                     source_item_id=item.id,
                     segment_id=segment.id,
                 )
@@ -267,56 +252,6 @@ class BusinessIndexPipelineService:
         if not queued:
             self._maybe_complete(segment, current_job_id=job_id)
         return {"fetched_count": len(rows), "processing_job_count": queued}
-
-    def classify_source_item(self, source_item_id: str, *, job_id: str) -> dict[str, Any]:
-        item = self.items.get(source_item_id)
-        segment = self._segment(item.segment_id)
-        product = ProductRead.model_validate(
-            ProductRepository(self.session).get(segment.product_id)
-        )
-        result = SearchResult.model_validate(item.raw_payload)
-        assessment = assess_discovery_candidate(result, product)
-        if not assessment.is_promotable:
-            reviewable = _assessment_needs_review(
-                assessment.candidate_type,
-                assessment.confidence,
-                item.provider_id,
-            )
-            self.items.add_decision(
-                item.id,
-                SourceItemDecisionCreate(
-                    stage=SourceItemStage.RELEVANCE,
-                    decision=(
-                        SourceItemDecisionValue.NEEDS_REVIEW
-                        if reviewable
-                        else SourceItemDecisionValue.REJECTED
-                    ),
-                    reason=assessment.rejection_reason,
-                    confidence=assessment.confidence,
-                    details={"candidate_type": assessment.candidate_type.value},
-                ),
-                next_state=(
-                    SourceItemState.NEEDS_REVIEW if reviewable else SourceItemState.REJECTED
-                ),
-            )
-            self._maybe_complete(segment, current_job_id=job_id)
-            return {"state": "needs_review" if reviewable else "rejected"}
-        self.items.add_decision(
-            item.id,
-            SourceItemDecisionCreate(
-                stage=SourceItemStage.RELEVANCE,
-                decision=SourceItemDecisionValue.ACCEPTED,
-                reason="Source item has sufficient evidence of a target business.",
-                confidence=assessment.confidence,
-                details={"candidate_type": assessment.candidate_type.value},
-            ),
-            next_state=SourceItemState.RELEVANT,
-        )
-        self.queue.enqueue_business_identity_resolve(
-            source_item_id=item.id,
-            segment_id=segment.id,
-        )
-        return {"state": "relevant"}
 
     def _carry_forward_human_decision(self, item: SourceItemModel) -> None:
         previous = self.items.latest_user_decision_for(item)
@@ -343,6 +278,7 @@ class BusinessIndexPipelineService:
 
     def resolve_identity(self, source_item_id: str) -> dict[str, Any]:
         item = self.items.get(source_item_id)
+        segment = self._segment(item.segment_id)
         result = SearchResult.model_validate(item.raw_payload)
         raw = {**(result.raw or {}), "source_item_id": item.id}
         canonical = CanonicalRepository(self.session, embedding=self.embedding)
@@ -382,84 +318,35 @@ class BusinessIndexPipelineService:
                 "state": "needs_review",
                 "candidate_business_ids": list(link.identity_candidate_ids),
             }
+        self.segments.assign_business(
+            segment,
+            business_id=link.business_id,
+            source_observation_id=link.source_observation_id,
+        )
         self.items.add_decision(
             item.id,
             SourceItemDecisionCreate(
                 stage=SourceItemStage.IDENTITY,
                 decision=SourceItemDecisionValue.RESOLVED,
-                reason="Resolved to a canonical business.",
+                reason="Resolved and assigned to a searchable business segment.",
                 details={
                     "business_id": link.business_id,
                     "resolution": link.identity_resolution,
                 },
             ),
-            next_state=SourceItemState.VALIDATING,
-            business_id=link.business_id,
-        )
-        self.queue.enqueue_business_validate(
-            source_item_id=item.id,
-            segment_id=item.segment_id,
-            business_id=link.business_id,
-        )
-        return {"business_id": link.business_id}
-
-    def validate_business(self, source_item_id: str) -> dict[str, Any]:
-        item = self.items.get(source_item_id)
-        if not item.business_id:
-            raise ValueError(f"source item has no resolved business: {source_item_id}")
-        business = self.session.get(BusinessModel, item.business_id)
-        if business is None:
-            raise ValueError(f"business not found: {item.business_id}")
-        segment = self._segment(item.segment_id)
-        results = BusinessValidationService(self.session).validate(
-            business=business,
-            source_item=item,
-            segment=segment,
-        )
-        statuses = {result.status for result in results}
-        if "failed" in statuses:
-            self.items.add_decision(
-                item.id,
-                SourceItemDecisionCreate(
-                    stage=SourceItemStage.VALIDATION,
-                    decision=SourceItemDecisionValue.REJECTED,
-                    reason="Business validation failed.",
-                    details={"validation_ids": [result.id for result in results]},
-                ),
-                next_state=SourceItemState.REJECTED,
-                business_id=item.business_id,
-            )
-            return {"business_id": item.business_id, "state": "rejected"}
-        if statuses != {"passed"}:
-            self.items.add_decision(
-                item.id,
-                SourceItemDecisionCreate(
-                    stage=SourceItemStage.VALIDATION,
-                    decision=SourceItemDecisionValue.NEEDS_REVIEW,
-                    reason="Business validation requires additional evidence.",
-                    details={"validation_ids": [result.id for result in results]},
-                ),
-                next_state=SourceItemState.NEEDS_REVIEW,
-                business_id=item.business_id,
-            )
-            return {"business_id": item.business_id, "state": "needs_review"}
-        self.items.add_decision(
-            item.id,
-            SourceItemDecisionCreate(
-                stage=SourceItemStage.VALIDATION,
-                decision=SourceItemDecisionValue.VALIDATED,
-                reason="Identity, business type, trade, and location validations passed.",
-                details={"validation_ids": [result.id for result in results]},
-            ),
             next_state=SourceItemState.AUDIT_PENDING,
-            business_id=item.business_id,
+            business_id=link.business_id,
         )
         self.queue.enqueue_business_opportunity_audit(
             source_item_id=item.id,
             segment_id=item.segment_id,
-            business_id=item.business_id,
+            business_id=link.business_id,
         )
-        return {"business_id": item.business_id, "state": "validated"}
+        return {
+            "business_id": link.business_id,
+            "state": "searchable",
+            "signal_collection_queued": True,
+        }
 
     def audit_opportunity(
         self,
@@ -498,7 +385,7 @@ class BusinessIndexPipelineService:
                 SourceItemDecisionCreate(
                     stage=SourceItemStage.OPPORTUNITY,
                     decision=SourceItemDecisionValue.AUDITED,
-                    reason="Opportunity audit completed; validated business is searchable.",
+                    reason="Opportunity signal collection completed for searchable business.",
                     details={
                         "business_id": business_id,
                         "opportunity_evidence": opportunity_evidence,
@@ -542,16 +429,6 @@ class BusinessIndexPipelineService:
         limit = min(max(int(segment.target_business_count or 25), 1), 100)
         return candidates[:limit]
 
-    def match_eligibility(self, segment_id: str, *, job_id: str) -> dict[str, Any]:
-        """Complete legacy queued jobs; eligibility now belongs to a search contract."""
-        segment = self._segment(segment_id)
-        self._maybe_complete(segment, current_job_id=job_id)
-        return {
-            "evaluated_count": 0,
-            "updated_item_count": 0,
-            "deprecated": True,
-        }
-
     def _segment(self, segment_id: str):
         segment = self.segments.get(segment_id)
         if segment is None:
@@ -561,11 +438,8 @@ class BusinessIndexPipelineService:
     def _maybe_complete(self, segment, *, current_job_id: str) -> bool:
         stage_types = {
             JobType.SOURCE_FETCH.value,
-            JobType.SOURCE_ITEM_CLASSIFY.value,
             JobType.BUSINESS_IDENTITY_RESOLVE.value,
-            JobType.BUSINESS_VALIDATE.value,
             JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
-            JobType.SEARCH_ELIGIBILITY_MATCH.value,
         }
         active = list(
             self.session.scalars(

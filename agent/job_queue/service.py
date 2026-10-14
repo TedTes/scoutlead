@@ -10,9 +10,6 @@ class QueueService:
     def __init__(self, session: Session) -> None:
         self.queue = QueueRepository(session)
 
-    def enqueue_campaign_run(self, campaign_id: str):
-        return self.queue.enqueue(JobType.CAMPAIGN_RUN, {"campaign_id": campaign_id})
-
     def enqueue_message_send(self, message_id: str):
         return self.queue.enqueue(JobType.MESSAGE_SEND, {"message_id": message_id})
 
@@ -86,14 +83,6 @@ class QueueService:
             parent_run_id=parent_run_id,
         )
 
-    def enqueue_source_item_classify(self, *, source_item_id: str, segment_id: str):
-        return self.queue.enqueue_once(
-            JobType.SOURCE_ITEM_CLASSIFY,
-            {"source_item_id": source_item_id, "segment_id": segment_id},
-            dedupe_key=source_item_id,
-            max_attempts=3,
-        )
-
     def enqueue_business_identity_resolve(self, *, source_item_id: str, segment_id: str):
         return self.queue.enqueue_once(
             JobType.BUSINESS_IDENTITY_RESOLVE,
@@ -157,24 +146,6 @@ class QueueService:
             commit=commit,
         )
 
-    def enqueue_business_validate(
-        self,
-        *,
-        source_item_id: str,
-        segment_id: str,
-        business_id: str,
-    ):
-        return self.queue.enqueue_once(
-            JobType.BUSINESS_VALIDATE,
-            {
-                "source_item_id": source_item_id,
-                "segment_id": segment_id,
-                "business_id": business_id,
-            },
-            dedupe_key=f"{source_item_id}:{business_id}",
-            max_attempts=3,
-        )
-
     def enqueue_business_opportunity_audit(
         self,
         *,
@@ -192,14 +163,6 @@ class QueueService:
             JobType.BUSINESS_OPPORTUNITY_AUDIT,
             payload,
             dedupe_key=f"{segment_id}:{business_id}:{source_item_id or 'index'}",
-            max_attempts=3,
-        )
-
-    def enqueue_search_eligibility_match(self, *, segment_id: str):
-        return self.queue.enqueue_once(
-            JobType.SEARCH_ELIGIBILITY_MATCH,
-            {"segment_id": segment_id},
-            dedupe_key=segment_id,
             max_attempts=3,
         )
 

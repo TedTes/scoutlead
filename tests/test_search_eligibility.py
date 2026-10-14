@@ -3,7 +3,7 @@ from datetime import timedelta
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from business_index.eligibility import REQUIRED_VALIDATIONS, searchable_business_conditions
+from business_index.eligibility import searchable_business_conditions
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
@@ -52,25 +52,6 @@ def _eligible_scope(session):
             last_seen_at=now,
         )
     )
-    for dimension, confidence in REQUIRED_VALIDATIONS.items():
-        session.add(
-            ValidationResultModel(
-                id=new_id("validation"),
-                idempotency_key=f"{business.id}:{dimension}:passed",
-                business_id=business.id,
-                niche_id=niche.id,
-                market_key="toronto",
-                validation_type=dimension,
-                status="passed",
-                confidence=confidence,
-                reason="Passed",
-                evidence=[],
-                validator="test",
-                validator_version=1,
-                observed_at=now,
-                expires_at=now + timedelta(days=30),
-            )
-        )
     session.commit()
     return business, niche, now
 
@@ -88,7 +69,7 @@ def _searchable_ids(session) -> list[str]:
     )
 
 
-def test_current_passed_validations_make_membership_searchable() -> None:
+def test_active_business_membership_is_searchable_without_validations() -> None:
     factory = _session_factory()
     with factory() as session:
         business, _, _ = _eligible_scope(session)
@@ -96,7 +77,7 @@ def test_current_passed_validations_make_membership_searchable() -> None:
         assert _searchable_ids(session) == [business.id]
 
 
-def test_newer_failed_validation_removes_membership_from_search() -> None:
+def test_failed_quality_validation_does_not_remove_membership_from_search() -> None:
     factory = _session_factory()
     with factory() as session:
         business, niche, observed_at = _eligible_scope(session)
@@ -118,6 +99,16 @@ def test_newer_failed_validation_removes_membership_from_search() -> None:
                 expires_at=observed_at + timedelta(days=30),
             )
         )
+        session.commit()
+
+        assert _searchable_ids(session) == [business.id]
+
+
+def test_closed_business_is_not_searchable() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _, _ = _eligible_scope(session)
+        business.status = "closed"
         session.commit()
 
         assert _searchable_ids(session) == []

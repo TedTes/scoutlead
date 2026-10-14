@@ -9,11 +9,8 @@ class SourceItemState(StrEnum):
     FETCHED = "fetched"
     NEEDS_REVIEW = "needs_review"
     RELEVANT = "relevant"
-    VALIDATION_QUEUED = "validation_queued"
+    RESOLUTION_QUEUED = "resolution_queued"
     REJECTED = "rejected"
-    IDENTITY_RESOLVED = "identity_resolved"
-    VALIDATING = "validating"
-    VALIDATED = "validated"
     AUDIT_PENDING = "audit_pending"
     AUDITED = "audited"
     ELIGIBLE = "eligible"
@@ -24,7 +21,6 @@ class SourceItemState(StrEnum):
 class SourceItemStage(StrEnum):
     RELEVANCE = "relevance"
     IDENTITY = "identity"
-    VALIDATION = "validation"
     OPPORTUNITY = "opportunity"
     ELIGIBILITY = "eligibility"
 
@@ -35,7 +31,6 @@ class SourceItemDecisionValue(StrEnum):
     NEEDS_REVIEW = "needs_review"
     DUPLICATE = "duplicate"
     RESOLVED = "resolved"
-    VALIDATED = "validated"
     AUDITED = "audited"
     ELIGIBLE = "eligible"
     EXCLUDED = "excluded"

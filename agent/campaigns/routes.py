@@ -5,12 +5,9 @@ from fastapi import APIRouter, Depends, Response, status
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaign_sources.repository import CampaignSourceRepository
 from campaign_sources.schemas import CampaignSourceRead
-from campaigns.schemas import CampaignCreate, CampaignPreflightRead, CampaignRead, CampaignRunSummary, CampaignUpdate
+from campaigns.schemas import CampaignCreate, CampaignRead, CampaignUpdate
 from campaigns.service import CampaignService
 from evaluation.schemas import CampaignMetrics
-from job_queue.schemas import QueueJobRead
-from job_queue.service import QueueService
-from shared.errors import ConflictError
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -133,40 +130,6 @@ def resume_campaign(
     return _service(session, services, auth).resume(campaign_id)
 
 
-@router.post("/{campaign_id}/run", response_model=CampaignRunSummary)
-def run_campaign(
-    campaign_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    service = _service(session, services, auth)
-    _assert_preflight_ready(service.preflight(campaign_id))
-    return service.run_campaign(campaign_id)
-
-
-@router.post("/{campaign_id}/enqueue", response_model=QueueJobRead)
-def enqueue_campaign_run(
-    campaign_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    service = _service(session, services, auth)
-    _assert_preflight_ready(service.preflight(campaign_id))
-    return QueueService(session).enqueue_campaign_run(campaign_id)
-
-
-@router.get("/{campaign_id}/preflight", response_model=CampaignPreflightRead)
-def campaign_preflight(
-    campaign_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    return _service(session, services, auth).preflight(campaign_id)
-
-
 @router.get("/{campaign_id}/metrics", response_model=CampaignMetrics)
 def campaign_metrics(
     campaign_id: str,
@@ -175,13 +138,3 @@ def campaign_metrics(
     auth: CurrentAuth,
 ):
     return _service(session, services, auth).metrics(campaign_id)
-
-
-def _assert_preflight_ready(preflight: CampaignPreflightRead) -> None:
-    if preflight.ready:
-        return
-    failures = [check for check in preflight.checks if check.required and check.status == "failed"]
-    raise ConflictError(
-        "discovery run cannot start until required integrations are configured",
-        {"failures": [failure.model_dump(mode="json") for failure in failures]},
-    )

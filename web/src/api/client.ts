@@ -11,8 +11,6 @@ import type {
   ApiHealth,
   DiscoveryRun,
   DiscoveryRunCreateInput,
-  DiscoveryPreflight,
-  DiscoveryRunSummary,
   DiscoveryRunSource,
   DiscoveryCandidate,
   DiscoveryResult,
@@ -35,7 +33,6 @@ import type {
   ProfileFactChange,
   ProfileOptions,
   ProfileQueued,
-  QueueJob,
   SourceRequestInput,
   SourceRequestRun,
   SourceProvider,
@@ -280,13 +277,6 @@ export class ApiClient {
     return this.request<GmailConnectionStatus>(`/products/${productId}/email/gmail`, { method: "DELETE" });
   }
 
-  discoverProduct(id: string, maxResults = 10) {
-    return this.request<DiscoveryRunSummary>(`/products/${id}/discover`, {
-      method: "POST",
-      body: { max_results: maxResults },
-    });
-  }
-
   getDiscoveryRuns() {
     return this.request<DiscoveryRun[]>("/discovery-runs");
   }
@@ -423,20 +413,8 @@ export class ApiClient {
     return this.request<DiscoveryRunSource[]>(`/discovery-runs/${id}/sources`);
   }
 
-  getDiscoveryRunPreflight(id: string) {
-    return this.request<DiscoveryPreflight>(`/discovery-runs/${id}/preflight`);
-  }
-
   deleteDiscoveryRun(id: string) {
     return this.request<void>(`/discovery-runs/${id}`, { method: "DELETE" });
-  }
-
-  runDiscovery(id: string) {
-    return this.request<DiscoveryRunSummary>(`/discovery-runs/${id}/run`, { method: "POST" });
-  }
-
-  enqueueDiscoveryRun(id: string) {
-    return this.request<QueueJob>(`/discovery-runs/${id}/enqueue`, { method: "POST" });
   }
 
   getDiscoveryRunDiagnostics(runId: string) {

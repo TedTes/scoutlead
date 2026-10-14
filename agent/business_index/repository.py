@@ -110,6 +110,54 @@ class BusinessIndexRepository:
             )
         )
 
+    def assign_business(
+        self,
+        segment: BusinessIndexSegmentModel,
+        *,
+        business_id: str,
+        source_observation_id: str | None,
+    ) -> BusinessNicheMembershipModel:
+        membership = self.session.scalar(
+            select(BusinessNicheMembershipModel)
+            .where(
+                BusinessNicheMembershipModel.business_id == business_id,
+                BusinessNicheMembershipModel.niche_id == segment.niche_id,
+                BusinessNicheMembershipModel.market_key == segment.market_key,
+            )
+            .limit(1)
+        )
+        now = utcnow()
+        evidence = {
+            "type": "business_index_segment",
+            "segment_id": segment.id,
+            "source_observation_id": source_observation_id,
+        }
+        if membership is None:
+            membership = BusinessNicheMembershipModel(
+                id=new_id("bizniche"),
+                business_id=business_id,
+                niche_id=segment.niche_id,
+                market_key=segment.market_key,
+                confidence=1.0,
+                evidence=[evidence],
+                source_observation_id=source_observation_id,
+                seed_batch_id=None,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+            self.session.add(membership)
+        else:
+            current_evidence = list(membership.evidence or [])
+            if evidence not in current_evidence:
+                membership.evidence = [*current_evidence, evidence]
+            membership.confidence = max(membership.confidence, 1.0)
+            membership.source_observation_id = (
+                source_observation_id or membership.source_observation_id
+            )
+            membership.last_seen_at = now
+        self.session.flush()
+        return membership
+
     def due(self, *, limit: int = 25) -> list[BusinessIndexSegmentModel]:
         now = utcnow()
         candidates = list(

@@ -1,10 +1,9 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaign_sources.repository import CampaignSourceRepository
 from business_index.schemas import SearchContract
-from campaigns.schemas import CampaignCreate
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from db.models import NicheModel, QueueJobModel
@@ -73,7 +72,6 @@ def test_source_request_creates_structured_google_places_run_without_running() -
         assert result.plan.action == "list_contacts"
         assert result.plan.query == "painting service Toronto ON"
         assert result.run.name == "Painters Toronto shortlist"
-        assert result.summary is None
         assert sources[0].provider_id == "google_places"
         assert sources[0].input["source_request_prompt"] == request.prompt
         assert sources[0].input["source_request_action"] == "list_contacts"
@@ -838,41 +836,12 @@ def test_broad_source_request_returns_existing_category_and_market_match() -> No
         jobs = session.query(QueueJobModel).all()
 
     assert search_tool.calls == 0
-    assert result.summary is None
     assert result.current_result_count == 1
     assert result.requested_result_count == 5
     assert result.state == "ready"
     assert result.run.status == "completed"
     assert jobs == []
     assert [lead.company_name for lead in leads] == ["All Painting Toronto"]
-
-
-def test_contact_listing_run_does_not_create_outreach_drafts() -> None:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    create_database(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    with session_factory() as session:
-        product = ProductRepository(session).create(_product_with_seed())
-        service = CampaignService(
-            session=session,
-            llm=FakeWorkflowLLM(),
-            search_tool=SearchTool(),
-            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
-        )
-        run = service.create(
-            CampaignCreate(
-                product_id=product.id,
-                name="List contacts only",
-                max_leads=5,
-            )
-        )
-
-        summary = service.run_contact_listing(run.id)
-
-        assert summary.drafted_message_count == 0
-        assert summary.campaign.status == "completed"
-        assert session.execute(text("select count(*) from messages")).scalar_one() == 0
 
 
 def test_source_request_compiles_url_actor_input_from_source_template() -> None:

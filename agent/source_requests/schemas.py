@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from campaigns.schemas import CampaignRead, CampaignRunSummary
+from campaigns.schemas import CampaignRead
 
 
 GOOGLE_PLACES_PROVIDER_ID = "google_places"
@@ -106,7 +106,6 @@ class SourceProviderRead(BaseModel):
 class SourceRequestRun(BaseModel):
     plan: SourceRequestPlan
     run: CampaignRead
-    summary: CampaignRunSummary | None = None
     state: str = "ready"
     current_result_count: int = 0
     requested_result_count: int = 0
