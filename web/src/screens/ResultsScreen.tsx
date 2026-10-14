@@ -3789,8 +3789,8 @@ function emptyBatchCopy(
   }
   if (state === "scoring") {
     return {
-      title: "Building this lead batch.",
-      detail: "Candidate evaluation is still running. Results will appear automatically.",
+      title: "Matching this audience.",
+      detail: "ScoutLead is matching stored business signals. This normally takes only a few seconds.",
     };
   }
   if (state === "setup") {
@@ -3804,7 +3804,7 @@ function emptyBatchCopy(
       ? "The scoring worker hit a provider rate limit."
       : failureClass === "quota"
         ? "The scoring worker has no remaining provider quota."
-        : "The scoring worker exhausted its retries.";
+        : "Audience matching stopped before completion.";
     return {
       title: "This lead batch could not be completed.",
       detail: `${cause} Check the worker logs before trying again.`,

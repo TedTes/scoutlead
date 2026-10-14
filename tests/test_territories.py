@@ -39,6 +39,7 @@ from db.models import (
     ValidationResultModel,
 )
 from db.session import create_database
+from job_queue.service import QueueService
 from products.repository import ProductRepository
 from products.schemas import ProductCreate, QualificationCriterion
 from shared.errors import ConflictError, NotFoundError, ValidationError
@@ -377,13 +378,37 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
             auth,
         )
 
-        scoring = current_profile_batch(result.profile.id, session, auth)
-        assert scoring.state.value == "scoring"
-        assert scoring.failure_class is None
+        completed = current_profile_batch(result.profile.id, session, auth)
+        assert completed.state.value == "empty"
+        assert completed.failure_class is None
 
         job = session.get(QueueJobModel, result.job.id)
         assert job is not None
-        job.attempts = 1
+        assert job.status == "completed"
+
+        initial_run = session.get(
+            AudienceRunModel,
+            result.job.payload["audience_run_id"],
+        )
+        assert initial_run is not None
+        initial_run.state = "matching"
+        initial_run.completed_at = None
+        job.status = "completed"
+        session.commit()
+
+        repaired = current_profile_batch(result.profile.id, session, auth)
+        assert repaired.state.value == "empty"
+        assert initial_run.state == "partial"
+        assert job.status == "completed"
+
+        run = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).create(result.profile.id)
+        job = QueueService(session).enqueue_audience_run(run.id)
+        job.status = "running"
+        job.attempts = 2
+        job.locked_at = utcnow()
         job.last_error = "HTTP 429 rate_limit_exceeded"
         session.commit()
         retrying = current_profile_batch(result.profile.id, session, auth)

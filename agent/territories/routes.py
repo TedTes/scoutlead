@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Response, status
 from sqlalchemy import select
@@ -245,21 +245,52 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         .order_by(AudienceRunModel.created_at.desc())
         .limit(1)
     )
-    result_run = session.scalar(
-        select(AudienceRunModel)
-        .join(AudienceResultModel, AudienceResultModel.run_id == AudienceRunModel.id)
-        .where(
-            AudienceRunModel.audience_id == profile.id,
-            AudienceRunModel.state.in_(
-                [AudienceRunState.READY.value, AudienceRunState.PARTIAL.value]
-            ),
-        )
-        .order_by(AudienceRunModel.created_at.desc())
-        .limit(1)
-    )
     latest_job = _latest_profile_job(
         session,
         latest_run.id if latest_run is not None else None,
+    )
+    if latest_run is not None and latest_job is not None:
+        is_initial_run = _is_initial_profile_run(session, latest_run)
+        run_is_incomplete = latest_run.state not in {
+            AudienceRunState.READY.value,
+            AudienceRunState.PARTIAL.value,
+            AudienceRunState.FAILED.value,
+        }
+        if is_initial_run and (
+            latest_job.status == JobStatus.QUEUED.value
+            or (
+                run_is_incomplete
+                and latest_job.status == JobStatus.COMPLETED.value
+            )
+            or (
+                latest_job.status == JobStatus.RUNNING.value
+                and latest_run.deadline_at
+                <= datetime.now(latest_run.deadline_at.tzinfo)
+            )
+        ):
+            _process_profile_run(
+                session,
+                run_id=latest_run.id,
+                job_id=latest_job.id,
+                workspace_id=auth.workspace_id,
+            )
+            session.refresh(latest_run)
+            session.refresh(latest_job)
+        elif (
+            latest_job.status == JobStatus.RUNNING.value
+            and latest_run.deadline_at <= datetime.now(latest_run.deadline_at.tzinfo)
+        ):
+            _fail_stalled_profile_run(session, latest_run, latest_job)
+            session.refresh(latest_run)
+            session.refresh(latest_job)
+    outreach_run = session.scalar(
+        select(AudienceRunModel)
+        .where(
+            AudienceRunModel.audience_id == profile.id,
+            AudienceRunModel.outreach_campaign_id.is_not(None),
+        )
+        .order_by(AudienceRunModel.created_at.desc())
+        .limit(1)
     )
     active_job = (
         latest_job
@@ -303,7 +334,7 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
         profile=service.get_read(profile.id),
         audience_run_id=latest_run.id if latest_run is not None else None,
         outreach_campaign_id=(
-            result_run.outreach_campaign_id if result_run is not None else None
+            outreach_run.outreach_campaign_id if outreach_run is not None else None
         ),
         leads=leads,
         state=state,
@@ -350,6 +381,87 @@ def _latest_profile_job(
         ),
         None,
     )
+
+
+def _process_profile_run(
+    session: DbSession,
+    *,
+    run_id: str,
+    job_id: str,
+    workspace_id: str | None,
+) -> None:
+    job = session.scalar(
+        select(QueueJobModel)
+        .where(QueueJobModel.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if job is None or job.status not in {
+        JobStatus.QUEUED.value,
+        JobStatus.RUNNING.value,
+        JobStatus.COMPLETED.value,
+    }:
+        return
+    job.status = JobStatus.RUNNING.value
+    job.attempts += 1
+    job.locked_at = datetime.now(timezone.utc)
+    session.commit()
+    try:
+        AudienceRunService(session, workspace_id=workspace_id).process(run_id)
+    except Exception as exc:
+        session.rollback()
+        run = session.get(AudienceRunModel, run_id)
+        job = session.get(QueueJobModel, job_id)
+        now = datetime.now(timezone.utc)
+        if run is not None:
+            run.state = AudienceRunState.FAILED.value
+            run.failure_reason = str(exc)[:2000]
+            run.completed_at = now
+        if job is not None:
+            job.status = JobStatus.FAILED.value
+            job.last_error = str(exc)[:2000]
+            job.completed_at = now
+            job.locked_at = None
+        session.commit()
+        return
+    job = session.get(QueueJobModel, job_id)
+    if job is not None:
+        job.status = JobStatus.COMPLETED.value
+        job.completed_at = datetime.now(timezone.utc)
+        job.locked_at = None
+        session.commit()
+
+
+def _is_initial_profile_run(session: DbSession, run: AudienceRunModel) -> bool:
+    previous_completed = session.scalar(
+        select(AudienceRunModel.id)
+        .where(
+            AudienceRunModel.audience_id == run.audience_id,
+            AudienceRunModel.id != run.id,
+            AudienceRunModel.state.in_(
+                [AudienceRunState.READY.value, AudienceRunState.PARTIAL.value]
+            ),
+        )
+        .limit(1)
+    )
+    return previous_completed is None
+
+
+def _fail_stalled_profile_run(
+    session: DbSession,
+    run: AudienceRunModel,
+    job: QueueJobModel,
+) -> None:
+    now = datetime.now(timezone.utc)
+    reason = "Audience matching exceeded its execution deadline. Run the audience again."
+    run.state = AudienceRunState.FAILED.value
+    run.failure_reason = reason
+    run.completed_at = now
+    job.status = JobStatus.FAILED.value
+    job.last_error = reason
+    job.completed_at = now
+    job.locked_at = None
+    session.commit()
 
 
 def _failure_class(error: str | None) -> str:
