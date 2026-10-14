@@ -17,6 +17,7 @@ from insights.routes import router as insights_router
 from leads.routes import router as leads_router
 from messages.routes import router as messages_router
 from outcomes.routes import router as outcomes_router
+from outreach_packages.routes import router as outreach_packages_router
 from products.routes import router as products_router
 from quality.routes import router as quality_router
 from shared.errors import SoutleadError
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(leads_router)
     app.include_router(messages_router)
     app.include_router(outcomes_router)
+    app.include_router(outreach_packages_router)
     app.include_router(territories_router)
     app.include_router(profiles_router)
     app.include_router(webhooks_router)

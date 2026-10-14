@@ -623,6 +623,33 @@ class DemoSiteModel(TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class OutreachPackageModel(TimestampMixin, Base):
+    __tablename__ = "outreach_packages"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "audience_result_id",
+            name="uq_outreach_packages_workspace_result",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=True, index=True
+    )
+    audience_result_id: Mapped[str] = mapped_column(
+        ForeignKey("audience_results.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    business_id: Mapped[str] = mapped_column(
+        ForeignKey("businesses.id"), nullable=False, index=True
+    )
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 class BusinessSearchEvaluationModel(TimestampMixin, Base):
     __tablename__ = "business_search_evaluations"
     __table_args__ = (
