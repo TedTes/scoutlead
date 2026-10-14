@@ -1,4 +1,4 @@
-"""drop the retired publication schema
+"""detach the retired publication schema from the runtime
 
 Revision ID: 20261014_0050
 Revises: 20261014_0049
@@ -22,7 +22,11 @@ def upgrade() -> None:
     )
     op.drop_column("audience_results", "publication_id")
     op.drop_table("pipeline_outbox_events")
-    op.drop_table("business_publications")
+
+    # Keep the final compatibility table for one more deployment. The previous
+    # application version can still hold a long-lived ACCESS SHARE lock while
+    # migrations run, which makes DROP TABLE block the rolling deployment.
+    # Nothing in the current runtime reads or writes this table.
 
 
 def downgrade() -> None:
