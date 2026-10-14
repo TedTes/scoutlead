@@ -10868,6 +10868,435 @@ button.bulk-recipient-select:hover {
   transform: translateX(0);
 }
 
+.outreach-workspace {
+  background: #f6f7f8;
+}
+
+.outreach-workspace-header {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 9px 18px;
+}
+
+.outreach-workspace-header > div {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.outreach-workspace-header span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.outreach-workspace-header strong {
+  color: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outreach-workspace-header small {
+  color: var(--faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outreach-workspace-header > button {
+  align-items: center;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  display: inline-flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.outreach-channel-rail {
+  align-items: stretch;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 5px;
+  min-height: 64px;
+  padding: 8px 18px;
+}
+
+.outreach-channel-rail button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+  display: flex;
+  flex: 0 1 108px;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 5px 9px;
+}
+
+.outreach-channel-rail button > span {
+  align-items: center;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: inline-flex;
+  flex: 0 0 28px;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.outreach-channel-rail button.active {
+  background: var(--black);
+  border-color: var(--black);
+  color: #fff;
+}
+
+.outreach-channel-rail button.active > span {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.outreach-canvas {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+}
+
+.outreach-evidence-strip {
+  align-items: flex-start;
+  background: #eef8f2;
+  border: 1px solid var(--green-line);
+  border-radius: 7px;
+  color: var(--green);
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+}
+
+.outreach-evidence-strip svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.outreach-evidence-strip div {
+  display: grid;
+  gap: 2px;
+}
+
+.outreach-evidence-strip span {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.outreach-evidence-strip strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.outreach-editor-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  margin: 0 auto;
+  max-width: 720px;
+  padding: 16px;
+  width: 100%;
+}
+
+.outreach-editor-field,
+.outreach-email-editor label {
+  display: grid;
+  gap: 7px;
+}
+
+.outreach-editor-field > span,
+.outreach-email-editor label > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.outreach-editor-field textarea,
+.outreach-call-script textarea,
+.outreach-email-editor textarea,
+.outreach-email-editor input {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+  padding: 11px 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.outreach-editor-field textarea,
+.outreach-email-editor textarea {
+  min-height: 180px;
+}
+
+.outreach-editor-field textarea:focus,
+.outreach-call-script textarea:focus,
+.outreach-email-editor textarea:focus,
+.outreach-email-editor input:focus {
+  border-color: var(--muted);
+  box-shadow: 0 0 0 2px rgba(111, 81, 223, 0.08);
+}
+
+.outreach-editor-field small {
+  color: var(--faint);
+  font-size: 10px;
+  text-align: right;
+}
+
+.outreach-call-script {
+  display: grid;
+  gap: 0;
+}
+
+.outreach-call-destination {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  margin: -2px -2px 8px;
+  padding: 0 2px 14px;
+}
+
+.outreach-call-destination > span,
+.outreach-call-destination > a {
+  align-items: center;
+  background: var(--black);
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.outreach-call-destination > div {
+  display: grid;
+  gap: 2px;
+}
+
+.outreach-call-destination strong {
+  font-size: 13px;
+}
+
+.outreach-call-destination small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.outreach-call-script > label {
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  padding: 10px 0;
+}
+
+.outreach-call-script > label:last-child {
+  border-bottom: 0;
+}
+
+.outreach-call-script > label > span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  padding-top: 8px;
+  text-transform: uppercase;
+}
+
+.outreach-call-script textarea {
+  border: 0;
+  min-height: 54px;
+  padding: 6px 8px;
+}
+
+.outreach-email-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.outreach-action-footer {
+  align-items: center;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  min-height: 64px;
+  padding: 10px 18px;
+}
+
+.outreach-action-footer > span {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.outreach-action-footer > div {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.outreach-action-footer button,
+.outreach-action-footer a {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--text);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 750;
+  gap: 6px;
+  height: 36px;
+  justify-content: center;
+  padding: 0 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.outreach-action-footer .primary {
+  background: var(--black);
+  border-color: var(--black);
+  color: #fff;
+}
+
+.outreach-empty-state {
+  align-content: center;
+  align-items: center;
+  display: grid;
+  flex: 1 1 auto;
+  justify-items: center;
+  margin: auto;
+  max-width: 460px;
+  min-height: 320px;
+  padding: 32px;
+  text-align: center;
+}
+
+.outreach-empty-icon {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  margin-bottom: 12px;
+  width: 38px;
+}
+
+.outreach-empty-state strong {
+  font-size: 15px;
+}
+
+.outreach-empty-state p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 7px 0 0;
+}
+
+.outreach-empty-state blockquote {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 14px 0;
+  padding: 11px 13px;
+}
+
+.outreach-empty-state button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+
+@media (max-width: 680px) {
+  .outreach-workspace-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .outreach-workspace-header small,
+  .outreach-action-footer > span {
+    display: none;
+  }
+
+  .outreach-channel-rail {
+    overflow-x: auto;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .outreach-channel-rail button {
+    flex: 0 0 96px;
+  }
+
+  .outreach-canvas {
+    padding: 12px;
+  }
+
+  .outreach-action-footer {
+    justify-content: flex-end;
+    padding: 9px 10px;
+  }
+
+  .outreach-action-footer > div {
+    width: 100%;
+  }
+
+  .outreach-action-footer button,
+  .outreach-action-footer a {
+    flex: 1 1 auto;
+  }
+}
+
 .contact-drawer-header {
   align-items: flex-start;
   display: flex;

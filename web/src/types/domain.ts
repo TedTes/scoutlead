@@ -474,6 +474,41 @@ export type DemoSite = {
   expires_at?: string | null;
 };
 
+export type OutreachEvidence = {
+  signal_key: string;
+  label: string;
+  statement: string;
+  value?: boolean | number | string | null;
+};
+
+export type OutreachPackageContent = {
+  observation: string;
+  evidence: OutreachEvidence[];
+  message: { body: string };
+  call?: { opener: string; observation: string; ask: string } | null;
+  form?: { body: string } | null;
+  email?: { subject: string; body: string } | null;
+  demo_path?: string | null;
+};
+
+export type OutreachPackage = {
+  id: string;
+  audience_result_id: string;
+  business_id: string;
+  business_name: string;
+  website_url?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  contact_url?: string | null;
+  channels: Array<"message" | "call" | "form" | "email">;
+  content: OutreachPackageContent;
+  provider: string;
+  model?: string | null;
+  usage: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TerritoryResolution = {
   product_id: string;
   request: string;

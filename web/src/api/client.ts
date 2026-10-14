@@ -15,6 +15,7 @@ import type {
   DiscoveryCandidate,
   DiscoveryResult,
   DemoSite,
+  OutreachPackage,
   RunDiagnostics,
   SourceItem,
   CampaignMessageApprovalInput,
@@ -328,6 +329,21 @@ export class ApiClient {
 
   publishDemoSite(id: string) {
     return this.request<DemoSite>(`/demo-sites/${id}/publish`, { method: "POST" });
+  }
+
+  getOutreachPackage(resultId: string) {
+    return this.request<OutreachPackage | null>(`/outreach-packages/by-result/${resultId}`);
+  }
+
+  generateOutreachPackage(resultId: string) {
+    return this.request<OutreachPackage>(`/outreach-packages/from-result/${resultId}`, { method: "POST" });
+  }
+
+  updateOutreachPackage(id: string, content: OutreachPackage["content"]) {
+    return this.request<OutreachPackage>(`/outreach-packages/${id}`, {
+      method: "PATCH",
+      body: { content },
+    });
   }
 
   resolveTerritory(productId: string, request: string) {

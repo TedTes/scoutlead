@@ -6,9 +6,11 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileText,
   Globe,
   Mail,
   MapPin,
+  MessageCircle,
   MoreVertical,
   Pause,
   Phone,
@@ -46,6 +48,8 @@ import type {
   LeadUpdateInput,
   LeadOutcomeValue,
   Message,
+  OutreachPackage,
+  OutreachPackageContent,
   Product,
   SenderProfile,
   SearchIntent,
@@ -603,8 +607,12 @@ export function ResultsScreen({
     }
   };
 
-  const recordContactOutcome = async (leadId: string, outcome: LeadOutcomeValue) => {
-    await territoryApi.recordLeadOutcome(leadId, outcome, outcome === "contacted" ? "email" : "other");
+  const recordContactOutcome = async (
+    leadId: string,
+    outcome: LeadOutcomeValue,
+    channel: "email" | "phone" | "contact_form" | "other" = outcome === "contacted" ? "email" : "other",
+  ) => {
+    await territoryApi.recordLeadOutcome(leadId, outcome, channel);
     await refreshAll({ showLoading: false });
     if (selectedTerritory) {
       await territoryApi.getTerritoryMetrics(selectedTerritory.id).then(setTerritoryMetrics);
@@ -997,7 +1005,17 @@ export function ResultsScreen({
           )}
         </section>
 
-        {selectedContact ? (
+        {selectedContact ? (workflowView === "shortlisted" ? (
+          <OutreachWorkspace
+            contact={selectedContact}
+            persistent={desktopSplitView}
+            onClose={() => setDetailPanelOpen(false)}
+            onGetPackage={() => territoryApi.getOutreachPackage(selectedContact.id)}
+            onGeneratePackage={() => territoryApi.generateOutreachPackage(selectedContact.id)}
+            onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
+            onMarkContacted={(channel) => recordContactOutcome(selectedContact.id, "contacted", channel)}
+          />
+        ) : (
           <ContactDrawer
             contact={selectedContact}
             persistent={desktopSplitView}
@@ -1017,7 +1035,7 @@ export function ResultsScreen({
             onUpdateLead={updateLead}
             onUpdateMessage={updateMessage}
           />
-        ) : null}
+        )) : null}
       </div>
 
       {pendingExport ? (
@@ -1075,6 +1093,274 @@ export function ResultsScreen({
       ) : null}
     </section>
   );
+}
+
+type OutreachChannel = "message" | "call" | "form" | "email";
+
+function OutreachWorkspace({
+  contact,
+  onClose,
+  onGeneratePackage,
+  onGetPackage,
+  onMarkContacted,
+  onSavePackage,
+  persistent = false,
+}: {
+  contact: DiscoveryResult;
+  onClose: () => void;
+  onGeneratePackage: () => Promise<OutreachPackage>;
+  onGetPackage: () => Promise<OutreachPackage | null>;
+  onMarkContacted: (channel: "email" | "phone" | "contact_form" | "other") => Promise<void>;
+  onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
+  persistent?: boolean;
+}) {
+  const { showToast } = useToast();
+  const [outreachPackage, setOutreachPackage] = useState<OutreachPackage | null>(null);
+  const [draft, setDraft] = useState<OutreachPackageContent | null>(null);
+  const [activeChannel, setActiveChannel] = useState<OutreachChannel>("message");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const matchedEvidence = audienceMatchedSignals(contact);
+
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setOutreachPackage(null);
+    setDraft(null);
+    setActiveChannel("message");
+    if (!contact.id.startsWith("audience_result_")) {
+      setLoading(false);
+      return () => { current = false; };
+    }
+    void onGetPackage()
+      .then((value) => {
+        if (!current) return;
+        setOutreachPackage(value);
+        setDraft(value?.content || null);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => { current = false; };
+  }, [contact.id]);
+
+  useEffect(() => {
+    if (outreachPackage?.channels.includes(activeChannel)) return;
+    setActiveChannel(outreachPackage?.channels[0] || "message");
+  }, [activeChannel, outreachPackage?.channels]);
+
+  const generate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const value = await onGeneratePackage();
+      setOutreachPackage(value);
+      setDraft(value.content);
+      setActiveChannel(value.channels[0] || "message");
+      showToast({ title: "Outreach ready", message: "Review and edit before using it.", tone: "green" });
+    } catch (error) {
+      showToast({ title: "Could not prepare outreach", message: error instanceof Error ? error.message : String(error), tone: "red" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (!outreachPackage || !draft || busy) return;
+    setBusy(true);
+    try {
+      const value = await onSavePackage(outreachPackage.id, draft);
+      setOutreachPackage(value);
+      setDraft(value.content);
+      showToast({ title: "Draft saved", tone: "green" });
+    } catch (error) {
+      showToast({ title: "Could not save draft", message: error instanceof Error ? error.message : String(error), tone: "red" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyText = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast({ title: `${label} copied`, tone: "green" });
+    } catch {
+      showToast({ title: "Copy failed", tone: "red" });
+    }
+  };
+
+  const markContacted = async (label: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const channel = activeChannel === "call"
+        ? "phone"
+        : activeChannel === "form"
+          ? "contact_form"
+          : activeChannel === "email"
+            ? "email"
+            : "other";
+      await onMarkContacted(channel);
+      showToast({ title: label, tone: "green" });
+    } catch (error) {
+      showToast({ title: "Could not update lead", message: error instanceof Error ? error.message : String(error), tone: "red" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const channelMeta: Record<OutreachChannel, { label: string; icon: ReactNode }> = {
+    message: { label: "Message", icon: <MessageCircle size={16} /> },
+    call: { label: "Call", icon: <Phone size={16} /> },
+    form: { label: "Form", icon: <FileText size={16} /> },
+    email: { label: "Email", icon: <Mail size={16} /> },
+  };
+  const copyValue = !draft
+    ? ""
+    : activeChannel === "message"
+      ? draft.message.body
+      : activeChannel === "form"
+        ? draft.form?.body || ""
+        : activeChannel === "email"
+          ? [`Subject: ${draft.email?.subject || ""}`, draft.email?.body || ""].join("\n\n")
+          : [draft.call?.opener, draft.call?.observation, draft.call?.ask].filter(Boolean).join("\n\n");
+
+  return (
+    <div className={persistent ? "contact-drawer-overlay outreach-overlay open is-persistent" : "contact-drawer-overlay outreach-overlay open"}>
+      {persistent ? null : <button className="contact-drawer-backdrop" type="button" aria-label="Close outreach" onClick={onClose} />}
+      <aside className="contact-drawer-panel outreach-workspace" aria-label={`Outreach for ${contact.company_name}`}>
+        <header className="outreach-workspace-header">
+          <div>
+            <span>Outreach</span>
+            <strong>{contact.company_name}</strong>
+            <small>{[contactListCategoryLabel(contact), contact.geography].filter(Boolean).join(" · ")}</small>
+          </div>
+          <button aria-label="Close outreach" title="Close" type="button" onClick={onClose}><X size={17} /></button>
+        </header>
+
+        {outreachPackage && draft ? (
+          <>
+            <nav className="outreach-channel-rail" aria-label="Outreach channels">
+              {outreachPackage.channels.map((channel) => (
+                <button
+                  className={activeChannel === channel ? "active" : ""}
+                  key={channel}
+                  type="button"
+                  onClick={() => setActiveChannel(channel)}
+                >
+                  <span>{channelMeta[channel].icon}</span>
+                  {channelMeta[channel].label}
+                </button>
+              ))}
+            </nav>
+
+            <div className="outreach-canvas">
+              <section className="outreach-evidence-strip">
+                <Sparkles size={14} />
+                <div><span>Verified observation</span><strong>{draft.observation}</strong></div>
+              </section>
+
+              <section className="outreach-editor-card">
+                {activeChannel === "message" ? (
+                  <label className="outreach-editor-field">
+                    <span>Message draft</span>
+                    <textarea value={draft.message.body} onChange={(event) => setDraft({ ...draft, message: { body: event.target.value } })} />
+                    <small>{draft.message.body.length} characters · copy by default</small>
+                  </label>
+                ) : null}
+
+                {activeChannel === "call" && draft.call ? (
+                  <div className="outreach-call-script">
+                    <div className="outreach-call-destination">
+                      <span><Phone size={15} /></span>
+                      <div><strong>{contact.company_name}</strong><small>{outreachPackage.phone}</small></div>
+                      <a aria-label="Call now" href={`tel:${outreachPackage.phone}`}><Phone size={15} /></a>
+                    </div>
+                    {(["opener", "observation", "ask"] as const).map((part) => (
+                      <label key={part}>
+                        <span>{part === "observation" ? "Hook" : part}</span>
+                        <textarea value={draft.call?.[part] || ""} onChange={(event) => setDraft({ ...draft, call: { ...draft.call!, [part]: event.target.value } })} />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+
+                {activeChannel === "form" && draft.form ? (
+                  <label className="outreach-editor-field">
+                    <span>Website form message</span>
+                    <textarea value={draft.form.body} onChange={(event) => setDraft({ ...draft, form: { body: event.target.value } })} />
+                    <small>The message is copied before the contact page opens.</small>
+                  </label>
+                ) : null}
+
+                {activeChannel === "email" && draft.email ? (
+                  <div className="outreach-email-editor">
+                    <label><span>Subject</span><input value={draft.email.subject} onChange={(event) => setDraft({ ...draft, email: { ...draft.email!, subject: event.target.value } })} /></label>
+                    <label className="outreach-editor-field"><span>Email draft</span><textarea value={draft.email.body} onChange={(event) => setDraft({ ...draft, email: { ...draft.email!, body: event.target.value } })} /></label>
+                  </div>
+                ) : null}
+              </section>
+            </div>
+
+            <footer className="outreach-action-footer">
+              <span>Review before using. Copying does not mark this lead contacted.</span>
+              <div>
+                <button disabled={busy} type="button" onClick={() => void save()}>Save</button>
+                {activeChannel === "call" && outreachPackage.phone ? (
+                  <a className="secondary" href={`tel:${outreachPackage.phone}`}><Phone size={14} /> Call now</a>
+                ) : activeChannel === "form" && outreachPackage.contact_url ? (
+                  <button type="button" onClick={() => { void copyText(copyValue, "Form message"); window.open(outreachPackage.contact_url || "", "_blank", "noopener,noreferrer"); }}><ExternalLink size={14} /> Copy &amp; open</button>
+                ) : (
+                  <button disabled={!copyValue} type="button" onClick={() => void copyText(copyValue, channelMeta[activeChannel].label)}><Copy size={14} /> Copy</button>
+                )}
+                <button className="primary" disabled={busy} type="button" onClick={() => void markContacted(activeChannel === "call" ? "Marked called" : activeChannel === "form" ? "Marked submitted" : activeChannel === "email" ? "Marked emailed" : "Marked contacted")}><Check size={14} /> Mark {activeChannel === "call" ? "called" : activeChannel === "form" ? "submitted" : activeChannel === "email" ? "emailed" : "contacted"}</button>
+              </div>
+            </footer>
+          </>
+        ) : (
+          <div className="outreach-empty-state">
+            {loading ? (
+              <><span className="outreach-empty-icon"><Sparkles size={18} /></span><strong>Loading outreach</strong></>
+            ) : matchedEvidence.length ? (
+              <>
+                <span className="outreach-empty-icon"><MessageCircle size={18} /></span>
+                <strong>Prepare evidence-grounded outreach</strong>
+                <p>ScoutLead will use this verified observation:</p>
+                <blockquote>{matchedEvidence[0]}</blockquote>
+                <button className="primary" disabled={busy} type="button" onClick={() => void generate()}><Sparkles size={14} /> {busy ? "Preparing..." : "Prepare outreach"}</button>
+              </>
+            ) : (
+              <>
+                <span className="outreach-empty-icon"><AlertTriangle size={18} /></span>
+                <strong>Verified opportunity required</strong>
+                <p>Request or collect an opportunity signal before generating a message. A shortlist alone is not evidence.</p>
+              </>
+            )}
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function audienceMatchedSignals(contact: DiscoveryResult): string[] {
+  const raw = contact.raw_sources?.find((item) => item && typeof item === "object");
+  const profileMatch = raw?.profile_match;
+  if (!profileMatch || typeof profileMatch !== "object") return [];
+  const signals = (profileMatch as Record<string, unknown>).matched_signals;
+  if (!Array.isArray(signals)) return [];
+  return signals.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const signal = item as Record<string, unknown>;
+    const key = String(signal.signal_key || "opportunity").replace(/_/g, " ");
+    const value = signal.value;
+    if (signal.signal_key === "reviews_under_15") return [`${Number(value || 0)} public reviews in the latest record.`];
+    if (signal.signal_key === "no_quote_flow") return ["No quote or booking flow was found in the latest website check."];
+    if (signal.signal_key === "no_contact_form") return ["No contact form was found in the latest website check."];
+    if (signal.signal_key === "website_unavailable") return ["The website was unavailable during the latest check."];
+    return [`The latest check confirmed ${key}.`];
+  });
 }
 
 function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {
