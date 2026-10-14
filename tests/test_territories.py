@@ -285,6 +285,25 @@ def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 2
 
 
+def test_profile_route_requires_a_service_or_explicit_signal() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        auth = SimpleNamespace(workspace_id="workspace:first")
+
+        with pytest.raises(ValidationError, match="at least one service"):
+            create_profile_route(
+                ProfileCreate(
+                    product_id=offer.id,
+                    trades=["painters"],
+                    customer_kind="residential",
+                    market={"city": "Toronto", "radius_km": 25},
+                ),
+                session,
+                auth,
+            )
+
+
 def test_profile_source_expansion_queues_each_trade_once() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -352,6 +371,7 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
                 trades=["painters"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
+                signals=["website_unavailable"],
             ),
             session,
             auth,

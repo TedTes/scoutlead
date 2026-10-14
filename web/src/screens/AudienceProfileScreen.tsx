@@ -113,7 +113,7 @@ export function AudienceProfileScreen() {
   const [services, setServices] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const audienceDefined = Boolean(trades.length && city.trim().length >= 2);
-  const valid = Boolean(selectedProductId && audienceDefined);
+  const valid = Boolean(selectedProductId && audienceDefined && services.length);
 
   const activeBatch = useMemo(
     () => profileBatch?.profile.id === selectedProfile?.id ? profileBatch : null,
@@ -375,8 +375,8 @@ export function AudienceProfileScreen() {
 
         <section className="audience-form-row" aria-labelledby="audience-signals-title">
           <div className="audience-row-copy">
-            <h2 id="audience-signals-title">Services you provide</h2>
-            <p>Optional. Select services to prioritize businesses showing evidence they need them.</p>
+            <h2 id="audience-signals-title">Services you provide <em>*</em></h2>
+            <p>Select at least one service to find businesses showing evidence they need it.</p>
           </div>
           <div className="audience-row-control">
             <div className="audience-focus-list" role="group" aria-labelledby="audience-signals-title">
@@ -440,7 +440,7 @@ function getFormHint(trades: ProfileTrade[], city: string, services: string[]) {
   if (needsBusinessType && needsCity) return "Choose a business type and enter a city to continue.";
   if (needsBusinessType) return "Choose a business type to continue.";
   if (needsCity) return "Enter a city to continue.";
-  if (!services.length) return "Ready to create a broad audience.";
+  if (!services.length) return "Choose at least one service to continue.";
   return "Ready to create this audience.";
 }
 

@@ -13,6 +13,7 @@ from db.models import (
 )
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
+from shared.errors import ValidationError
 from territories.metrics import (
     TerritoryMetricsRead,
     TerritoryMetricsService,
@@ -143,6 +144,11 @@ def refresh_territory(
     status_code=status.HTTP_201_CREATED,
 )
 def create_profile(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
+    if not data.services and not data.signals:
+        raise ValidationError(
+            "at least one service is required",
+            {"user_message": "Choose at least one service before creating an audience."},
+        )
     service = _service(session, auth)
     profile = service.create_profile(data, commit=False)
     run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
