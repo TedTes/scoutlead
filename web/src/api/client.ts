@@ -108,6 +108,19 @@ export class ApiClient {
     });
   }
 
+  evaluateAdminBusinessPublications(scope: "all" | "selected", reason: string, businessIds: string[] = []) {
+    return this.request<{
+      batch_id: string;
+      requested_business_count: number;
+      eligible_business_count: number;
+      queued_evaluation_count: number;
+      skipped_business_count: number;
+    }>("/admin/businesses/publication-evaluate", {
+      method: "POST",
+      body: { scope, reason, business_ids: businessIds },
+    });
+  }
+
   getAdminBusinessDeleteDependencies(id: string) {
     return this.request<Record<string, number>>(`/admin/businesses/${id}/delete-dependencies`);
   }

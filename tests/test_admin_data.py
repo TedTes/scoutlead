@@ -20,6 +20,7 @@ from db.models import (
     BusinessFactModel,
     BusinessModel,
     BusinessIndexSegmentModel,
+    BusinessNicheMembershipModel,
     BusinessPublicationModel,
     NicheModel,
     ProductModel,
@@ -172,6 +173,107 @@ def test_expired_validation_is_reported_as_incomplete() -> None:
 
         assert overview["fully_validated"] == 0
         assert overview["incomplete"] == 1
+
+
+def test_admin_queues_publication_evaluation_for_validated_businesses() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, niche = _business(session)
+        segment = _segment(session, niche)
+        now = utcnow()
+        session.add(
+            BusinessNicheMembershipModel(
+                id=new_id("membership"),
+                business_id=business.id,
+                niche_id=niche.id,
+                market_key="toronto",
+                confidence=1.0,
+                evidence=[],
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+        )
+        for validation_type in ("identity", "business_identity", "trade", "location"):
+            session.add(
+                ValidationResultModel(
+                    id=new_id("validation"),
+                    idempotency_key=f"{business.id}:{validation_type}:current",
+                    business_id=business.id,
+                    niche_id=niche.id,
+                    market_key="toronto",
+                    validation_type=validation_type,
+                    status="passed",
+                    confidence=95,
+                    reason="Passed",
+                    evidence=[],
+                    validator="test",
+                    validator_version=1,
+                    observed_at=now,
+                    expires_at=now + timedelta(days=30),
+                )
+            )
+        session.commit()
+
+        result = _service(session).queue_publication_evaluation(
+            reason="Backfill validated records into publication evaluation",
+            scope="all",
+            business_ids=[],
+        )
+
+        job = session.scalar(
+            select(QueueJobModel).where(
+                QueueJobModel.type == "business.publication_evaluate"
+            )
+        )
+        assert result["eligible_business_count"] == 1
+        assert result["queued_evaluation_count"] == 1
+        assert result["skipped_business_count"] == 0
+        assert job is not None
+        assert job.payload["business_id"] == business.id
+        assert job.payload["segment_id"] == segment.id
+        assert "source_item_id" not in job.payload
+
+
+def test_admin_revalidation_queues_publication_when_all_checks_pass() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, niche = _business(session)
+        segment = _segment(session, niche)
+        source_value = SourceItemCreate(
+            segment_id=segment.id,
+            provider_id="google_places",
+            external_id="place-example",
+            query="painters Toronto",
+            source_url="https://maps.example/example-painting",
+            title="Example Painting",
+            raw_payload={"primaryTypeDisplayName": "Painter"},
+            fetched_at=utcnow(),
+        )
+        source = SourceItemModel(
+            id=new_id("source_item"),
+            **source_value.model_dump(),
+            content_hash=source_item_content_hash(source_value),
+            state="validated",
+            business_id=business.id,
+        )
+        session.add(source)
+        session.commit()
+
+        result = _service(session).revalidate(
+            business.id,
+            "Refresh the current validation evidence",
+        )
+
+        job = session.scalar(
+            select(QueueJobModel).where(
+                QueueJobModel.type == "business.publication_evaluate"
+            )
+        )
+        assert result["validation_state"] == "passed"
+        assert job is not None
+        assert job.payload["business_id"] == business.id
+        assert job.payload["segment_id"] == segment.id
+        assert job.payload["source_item_id"] != source.id
 
 
 def test_permanent_delete_is_blocked_when_related_records_exist() -> None:

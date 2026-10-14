@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from admin.schemas import (
@@ -791,6 +791,98 @@ class AdminDataService:
             ) or 0,
         }
 
+    def queue_publication_evaluation(
+        self,
+        *,
+        reason: str,
+        scope: str,
+        business_ids: list[str],
+    ) -> dict[str, Any]:
+        requested_ids = list(dict.fromkeys(business_ids))
+        if scope == "selected" and not requested_ids:
+            raise ValidationError("Select at least one business")
+
+        statement = select(BusinessModel).where(BusinessModel.status == "active")
+        if scope == "selected":
+            found_ids = set(
+                self.session.scalars(
+                    select(BusinessModel.id).where(BusinessModel.id.in_(requested_ids))
+                )
+            )
+            unknown_ids = set(requested_ids) - found_ids
+            if unknown_ids:
+                raise ValidationError(
+                    "One or more selected businesses do not exist",
+                    {"business_ids": sorted(unknown_ids)},
+                )
+            statement = statement.where(BusinessModel.id.in_(requested_ids))
+
+        businesses = list(self.session.scalars(statement))
+        states = self._validation_states([business.id for business in businesses])
+        eligible_ids = {
+            business.id
+            for business in businesses
+            if states[business.id]["state"] == "passed"
+        }
+        scope_rows = list(
+            self.session.execute(
+                select(BusinessNicheMembershipModel, BusinessIndexSegmentModel)
+                .join(
+                    BusinessIndexSegmentModel,
+                    and_(
+                        BusinessIndexSegmentModel.niche_id
+                        == BusinessNicheMembershipModel.niche_id,
+                        BusinessIndexSegmentModel.market_key
+                        == BusinessNicheMembershipModel.market_key,
+                    ),
+                )
+                .where(
+                    BusinessNicheMembershipModel.business_id.in_(eligible_ids),
+                    BusinessIndexSegmentModel.status == "active",
+                )
+                .order_by(
+                    BusinessNicheMembershipModel.business_id,
+                    BusinessNicheMembershipModel.confidence.desc(),
+                )
+            )
+        ) if eligible_ids else []
+
+        queue = QueueService(self.session)
+        evaluated_business_ids: set[str] = set()
+        queued_scopes: set[tuple[str, str]] = set()
+        for membership, segment in scope_rows:
+            scope_key = (membership.business_id, segment.id)
+            if scope_key in queued_scopes:
+                continue
+            queue.enqueue_business_publication_evaluate(
+                source_item_id=None,
+                segment_id=segment.id,
+                business_id=membership.business_id,
+                commit=False,
+            )
+            queued_scopes.add(scope_key)
+            evaluated_business_ids.add(membership.business_id)
+
+        batch_id = new_id("publication_evaluation")
+        requested_count = len(requested_ids) if scope == "selected" else len(businesses)
+        result = {
+            "batch_id": batch_id,
+            "requested_business_count": requested_count,
+            "eligible_business_count": len(eligible_ids),
+            "queued_evaluation_count": len(queued_scopes),
+            "skipped_business_count": requested_count - len(evaluated_business_ids),
+        }
+        self._audit(
+            "publication:evaluate",
+            batch_id,
+            reason,
+            None,
+            {**result, "scope": scope},
+            entity_type="publication_evaluation",
+        )
+        self.session.commit()
+        return result
+
     def list_businesses(
         self,
         *,
@@ -1127,7 +1219,20 @@ class AdminDataService:
             business=business, source_item=source, segment=segment
         )
         statuses = {result.status for result in results}
-        source.state = "rejected" if "failed" in statuses else "needs_review" if statuses != {"passed"} else "validated"
+        source.state = (
+            "rejected"
+            if "failed" in statuses
+            else "needs_review"
+            if statuses != {"passed"}
+            else "validated"
+        )
+        if statuses == {"passed"}:
+            QueueService(self.session).enqueue_business_publication_evaluate(
+                source_item_id=source.id,
+                segment_id=segment.id,
+                business_id=business.id,
+                commit=False,
+            )
         self._audit(
             "revalidate",
             business.id,
