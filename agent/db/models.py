@@ -453,36 +453,6 @@ class ValidationResultModel(TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class BusinessPublicationModel(TimestampMixin, Base):
-    __tablename__ = "business_publications"
-    __table_args__ = (
-        UniqueConstraint(
-            "business_id",
-            "niche_id",
-            "market_key",
-            name="uq_business_publications_scope",
-        ),
-        Index(
-            "ix_business_publications_scope_status",
-            "niche_id",
-            "market_key",
-            "status",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
-    market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    policy_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    reasons: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class QualityLabelModel(TimestampMixin, Base):
     __tablename__ = "quality_labels"
     __table_args__ = (
@@ -538,26 +508,6 @@ class QualityMetricSnapshotModel(TimestampMixin, Base):
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class PipelineOutboxEventModel(TimestampMixin, Base):
-    __tablename__ = "pipeline_outbox_events"
-    __table_args__ = (
-        UniqueConstraint("idempotency_key", name="uq_pipeline_outbox_idempotency_key"),
-        Index("ix_pipeline_outbox_poll", "status", "available_at", "created_at"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    idempotency_key: Mapped[str] = mapped_column(String(500), nullable=False)
-    topic: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    aggregate_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
 class AudienceRunModel(TimestampMixin, Base):
     __tablename__ = "audience_runs"
     __table_args__ = (
@@ -605,9 +555,6 @@ class AudienceResultModel(TimestampMixin, Base):
     )
     business_id: Mapped[str] = mapped_column(
         ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    publication_id: Mapped[str] = mapped_column(
-        ForeignKey("business_publications.id"), nullable=False, index=True
     )
     rank_position: Mapped[int] = mapped_column(Integer, nullable=False)
     is_new: Mapped[bool] = mapped_column(Boolean, nullable=False)

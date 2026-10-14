@@ -34,8 +34,7 @@ from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from products.repository import ProductRepository
 from products.schemas import ProductRead
-from publication.policy import PublicationPolicyService
-from publication.validation import BusinessValidationService
+from business_validation.validation import BusinessValidationService
 from shared.utils import utcnow
 from source_items.repository import SourceItemRepository
 from source_items.schemas import (
@@ -499,7 +498,7 @@ class BusinessIndexPipelineService:
                 SourceItemDecisionCreate(
                     stage=SourceItemStage.OPPORTUNITY,
                     decision=SourceItemDecisionValue.AUDITED,
-                    reason="Opportunity audit completed; eligibility is evaluated separately.",
+                    reason="Opportunity audit completed; validated business is searchable.",
                     details={
                         "business_id": business_id,
                         "opportunity_evidence": opportunity_evidence,
@@ -512,65 +511,12 @@ class BusinessIndexPipelineService:
                         },
                     },
                 ),
-                next_state=SourceItemState.AUDITED,
+                next_state=SourceItemState.ELIGIBLE,
                 business_id=business_id,
             )
-        self.queue.enqueue_business_publication_evaluate(
-            source_item_id=item.id if item is not None else None,
-            segment_id=segment.id,
-            business_id=business_id,
-        )
         if job_id:
             self._maybe_complete(segment, current_job_id=job_id)
         return {"business_id": business_id, "state": "audited"}
-
-    def evaluate_publication(
-        self,
-        *,
-        business_id: str,
-        segment_id: str,
-        source_item_id: str | None,
-        job_id: str,
-    ) -> dict[str, Any]:
-        segment = self._segment(segment_id)
-        item = self.items.get(source_item_id) if source_item_id else None
-        publication = PublicationPolicyService(self.session).evaluate(
-            business_id=business_id,
-            niche_id=segment.niche_id,
-            market_key=segment.market_key,
-            source=item.provider_id if item is not None else None,
-        )
-        if item is not None:
-            is_published = publication.status == "published"
-            is_quarantined = publication.status == "quarantined"
-            self.items.add_decision(
-                item.id,
-                SourceItemDecisionCreate(
-                    stage=SourceItemStage.ELIGIBILITY,
-                    decision=(
-                        SourceItemDecisionValue.ELIGIBLE
-                        if is_published
-                        else SourceItemDecisionValue.EXCLUDED
-                        if is_quarantined
-                        else SourceItemDecisionValue.NEEDS_REVIEW
-                    ),
-                    reason=f"Publication policy returned {publication.status}.",
-                    details={
-                        "publication_id": publication.id,
-                        "reasons": publication.reasons,
-                    },
-                ),
-                next_state=(
-                    SourceItemState.ELIGIBLE
-                    if is_published
-                    else SourceItemState.EXCLUDED
-                    if is_quarantined
-                    else SourceItemState.NEEDS_REVIEW
-                ),
-                business_id=business_id,
-            )
-        self._maybe_complete(segment, current_job_id=job_id)
-        return {"business_id": business_id, "state": publication.status}
 
     def _businesses_needing_fact_audit(self, segment) -> list[str]:
         business_ids = self.segments.business_ids(segment)
@@ -619,7 +565,6 @@ class BusinessIndexPipelineService:
             JobType.BUSINESS_IDENTITY_RESOLVE.value,
             JobType.BUSINESS_VALIDATE.value,
             JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
-            JobType.BUSINESS_PUBLICATION_EVALUATE.value,
             JobType.SEARCH_ELIGIBILITY_MATCH.value,
         }
         active = list(

@@ -22,7 +22,6 @@ from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
-    BusinessPublicationModel,
     AudienceResultModel,
     AudienceRunModel,
     CampaignModel,
@@ -36,6 +35,7 @@ from db.models import (
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     TerritoryModel,
+    ValidationResultModel,
 )
 from db.session import create_database
 from products.repository import ProductRepository
@@ -69,8 +69,6 @@ from leads.schemas import (
 )
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
-from pipeline_outbox.dispatcher import PipelineOutboxDispatcher
-from pipeline_outbox.repository import PipelineOutboxRepository
 from territories.metrics import TerritoryMetricsService
 from territories.matching import ProfileMatchService
 
@@ -1095,54 +1093,6 @@ def test_audience_result_suppression_blocks_shortlisting_without_creating_a_lead
         assert session.scalar(select(func.count()).select_from(LeadModel)) == 0
         with pytest.raises(ConflictError, match="blocked from outreach"):
             runs.update_result(result.id, AudienceResultUpdate(shortlisted=True))
-
-
-def test_published_business_event_wakes_matching_waiting_audience() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        profile = TerritoryService(
-            session,
-            workspace_id="workspace:first",
-        ).create_profile(
-            ProfileCreate(
-                product_id=offer.id,
-                trades=["hvac"],
-                customer_kind="residential",
-                market={"city": "Toronto", "radius_km": 25},
-                signals=[],
-                exclude=[],
-                limit=15,
-            )
-        )
-        run = AudienceRunService(
-            session,
-            workspace_id="workspace:first",
-        ).create(profile.id)
-        run.state = "waiting_validation"
-        PipelineOutboxRepository(session).emit(
-            topic="business.publication_changed",
-            aggregate_type="business_publication",
-            aggregate_id="publication:test",
-            payload={
-                "publication_id": "publication:test",
-                "business_id": "business:test",
-                "niche_id": profile.niche_id,
-                "market_key": profile.market_key,
-                "status": "published",
-            },
-            idempotency_key="publication:test:published",
-        )
-        session.commit()
-
-        assert PipelineOutboxDispatcher(session).dispatch_one() is True
-
-        job = session.scalar(
-            select(QueueJobModel).where(QueueJobModel.type == "audience.run")
-        )
-        assert job is not None
-        assert job.payload["audience_run_id"] == run.id
 
 
 def test_profile_match_excludes_only_explicit_true_classifications() -> None:
@@ -2299,18 +2249,33 @@ def _seed_hvac_businesses(session) -> None:
                 },
             },
         )
+    now = utcnow()
     for membership in session.scalars(select(BusinessNicheMembershipModel)):
-        session.add(
-            BusinessPublicationModel(
-                id=new_id("publication"),
-                business_id=membership.business_id,
-                niche_id=membership.niche_id,
-                market_key=membership.market_key,
-                status="published",
-                policy_version=1,
-                reasons=[{"code": "test_fixture"}],
-                evaluated_at=utcnow(),
-                expires_at=utcnow() + timedelta(days=30),
+        for dimension, confidence in {
+            "identity": 90,
+            "business_identity": 85,
+            "trade": 90,
+            "location": 85,
+        }.items():
+            session.add(
+                ValidationResultModel(
+                    id=new_id("validation"),
+                    idempotency_key=(
+                        f"{membership.business_id}:{membership.niche_id}:"
+                        f"{membership.market_key}:{dimension}"
+                    ),
+                    business_id=membership.business_id,
+                    niche_id=membership.niche_id,
+                    market_key=membership.market_key,
+                    validation_type=dimension,
+                    status="passed",
+                    confidence=confidence,
+                    reason="Test validation passed.",
+                    evidence=[],
+                    validator="test",
+                    validator_version=1,
+                    observed_at=now,
+                    expires_at=now + timedelta(days=30),
+                )
             )
-        )
     session.commit()

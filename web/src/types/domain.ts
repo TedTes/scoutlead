@@ -811,7 +811,7 @@ export type AdminOverview = {
   fully_validated: number;
   needs_attention: number;
   incomplete: number;
-  published: number;
+  searchable: number;
 };
 
 export type AdminBusinessSummary = {
@@ -855,7 +855,6 @@ export type AdminBusinessDetail = AdminBusinessSummary & {
   facts: Array<Record<string, unknown>>;
   signals: AdminBusinessSignal[];
   sources: Array<Record<string, unknown>>;
-  publications: Array<Record<string, unknown>>;
   audit: Array<Record<string, unknown>>;
   delete_dependencies: Record<string, number>;
 };

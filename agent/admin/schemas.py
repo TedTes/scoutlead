@@ -45,12 +45,6 @@ class AdminActionReason(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
-class AdminPublicationEvaluationRequest(BaseModel):
-    reason: str = Field(min_length=3, max_length=1000)
-    scope: Literal["all", "selected"] = "selected"
-    business_ids: list[str] = Field(default_factory=list, max_length=500)
-
-
 class AdminDeleteRequest(BaseModel):
     confirmation: str
     reason: str = Field(min_length=3, max_length=1000)

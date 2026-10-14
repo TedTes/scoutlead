@@ -11,7 +11,7 @@ from db.models import (
     AudienceRunModel,
     BusinessFactModel,
     FactClaimModel,
-    BusinessPublicationModel,
+    BusinessNicheMembershipModel,
     NicheModel,
     QualityLabelModel,
     QualityMetricSnapshotModel,
@@ -20,7 +20,6 @@ from db.models import (
     SourceObservationModel,
     ValidationResultModel,
 )
-from publication.policy import PublicationPolicyService
 from quality.fact_policy import FactQualityPolicyService
 from quality.repository import QualityRepository, QualityScope
 from quality.schemas import (
@@ -54,9 +53,9 @@ class QualityService:
         limit: int = 25,
     ) -> list[QualityReviewCandidate]:
         statement = (
-            select(BusinessPublicationModel, BusinessModel, NicheModel)
-            .join(BusinessModel, BusinessModel.id == BusinessPublicationModel.business_id)
-            .join(NicheModel, NicheModel.id == BusinessPublicationModel.niche_id)
+            select(BusinessNicheMembershipModel, BusinessModel, NicheModel)
+            .join(BusinessModel, BusinessModel.id == BusinessNicheMembershipModel.business_id)
+            .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
             .where(
                 ~select(QualityLabelModel.id)
                 .where(
@@ -67,9 +66,9 @@ class QualityService:
             )
         )
         if niche_id:
-            statement = statement.where(BusinessPublicationModel.niche_id == niche_id)
+            statement = statement.where(BusinessNicheMembershipModel.niche_id == niche_id)
         if market_key:
-            statement = statement.where(BusinessPublicationModel.market_key == market_key)
+            statement = statement.where(BusinessNicheMembershipModel.market_key == market_key)
         rows = self.session.execute(statement.order_by(func.random()).limit(min(limit, 100))).all()
         business_ids = [business.id for _, business, _ in rows]
         facts = BusinessFactRepository(self.session).map_for_businesses(business_ids)
@@ -97,16 +96,14 @@ class QualityService:
                 source=(observations[business.id][0].source if observations[business.id] else None),
                 niche_id=niche.id,
                 niche_label=niche.label,
-                market_key=publication.market_key,
-                publication_status=publication.status,
-                publication_reasons=publication.reasons,
+                market_key=membership.market_key,
                 evidence_urls=[
                     observation.source_url
                     for observation in observations[business.id]
                     if observation.source_url
                 ][:5],
             )
-            for publication, business, niche in rows
+            for membership, business, niche in rows
         ]
 
     def add_label(self, data: QualityLabelCreate, *, reviewer: str):
@@ -129,7 +126,6 @@ class QualityService:
         )
         metric = self.repository.calculate(scope)
         FactQualityPolicyService(self.session).reevaluate_dimension(data.dimension)
-        self._reevaluate_scope(scope)
         return label, metric
 
     def latest_metrics(self, *, limit: int = 100) -> list[QualityMetricSnapshotModel]:
@@ -176,10 +172,6 @@ class QualityService:
                 ValidationResultModel,
                 ValidationResultModel.status,
             ),
-            publications_by_status=self._group_counts(
-                BusinessPublicationModel,
-                BusinessPublicationModel.status,
-            ),
             source_items_by_state=self._group_counts(
                 SourceItemModel,
                 SourceItemModel.state,
@@ -199,17 +191,6 @@ class QualityService:
                     .where(
                         BusinessFactModel.expires_at.is_not(None),
                         BusinessFactModel.expires_at < now,
-                    )
-                )
-                or 0
-            ),
-            expired_publications=int(
-                self.session.scalar(
-                    select(func.count())
-                    .select_from(BusinessPublicationModel)
-                    .where(
-                        BusinessPublicationModel.expires_at.is_not(None),
-                        BusinessPublicationModel.expires_at < now,
                     )
                 )
                 or 0
@@ -249,18 +230,3 @@ class QualityService:
             .limit(1)
         )
         return validation.status == "passed" if validation else None
-
-    def _reevaluate_scope(self, scope: QualityScope) -> None:
-        statement = select(BusinessPublicationModel)
-        if scope.niche_id:
-            statement = statement.where(BusinessPublicationModel.niche_id == scope.niche_id)
-        if scope.market_key:
-            statement = statement.where(BusinessPublicationModel.market_key == scope.market_key)
-        publications = list(self.session.scalars(statement))
-        for publication in publications:
-            PublicationPolicyService(self.session).evaluate(
-                business_id=publication.business_id,
-                niche_id=publication.niche_id,
-                market_key=publication.market_key,
-                source=scope.source,
-            )

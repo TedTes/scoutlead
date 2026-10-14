@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import BusinessPublicationModel, ValidationResultModel
+from db.models import ValidationResultModel
 from shared.utils import new_id
 
 
@@ -110,56 +110,3 @@ class ValidationRepository:
         for row in rows:
             latest.setdefault(row.validation_type, row)
         return latest
-
-
-class PublicationRepository:
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    def upsert(
-        self,
-        *,
-        business_id: str,
-        niche_id: str,
-        market_key: str,
-        status: str,
-        policy_version: int,
-        reasons: list[dict],
-        evaluated_at: datetime,
-        expires_at: datetime | None,
-        commit: bool = True,
-    ) -> BusinessPublicationModel:
-        model = self.session.scalar(
-            select(BusinessPublicationModel)
-            .where(
-                BusinessPublicationModel.business_id == business_id,
-                BusinessPublicationModel.niche_id == niche_id,
-                BusinessPublicationModel.market_key == market_key,
-            )
-            .limit(1)
-        )
-        if model is None:
-            model = BusinessPublicationModel(
-                id=new_id("publication"),
-                business_id=business_id,
-                niche_id=niche_id,
-                market_key=market_key,
-                status=status,
-                policy_version=policy_version,
-                reasons=reasons,
-                evaluated_at=evaluated_at,
-                expires_at=expires_at,
-            )
-            self.session.add(model)
-        else:
-            model.status = status
-            model.policy_version = policy_version
-            model.reasons = reasons
-            model.evaluated_at = evaluated_at
-            model.expires_at = expires_at
-        if commit:
-            self.session.commit()
-            self.session.refresh(model)
-        else:
-            self.session.flush()
-        return model

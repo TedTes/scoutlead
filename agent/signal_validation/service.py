@@ -16,7 +16,7 @@ from db.models import (
     SignalDefinitionModel,
     SourceObservationModel,
 )
-from publication.repository import ValidationRepository, ValidationResult
+from business_validation.repository import ValidationRepository, ValidationResult
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import utcnow
 from signal_collection.service import extract_signal_value

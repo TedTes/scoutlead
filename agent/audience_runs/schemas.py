@@ -25,7 +25,6 @@ class AudienceResultRead(BaseModel):
     run_id: str
     audience_id: str
     business_id: str
-    publication_id: str
     rank_position: int
     is_new: bool
     match_snapshot: dict

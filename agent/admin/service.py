@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from admin.schemas import (
@@ -17,6 +17,7 @@ from admin.schemas import (
     AdminSignalDefinitionUpdate,
 )
 from auth.context import AuthContext
+from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from db.base import Base
 from db.models import (
@@ -25,7 +26,6 @@ from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
-    BusinessPublicationModel,
     NicheModel,
     QueueJobModel,
     ServiceDefinitionModel,
@@ -34,12 +34,13 @@ from db.models import (
     SourceItemModel,
     ValidationResultModel,
 )
-from publication.validation import BusinessValidationService
+from business_validation.validation import BusinessValidationService
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, normalize_url, utcnow
 from service_definitions.repository import ServiceDefinitionRepository
+from seeding.batches import active_membership_condition
 from signal_definitions.repository import SignalDefinitionRepository
 from source_items.repository import SourceItemRepository, source_item_content_hash
 from source_items.schemas import (
@@ -784,104 +785,17 @@ class AdminDataService:
             "fully_validated": validation_counts["passed"],
             "needs_attention": validation_counts["attention"],
             "incomplete": validation_counts["incomplete"],
-            "published": self.session.scalar(
-                select(func.count()).select_from(BusinessPublicationModel).where(
-                    BusinessPublicationModel.status == "published"
+            "searchable": self.session.scalar(
+                select(func.count(func.distinct(BusinessModel.id)))
+                .select_from(BusinessModel)
+                .join(
+                    BusinessNicheMembershipModel,
+                    BusinessNicheMembershipModel.business_id == BusinessModel.id,
                 )
+                .where(active_membership_condition())
+                .where(*searchable_business_conditions())
             ) or 0,
         }
-
-    def queue_publication_evaluation(
-        self,
-        *,
-        reason: str,
-        scope: str,
-        business_ids: list[str],
-    ) -> dict[str, Any]:
-        requested_ids = list(dict.fromkeys(business_ids))
-        if scope == "selected" and not requested_ids:
-            raise ValidationError("Select at least one business")
-
-        statement = select(BusinessModel).where(BusinessModel.status == "active")
-        if scope == "selected":
-            found_ids = set(
-                self.session.scalars(
-                    select(BusinessModel.id).where(BusinessModel.id.in_(requested_ids))
-                )
-            )
-            unknown_ids = set(requested_ids) - found_ids
-            if unknown_ids:
-                raise ValidationError(
-                    "One or more selected businesses do not exist",
-                    {"business_ids": sorted(unknown_ids)},
-                )
-            statement = statement.where(BusinessModel.id.in_(requested_ids))
-
-        businesses = list(self.session.scalars(statement))
-        states = self._validation_states([business.id for business in businesses])
-        eligible_ids = {
-            business.id
-            for business in businesses
-            if states[business.id]["state"] == "passed"
-        }
-        scope_rows = list(
-            self.session.execute(
-                select(BusinessNicheMembershipModel, BusinessIndexSegmentModel)
-                .join(
-                    BusinessIndexSegmentModel,
-                    and_(
-                        BusinessIndexSegmentModel.niche_id
-                        == BusinessNicheMembershipModel.niche_id,
-                        BusinessIndexSegmentModel.market_key
-                        == BusinessNicheMembershipModel.market_key,
-                    ),
-                )
-                .where(
-                    BusinessNicheMembershipModel.business_id.in_(eligible_ids),
-                    BusinessIndexSegmentModel.status == "active",
-                )
-                .order_by(
-                    BusinessNicheMembershipModel.business_id,
-                    BusinessNicheMembershipModel.confidence.desc(),
-                )
-            )
-        ) if eligible_ids else []
-
-        queue = QueueService(self.session)
-        evaluated_business_ids: set[str] = set()
-        queued_scopes: set[tuple[str, str]] = set()
-        for membership, segment in scope_rows:
-            scope_key = (membership.business_id, segment.id)
-            if scope_key in queued_scopes:
-                continue
-            queue.enqueue_business_publication_evaluate(
-                source_item_id=None,
-                segment_id=segment.id,
-                business_id=membership.business_id,
-                commit=False,
-            )
-            queued_scopes.add(scope_key)
-            evaluated_business_ids.add(membership.business_id)
-
-        batch_id = new_id("publication_evaluation")
-        requested_count = len(requested_ids) if scope == "selected" else len(businesses)
-        result = {
-            "batch_id": batch_id,
-            "requested_business_count": requested_count,
-            "eligible_business_count": len(eligible_ids),
-            "queued_evaluation_count": len(queued_scopes),
-            "skipped_business_count": requested_count - len(evaluated_business_ids),
-        }
-        self._audit(
-            "publication:evaluate",
-            batch_id,
-            reason,
-            None,
-            {**result, "scope": scope},
-            entity_type="publication_evaluation",
-        )
-        self.session.commit()
-        return result
 
     def list_businesses(
         self,
@@ -968,13 +882,6 @@ class AdminDataService:
                 .limit(30)
             )
         )
-        publications = list(
-            self.session.scalars(
-                select(BusinessPublicationModel)
-                .where(BusinessPublicationModel.business_id == business_id)
-                .order_by(BusinessPublicationModel.evaluated_at.desc())
-            )
-        )
         audit = list(
             self.session.scalars(
                 select(AdminAuditEventModel)
@@ -1039,18 +946,6 @@ class AdminDataService:
                     "last_error": item.last_error,
                 }
                 for item in sources
-            ],
-            "publications": [
-                {
-                    "id": publication.id,
-                    "niche_id": publication.niche_id,
-                    "market_key": publication.market_key,
-                    "status": publication.status,
-                    "reasons": publication.reasons,
-                    "evaluated_at": publication.evaluated_at,
-                    "expires_at": publication.expires_at,
-                }
-                for publication in publications
             ],
             "audit": [
                 {
@@ -1166,7 +1061,6 @@ class AdminDataService:
             setattr(business, field, value)
         business.last_seen_at = utcnow()
         business.status = "quarantined"
-        self._withdraw_publications(business.id, "quarantined")
         self._audit("update", business.id, data.reason, before, _business_dict(business))
         self.session.commit()
         return self.detail(business.id)
@@ -1175,8 +1069,6 @@ class AdminDataService:
         business = self._business(business_id)
         before = _business_dict(business)
         business.status = status
-        if status != "active":
-            self._withdraw_publications(business.id, status)
         self._audit(f"status:{status}", business.id, reason, before, _business_dict(business))
         self.session.commit()
         return self.detail(business.id)
@@ -1226,13 +1118,6 @@ class AdminDataService:
             if statuses != {"passed"}
             else "validated"
         )
-        if statuses == {"passed"}:
-            QueueService(self.session).enqueue_business_publication_evaluate(
-                source_item_id=source.id,
-                segment_id=segment.id,
-                business_id=business.id,
-                commit=False,
-            )
         self._audit(
             "revalidate",
             business.id,
@@ -1674,20 +1559,6 @@ class AdminDataService:
         for membership, niche in rows:
             result.setdefault(membership.business_id, (membership, niche))
         return result
-
-    def _withdraw_publications(self, business_id: str, status: str) -> None:
-        for publication in self.session.scalars(
-            select(BusinessPublicationModel).where(
-                BusinessPublicationModel.business_id == business_id,
-                BusinessPublicationModel.status == "published",
-            )
-        ):
-            publication.status = status
-            publication.reasons = [
-                *(publication.reasons or []),
-                {"code": "admin_withdrawal", "message": f"Business set to {status}."},
-            ]
-            publication.evaluated_at = utcnow()
 
     def _audit(
         self,

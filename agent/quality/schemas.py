@@ -18,8 +18,6 @@ class QualityReviewCandidate(BaseModel):
     niche_id: str
     niche_label: str
     market_key: str
-    publication_status: str
-    publication_reasons: list[dict] = Field(default_factory=list)
     evidence_urls: list[str] = Field(default_factory=list)
 
 
@@ -63,10 +61,8 @@ class QualityOverview(BaseModel):
     facts_by_resolution: dict[str, int] = Field(default_factory=dict)
     facts_by_quality: dict[str, int] = Field(default_factory=dict)
     validations_by_status: dict[str, int] = Field(default_factory=dict)
-    publications_by_status: dict[str, int] = Field(default_factory=dict)
     source_items_by_state: dict[str, int] = Field(default_factory=dict)
     audience_runs_by_state: dict[str, int] = Field(default_factory=dict)
     queue_jobs_by_status: dict[str, int] = Field(default_factory=dict)
     expired_facts: int
-    expired_publications: int
     latest_global_metrics: dict[str, QualityMetricRead] = Field(default_factory=dict)

@@ -15,7 +15,7 @@ from db.models import (
     SourceItemModel,
     SourceObservationModel,
 )
-from publication.repository import ValidationRepository, ValidationResult
+from business_validation.repository import ValidationRepository, ValidationResult
 from shared.utils import utcnow
 from territories.markets import market_center
 

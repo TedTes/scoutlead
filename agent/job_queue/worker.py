@@ -35,8 +35,6 @@ from business_index.schemas import SearchContract
 from products.repository import ProductRepository
 from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
-from pipeline_outbox.dispatcher import PipelineOutboxDispatcher
-from publication.maintenance import expire_stale_evidence
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
 from territories.source_expansion import enqueue_profile_source_expansion
@@ -63,8 +61,6 @@ def run_once() -> bool:
         queue = QueueRepository(session)
         job = queue.claim_next()
         if job is None:
-            if PipelineOutboxDispatcher(session).dispatch_one():
-                return True
             return False
         logger.info(
             "job_started job_id=%s job_type=%s attempt=%s",
@@ -229,20 +225,6 @@ def run_once() -> bool:
                             else None
                         ),
                     )
-            elif job.type == JobType.BUSINESS_PUBLICATION_EVALUATE.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).evaluate_publication(
-                    business_id=str(job.payload["business_id"]),
-                    segment_id=str(job.payload["segment_id"]),
-                    source_item_id=(
-                        str(job.payload["source_item_id"])
-                        if job.payload.get("source_item_id")
-                        else None
-                    ),
-                    job_id=job.id,
-                )
             elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
                 SearchEvaluationService(
                     session=session,
@@ -519,7 +501,6 @@ def _record_source_item_failure(
                 JobType.BUSINESS_IDENTITY_RESOLVE.value: SourceItemStage.IDENTITY,
                 JobType.BUSINESS_VALIDATE.value: SourceItemStage.VALIDATION,
                 JobType.BUSINESS_OPPORTUNITY_AUDIT.value: SourceItemStage.OPPORTUNITY,
-                JobType.BUSINESS_PUBLICATION_EVALUATE.value: SourceItemStage.ELIGIBILITY,
                 JobType.SEARCH_ELIGIBILITY_MATCH.value: SourceItemStage.ELIGIBILITY,
             }.get(job_type, SourceItemStage.IDENTITY),
             decision=SourceItemDecisionValue.FAILED,
@@ -554,7 +535,6 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
         enqueue_due_business_index_refreshes(session)
         _last_business_index_scheduler_tick = now
     if now - _last_evidence_expiry_tick >= 3600:
-        expire_stale_evidence(session)
         _last_evidence_expiry_tick = now
     if not services.settings.territory_scheduler_enabled:
         return

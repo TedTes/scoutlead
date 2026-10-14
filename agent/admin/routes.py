@@ -6,7 +6,6 @@ from admin.schemas import (
     AdminBusinessStateChange,
     AdminBusinessUpdate,
     AdminDeleteRequest,
-    AdminPublicationEvaluationRequest,
     AdminDataJobAction,
     AdminDataJobCreate,
     AdminSignalDefinitionCreate,
@@ -263,19 +262,6 @@ def collect_service_signals(
 @router.get("/businesses/overview")
 def business_overview(session: DbSession, auth: AdminAuth):
     return _service(session, auth).overview()
-
-
-@router.post("/businesses/publication-evaluate")
-def evaluate_business_publications(
-    data: AdminPublicationEvaluationRequest,
-    session: DbSession,
-    auth: AdminAuth,
-):
-    return _service(session, auth).queue_publication_evaluation(
-        reason=data.reason,
-        scope=data.scope,
-        business_ids=data.business_ids,
-    )
 
 
 @router.get("/businesses")

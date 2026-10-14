@@ -30,7 +30,7 @@ const emptyOverview: AdminOverview = {
   fully_validated: 0,
   needs_attention: 0,
   incomplete: 0,
-  published: 0,
+  searchable: 0,
 };
 
 export function AdminDataScreen({ api }: { api: ApiClient }) {
@@ -43,12 +43,9 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [validation, setValidation] = useState("");
   const [status, setStatus] = useState("");
   const [selectedId, setSelectedId] = useState("");
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [evaluating, setEvaluating] = useState(false);
   const [dialog, setDialog] = useState<"add" | "edit" | "delete" | null>(null);
 
   const load = useCallback(async () => {
@@ -101,48 +98,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     await load();
   };
 
-  const evaluatePublications = async (scope: "all" | "selected") => {
-    if (scope === "selected" && !checkedIds.size) return;
-    if (scope === "all" && !window.confirm("Evaluate all active, validated businesses for publication?")) return;
-    const reason = window.prompt(
-      scope === "selected"
-        ? "Reason for evaluating the selected businesses"
-        : "Reason for evaluating all validated businesses",
-      "Make validated businesses available to audience search",
-    );
-    if (!reason?.trim()) return;
-    setEvaluating(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await api.evaluateAdminBusinessPublications(
-        scope,
-        reason,
-        scope === "selected" ? Array.from(checkedIds) : [],
-      );
-      setNotice(
-        `${result.queued_evaluation_count} publication evaluations queued for ${result.eligible_business_count} validated businesses. ${result.skipped_business_count} skipped.`,
-      );
-      setCheckedIds(new Set());
-      await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setEvaluating(false);
-    }
-  };
-
-  const pageIds = rows.map((row) => row.id);
-  const allPageChecked = Boolean(pageIds.length) && pageIds.every((id) => checkedIds.has(id));
-  const togglePage = () => {
-    setCheckedIds((current) => {
-      const next = new Set(current);
-      if (allPageChecked) pageIds.forEach((id) => next.delete(id));
-      else pageIds.forEach((id) => next.add(id));
-      return next;
-    });
-  };
-
   if (allowed === false) {
     return (
       <section className="admin-denied">
@@ -161,19 +116,11 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <Metric label="Validated" value={overview.fully_validated} tone="good" />
           <Metric label="Needs attention" value={overview.needs_attention} tone="warn" />
           <Metric label="Incomplete" value={overview.incomplete} />
-          <Metric label="Published" value={overview.published} />
+          <Metric label="Searchable" value={overview.searchable} />
         </div>
-        <div className="admin-header-actions">
-          <button disabled={!checkedIds.size || evaluating} type="button" onClick={() => void evaluatePublications("selected")}>
-            <Activity size={15} /> Evaluate selected{checkedIds.size ? ` (${checkedIds.size})` : ""}
-          </button>
-          <button disabled={evaluating} type="button" onClick={() => void evaluatePublications("all")}>
-            <Activity size={15} /> Evaluate validated
-          </button>
-          <button className="admin-primary-button" type="button" onClick={() => setDialog("add")}>
-            <Plus size={15} /> Add business
-          </button>
-        </div>
+        <button className="admin-primary-button" type="button" onClick={() => setDialog("add")}>
+          <Plus size={15} /> Add business
+        </button>
       </header>
 
       <div className="admin-toolbar">
@@ -204,23 +151,21 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       </div>
 
       {error ? <div className="admin-error"><CircleAlert size={15} /> {error}</div> : null}
-      {notice ? <div className="admin-notice"><CheckCircle2 size={15} /> {notice}</div> : null}
 
       <div className="admin-workspace admin-leads-workspace">
         <div className="admin-table-pane">
           <table className="admin-business-table">
-            <thead><tr><th className="admin-select-cell"><input aria-label="Select this page" checked={allPageChecked} type="checkbox" onChange={togglePage} /></th><th>Business</th><th>Market</th><th>Validation</th><th>State</th></tr></thead>
+            <thead><tr><th>Business</th><th>Market</th><th>Validation</th><th>State</th></tr></thead>
             <tbody>
               {rows.map((row) => (
                 <tr className={row.id === selectedId ? "is-selected" : ""} key={row.id} onClick={() => setSelectedId(row.id)}>
-                  <td className="admin-select-cell"><input aria-label={`Select ${row.display_name}`} checked={checkedIds.has(row.id)} type="checkbox" onClick={(event) => event.stopPropagation()} onChange={() => setCheckedIds((current) => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; })} /></td>
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
                   <td><StatusPill value={row.validation_state} /></td>
                   <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
-              {!loading && !rows.length ? <tr><td colSpan={5} className="admin-empty">No businesses match these filters.</td></tr> : null}
+              {!loading && !rows.length ? <tr><td colSpan={4} className="admin-empty">No businesses match these filters.</td></tr> : null}
             </tbody>
           </table>
           <footer className="admin-pagination">

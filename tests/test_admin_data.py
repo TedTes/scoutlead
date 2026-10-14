@@ -21,7 +21,6 @@ from db.models import (
     BusinessModel,
     BusinessIndexSegmentModel,
     BusinessNicheMembershipModel,
-    BusinessPublicationModel,
     NicheModel,
     ProductModel,
     QueueJobModel,
@@ -112,33 +111,18 @@ def _segment(session, niche):
     return segment
 
 
-def test_edit_quarantines_business_withdraws_publication_and_audits() -> None:
+def test_edit_quarantines_business_and_audits() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, niche = _business(session)
-        session.add(
-            BusinessPublicationModel(
-                id=new_id("publication"),
-                business_id=business.id,
-                niche_id=niche.id,
-                market_key="toronto",
-                status="published",
-                policy_version=1,
-                reasons=[],
-                evaluated_at=utcnow(),
-            )
-        )
-        session.commit()
+        business, _ = _business(session)
 
         result = _service(session).update(
             business.id,
             AdminBusinessUpdate(phone="4165550199", reason="Corrected from source profile"),
         )
 
-        publication = session.scalar(select(BusinessPublicationModel))
         audit = session.scalar(select(AdminAuditEventModel))
         assert result["status"] == "quarantined"
-        assert publication.status == "quarantined"
         assert audit.action == "update"
         assert audit.actor_email == "admin@example.com"
         assert audit.before["phone"] is None
@@ -175,11 +159,11 @@ def test_expired_validation_is_reported_as_incomplete() -> None:
         assert overview["incomplete"] == 1
 
 
-def test_admin_queues_publication_evaluation_for_validated_businesses() -> None:
+def test_admin_reports_validated_membership_as_searchable() -> None:
     factory = _session_factory()
     with factory() as session:
         business, niche = _business(session)
-        segment = _segment(session, niche)
+        _segment(session, niche)
         now = utcnow()
         session.add(
             BusinessNicheMembershipModel(
@@ -214,27 +198,12 @@ def test_admin_queues_publication_evaluation_for_validated_businesses() -> None:
             )
         session.commit()
 
-        result = _service(session).queue_publication_evaluation(
-            reason="Backfill validated records into publication evaluation",
-            scope="all",
-            business_ids=[],
-        )
+        overview = _service(session).overview()
 
-        job = session.scalar(
-            select(QueueJobModel).where(
-                QueueJobModel.type == "business.publication_evaluate"
-            )
-        )
-        assert result["eligible_business_count"] == 1
-        assert result["queued_evaluation_count"] == 1
-        assert result["skipped_business_count"] == 0
-        assert job is not None
-        assert job.payload["business_id"] == business.id
-        assert job.payload["segment_id"] == segment.id
-        assert "source_item_id" not in job.payload
+        assert overview["searchable"] == 1
 
 
-def test_admin_revalidation_queues_publication_when_all_checks_pass() -> None:
+def test_admin_revalidation_makes_passed_business_searchable_without_publication() -> None:
     factory = _session_factory()
     with factory() as session:
         business, niche = _business(session)
@@ -264,32 +233,32 @@ def test_admin_revalidation_queues_publication_when_all_checks_pass() -> None:
             "Refresh the current validation evidence",
         )
 
-        job = session.scalar(
-            select(QueueJobModel).where(
-                QueueJobModel.type == "business.publication_evaluate"
-            )
-        )
         assert result["validation_state"] == "passed"
-        assert job is not None
-        assert job.payload["business_id"] == business.id
-        assert job.payload["segment_id"] == segment.id
-        assert job.payload["source_item_id"] != source.id
+        assert session.scalar(select(QueueJobModel)) is None
 
 
 def test_permanent_delete_is_blocked_when_related_records_exist() -> None:
     factory = _session_factory()
     with factory() as session:
         business, niche = _business(session)
+        segment = _segment(session, niche)
+        source_value = SourceItemCreate(
+            segment_id=segment.id,
+            provider_id="admin_manual",
+            external_id=None,
+            query="manual",
+            source_url="https://example.com/source",
+            title=business.display_name,
+            raw_payload={},
+            fetched_at=utcnow(),
+        )
         session.add(
-            BusinessPublicationModel(
-                id=new_id("publication"),
+            SourceItemModel(
+                id=new_id("source_item"),
+                **source_value.model_dump(),
+                content_hash=source_item_content_hash(source_value),
+                state="validated",
                 business_id=business.id,
-                niche_id=niche.id,
-                market_key="toronto",
-                status="staged",
-                policy_version=1,
-                reasons=[],
-                evaluated_at=utcnow(),
             )
         )
         session.commit()

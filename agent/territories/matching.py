@@ -8,6 +8,7 @@ from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from business_facts.repository import fact_value
+from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import (
     email_from_raw,
     normalize_email,
@@ -18,7 +19,6 @@ from db.models import (
     BusinessFactModel,
     BusinessModel,
     BusinessNicheMembershipModel,
-    BusinessPublicationModel,
     ContactModel,
     OutcomeModel,
     ServiceDefinitionModel,
@@ -98,23 +98,9 @@ class ProfileMatchService:
                 BusinessNicheMembershipModel,
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
-            .join(
-                BusinessPublicationModel,
-                and_(
-                    BusinessPublicationModel.business_id == BusinessModel.id,
-                    BusinessPublicationModel.niche_id
-                    == BusinessNicheMembershipModel.niche_id,
-                    BusinessPublicationModel.market_key
-                    == BusinessNicheMembershipModel.market_key,
-                    BusinessPublicationModel.status == "published",
-                    or_(
-                        BusinessPublicationModel.expires_at.is_(None),
-                        BusinessPublicationModel.expires_at >= utcnow(),
-                    ),
-                ),
-            )
             .where(BusinessNicheMembershipModel.niche_id.in_(niche_ids))
             .where(active_membership_condition())
+            .where(*searchable_business_conditions())
         )
         if profile.trade_keys:
             statement = statement.where(

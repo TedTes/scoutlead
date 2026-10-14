@@ -195,25 +195,6 @@ class QueueService:
             max_attempts=3,
         )
 
-    def enqueue_business_publication_evaluate(
-        self,
-        *,
-        source_item_id: str | None,
-        segment_id: str,
-        business_id: str,
-        commit: bool = True,
-    ):
-        payload = {"segment_id": segment_id, "business_id": business_id}
-        if source_item_id:
-            payload["source_item_id"] = source_item_id
-        return self.queue.enqueue_once(
-            JobType.BUSINESS_PUBLICATION_EVALUATE,
-            payload,
-            dedupe_key=f"{segment_id}:{business_id}:{source_item_id or 'index'}",
-            max_attempts=3,
-            commit=commit,
-        )
-
     def enqueue_search_eligibility_match(self, *, segment_id: str):
         return self.queue.enqueue_once(
             JobType.SEARCH_ELIGIBILITY_MATCH,

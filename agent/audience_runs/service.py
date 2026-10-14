@@ -15,7 +15,6 @@ from audience_runs.schemas import (
 from db.models import (
     AudienceResultModel,
     AudienceRunModel,
-    BusinessPublicationModel,
     BusinessModel,
     CoverageRequestModel,
     LeadModel,
@@ -130,18 +129,6 @@ class AudienceRunService:
         new_result_count = 0
         for row in selected:
             business_id = _business_id(row)
-            publication = self.session.scalar(
-                select(BusinessPublicationModel)
-                .where(
-                    BusinessPublicationModel.business_id == business_id,
-                    BusinessPublicationModel.niche_id.in_([niche.id for niche in niches]),
-                    BusinessPublicationModel.status == "published",
-                )
-                .order_by(BusinessPublicationModel.evaluated_at.desc())
-                .limit(1)
-            )
-            if publication is None:
-                continue
             selected_business_ids.add(business_id)
             inserted_count += 1
             if business_id not in previously_delivered:
@@ -153,14 +140,12 @@ class AudienceRunService:
                     run_id=run.id,
                     audience_id=audience.id,
                     business_id=business_id,
-                    publication_id=publication.id,
                     rank_position=inserted_count,
                     is_new=business_id not in previously_delivered,
                     match_snapshot=row,
                 )
                 self.session.add(result)
             else:
-                result.publication_id = publication.id
                 result.rank_position = inserted_count
                 result.is_new = business_id not in previously_delivered
                 result.match_snapshot = row
