@@ -218,7 +218,7 @@ jobs:
 
       - name: Deploy API service
         if: steps.changes.outputs.backend == 'true'
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           python scripts/railway_up_ci.py railway up \
             --project "$RAILWAY_PROJECT_ID" \
@@ -229,7 +229,7 @@ jobs:
 
       - name: Deploy worker service
         if: steps.changes.outputs.backend == 'true'
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           python scripts/railway_up_ci.py railway up \
             --project "$RAILWAY_PROJECT_ID" \
@@ -240,7 +240,7 @@ jobs:
 
       - name: Deploy web service
         if: steps.changes.outputs.web == 'true'
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           python scripts/railway_up_ci.py railway up ./web \
             --path-as-root \
