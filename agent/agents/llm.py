@@ -215,25 +215,61 @@ class AnthropicStructuredLLMClient:
                         response_model: type[TModel],
                         context: dict[str, Any] | None = None) -> TModel:
         schema = response_model.model_json_schema()
-        response = _post_with_retry(
-            provider="anthropic", task=task, max_attempts=self.max_attempts,
-            backoff_seconds=self.retry_backoff_seconds,
-            request=lambda: httpx.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"},
-                timeout=self.timeout_seconds,
-                json={
+        try:
+            response = _post_with_retry(
+                provider="anthropic", task=task, max_attempts=self.max_attempts,
+                backoff_seconds=self.retry_backoff_seconds,
+                request=lambda: httpx.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01",
+                             "content-type": "application/json"},
+                    timeout=self.timeout_seconds,
+                    json={
+                        "model": self.model,
+                        "max_tokens": 2400,
+                        "system": system,
+                        "messages": [{"role": "user", "content": f"{prompt}\n\nTask: {task}\nContext JSON: {context or {}}"}],
+                        "tools": [{"name": "return_structured_result", "description": "Return the validated result.",
+                                   "input_schema": schema}],
+                        "tool_choice": {"type": "tool", "name": "return_structured_result"},
+                    },
+                ),
+            )
+        except httpx.HTTPStatusError as exc:
+            details = _provider_error_details(exc)
+            logger.warning(
+                "anthropic_llm_failed task=%s model=%s status_code=%s request_id=%s error=%s",
+                task,
+                self.model,
+                details["status_code"],
+                details.get("request_id"),
+                details.get("provider_message"),
+            )
+            raise ConfigurationError(
+                "Anthropic generation failed",
+                {
+                    **details,
+                    "provider": "anthropic",
                     "model": self.model,
-                    "max_tokens": 2400,
-                    "system": system,
-                    "messages": [{"role": "user", "content": f"{prompt}\n\nTask: {task}\nContext JSON: {context or {}}"}],
-                    "tools": [{"name": "return_structured_result", "description": "Return the validated result.",
-                               "input_schema": schema}],
-                    "tool_choice": {"type": "tool", "name": "return_structured_result"},
+                    "user_message": "Outreach generation is temporarily unavailable. Check the Anthropic model and billing configuration.",
                 },
-            ),
-        )
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.warning(
+                "anthropic_llm_failed task=%s model=%s error=%s",
+                task,
+                self.model,
+                exc.__class__.__name__,
+            )
+            raise ConfigurationError(
+                "Anthropic request failed",
+                {
+                    "provider": "anthropic",
+                    "model": self.model,
+                    "error": exc.__class__.__name__,
+                    "user_message": "Anthropic could not be reached. Try generating outreach again.",
+                },
+            ) from exc
         payload = response.json()
         self.last_usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
         for block in payload.get("content", []):
@@ -308,3 +344,24 @@ def _openai_error_code(exc: httpx.HTTPStatusError) -> str:
     if not isinstance(error, dict):
         return ""
     return str(error.get("code") or error.get("type") or "")
+
+
+def _provider_error_details(exc: httpx.HTTPStatusError) -> dict[str, Any]:
+    response = exc.response
+    details: dict[str, Any] = {"status_code": response.status_code}
+    request_id = response.headers.get("request-id") or response.headers.get("x-request-id")
+    if request_id:
+        details["request_id"] = request_id
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        if error.get("type"):
+            details["provider_error_type"] = str(error["type"])
+        if error.get("message"):
+            details["provider_message"] = str(error["message"])[:1000]
+    elif response.text:
+        details["provider_message"] = response.text[:1000]
+    return details

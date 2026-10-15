@@ -1,7 +1,9 @@
 import httpx
+import pytest
 from pydantic import BaseModel
 
 from agents.llm import AnthropicStructuredLLMClient, OpenAIStructuredLLMClient
+from shared.errors import ConfigurationError
 
 
 class Result(BaseModel):
@@ -27,6 +29,45 @@ def test_anthropic_client_returns_structured_tool_output(monkeypatch) -> None:
 
     assert result.value == "ok"
     assert client.last_usage["output_tokens"] == 5
+
+
+def test_anthropic_client_exposes_provider_validation_error(monkeypatch) -> None:
+    def fake_post(*args, **kwargs):
+        return httpx.Response(
+            400,
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+            headers={"request-id": "req_test"},
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "model is not available",
+                }
+            },
+        )
+
+    monkeypatch.setattr("agents.llm.httpx.post", fake_post)
+    client = AnthropicStructuredLLMClient(api_key="test", model="retired-model")
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        client.generate_object(
+            task="test",
+            system="Return data.",
+            prompt="Test",
+            response_model=Result,
+        )
+
+    assert exc_info.value.details == {
+        "status_code": 400,
+        "request_id": "req_test",
+        "provider_error_type": "invalid_request_error",
+        "provider_message": "model is not available",
+        "provider": "anthropic",
+        "model": "retired-model",
+        "user_message": (
+            "Outreach generation is temporarily unavailable. "
+            "Check the Anthropic model and billing configuration."
+        ),
+    }
 
 
 def test_openai_client_retries_transient_timeout(monkeypatch) -> None:
