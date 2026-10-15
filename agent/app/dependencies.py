@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from agents.embeddings import EmbeddingClient, MissingEmbeddingClient, OpenAIEmbeddingClient
 from agents.llm import (
-    AnthropicStructuredLLMClient,
     LLMClient,
     MissingLLMClient,
     OpenAIStructuredLLMClient,
@@ -36,7 +35,6 @@ class AppServices:
     settings: Settings
     db: Database
     llm: LLMClient
-    demo_llm: LLMClient
     embedding: EmbeddingClient
     search: SearchTool
     browser: DirectHttpBrowserTool
@@ -63,15 +61,6 @@ def create_app_services(settings: Settings) -> AppServices:
     else:
         llm = MissingLLMClient()
 
-    demo_llm: LLMClient = llm
-    if settings.anthropic_api_key:
-        demo_llm = AnthropicStructuredLLMClient(
-            api_key=settings.anthropic_api_key,
-            model=settings.anthropic_model,
-            timeout_seconds=settings.llm_timeout_seconds,
-            max_attempts=settings.llm_max_attempts,
-        )
-
     embedding: EmbeddingClient
     if settings.openai_api_key:
         embedding = OpenAIEmbeddingClient(
@@ -90,7 +79,6 @@ def create_app_services(settings: Settings) -> AppServices:
         settings=settings,
         db=Database(settings.database_url),
         llm=llm,
-        demo_llm=demo_llm,
         embedding=embedding,
         search=SearchTool(
             endpoint=settings.search_api_endpoint,

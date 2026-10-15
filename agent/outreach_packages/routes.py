@@ -10,11 +10,11 @@ router = APIRouter(prefix="/outreach-packages", tags=["outreach-packages"])
 
 def _service(request: Request, session: DbSession, workspace_id: str | None) -> OutreachPackageService:
     settings = request.app.state.services.settings
-    provider = "anthropic" if settings.anthropic_api_key else "openai" if settings.openai_api_key else "remote"
-    model = settings.anthropic_model if settings.anthropic_api_key else settings.openai_model if settings.openai_api_key else settings.llm_model
+    provider = "openai" if settings.openai_api_key else "remote"
+    model = settings.openai_model if settings.openai_api_key else settings.llm_model
     return OutreachPackageService(
         session,
-        llm=request.app.state.services.demo_llm,
+        llm=request.app.state.services.llm,
         workspace_id=workspace_id,
         provider=provider,
         model=model,

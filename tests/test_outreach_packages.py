@@ -59,8 +59,8 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
             session,
             llm=DraftLLM(),
             workspace_id="workspace:first",
-            provider="anthropic",
-            model="claude-test",
+            provider="openai",
+            model="gpt-test",
         )
 
         package = service.generate(result.id)
@@ -87,8 +87,8 @@ def test_outreach_package_rejects_unverified_opportunity() -> None:
             session,
             llm=DraftLLM(),
             workspace_id="workspace:first",
-            provider="anthropic",
-            model="claude-test",
+            provider="openai",
+            model="gpt-test",
         )
 
         with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
@@ -123,8 +123,8 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
             session,
             llm=DraftLLM(),
             workspace_id="workspace:first",
-            provider="anthropic",
-            model="claude-test",
+            provider="openai",
+            model="gpt-test",
         )
 
         package = service.generate(result.id)
@@ -155,8 +155,8 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
             session,
             llm=DraftLLM("The latest business listing"),
             workspace_id="workspace:first",
-            provider="anthropic",
-            model="claude-test",
+            provider="openai",
+            model="gpt-test",
         )
 
         package = service.generate(result.id)

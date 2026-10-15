@@ -184,6 +184,41 @@ class OpenAIStructuredLLMClient:
             if parsed is None:
                 raise ValueError("OpenAI response did not contain parseable JSON output")
             return response_model.model_validate(parsed)
+        except httpx.HTTPStatusError as exc:
+            details = _provider_error_details(exc)
+            logger.warning(
+                "openai_structured_llm_failed task=%s model=%s status_code=%s request_id=%s error=%s",
+                task,
+                self.model,
+                details["status_code"],
+                details.get("request_id"),
+                details.get("provider_message"),
+            )
+            raise ConfigurationError(
+                "OpenAI generation failed",
+                {
+                    **details,
+                    "provider": "openai",
+                    "model": self.model,
+                    "user_message": "Generation is temporarily unavailable. Check the OpenAI model and billing configuration.",
+                },
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.warning(
+                "openai_structured_llm_failed task=%s model=%s error=%s",
+                task,
+                self.model,
+                exc.__class__.__name__,
+            )
+            raise ConfigurationError(
+                "OpenAI request failed",
+                {
+                    "provider": "openai",
+                    "model": self.model,
+                    "error": exc.__class__.__name__,
+                    "user_message": "OpenAI could not be reached. Try generating again.",
+                },
+            ) from exc
         except Exception as exc:
             logger.warning("openai_structured_llm_failed task=%s error=%s", task, exc)
             raise
@@ -198,84 +233,6 @@ class OpenAIStructuredLLMClient:
                 if isinstance(text, str):
                     return text
         raise ValueError("missing output text")
-
-
-class AnthropicStructuredLLMClient:
-    def __init__(self, *, api_key: str, model: str, timeout_seconds: float = 60.0,
-                 max_attempts: int = DEFAULT_MAX_ATTEMPTS,
-                 retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS) -> None:
-        self.api_key = api_key
-        self.model = model
-        self.timeout_seconds = timeout_seconds
-        self.max_attempts = max(1, max_attempts)
-        self.retry_backoff_seconds = max(0, retry_backoff_seconds)
-        self.last_usage: dict[str, Any] = {}
-
-    def generate_object(self, *, task: str, system: str, prompt: str,
-                        response_model: type[TModel],
-                        context: dict[str, Any] | None = None) -> TModel:
-        schema = response_model.model_json_schema()
-        try:
-            response = _post_with_retry(
-                provider="anthropic", task=task, max_attempts=self.max_attempts,
-                backoff_seconds=self.retry_backoff_seconds,
-                request=lambda: httpx.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01",
-                             "content-type": "application/json"},
-                    timeout=self.timeout_seconds,
-                    json={
-                        "model": self.model,
-                        "max_tokens": 2400,
-                        "system": system,
-                        "messages": [{"role": "user", "content": f"{prompt}\n\nTask: {task}\nContext JSON: {context or {}}"}],
-                        "tools": [{"name": "return_structured_result", "description": "Return the validated result.",
-                                   "input_schema": schema}],
-                        "tool_choice": {"type": "tool", "name": "return_structured_result"},
-                    },
-                ),
-            )
-        except httpx.HTTPStatusError as exc:
-            details = _provider_error_details(exc)
-            logger.warning(
-                "anthropic_llm_failed task=%s model=%s status_code=%s request_id=%s error=%s",
-                task,
-                self.model,
-                details["status_code"],
-                details.get("request_id"),
-                details.get("provider_message"),
-            )
-            raise ConfigurationError(
-                "Anthropic generation failed",
-                {
-                    **details,
-                    "provider": "anthropic",
-                    "model": self.model,
-                    "user_message": "Outreach generation is temporarily unavailable. Check the Anthropic model and billing configuration.",
-                },
-            ) from exc
-        except httpx.RequestError as exc:
-            logger.warning(
-                "anthropic_llm_failed task=%s model=%s error=%s",
-                task,
-                self.model,
-                exc.__class__.__name__,
-            )
-            raise ConfigurationError(
-                "Anthropic request failed",
-                {
-                    "provider": "anthropic",
-                    "model": self.model,
-                    "error": exc.__class__.__name__,
-                    "user_message": "Anthropic could not be reached. Try generating outreach again.",
-                },
-            ) from exc
-        payload = response.json()
-        self.last_usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
-        for block in payload.get("content", []):
-            if block.get("type") == "tool_use" and block.get("name") == "return_structured_result":
-                return response_model.model_validate(block.get("input"))
-        raise ValueError("Anthropic response did not contain structured tool output")
 
 
 def _post_with_retry(
