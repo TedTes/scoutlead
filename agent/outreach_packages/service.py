@@ -5,7 +5,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agents.llm import LLMClient
 from db.models import (
     AudienceResultModel,
     AudienceRunModel,
@@ -18,16 +17,16 @@ from db.models import (
 )
 from outreach_packages.schemas import (
     OutreachEvidence,
-    OutreachGeneration,
     OutreachPackageContent,
     OutreachPackageRead,
     OutreachPackageUpdate,
 )
+from outreach_packages.templates import OutreachTemplateContext, render_outreach
 from shared.errors import NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
 
-PROMPT_VERSION = 1
+TEMPLATE_VERSION = 1
 
 
 class OutreachPackageService:
@@ -35,16 +34,10 @@ class OutreachPackageService:
         self,
         session: Session,
         *,
-        llm: LLMClient,
         workspace_id: str | None,
-        provider: str,
-        model: str | None,
     ) -> None:
         self.session = session
-        self.llm = llm
         self.workspace_id = workspace_id
-        self.provider = provider
-        self.model = model
 
     def find_for_result(self, result_id: str) -> OutreachPackageRead | None:
         result, _, _, business, _ = self._context(result_id)
@@ -102,32 +95,17 @@ class OutreachPackageService:
             or (workspace.sender_contact if workspace else None)
             or product.product_name
         )
-        generated = self.llm.generate_object(
-            task="outreach_package_v1",
-            system=(
-                "Write concise one-to-one outreach using only the supplied facts. "
-                "The first sentence must refer to the verified observation. Do not invent impact, "
-                "results, familiarity, credentials, or urgency. Keep the ask low pressure. "
-                "Return one draft per requested channel, without tone variants."
-            ),
-            prompt=(
-                "Prepare a short reusable message, a three-part call starter, a website contact-form "
-                "message, and an email. Mention the optional demo only when demo_path is present."
-            ),
-            response_model=OutreachGeneration,
-            context={
-                "business": {
-                    "name": business.display_name,
-                    "category": business.category_key,
-                    "market": business.geography or audience.market_key,
-                },
-                "verified_observation": observation,
-                "supporting_evidence": [item.model_dump() for item in evidence],
-                "provider_offer": product.offer_summary or product.value_proposition or product.product_name,
-                "call_to_action": product.outreach_objective or "Ask whether a short example would be useful.",
-                "signature": signature,
-                "demo_path": demo_path,
-            },
+        generated = render_outreach(
+            OutreachTemplateContext(
+                business_name=business.display_name,
+                category=business.category_key,
+                market=audience.city or audience.market_key,
+                evidence=evidence[0],
+                offer=product.offer_summary or product.value_proposition or product.product_name,
+                call_to_action=product.outreach_objective,
+                signature=signature,
+                demo_path=demo_path,
+            )
         )
         content = OutreachPackageContent(
             observation=observation,
@@ -144,10 +122,10 @@ class OutreachPackageService:
             audience_result_id=result.id,
             business_id=result.business_id,
             content=content.model_dump(),
-            provider=self.provider,
-            model=self.model,
-            usage=dict(getattr(self.llm, "last_usage", {}) or {}),
-            prompt_version=PROMPT_VERSION,
+            provider="template",
+            model=None,
+            usage={},
+            prompt_version=TEMPLATE_VERSION,
         )
         self.session.add(row)
         self.session.commit()

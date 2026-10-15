@@ -15,41 +15,11 @@ from db.models import (
 )
 from db.session import create_database
 from outreach_packages.schemas import (
-    CallDraft,
-    EmailDraft,
-    OutreachGeneration,
     OutreachPackageUpdate,
-    WrittenDraft,
 )
 from outreach_packages.service import OutreachPackageService
 from shared.errors import WorkflowBoundaryError
 from shared.utils import new_id, utcnow
-
-
-class DraftLLM:
-    last_usage = {"input_tokens": 20, "output_tokens": 40}
-
-    def __init__(self, expected_observation: str = "No quote") -> None:
-        self.expected_observation = expected_observation
-
-    def generate_object(self, **kwargs):
-        assert kwargs["task"] == "outreach_package_v1"
-        assert kwargs["context"]["verified_observation"].startswith(
-            self.expected_observation
-        )
-        return OutreachGeneration(
-            message=WrittenDraft(body="I noticed your site does not currently show an online quote flow. Open to a quick example?"),
-            call=CallDraft(
-                opener="Hi, is this the owner or manager?",
-                observation="I noticed the website does not currently show an online quote flow.",
-                ask="Would a quick example be useful?",
-            ),
-            form=WrittenDraft(body="I noticed the website does not currently show an online quote flow. Would a quick example be useful?"),
-            email=EmailDraft(
-                subject="Quick question about online quotes",
-                body="I noticed the website does not currently show an online quote flow. Would a quick example be useful?",
-            ),
-        )
 
 
 def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
@@ -57,10 +27,7 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         result = _seed_result(session, confirmed=True)
         service = OutreachPackageService(
             session,
-            llm=DraftLLM(),
             workspace_id="workspace:first",
-            provider="openai",
-            model="gpt-test",
         )
 
         package = service.generate(result.id)
@@ -69,6 +36,14 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert package.content.observation == "No quote or booking flow was found in the latest website check."
         assert package.phone == "416-555-0101"
         assert package.contact_url == "https://example.com/contact"
+        assert package.provider == "template"
+        assert package.model is None
+        assert package.usage == {}
+        assert "Lakeside Painting" in package.content.message.body
+        assert "quote or booking option" in package.content.message.body
+        assert "painters in Toronto" in package.content.message.body
+        assert "Online booking and conversion improvements" in package.content.message.body
+        assert package.content.call.ask == "Would a short example be useful?"
         assert service.generate(result.id).id == package.id
         assert session.scalar(select(func.count()).select_from(OutreachPackageModel)) == 1
 
@@ -85,10 +60,7 @@ def test_outreach_package_rejects_unverified_opportunity() -> None:
         result = _seed_result(session, confirmed=False)
         service = OutreachPackageService(
             session,
-            llm=DraftLLM(),
             workspace_id="workspace:first",
-            provider="openai",
-            model="gpt-test",
         )
 
         with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
@@ -121,10 +93,7 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
         session.commit()
         service = OutreachPackageService(
             session,
-            llm=DraftLLM(),
             workspace_id="workspace:first",
-            provider="openai",
-            model="gpt-test",
         )
 
         package = service.generate(result.id)
@@ -153,16 +122,16 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
         session.commit()
         service = OutreachPackageService(
             session,
-            llm=DraftLLM("The latest business listing"),
             workspace_id="workspace:first",
-            provider="openai",
-            model="gpt-test",
         )
 
         package = service.generate(result.id)
 
         assert package.content.observation == (
             "The latest business listing does not include a website."
+        )
+        assert "latest business listing does not include a website" in (
+            package.content.message.body
         )
 
 
