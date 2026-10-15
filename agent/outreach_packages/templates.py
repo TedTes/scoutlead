@@ -15,8 +15,6 @@ from outreach_packages.schemas import (
 @dataclass(frozen=True, slots=True)
 class OutreachTemplateContext:
     business_name: str
-    category: str | None
-    market: str | None
     evidence: OutreachEvidence
     offer: str
     call_to_action: str | None
@@ -26,19 +24,27 @@ class OutreachTemplateContext:
 
 def render_outreach(context: OutreachTemplateContext) -> OutreachGeneration:
     observation = _conversational_observation(context.evidence)
-    offer = _offer_sentence(context.offer, context.category, context.market)
-    ask = _call_to_action(context.call_to_action)
+    offer = _offer_sentence(context.offer, context.evidence)
+    ask = _call_to_action(context.call_to_action, context.evidence)
     demo = f" Here is a short example: {context.demo_path}." if context.demo_path else ""
 
     message = _limit(
-        f"Hi {context.business_name}, {observation} {offer}{demo} {ask} - {context.signature}",
+        "\n\n".join(
+            [
+                f"Hi {context.business_name},",
+                observation,
+                f"{offer}{demo} {ask}",
+            ]
+        ),
         900,
     )
     form = _limit(
         "\n\n".join(
             [
                 f"Hi {context.business_name} team,",
-                f"{observation} {offer}{demo} {ask}",
+                observation,
+                f"{offer}{demo}",
+                ask,
                 f"Thanks,\n{context.signature}",
             ]
         ),
@@ -85,24 +91,26 @@ def _conversational_observation(evidence: OutreachEvidence) -> str:
         "uses_http": "The latest website check found that the site is not using HTTPS.",
     }
     if key == "website_status" and value == "not_listed":
-        return "Your latest business listing does not include a website."
+        return "I noticed your business listing doesn't include a website."
     if key == "reviews_under_15":
         return f"Your business has {int(value or 0)} public reviews in the latest record."
     return observations.get(key, _sentence(evidence.statement))
 
 
-def _offer_sentence(offer: str, category: str | None, market: str | None) -> str:
-    audience = "businesses"
-    if category:
-        trade = _humanize(category)
-        audience = trade if trade.endswith("s") else f"{trade} businesses"
-    if market:
-        audience = f"{audience} in {_humanize(market)}"
-    compact_offer = _compact(offer).rstrip(".!?")
-    return _sentence(f"I help {audience} with {compact_offer[:260]}")
+def _offer_sentence(offer: str, evidence: OutreachEvidence) -> str:
+    if evidence.signal_key == "website_status" and evidence.value == "not_listed":
+        return "I help local service businesses launch modern websites that generate more quote requests."
+    compact_offer = _compact(offer).rstrip(".!?")[:320]
+    if re.match(r"^(i|we)\b", compact_offer, flags=re.IGNORECASE):
+        return _sentence(compact_offer)
+    first_word = compact_offer.split(" ", 1)[0]
+    sentence_offer = compact_offer if first_word.isupper() else compact_offer[0].lower() + compact_offer[1:]
+    return _sentence(f"I offer {sentence_offer}")
 
 
-def _call_to_action(value: str | None) -> str:
+def _call_to_action(value: str | None, evidence: OutreachEvidence) -> str:
+    if evidence.signal_key == "website_status" and evidence.value == "not_listed":
+        return "Would you be open to seeing a quick example?"
     if not value:
         return "Would a short example be useful?"
     text = _compact(value).rstrip(".!?")
@@ -133,10 +141,6 @@ def _email_subject(evidence: OutreachEvidence) -> str:
     }:
         return "Quick question about your website"
     return "Quick question about your business"
-
-
-def _humanize(value: str) -> str:
-    return _compact(value.replace("_", " ").replace("-", " "))
 
 
 def _sentence(value: str) -> str:

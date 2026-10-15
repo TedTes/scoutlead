@@ -26,7 +26,7 @@ from shared.errors import NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
 
-TEMPLATE_VERSION = 1
+TEMPLATE_VERSION = 4
 
 
 class OutreachPackageService:
@@ -40,13 +40,18 @@ class OutreachPackageService:
         self.workspace_id = workspace_id
 
     def find_for_result(self, result_id: str) -> OutreachPackageRead | None:
-        result, _, _, business, _ = self._context(result_id)
+        result, audience, product, business, workspace = self._context(result_id)
         row = self.session.scalar(
             select(OutreachPackageModel).where(
                 OutreachPackageModel.workspace_id == self.workspace_id,
                 OutreachPackageModel.audience_result_id == result.id,
             )
         )
+        if row is not None and _should_refresh_template(row):
+            row.content = self._render_content(result, product, business, workspace).model_dump()
+            row.prompt_version = TEMPLATE_VERSION
+            self.session.commit()
+            self.session.refresh(row)
         return self._read(row, business, result) if row is not None else None
 
     def generate(self, result_id: str) -> OutreachPackageRead:
@@ -63,7 +68,39 @@ class OutreachPackageService:
             )
         )
         if existing is not None:
+            if _should_refresh_template(existing):
+                existing.content = self._render_content(
+                    result, product, business, workspace
+                ).model_dump()
+                existing.prompt_version = TEMPLATE_VERSION
+                self.session.commit()
+                self.session.refresh(existing)
             return self._read(existing, business, result)
+
+        content = self._render_content(result, product, business, workspace)
+        row = OutreachPackageModel(
+            id=new_id("outreach_package"),
+            workspace_id=self.workspace_id,
+            audience_result_id=result.id,
+            business_id=result.business_id,
+            content=content.model_dump(),
+            provider="template",
+            model=None,
+            usage={},
+            prompt_version=TEMPLATE_VERSION,
+        )
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return self._read(row, business, result)
+
+    def _render_content(
+        self,
+        result: AudienceResultModel,
+        product: ProductModel,
+        business: BusinessModel,
+        workspace: WorkspaceModel | None,
+    ) -> OutreachPackageContent:
 
         snapshot = result.match_snapshot or {}
         profile_match = _profile_match(snapshot)
@@ -72,7 +109,7 @@ class OutreachPackageService:
             raise WorkflowBoundaryError(
                 "A verified opportunity is required before preparing outreach.",
                 {
-                    "result_id": result_id,
+                    "result_id": result.id,
                     "user_message": "Collect or request an opportunity signal for this business first.",
                 },
             )
@@ -98,8 +135,6 @@ class OutreachPackageService:
         generated = render_outreach(
             OutreachTemplateContext(
                 business_name=business.display_name,
-                category=business.category_key,
-                market=audience.city or audience.market_key,
                 evidence=evidence[0],
                 offer=product.offer_summary or product.value_proposition or product.product_name,
                 call_to_action=product.outreach_objective,
@@ -107,7 +142,7 @@ class OutreachPackageService:
                 demo_path=demo_path,
             )
         )
-        content = OutreachPackageContent(
+        return OutreachPackageContent(
             observation=observation,
             evidence=evidence,
             message=generated.message,
@@ -116,21 +151,6 @@ class OutreachPackageService:
             email=generated.email if email else None,
             demo_path=demo_path,
         )
-        row = OutreachPackageModel(
-            id=new_id("outreach_package"),
-            workspace_id=self.workspace_id,
-            audience_result_id=result.id,
-            business_id=result.business_id,
-            content=content.model_dump(),
-            provider="template",
-            model=None,
-            usage={},
-            prompt_version=TEMPLATE_VERSION,
-        )
-        self.session.add(row)
-        self.session.commit()
-        self.session.refresh(row)
-        return self._read(row, business, result)
 
     def update(self, package_id: str, data: OutreachPackageUpdate) -> OutreachPackageRead:
         row = self._owned(package_id)
@@ -298,3 +318,18 @@ def _find_string(value: object, keys: set[str]) -> str | None:
 
 def _optional_string(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _should_refresh_template(row: OutreachPackageModel) -> bool:
+    if row.provider != "template" or row.prompt_version >= TEMPLATE_VERSION:
+        return False
+    content = row.content if isinstance(row.content, dict) else {}
+    message = content.get("message") if isinstance(content.get("message"), dict) else {}
+    body = str(message.get("body") or "").lower()
+    return any(
+        marker in body
+        for marker in (
+            " on businesses in ",
+            "that help local service businesses generate more qualified inquiries and quote requests",
+        )
+    )

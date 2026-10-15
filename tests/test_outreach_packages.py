@@ -41,8 +41,9 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert package.usage == {}
         assert "Lakeside Painting" in package.content.message.body
         assert "quote or booking option" in package.content.message.body
-        assert "painters in Toronto" in package.content.message.body
-        assert "Online booking and conversion improvements" in package.content.message.body
+        assert "I offer online booking and conversion improvements" in package.content.message.body
+        assert package.content.message.body.count("\n\n") == 2
+        assert package.content.form.body.count("\n\n") == 4
         assert package.content.call.ask == "Would a short example be useful?"
         assert service.generate(result.id).id == package.id
         assert session.scalar(select(func.count()).select_from(OutreachPackageModel)) == 1
@@ -53,6 +54,51 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
 
         assert updated.content.message.body.startswith("Updated message")
         assert service.find_for_result(result.id).content.message.body == updated.content.message.body
+
+
+def test_outreach_package_refreshes_older_template_copy() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(session, workspace_id="workspace:first")
+        package = service.generate(result.id)
+        row = session.get(OutreachPackageModel, package.id)
+        stale_content = dict(row.content)
+        stale_content["message"] = {
+            "body": (
+                "Hi Lakeside Painting, I help residential painting contractors in "
+                "scarborough on businesses in Toronto with websites."
+            )
+        }
+        row.content = stale_content
+        row.prompt_version = 1
+        session.commit()
+
+        refreshed = service.find_for_result(result.id)
+
+        assert refreshed is not None
+        assert "on businesses in" not in refreshed.content.message.body
+        assert "I offer online booking and conversion improvements" in refreshed.content.message.body
+        assert row.prompt_version == 4
+
+
+def test_outreach_package_preserves_edited_older_template_copy() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(session, workspace_id="workspace:first")
+        package = service.generate(result.id)
+        row = session.get(OutreachPackageModel, package.id)
+        custom_body = "Hi Lakeside Painting, I wrote this custom message and want to keep it."
+        custom_content = dict(row.content)
+        custom_content["message"] = {"body": custom_body}
+        row.content = custom_content
+        row.prompt_version = 1
+        session.commit()
+
+        preserved = service.find_for_result(result.id)
+
+        assert preserved is not None
+        assert preserved.content.message.body == custom_body
+        assert row.prompt_version == 1
 
 
 def test_outreach_package_rejects_unverified_opportunity() -> None:
@@ -130,9 +176,13 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
         assert package.content.observation == (
             "The latest business listing does not include a website."
         )
-        assert "latest business listing does not include a website" in (
-            package.content.message.body
+        assert package.content.message.body == (
+            "Hi Lakeside Painting,\n\n"
+            "I noticed your business listing doesn't include a website.\n\n"
+            "I help local service businesses launch modern websites that generate more "
+            "quote requests. Would you be open to seeing a quick example?"
         )
+        assert len(package.content.message.body) <= 306
 
 
 def _session_factory():
