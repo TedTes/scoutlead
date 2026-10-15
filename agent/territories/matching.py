@@ -530,48 +530,38 @@ class ProfileMatchService:
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
+    evidence = _usable_evidence_condition(spec, fact, include_probable=True)
     signal = spec.key
     if signal == "website_unavailable":
         return and_(
-            fact.resolution_state == "confirmed",
-            fact.quality_state == "published",
-            fact.confidence >= 90,
+            evidence,
             fact.value_text.in_(("missing", "unavailable", "parked")),
         )
     if signal in {"no_quote_flow", "no_contact_form"}:
         return and_(
-            fact.resolution_state == "confirmed",
-            fact.quality_state == "published",
-            fact.confidence >= 90,
+            evidence,
             fact.value_boolean.is_(False),
         )
     if signal == "reviews_under_15":
         return and_(
-            fact.resolution_state == "confirmed",
-            fact.quality_state == "published",
-            fact.confidence >= 90,
+            evidence,
             fact.value_number < 15.0,
         )
-    confirmed = and_(
-        fact.resolution_state == "confirmed",
-        fact.quality_state == "published",
-        fact.confidence >= int(spec.config.get("minimum_confidence", 90)),
-    )
     if spec.opportunity_direction == "false_is_opportunity":
-        return and_(confirmed, fact.value_boolean.is_(False))
+        return and_(evidence, fact.value_boolean.is_(False))
     if spec.opportunity_direction == "true_is_opportunity":
-        return and_(confirmed, fact.value_boolean.is_(True))
+        return and_(evidence, fact.value_boolean.is_(True))
     if spec.opportunity_direction == "lower_is_opportunity":
         threshold = spec.config.get("opportunity_threshold")
         return (
-            and_(confirmed, fact.value_number < float(threshold))
+            and_(evidence, fact.value_number < float(threshold))
             if isinstance(threshold, (int, float))
             else literal(False)
         )
     if spec.opportunity_direction == "higher_is_opportunity":
         threshold = spec.config.get("opportunity_threshold")
         return (
-            and_(confirmed, fact.value_number > float(threshold))
+            and_(evidence, fact.value_number > float(threshold))
             if isinstance(threshold, (int, float))
             else literal(False)
         )
@@ -582,12 +572,35 @@ def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
             "unavailable",
             "parked",
         ]
-        return and_(confirmed, fact.value_text.in_(tuple(str(value) for value in values)))
+        return and_(evidence, fact.value_text.in_(tuple(str(value) for value in values)))
     return literal(False)
 
 
 def _confirmed_signal_condition(spec: SignalMatchSpec, fact) -> Any:
-    return _signal_condition(spec, fact)
+    return and_(
+        _signal_condition(spec, fact),
+        _usable_evidence_condition(spec, fact, include_probable=False),
+    )
+
+
+def _usable_evidence_condition(
+    spec: SignalMatchSpec,
+    fact,
+    *,
+    include_probable: bool,
+) -> Any:
+    acceptable_quality = fact.quality_state.notin_(("rejected", "quarantined"))
+    confirmed = and_(
+        fact.resolution_state == "confirmed",
+        fact.confidence >= int(spec.config.get("minimum_confidence", 90)),
+    )
+    if not include_probable:
+        return and_(acceptable_quality, confirmed)
+    probable = and_(
+        fact.resolution_state == "probable",
+        fact.confidence >= int(spec.config.get("possible_minimum_confidence", 50)),
+    )
+    return and_(acceptable_quality, or_(confirmed, probable))
 
 
 def _signal_match_confidence(
@@ -596,28 +609,37 @@ def _signal_match_confidence(
 ) -> str | None:
     if fact is None:
         return None
+    if fact.quality_state in {"rejected", "quarantined"}:
+        return None
     if (
-        fact.resolution_state != "confirmed"
-        or fact.quality_state != "published"
-        or fact.confidence < int(spec.config.get("minimum_confidence", 90))
+        fact.resolution_state == "confirmed"
+        and fact.confidence >= int(spec.config.get("minimum_confidence", 90))
     ):
+        evidence_confidence = "confirmed"
+    elif (
+        fact.resolution_state == "probable"
+        and fact.confidence
+        >= int(spec.config.get("possible_minimum_confidence", 50))
+    ):
+        evidence_confidence = "possible"
+    else:
         return None
     value = fact_value(fact)
     signal = spec.key
     if signal == "website_unavailable":
-        return "confirmed" if value in {"missing", "unavailable", "parked"} else None
+        return evidence_confidence if value in {"missing", "unavailable", "parked"} else None
     if signal in {"no_quote_flow", "no_contact_form"}:
-        return "confirmed" if value is False else None
+        return evidence_confidence if value is False else None
     if signal == "reviews_under_15":
-        return "confirmed" if isinstance(value, (int, float)) and value < 15 else None
+        return evidence_confidence if isinstance(value, (int, float)) and value < 15 else None
     if spec.opportunity_direction == "false_is_opportunity":
-        return "confirmed" if value is False else None
+        return evidence_confidence if value is False else None
     if spec.opportunity_direction == "true_is_opportunity":
-        return "confirmed" if value is True else None
+        return evidence_confidence if value is True else None
     threshold = spec.config.get("opportunity_threshold")
     if spec.opportunity_direction == "lower_is_opportunity":
         return (
-            "confirmed"
+            evidence_confidence
             if isinstance(value, (int, float))
             and isinstance(threshold, (int, float))
             and value < threshold
@@ -625,7 +647,7 @@ def _signal_match_confidence(
         )
     if spec.opportunity_direction == "higher_is_opportunity":
         return (
-            "confirmed"
+            evidence_confidence
             if isinstance(value, (int, float))
             and isinstance(threshold, (int, float))
             and value > threshold
@@ -638,7 +660,7 @@ def _signal_match_confidence(
             "unavailable",
             "parked",
         ]
-        return "confirmed" if value in values else None
+        return evidence_confidence if value in values else None
     return None
 
 

@@ -1344,7 +1344,7 @@ def test_profile_can_rank_with_active_dynamic_signal_definition() -> None:
                 value=False,
                 observed_at=utcnow(),
                 source_observation_id=None,
-                quality_state="published",
+                quality_state="staged",
             ),
         )
         session.commit()
@@ -1373,6 +1373,81 @@ def test_profile_can_rank_with_active_dynamic_signal_definition() -> None:
         evidence = rows[0]["raw"]["profile_match"]["signals"][definition.key]
         assert evidence["matched"] is True
         assert evidence["value"] is False
+
+
+def test_profile_can_rank_probable_not_listed_website_evidence() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        business = session.scalar(
+            select(BusinessModel).order_by(BusinessModel.display_name)
+        )
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="website_status",
+            label="Website status",
+            value_type="text",
+            category="website",
+            status="active",
+            collector_key="website_http",
+            extractor_key="website_status",
+            freshness_days=30,
+            opportunity_direction="missing_is_opportunity",
+            config={
+                "opportunity_values": [
+                    "missing",
+                    "not_listed",
+                    "unavailable",
+                    "parked",
+                ]
+            },
+            version=1,
+        )
+        session.add(definition)
+        session.flush()
+        BusinessFactRepository(session).upsert(
+            business.id,
+            BusinessFactValue(
+                key=definition.key,
+                value="not_listed",
+                observed_at=utcnow(),
+                source_observation_id=None,
+                confidence=65,
+                resolution_state="probable",
+                quality_state="staged",
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[definition.key],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert len(rows) == 2
+        assert business.display_name in {row["title"] for row in rows}
+        for row in rows:
+            match = row["raw"]["profile_match"]
+            assert match["confirmed_signal_count"] == 0
+            assert match["possible_signal_count"] == 1
+            assert match["signals"][definition.key]["confidence"] == "possible"
 
 
 def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
