@@ -74,8 +74,8 @@ class OutreachPackageService:
 
         snapshot = result.match_snapshot or {}
         profile_match = _profile_match(snapshot)
-        matched = [item for item in profile_match.get("matched_signals") or [] if isinstance(item, dict)]
-        if not matched or int(profile_match.get("confirmed_signal_count") or 0) < 1:
+        matched = _outreach_eligible_matched_signals(profile_match)
+        if not matched:
             raise WorkflowBoundaryError(
                 "A verified opportunity is required before preparing outreach.",
                 {
@@ -240,11 +240,51 @@ def _profile_match(snapshot: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _outreach_eligible_matched_signals(
+    profile_match: dict[str, Any],
+) -> list[dict[str, Any]]:
+    matched = [
+        item
+        for item in profile_match.get("matched_signals") or []
+        if isinstance(item, dict)
+    ]
+    signal_details = profile_match.get("signals")
+    details = signal_details if isinstance(signal_details, dict) else {}
+    confirmed = []
+    grounded_listing_gaps = []
+    for item in matched:
+        signal_key = str(item.get("signal_key") or "")
+        detail = details.get(signal_key)
+        detail_confidence = (
+            detail.get("confidence") if isinstance(detail, dict) else None
+        )
+        confidence = item.get("confidence") or detail_confidence
+        is_listed_website_gap = (
+            signal_key == "website_status"
+            and item.get("value") == "not_listed"
+            and confidence == "possible"
+        )
+        if confidence == "confirmed":
+            confirmed.append(item)
+        elif is_listed_website_gap:
+            grounded_listing_gaps.append(item)
+    if confirmed or grounded_listing_gaps:
+        return [*confirmed, *grounded_listing_gaps]
+    if int(profile_match.get("confirmed_signal_count") or 0) >= len(matched):
+        return matched
+    return []
+
+
 def _evidence(item: dict[str, Any]) -> OutreachEvidence:
     key = str(item.get("signal_key") or "opportunity")
     value = item.get("value")
     label = key.replace("_", " ").strip().capitalize()
     statements = {
+        "website_status": (
+            "The latest business listing does not include a website."
+            if value == "not_listed"
+            else f"The latest website status is {str(value).replace('_', ' ')}."
+        ),
         "website_unavailable": "The business website was unavailable during the latest check.",
         "no_quote_flow": "No quote or booking flow was found in the latest website check.",
         "no_contact_form": "No contact form was found in the latest website check.",

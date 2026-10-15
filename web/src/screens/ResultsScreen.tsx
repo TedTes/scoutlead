@@ -272,6 +272,11 @@ export function ResultsScreen({
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
     : undefined;
+  const detailContact = selectedContact && (
+    workflowView !== "shortlisted" || hasActionableAudienceOpportunity(selectedContact)
+  )
+    ? selectedContact
+    : undefined;
   const selectedMessage = selectedContact
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
@@ -334,9 +339,9 @@ export function ResultsScreen({
   }, [desktopSplitView, detailPanelOpen, selectedContactId, visibleContacts.map((contact) => contact.id).join("|")]);
 
   useEffect(() => {
-    document.body.classList.toggle("has-contact-detail", Boolean(selectedContact));
+    document.body.classList.toggle("has-contact-detail", Boolean(detailContact));
     return () => document.body.classList.remove("has-contact-detail");
-  }, [selectedContact]);
+  }, [detailContact]);
 
   useEffect(() => {
     setDraftPrompt(runPrompt);
@@ -724,7 +729,7 @@ export function ResultsScreen({
   }
 
   return (
-    <section className={selectedContact ? "results-workspace has-detail" : "results-workspace"}>
+    <section className={detailContact ? "results-workspace has-detail" : "results-workspace"}>
       <div className="results-controlbar">
         {activeProfile ? (
           <nav aria-label="Audience context" className="results-breadcrumb">
@@ -909,7 +914,7 @@ export function ResultsScreen({
         </div>
       </div>
 
-      <div className={selectedContact ? "results-body has-detail" : "results-body"}>
+      <div className={detailContact ? "results-body has-detail" : "results-body"}>
         <section className="lead-feed-pane" aria-label="Lead list">
           <header className="lead-feed-header">
             <div className="lead-feed-title-row">
@@ -988,8 +993,17 @@ export function ResultsScreen({
                 <ContactCard
                   contact={contact}
                   key={contact.id}
-                  selected={contact.id === selectedContactId}
+                  selected={contact.id === detailContact?.id}
                   onOpen={() => {
+                    if (workflowView === "shortlisted" && !hasActionableAudienceOpportunity(contact)) {
+                      setSelectedContactId(contact.id);
+                      setDetailPanelOpen(false);
+                      showToast({
+                        title: "Outreach unavailable",
+                        message: "This lead does not have a verified opportunity yet.",
+                      });
+                      return;
+                    }
                     setSelectedContactId(contact.id);
                     setDetailPanelOpen(true);
                   }}
@@ -1005,19 +1019,19 @@ export function ResultsScreen({
           )}
         </section>
 
-        {selectedContact ? (workflowView === "shortlisted" ? (
+        {detailContact ? (workflowView === "shortlisted" ? (
           <OutreachWorkspace
-            contact={selectedContact}
+            contact={detailContact}
             persistent={desktopSplitView}
             onClose={() => setDetailPanelOpen(false)}
-            onGetPackage={() => territoryApi.getOutreachPackage(selectedContact.id)}
-            onGeneratePackage={() => territoryApi.generateOutreachPackage(selectedContact.id)}
+            onGetPackage={() => territoryApi.getOutreachPackage(detailContact.id)}
+            onGeneratePackage={() => territoryApi.generateOutreachPackage(detailContact.id)}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
-            onMarkContacted={(channel) => recordContactOutcome(selectedContact.id, "contacted", channel)}
+            onMarkContacted={(channel) => recordContactOutcome(detailContact.id, "contacted", channel)}
           />
         ) : (
           <ContactDrawer
-            contact={selectedContact}
+            contact={detailContact}
             persistent={desktopSplitView}
             message={selectedMessage}
             gmailConnected={gmailConnected}
@@ -1120,7 +1134,7 @@ function OutreachWorkspace({
   const [activeChannel, setActiveChannel] = useState<OutreachChannel>("message");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const matchedEvidence = audienceMatchedSignals(contact);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let current = true;
@@ -1128,20 +1142,28 @@ function OutreachWorkspace({
     setOutreachPackage(null);
     setDraft(null);
     setActiveChannel("message");
+    setLoadError("");
     if (!contact.id.startsWith("audience_result_")) {
       setLoading(false);
       return () => { current = false; };
     }
-    void onGetPackage()
-      .then((value) => {
+    void (async () => {
+      try {
+        let value = await onGetPackage();
+        if (!current) return;
+        if (!value) value = await onGeneratePackage();
         if (!current) return;
         setOutreachPackage(value);
-        setDraft(value?.content || null);
-      })
-      .catch(() => undefined)
-      .finally(() => {
+        setDraft(value.content);
+        setActiveChannel(value.channels[0] || "message");
+      } catch (error) {
+        if (current) {
+          setLoadError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
         if (current) setLoading(false);
-      });
+      }
+    })();
     return () => { current = false; };
   }, [contact.id]);
 
@@ -1153,6 +1175,7 @@ function OutreachWorkspace({
   const generate = async () => {
     if (busy) return;
     setBusy(true);
+    setLoadError("");
     try {
       const value = await onGeneratePackage();
       setOutreachPackage(value);
@@ -1160,6 +1183,7 @@ function OutreachWorkspace({
       setActiveChannel(value.channels[0] || "message");
       showToast({ title: "Outreach ready", message: "Review and edit before using it.", tone: "green" });
     } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error));
       showToast({ title: "Could not prepare outreach", message: error instanceof Error ? error.message : String(error), tone: "red" });
     } finally {
       setBusy(false);
@@ -1321,20 +1345,19 @@ function OutreachWorkspace({
         ) : (
           <div className="outreach-empty-state">
             {loading ? (
-              <><span className="outreach-empty-icon"><Sparkles size={18} /></span><strong>Loading outreach</strong></>
-            ) : matchedEvidence.length ? (
+              <><span className="outreach-empty-icon"><Sparkles size={18} /></span><strong>Preparing outreach</strong><p>Generating channel drafts from the selected opportunity.</p></>
+            ) : loadError ? (
               <>
-                <span className="outreach-empty-icon"><MessageCircle size={18} /></span>
-                <strong>Prepare evidence-grounded outreach</strong>
-                <p>ScoutLead will use this verified observation:</p>
-                <blockquote>{matchedEvidence[0]}</blockquote>
-                <button className="primary" disabled={busy} type="button" onClick={() => void generate()}><Sparkles size={14} /> {busy ? "Preparing..." : "Prepare outreach"}</button>
+                <span className="outreach-empty-icon"><AlertTriangle size={18} /></span>
+                <strong>Could not prepare outreach</strong>
+                <p>{loadError}</p>
+                <button className="primary" disabled={busy} type="button" onClick={() => void generate()}><RotateCw size={14} /> {busy ? "Retrying..." : "Retry"}</button>
               </>
             ) : (
               <>
                 <span className="outreach-empty-icon"><AlertTriangle size={18} /></span>
-                <strong>Verified opportunity required</strong>
-                <p>Request or collect an opportunity signal before generating a message. A shortlist alone is not evidence.</p>
+                <strong>Outreach unavailable</strong>
+                <p>No outreach package was returned for this lead.</p>
               </>
             )}
           </div>
@@ -1344,23 +1367,77 @@ function OutreachWorkspace({
   );
 }
 
-function audienceMatchedSignals(contact: DiscoveryResult): string[] {
+type AudienceMatchedSignal = {
+  confidence: "confirmed" | "possible";
+  signalKey: string;
+  statement: string;
+  value: unknown;
+};
+
+function audienceMatchedSignals(contact: DiscoveryResult): AudienceMatchedSignal[] {
   const raw = contact.raw_sources?.find((item) => item && typeof item === "object");
   const profileMatch = raw?.profile_match;
   if (!profileMatch || typeof profileMatch !== "object") return [];
-  const signals = (profileMatch as Record<string, unknown>).matched_signals;
+  const profileMatchRecord = profileMatch as Record<string, unknown>;
+  const signals = profileMatchRecord.matched_signals;
+  const signalDetails = profileMatchRecord.signals;
   if (!Array.isArray(signals)) return [];
   return signals.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const signal = item as Record<string, unknown>;
-    const key = String(signal.signal_key || "opportunity").replace(/_/g, " ");
+    const signalKey = String(signal.signal_key || "opportunity");
+    const detail = signalDetails && typeof signalDetails === "object"
+      ? (signalDetails as Record<string, unknown>)[signalKey]
+      : null;
+    const detailConfidence = detail && typeof detail === "object"
+      ? (detail as Record<string, unknown>).confidence
+      : null;
+    const confidence = signal.confidence || detailConfidence;
+    if (confidence !== "confirmed" && confidence !== "possible") return [];
     const value = signal.value;
-    if (signal.signal_key === "reviews_under_15") return [`${Number(value || 0)} public reviews in the latest record.`];
-    if (signal.signal_key === "no_quote_flow") return ["No quote or booking flow was found in the latest website check."];
-    if (signal.signal_key === "no_contact_form") return ["No contact form was found in the latest website check."];
-    if (signal.signal_key === "website_unavailable") return ["The website was unavailable during the latest check."];
-    return [`The latest check confirmed ${key}.`];
+    const statement = audienceSignalStatement(signalKey, value);
+    return [{ confidence, signalKey, statement, value } as AudienceMatchedSignal];
   });
+}
+
+function isOutreachEligibleEvidence(evidence: AudienceMatchedSignal): boolean {
+  return evidence.confidence === "confirmed" || (
+    evidence.confidence === "possible"
+    && evidence.signalKey === "website_status"
+    && evidence.value === "not_listed"
+  );
+}
+
+function hasActionableAudienceOpportunity(contact: DiscoveryResult): boolean {
+  return audienceMatchedSignals(contact).some(isOutreachEligibleEvidence);
+}
+
+function audienceSignalStatement(
+  signalKey: string,
+  value: unknown,
+): string {
+  if (signalKey === "reviews_under_15" || signalKey === "google_review_count") {
+    return `${Number(value || 0)} public reviews in the latest business record.`;
+  }
+  if (signalKey === "no_quote_flow" || (signalKey === "quote_or_booking_form_present" && value === false)) {
+    return "No quote or booking flow was found in the latest website check.";
+  }
+  if (signalKey === "no_contact_form" || (signalKey === "contact_form_present" && value === false)) {
+    return "No contact form was found in the latest website check.";
+  }
+  if (signalKey === "website_unavailable") {
+    return "The website was unavailable during the latest check.";
+  }
+  if (signalKey === "website_status" && value === "not_listed") {
+    return "The latest business listing does not include a website.";
+  }
+  if (signalKey === "website_status" && typeof value === "string") {
+    return `The latest website status is ${value.replace(/_/g, " ")}.`;
+  }
+  if (signalKey === "uses_https" && value === false) {
+    return "The latest website check found that the site is not using HTTPS.";
+  }
+  return `The latest check found a ${signalKey.replace(/_/g, " ")} opportunity.`;
 }
 
 function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {

@@ -29,9 +29,14 @@ from shared.utils import new_id, utcnow
 class DraftLLM:
     last_usage = {"input_tokens": 20, "output_tokens": 40}
 
+    def __init__(self, expected_observation: str = "No quote") -> None:
+        self.expected_observation = expected_observation
+
     def generate_object(self, **kwargs):
         assert kwargs["task"] == "outreach_package_v1"
-        assert kwargs["context"]["verified_observation"].startswith("No quote")
+        assert kwargs["context"]["verified_observation"].startswith(
+            self.expected_observation
+        )
         return OutreachGeneration(
             message=WrittenDraft(body="I noticed your site does not currently show an online quote flow. Open to a quick example?"),
             call=CallDraft(
@@ -88,6 +93,77 @@ def test_outreach_package_rejects_unverified_opportunity() -> None:
 
         with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
             service.generate(result.id)
+
+
+def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        snapshot = dict(result.match_snapshot)
+        raw = dict(snapshot["raw"])
+        profile_match = dict(raw["profile_match"])
+        profile_match["matched_signals"] = [
+            {
+                "signal_key": "website_status",
+                "fact_key": "website_status",
+                "value": "not_listed",
+                "confidence": "possible",
+            },
+            {
+                "signal_key": "no_quote_flow",
+                "fact_key": "quote_or_booking_form_present",
+                "value": False,
+                "confidence": "confirmed",
+            },
+        ]
+        raw["profile_match"] = profile_match
+        snapshot["raw"] = raw
+        result.match_snapshot = snapshot
+        session.commit()
+        service = OutreachPackageService(
+            session,
+            llm=DraftLLM(),
+            workspace_id="workspace:first",
+            provider="anthropic",
+            model="claude-test",
+        )
+
+        package = service.generate(result.id)
+
+        assert package.content.observation.startswith("No quote")
+
+
+def test_outreach_package_uses_grounded_not_listed_website_observation() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=False)
+        snapshot = dict(result.match_snapshot)
+        raw = dict(snapshot["raw"])
+        raw["profile_match"] = {
+            "confirmed_signal_count": 0,
+            "matched_signals": [
+                {
+                    "signal_key": "website_status",
+                    "fact_key": "website_status",
+                    "value": "not_listed",
+                    "confidence": "possible",
+                }
+            ],
+        }
+        snapshot["raw"] = raw
+        result.match_snapshot = snapshot
+        session.commit()
+        service = OutreachPackageService(
+            session,
+            llm=DraftLLM("The latest business listing"),
+            workspace_id="workspace:first",
+            provider="anthropic",
+            model="claude-test",
+        )
+
+        package = service.generate(result.id)
+
+        assert package.content.observation == (
+            "The latest business listing does not include a website."
+        )
 
 
 def _session_factory():

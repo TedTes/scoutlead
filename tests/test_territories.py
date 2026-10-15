@@ -1308,6 +1308,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
                 "signal_key": "no_quote_flow",
                 "fact_key": "quote_or_booking_form_present",
                 "value": False,
+                "confidence": "confirmed",
             }
         ]
 

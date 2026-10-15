@@ -450,6 +450,7 @@ class ProfileMatchService:
                 "signal_key": signal,
                 "fact_key": evidence["fact_key"],
                 "value": evidence["value"],
+                "confidence": evidence["confidence"],
             }
             for signal, evidence in signal_evidence.items()
             if evidence["matched"] is True
