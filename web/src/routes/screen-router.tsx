@@ -40,7 +40,7 @@ export function renderScreen(
     case "integrations":
       return <IntegrationsScreen />;
     case "product":
-      return <ProductScreen {...productEditor} onNavigate={setActiveScreen} />;
+      return <ProductScreen {...productEditor} />;
     case "review":
       return <SourceReviewScreen onCountChange={sourceReview.onCountChange} />;
     case "results":

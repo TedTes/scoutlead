@@ -50,6 +50,7 @@ import {
   exportContactEmail,
   normalizeExportFileName,
 } from "../utils/export-file";
+import { formatDate } from "../utils/format";
 
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
@@ -714,7 +715,33 @@ function AppShell({
         className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
       >
         {activeScreen !== "results" ? (
-          <header className="desktop-account-bar">
+          <header className={activeScreen === "product" ? "desktop-account-bar has-summary" : "desktop-account-bar"}>
+            {activeScreen === "integrations" || activeScreen === "product" ? (
+              <div className="desktop-settings-context">
+                <nav aria-label="Page context" className="results-breadcrumb">
+                  <span>Manage</span>
+                  <span aria-hidden="true">/</span>
+                  <strong>{activeScreen === "integrations" ? "Integrations" : "Product settings"}</strong>
+                </nav>
+                {activeScreen === "product" && selectedProduct ? (
+                  <div className="desktop-settings-stats" aria-label="Product summary">
+                    <span><b>{productDiscoveryRuns.length}</b> {productDiscoveryRuns.length === 1 ? "run" : "runs"}</span>
+                    <span><b>{productContacts.length}</b> {productContacts.length === 1 ? "contact" : "contacts"}</span>
+                    <span>updated <b>{formatDate(selectedProduct.updated_at)}</b></span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {activeScreen === "product" ? (
+              <button
+                className="secondary desktop-settings-action"
+                type="button"
+                onClick={() => setIsCreatingProduct(true)}
+              >
+                <Plus size={14} />
+                New product
+              </button>
+            ) : null}
             {accountName ? <span title={accountName}>{accountName}</span> : null}
             <AccountControl accountSlot={accountSlot} placement="desktop" />
           </header>

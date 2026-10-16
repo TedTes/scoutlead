@@ -1,16 +1,13 @@
-import { ArrowLeft, CircleOff, Plus, Target, Trash2, X } from "lucide-react";
+import { CircleOff, Plus, Target, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type { Product } from "../types/domain";
-import type { Screen } from "../types/navigation";
-import { formatDate } from "../utils/format";
 
 type ProductScreenProps = {
   isCreatingProduct: boolean;
   onCreatingProductChange: (isCreating: boolean) => void;
   onDeleteProduct?: () => Promise<void> | void;
-  onNavigate: (screen: Screen) => void;
 };
 
 const DEFAULT_TARGET_GEOGRAPHY = "United States, Canada";
@@ -18,14 +15,11 @@ const DEFAULT_TARGET_GEOGRAPHY = "United States, Canada";
 export function ProductScreen({
   onCreatingProductChange,
   onDeleteProduct,
-  onNavigate,
 }: ProductScreenProps) {
   const {
     products,
     selectedProduct,
     selectedProductId,
-    productContacts,
-    productDiscoveryRuns,
     autoSaveProduct,
   } = useAppData();
   const { showToast } = useToast();
@@ -164,37 +158,6 @@ export function ProductScreen({
   return (
     <div className="product-page product-settings-page">
       <section className="product-settings-shell">
-        <header className="product-settings-heading">
-          <div className="product-settings-title-block">
-            <h1>Product profile</h1>
-            <div className="product-settings-meta-line" aria-label="Product summary">
-              <span>
-                <strong>{productDiscoveryRuns.length}</strong> {pluralize(productDiscoveryRuns.length, "run")}
-              </span>
-              <span>
-                <strong>{productContacts.length}</strong> {pluralize(productContacts.length, "contact")}
-              </span>
-              <span>
-                {saving ? "saving changes" : <>updated <strong>{formatDate(selectedProduct.updated_at)}</strong></>}
-              </span>
-            </div>
-          </div>
-          <div className="product-settings-actions">
-            <button
-              className="secondary product-settings-new"
-              type="button"
-              onClick={() => onCreatingProductChange(true)}
-            >
-              <Plus size={15} />
-              New product
-            </button>
-            <button className="secondary product-settings-finder" type="button" onClick={() => onNavigate("overview")}>
-              <ArrowLeft size={15} />
-              Finder
-            </button>
-          </div>
-        </header>
-
         <form
           className="product-settings-form"
           onSubmit={(event) => {
@@ -206,14 +169,14 @@ export function ProductScreen({
             <header className="product-profile-section-heading">
               <span>01</span>
               <div>
-                <h2 id="product-profile-offer">Your product</h2>
+                <h2 id="product-profile-offer">Product name</h2>
                 <p>Name the offer and describe the outcome you provide.</p>
               </div>
             </header>
             <div className="product-profile-section-fields">
               <label className="product-settings-field">
-                <span className="product-settings-label">Product name</span>
                 <input
+                  aria-label="Product name"
                   className="product-settings-input"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
@@ -512,8 +475,4 @@ function normalizeList(values: string[]) {
 function sameList(first: string[], second: string[]) {
   if (first.length !== second.length) return false;
   return first.every((value, index) => value === second[index]);
-}
-
-function pluralize(count: number, singular: string) {
-  return count === 1 ? singular : `${singular}s`;
 }

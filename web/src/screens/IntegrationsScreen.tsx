@@ -1,13 +1,11 @@
 import {
   AlertTriangle,
-  ArrowRight,
   Check,
-  Info,
   Link2,
   PlugZap,
   Save,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -32,11 +30,13 @@ export function IntegrationsScreen() {
   const [editingWebhook, setEditingWebhook] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [senderProfile, setSenderProfile] = useState<SenderProfile | null>(null);
-  const [editingSender, setEditingSender] = useState(false);
-  const [savingSender, setSavingSender] = useState(false);
+  const [senderLoaded, setSenderLoaded] = useState(false);
+  const [senderSaveState, setSenderSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [senderLegalName, setSenderLegalName] = useState("");
   const [senderMailingAddress, setSenderMailingAddress] = useState("");
   const [senderContact, setSenderContact] = useState("");
+  const lastSavedSender = useRef("");
+  const senderSaveVersion = useRef(0);
 
   const gmailConnected = Boolean(gmailConnectionStatus?.connected);
   const gmailEmail = gmailConnectionStatus?.email_address || "Connected account";
@@ -51,12 +51,71 @@ export function IntegrationsScreen() {
 
   useEffect(() => {
     void territoryApi.getSenderProfile().then((profile) => {
+      const values = {
+        sender_legal_name: profile.sender_legal_name || "",
+        sender_mailing_address: profile.sender_mailing_address || "",
+        sender_contact: profile.sender_contact || "",
+      };
       setSenderProfile(profile);
-      setSenderLegalName(profile.sender_legal_name || "");
-      setSenderMailingAddress(profile.sender_mailing_address || "");
-      setSenderContact(profile.sender_contact || "");
-    }).catch(() => setSenderProfile(null));
+      setSenderLegalName(values.sender_legal_name);
+      setSenderMailingAddress(values.sender_mailing_address);
+      setSenderContact(values.sender_contact);
+      lastSavedSender.current = JSON.stringify(values);
+      setSenderLoaded(true);
+    }).catch(() => {
+      setSenderProfile(null);
+      lastSavedSender.current = JSON.stringify({
+        sender_legal_name: "",
+        sender_mailing_address: "",
+        sender_contact: "",
+      });
+      setSenderLoaded(true);
+    });
   }, [territoryApi]);
+
+  useEffect(() => {
+    if (!senderLoaded) return;
+    const values = {
+      sender_legal_name: senderLegalName.trim(),
+      sender_mailing_address: senderMailingAddress.trim(),
+      sender_contact: senderContact.trim(),
+    };
+    const snapshot = JSON.stringify(values);
+    if (snapshot === lastSavedSender.current) return;
+
+    const version = senderSaveVersion.current + 1;
+    senderSaveVersion.current = version;
+    setSenderSaveState("saving");
+    let savedIndicatorTimeout: number | undefined;
+    const saveTimeout = window.setTimeout(() => {
+      void territoryApi.updateSenderProfile({
+        sender_legal_name: values.sender_legal_name || null,
+        sender_mailing_address: values.sender_mailing_address || null,
+        sender_contact: values.sender_contact || null,
+      }).then((profile) => {
+        if (senderSaveVersion.current !== version) return;
+        lastSavedSender.current = snapshot;
+        setSenderProfile(profile);
+        setSenderSaveState("saved");
+        savedIndicatorTimeout = window.setTimeout(() => {
+          if (senderSaveVersion.current === version) setSenderSaveState("idle");
+        }, 1800);
+      }).catch((error) => {
+        if (senderSaveVersion.current !== version) return;
+        setSenderSaveState("error");
+        showToast({
+          title: "Sender details were not saved",
+          message: error instanceof Error ? error.message : String(error),
+          tone: "red",
+        });
+      });
+    }, 650);
+
+    return () => {
+      window.clearTimeout(saveTimeout);
+      if (savedIndicatorTimeout) window.clearTimeout(savedIndicatorTimeout);
+    };
+  }, [senderContact, senderLegalName, senderLoaded, senderMailingAddress, showToast, territoryApi]);
 
   useEffect(() => {
     const handleGmailMessage = (event: MessageEvent) => {
@@ -158,35 +217,6 @@ export function IntegrationsScreen() {
     }
   };
 
-  const saveSenderProfile = async () => {
-    if (savingSender) return;
-    setSavingSender(true);
-    try {
-      const profile = await territoryApi.updateSenderProfile({
-        sender_legal_name: senderLegalName.trim() || null,
-        sender_mailing_address: senderMailingAddress.trim() || null,
-        sender_contact: senderContact.trim() || null,
-      });
-      setSenderProfile(profile);
-      setEditingSender(false);
-      showToast({
-        title: profile.complete ? "Sender identity saved" : "Sender identity incomplete",
-        message: profile.complete
-          ? "Compliance details will be added to sent outreach."
-          : "Complete all fields before sending outreach.",
-        tone: profile.complete ? "green" : "amber",
-      });
-    } catch (error) {
-      showToast({
-        title: "Sender identity was not saved",
-        message: error instanceof Error ? error.message : String(error),
-        tone: "red",
-      });
-    } finally {
-      setSavingSender(false);
-    }
-  };
-
   if (!selectedProduct) {
     return (
       <div className="integrations-page">
@@ -207,77 +237,56 @@ export function IntegrationsScreen() {
           </p>
         </header>
 
-        <button
-          className={gmailConnected ? "integration-account-banner connected" : "integration-account-banner"}
-          disabled={connectingGmail}
-          type="button"
-          onClick={() => void connectGmail()}
-        >
-          {gmailConnected ? <Check size={16} /> : <Info size={16} />}
-          <span>
-            {gmailConnected ? (
-              <>
-                <b>Gmail connected once for this account</b> - {gmailEmail} is available to every product.
-              </>
-            ) : (
-              <>
-                <b>Gmail connects once for this account</b> - used by every product after approval.
-              </>
-            )}
-          </span>
-          <strong>
-            {gmailConnected ? "Reconnect Gmail" : "Account connections"} <ArrowRight size={14} />
-          </strong>
-        </button>
-
-        <IntegrationGroup title="Sender identity" />
-        <IntegrationRow
-          active={Boolean(senderProfile?.complete)}
-          logo="S"
-          logoTone="sender"
-          title="Business details"
-          status={senderProfile?.complete ? "Ready" : "Required"}
-          statusTone={senderProfile?.complete ? "on" : "off"}
-          description={
-            senderProfile?.complete
-              ? `${senderProfile.sender_legal_name} - included with mailing address and contact in every email`
-              : "Required sender name, mailing address, and contact for compliant outreach"
-          }
-          action={
-            <button className="integration-button" type="button" onClick={() => setEditingSender((open) => !open)}>
-              {senderProfile?.complete ? "Edit" : "Set up"}
-            </button>
-          }
-        />
-        {editingSender ? (
-          <form
-            className="integration-sender-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveSenderProfile();
-            }}
-          >
+        <IntegrationGroup title="Email sender" />
+        <section className="integration-sender-form">
+          <header className="integration-sender-head">
+            <div>
+              <strong>Email sender details</strong>
+              <p>Business information shown in outbound email footers.</p>
+            </div>
+            <div className="integration-sender-meta" aria-live="polite">
+              {senderSaveState === "saving" ? <span className="integration-autosave">Saving...</span> : null}
+              {senderSaveState === "saved" ? (
+                <span className="integration-autosave saved"><Check size={12} /> Saved</span>
+              ) : null}
+              {senderSaveState === "error" ? (
+                <span className="integration-autosave error"><AlertTriangle size={12} /> Not saved</span>
+              ) : null}
+              <span className={`integration-status ${senderProfile?.complete ? "on" : "off"}`}>
+                {senderProfile?.complete ? "Ready" : "Required"}
+              </span>
+            </div>
+          </header>
+          <div className="integration-sender-fields">
             <label className="field">
-              <span>Legal sender name</span>
-              <input value={senderLegalName} onChange={(event) => setSenderLegalName(event.target.value)} />
+              <span>Business or legal name</span>
+              <input
+                autoComplete="organization"
+                placeholder="Example Studio Inc."
+                value={senderLegalName}
+                onChange={(event) => setSenderLegalName(event.target.value)}
+              />
             </label>
             <label className="field">
-              <span>Mailing address</span>
-              <textarea rows={2} value={senderMailingAddress} onChange={(event) => setSenderMailingAddress(event.target.value)} />
+              <span>Public contact</span>
+              <input
+                placeholder="Email, phone, or website"
+                value={senderContact}
+                onChange={(event) => setSenderContact(event.target.value)}
+              />
             </label>
-            <label className="field">
-              <span>Contact email, phone, or URL</span>
-              <input value={senderContact} onChange={(event) => setSenderContact(event.target.value)} />
+            <label className="field integration-sender-address">
+              <span>Physical mailing address</span>
+              <textarea
+                autoComplete="street-address"
+                placeholder="Street address, city, region, postal code, country"
+                rows={2}
+                value={senderMailingAddress}
+                onChange={(event) => setSenderMailingAddress(event.target.value)}
+              />
             </label>
-            <button
-              className="integration-button primary"
-              disabled={savingSender || !senderLegalName.trim() || !senderMailingAddress.trim() || !senderContact.trim()}
-              type="submit"
-            >
-              <Save size={14} /> {savingSender ? "Saving..." : "Save identity"}
-            </button>
-          </form>
-        ) : null}
+          </div>
+        </section>
 
         <IntegrationGroup title="Sending" />
         <IntegrationRow
