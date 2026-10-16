@@ -26,6 +26,7 @@ from outreach_packages.schemas import (
     OutreachPackageContent,
     OutreachPackageRead,
     OutreachPackageUpdate,
+    OutreachAISuggestionRequest,
     OutreachResponseClassification,
     OutreachResponseClassifyRequest,
     CallDraft,
@@ -37,7 +38,7 @@ from outreach_packages.playbooks import PlaybookRepository
 from outreach_packages.policy import OutreachPolicyValidator
 from outreach_packages.repository import OutreachEventRepository, OutreachPlaybookRepository
 from outreach_packages.templates import OutreachTemplateContext, render_outreach
-from shared.errors import NotFoundError, ValidationError, WorkflowBoundaryError
+from shared.errors import ConfigurationError, NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
 
@@ -304,6 +305,68 @@ class OutreachPackageService:
         self.session.commit()
         self.session.refresh(row)
         return self._read(row, business, result)
+
+    def generate_ai_suggestion(
+        self,
+        package_id: str,
+        data: OutreachAISuggestionRequest,
+    ) -> DraftAlternative:
+        row = self._owned(package_id)
+        content = OutreachPackageContent.model_validate(row.content)
+        if content.strategy is None or self.llm is None:
+            raise ConfigurationError(
+                "AI outreach suggestion is unavailable",
+                {"user_message": "OpenAI suggestions are not configured for this account."},
+            )
+
+        result, _, product, business, workspace = self._context(row.audience_result_id)
+        signature = (
+            (workspace.sender_legal_name if workspace else None)
+            or (workspace.sender_contact if workspace else None)
+            or product.product_name
+        )
+        adapter = OpenAIPhrasingAdapter(self.llm)
+        generated = render_outreach(
+            OutreachTemplateContext(
+                business_name=business.display_name,
+                strategy=content.strategy,
+                signature=signature,
+                demo_path=content.demo_path,
+            ),
+            phrasing=adapter,
+        )
+        if adapter.last_strategy is None:
+            raise ConfigurationError(
+                "AI outreach suggestion could not be generated",
+                {"user_message": "OpenAI could not generate a grounded suggestion. Try again."},
+            )
+        OutreachPolicyValidator().validate(
+            strategy=adapter.last_strategy,
+            generation=generated,
+        )
+
+        suggestion_id = f"openai:{data.channel}:{new_id('variant')}"
+        if data.channel == "message":
+            return DraftAlternative(
+                id=suggestion_id,
+                label="AI suggestion",
+                channel=data.channel,
+                body=generated.message.body,
+            )
+        if data.channel == "form":
+            return DraftAlternative(
+                id=suggestion_id,
+                label="AI suggestion",
+                channel=data.channel,
+                body=generated.form.body,
+            )
+        return DraftAlternative(
+            id=suggestion_id,
+            label="AI suggestion",
+            channel=data.channel,
+            subject=generated.email.subject,
+            body=generated.email.body,
+        )
 
     def classify_response(
         self,

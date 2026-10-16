@@ -153,6 +153,10 @@ class OutreachPackageUpdate(BaseModel):
     content: OutreachPackageContent
 
 
+class OutreachAISuggestionRequest(BaseModel):
+    channel: Literal["message", "form", "email"]
+
+
 class OutreachResponseClassifyRequest(BaseModel):
     channel: OutreachChannel
     response_text: str = Field(min_length=1, max_length=4000)

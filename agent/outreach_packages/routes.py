@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, status
 
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from outreach_packages.schemas import (
+    DraftAlternative,
+    OutreachAISuggestionRequest,
     OutreachAnalyticsRead,
     OutreachEventCreate,
     OutreachEventRead,
@@ -57,6 +59,17 @@ def update_package(
     services: Services,
 ):
     return _service(session, auth.workspace_id, services).update(package_id, data)
+
+
+@router.post("/{package_id}/ai-suggestion", response_model=DraftAlternative)
+def generate_ai_suggestion(
+    package_id: str,
+    data: OutreachAISuggestionRequest,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services,
+):
+    return _service(session, auth.workspace_id, services).generate_ai_suggestion(package_id, data)
 
 
 @router.post(

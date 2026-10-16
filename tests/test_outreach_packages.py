@@ -15,6 +15,7 @@ from db.models import (
 )
 from db.session import create_database
 from outreach_packages.schemas import (
+    OutreachAISuggestionRequest,
     OutreachEventCreate,
     OutreachPackageUpdate,
     OutreachResponseClassifyRequest,
@@ -97,6 +98,38 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         analytics = service.analytics()
         assert analytics.total_events == 2
         assert analytics.by_event == {"response_classified": 1, "draft_copied": 1}
+
+
+def test_outreach_package_generates_grounded_ai_suggestion_on_demand() -> None:
+    class SuggestionLLM:
+        def generate_object(self, *, response_model, **_kwargs):
+            return response_model.model_validate(
+                {
+                    "customer_consequence": "That could make it harder for customers to request quotes online.",
+                    "seller_positioning": "I help local service businesses simplify online quote requests.",
+                    "value_hypothesis": "A clearer request path could help customers take the next step.",
+                    "next_step": "Would it be useful if I sent a quick example?",
+                }
+            )
+
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            llm=SuggestionLLM(),
+        )
+        package = service.generate(result.id)
+
+        suggestion = service.generate_ai_suggestion(
+            package.id,
+            OutreachAISuggestionRequest(channel="message"),
+        )
+
+        assert suggestion.id.startswith("openai:message:")
+        assert suggestion.label == "AI suggestion"
+        assert package.content.strategy.observation in suggestion.body
+        assert "simplify online quote requests" in suggestion.body
 
 
 def test_outreach_package_refreshes_older_template_copy() -> None:
