@@ -60,6 +60,7 @@ function ClerkGate({ adminRoute }: { adminRoute: boolean }) {
     <App
       getAuthToken={getAuthToken}
       accountSlot={accountSlot}
+      accountId={user?.id}
       approverLabel={approverLabel}
     />
   );

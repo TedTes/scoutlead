@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   CalendarClock,
   Check,
   ChevronDown,
@@ -9,6 +10,7 @@ import {
   Menu,
   Package,
   Pencil,
+  PlayCircle,
   Plug,
   Plus,
   Send,
@@ -52,6 +54,7 @@ import {
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
   accountSlot?: ReactNode;
+  accountId?: string;
   approverLabel?: string;
 };
 
@@ -67,17 +70,25 @@ const MANAGE_HEIGHT_DEFAULT = 151;
 const MANAGE_HEIGHT_MIN = 112;
 const RAIL_FIXED_HEIGHT_BUDGET = 330;
 
-export function App({ getAuthToken, accountSlot, approverLabel }: AppProps = {}) {
+export function App({ getAuthToken, accountSlot, accountId, approverLabel }: AppProps = {}) {
   return (
     <ToastProvider>
       <AppDataProvider getAuthToken={getAuthToken} approverLabel={approverLabel}>
-        <AppShell accountSlot={accountSlot} />
+        <AppShell accountId={accountId} accountName={approverLabel} accountSlot={accountSlot} />
       </AppDataProvider>
     </ToastProvider>
   );
 }
 
-function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
+function AppShell({
+  accountId,
+  accountName,
+  accountSlot,
+}: {
+  accountId?: string;
+  accountName?: string;
+  accountSlot?: ReactNode;
+}) {
   const [viewMode, setViewMode] = useState<AppViewMode>("auto");
   const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
@@ -109,6 +120,7 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   const productMenuRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLElement | null>(null);
   const { showToast } = useToast();
+  const onboardingStorageKey = `scoutlead:product-onboarding:${accountId || "local"}`;
   const {
     loading,
     error,
@@ -398,6 +410,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
   }, [selectedProductId]);
 
   useEffect(() => {
+    if (loading || products.length || localStorage.getItem(onboardingStorageKey) === "dismissed") return;
+    setIsCreatingProduct(true);
+  }, [loading, onboardingStorageKey, products.length]);
+
+  useEffect(() => {
     if (!profileBatch || profileBatch.profile.id !== selectedProfileId) return;
     setViewMode("auto");
   }, [
@@ -681,10 +698,6 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
           onIntegrations={() => selectScreen("integrations")}
           onProductSettings={() => selectScreen("product")}
         />
-        <div className="rail-account-footer">
-          <AccountControl accountSlot={accountSlot} placement="desktop" />
-          <span className="rail-account-label">Account</span>
-        </div>
         <ResizeHandle
           ariaLabel="Resize navigation width"
           axis="x"
@@ -700,6 +713,12 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
       <section
         className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
       >
+        {activeScreen !== "results" ? (
+          <header className="desktop-account-bar">
+            {accountName ? <span title={accountName}>{accountName}</span> : null}
+            <AccountControl accountSlot={accountSlot} placement="desktop" />
+          </header>
+        ) : null}
         {loading ? (
           <div className="loading-overlay" aria-live="polite">
             <div className="loading-indicator">
@@ -711,6 +730,11 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         <main className="content">
           {isTraceRoute ? (
             <TraceDebugScreen onExit={returnToApp} />
+          ) : !products.length ? (
+            <FirstRunWorkspace
+              onOpenDemo={() => window.open("/#lead-proof", "_blank", "noopener,noreferrer")}
+              onSetUp={() => setIsCreatingProduct(true)}
+            />
           ) : (
             renderScreen(
               activeScreen,
@@ -734,6 +758,12 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
                 onViewChange: setLeadWorkflowView,
                 onCountsChange: handleWorkflowCountsChange,
                 onCreateAudience: startNewAudience,
+                accountControl: (
+                  <div className="results-account-control">
+                    {accountName ? <span title={accountName}>{accountName}</span> : null}
+                    <AccountControl accountSlot={accountSlot} placement="desktop" />
+                  </div>
+                ),
               },
               {
                 onCountChange: (runId, count) => setSourceReviewSummary({ runId, count }),
@@ -745,11 +775,17 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
 
       {isCreatingProduct ? (
         <AddProductDialog
+          onboarding={!products.length}
           products={products}
           onClose={() => setIsCreatingProduct(false)}
+          onSkip={() => {
+            localStorage.setItem(onboardingStorageKey, "dismissed");
+            setIsCreatingProduct(false);
+          }}
           onCreate={async (input) => {
             const created = await createProductFromProfile(input);
             if (created) {
+              localStorage.removeItem(onboardingStorageKey);
               setSelectedProductId(created.id);
               setSelectedDiscoveryRunId("");
               setViewMode("product");
@@ -786,6 +822,32 @@ function AppShell({ accountSlot }: { accountSlot?: ReactNode }) {
         />
       ) : null}
     </div>
+  );
+}
+
+function FirstRunWorkspace({
+  onOpenDemo,
+  onSetUp,
+}: {
+  onOpenDemo: () => void;
+  onSetUp: () => void;
+}) {
+  return (
+    <section className="first-run-workspace">
+      <span className="first-run-kicker">Start with your offer</span>
+      <h1>Define the businesses you can help.</h1>
+      <p>
+        Add a product profile so ScoutLead can connect your services to observable business opportunities.
+      </p>
+      <div className="first-run-actions">
+        <button className="runbtn" type="button" onClick={onSetUp}>
+          Set up product profile <ArrowRight size={15} />
+        </button>
+        <button className="secondary" type="button" onClick={onOpenDemo}>
+          <PlayCircle size={15} /> View demo workflow
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1309,13 +1371,17 @@ function DeleteAudienceDialog({
 }
 
 function AddProductDialog({
+  onboarding = false,
   products,
   onClose,
   onCreate,
+  onSkip,
 }: {
+  onboarding?: boolean;
   products: Product[];
   onClose: () => void;
   onCreate: (input: ProductProfileInput) => Promise<Product | null>;
+  onSkip?: () => void;
 }) {
   const { showToast } = useToast();
   const [productName, setProductName] = useState("");
@@ -1371,7 +1437,11 @@ function AddProductDialog({
   };
 
   return (
-    <Modal className="add-product-modal" title="New product" onClose={onClose}>
+    <Modal
+      className="add-product-modal"
+      title={onboarding ? "Set up your product profile" : "New product"}
+      onClose={onboarding && onSkip ? onSkip : onClose}
+    >
       <form
         className="add-product-form"
         onSubmit={(event) => {
@@ -1446,8 +1516,8 @@ function AddProductDialog({
         </details>
         {localError ? <p className="form-error">{localError}</p> : null}
         <div className="dialog-actions">
-          <button className="secondary" type="button" onClick={onClose}>
-            Cancel
+          <button className="secondary" type="button" onClick={onboarding && onSkip ? onSkip : onClose}>
+            {onboarding ? "Skip for now" : "Cancel"}
           </button>
           <button className="runbtn" disabled={!canCreateProduct} type="submit">
             {creating ? "Creating..." : "Create product"}

@@ -114,11 +114,13 @@ type BulkEmailOverride = {
 };
 
 export function ResultsScreen({
+  accountControl,
   onWorkflowViewChange,
   onWorkflowCountsChange,
   onCreateAudience,
   workflowView,
 }: {
+  accountControl?: ReactNode;
   onWorkflowViewChange: (view: LeadWorkflowView) => void;
   onWorkflowCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
   onCreateAudience?: () => void;
@@ -912,6 +914,7 @@ export function ResultsScreen({
               </div>
             ) : null}
           </div>
+          {accountControl}
         </div>
       </div>
 
@@ -1014,7 +1017,9 @@ export function ResultsScreen({
                     setSelectedContactId(contact.id);
                     setDetailPanelOpen(true);
                   }}
-                  onToggleShortlist={() => void updateLead(contact.id, { shortlisted: !contact.shortlisted_at })}
+                  onToggleShortlist={() => {
+                    void updateLead(contact.id, { shortlisted: !contact.shortlisted_at }).catch(() => undefined);
+                  }}
                 />
               ))}
             </ul>
@@ -1486,7 +1491,7 @@ function OutreachWorkspace({
                 </div>
               </section>
 
-              <section className={`outreach-editor-card is-${activeChannel}`} key={activeChannel}>
+              <section className={`outreach-editor-card is-${activeChannel}`}>
                 <header className="outreach-editor-header">
                   <div className="outreach-editor-identity">
                     <span className="outreach-editor-channel-icon">{channelMeta[activeChannel].icon}</span>

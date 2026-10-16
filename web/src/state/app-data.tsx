@@ -153,6 +153,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   const selectedProfileIdRef = useRef(selectedProfileIdState);
   const selectedDiscoveryRunIdRef = useRef(selectedDiscoveryRunIdState);
   const profileSelectionRequestRef = useRef(0);
+  const leadMutationVersionRef = useRef(new Map<string, number>());
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
@@ -759,9 +760,31 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           await api.qualifyLead(leadId);
         }),
       updateLead: (leadId, update) =>
-        mutate(async () => {
-          await api.updateLead(leadId, update);
-        }),
+        (async () => {
+          setError("");
+          const mutationVersion = (leadMutationVersionRef.current.get(leadId) || 0) + 1;
+          leadMutationVersionRef.current.set(leadId, mutationVersion);
+          const optimisticTimestamp = new Date().toISOString();
+          updateLeadInState(leadId, (lead) => ({
+            ...lead,
+            ...(update.review_status !== undefined ? { review_status: update.review_status } : {}),
+            ...(update.review_note !== undefined ? { review_note: update.review_note } : {}),
+            ...(update.shortlisted !== undefined
+              ? { shortlisted_at: update.shortlisted ? lead.shortlisted_at || optimisticTimestamp : null }
+              : {}),
+            updated_at: optimisticTimestamp,
+          }), setProductContacts, setSnapshot, setProfileBatch);
+          try {
+            const saved = await api.updateLead(leadId, update);
+            if (leadMutationVersionRef.current.get(leadId) !== mutationVersion) return;
+            updateLeadInState(leadId, () => saved, setProductContacts, setSnapshot, setProfileBatch);
+          } catch (err) {
+            if (leadMutationVersionRef.current.get(leadId) !== mutationVersion) return;
+            setError(err instanceof Error ? err.message : String(err));
+            await refreshAll({ showLoading: false });
+            throw err;
+          }
+        })(),
       updateLeadContactPolicy: (leadId, update) =>
         mutate(async () => {
           await api.updateLeadContactPolicy(leadId, update);
@@ -907,6 +930,20 @@ function dedupeContacts(contacts: DiscoveryResult[]) {
     deduped.push(contact);
   }
   return deduped;
+}
+
+function updateLeadInState(
+  leadId: string,
+  update: (lead: DiscoveryResult) => DiscoveryResult,
+  setProductContacts: React.Dispatch<React.SetStateAction<DiscoveryResult[]>>,
+  setSnapshot: React.Dispatch<React.SetStateAction<DiscoverySnapshot>>,
+  setProfileBatch: React.Dispatch<React.SetStateAction<ProfileBatch | null>>,
+) {
+  const updateList = (contacts: DiscoveryResult[]) =>
+    contacts.map((contact) => (contact.id === leadId ? update(contact) : contact));
+  setProductContacts(updateList);
+  setSnapshot((current) => ({ ...current, results: updateList(current.results) }));
+  setProfileBatch((current) => current ? { ...current, leads: updateList(current.leads) } : current);
 }
 
 function upsertDiscoveryRun(runs: DiscoveryRun[], nextRun: DiscoveryRun) {

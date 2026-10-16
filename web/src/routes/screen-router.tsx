@@ -3,6 +3,7 @@ import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
 import { SourceReviewScreen } from "../screens/SourceReviewScreen";
+import type { ReactNode } from "react";
 import type { DiscoveryRun } from "../types/domain";
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 
@@ -26,6 +27,7 @@ export function renderScreen(
     onViewChange: (view: LeadWorkflowView) => void;
     onCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
     onCreateAudience?: () => void;
+    accountControl?: ReactNode;
   } = {
     view: "this_week",
     onViewChange: () => undefined,
@@ -48,6 +50,7 @@ export function renderScreen(
           onWorkflowViewChange={resultsNavigation.onViewChange}
           onWorkflowCountsChange={resultsNavigation.onCountsChange}
           onCreateAudience={resultsNavigation.onCreateAudience}
+          accountControl={resultsNavigation.accountControl}
         />
       );
     default:

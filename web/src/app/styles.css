@@ -5917,31 +5917,6 @@ a {
   opacity: 0.45;
 }
 
-.rail-account-footer {
-  align-items: center;
-  border-top: 1px solid var(--line);
-  display: flex;
-  flex: 0 0 auto;
-  gap: 10px;
-  padding: 10px 17px 12px;
-}
-
-.rail-account-footer .top-avatar,
-.rail-account-footer .top-avatar-auth,
-.rail-account-footer .clerk-avatar-box {
-  border-radius: 8px;
-  flex-basis: 30px;
-  height: 30px;
-  margin-left: 0;
-  width: 30px;
-}
-
-.rail-account-label {
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
 .brand-mark {
   align-items: center;
   background: var(--black);
@@ -6767,6 +6742,84 @@ body.is-resizing-navigation .rail {
   flex-direction: column;
   min-width: 0;
   position: relative;
+}
+
+.desktop-account-bar {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex: 0 0 54px;
+  gap: 10px;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 0 18px;
+}
+
+.desktop-account-bar > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-account-bar .top-avatar,
+.desktop-account-bar .top-avatar-auth,
+.desktop-account-bar .clerk-avatar-box {
+  border-radius: 8px;
+  flex-basis: 32px;
+  height: 32px;
+  margin-left: 0;
+  width: 32px;
+}
+
+.first-run-workspace {
+  align-content: center;
+  display: grid;
+  min-height: calc(100vh - 54px - 72px);
+  padding: 48px max(24px, 8vw);
+}
+
+.first-run-workspace > * {
+  max-width: 620px;
+}
+
+.first-run-kicker {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.first-run-workspace h1 {
+  font-size: 28px;
+  line-height: 1.2;
+  margin: 12px 0 0;
+}
+
+.first-run-workspace p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 13px 0 0;
+}
+
+.first-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 24px;
+}
+
+.first-run-actions button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  height: 40px;
 }
 
 .app-topbar {
@@ -9467,6 +9520,37 @@ body.is-resizing-navigation .rail {
   padding-bottom: 0;
 }
 
+.results-account-control {
+  align-items: center;
+  border-left: 1px solid var(--line);
+  display: inline-flex;
+  gap: 9px;
+  height: 32px;
+  margin-left: 3px;
+  min-width: 0;
+  padding-left: 10px;
+}
+
+.results-account-control > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.results-account-control .top-avatar,
+.results-account-control .top-avatar-auth,
+.results-account-control .clerk-avatar-box {
+  border-radius: 8px;
+  flex: 0 0 32px;
+  height: 32px;
+  margin: 0;
+  width: 32px;
+}
+
 .results-new-audience-button {
   gap: 6px;
   height: 32px;
@@ -10495,11 +10579,16 @@ button.bulk-recipient-select:hover {
   justify-content: center;
   padding: 0;
   width: 25px;
+  transition: color 100ms ease, transform 100ms ease;
 }
 
 .lead-star:hover,
 .lead-star.active {
   color: #6f51df;
+}
+
+.lead-star:active {
+  transform: scale(0.84);
 }
 
 .lead-opportunity-label,
@@ -11001,7 +11090,6 @@ button.bulk-recipient-select:hover {
 }
 
 .outreach-editor-card {
-  animation: outreach-pane-in 280ms cubic-bezier(0.4, 0, 0.2, 1) both;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -11358,7 +11446,7 @@ button.bulk-recipient-select:hover {
   box-shadow: 0 2px 6px rgba(20, 24, 30, 0.2);
   position: absolute;
   top: 4px;
-  transition: left 320ms cubic-bezier(0.4, 0, 0.2, 1), width 320ms cubic-bezier(0.4, 0, 0.2, 1), opacity 120ms ease;
+  transition: left 140ms ease-out, width 140ms ease-out, opacity 80ms ease;
 }
 
 .outreach-channel-switcher button {
@@ -11377,7 +11465,7 @@ button.bulk-recipient-select:hover {
   min-width: 0;
   padding: 0 13px;
   position: relative;
-  transition: color 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 100ms ease;
   z-index: 1;
 }
 
@@ -11434,7 +11522,6 @@ button.bulk-recipient-select:hover {
 @media (prefers-reduced-motion: reduce) {
   .outreach-signals,
   .outreach-signal-chip,
-  .outreach-editor-card,
   .outreach-draft-state.is-saved svg {
     animation: none;
   }
@@ -13738,6 +13825,14 @@ button.bulk-recipient-select:hover {
     right: 0;
     top: 0;
     z-index: 60;
+  }
+
+  .desktop-account-bar {
+    display: none;
+  }
+
+  .results-account-control {
+    display: none;
   }
 
   .mobile-brand {
