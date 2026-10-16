@@ -51,6 +51,7 @@ import type {
   OutreachPackage,
   OutreachPackageContent,
   OutreachChannel,
+  OutreachDraftAlternative,
   OutreachResponseClassification,
   Product,
   SenderProfile,
@@ -1050,6 +1051,7 @@ export function ResultsScreen({
             onGetPackage={() => territoryApi.getOutreachPackage(detailContact.id)}
             onGeneratePackage={() => territoryApi.generateOutreachPackage(detailContact.id)}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
+            onGenerateAISuggestion={(packageId, channel) => territoryApi.generateOutreachAISuggestion(packageId, channel)}
             onClassifyResponse={(packageId, channel, responseText) => territoryApi.classifyOutreachResponse(packageId, channel, responseText)}
             onRecordEvent={(packageId, event) => territoryApi.recordOutreachEvent(packageId, event)}
           />
@@ -1217,6 +1219,7 @@ function OutreachWorkspace({
   onGetPackage,
   onDirtyChange,
   onSavePackage,
+  onGenerateAISuggestion,
   onClassifyResponse,
   onRecordEvent,
   persistent = false,
@@ -1227,6 +1230,7 @@ function OutreachWorkspace({
   onGetPackage: () => Promise<OutreachPackage | null>;
   onDirtyChange: (dirty: boolean) => void;
   onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
+  onGenerateAISuggestion: (packageId: string, channel: Exclude<OutreachChannel, "call">) => Promise<OutreachDraftAlternative>;
   onClassifyResponse: (packageId: string, channel: OutreachChannel, responseText: string) => Promise<OutreachResponseClassification>;
   onRecordEvent: (packageId: string, event: { channel: OutreachChannel; event_type: string; variant_id?: string | null; metadata?: Record<string, unknown> }) => Promise<unknown>;
   persistent?: boolean;
@@ -1245,6 +1249,8 @@ function OutreachWorkspace({
   const [responseText, setResponseText] = useState("");
   const [responseResult, setResponseResult] = useState<OutreachResponseClassification | null>(null);
   const [responseBusy, setResponseBusy] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<Partial<Record<OutreachChannel, OutreachDraftAlternative>>>({});
+  const [aiSuggestionBusy, setAiSuggestionBusy] = useState(false);
   const [channelIndicator, setChannelIndicator] = useState({ left: 0, width: 0 });
   const failedAutoSaveFingerprintRef = useRef("");
   const recommendedContentRef = useRef<OutreachPackageContent | null>(null);
@@ -1342,6 +1348,8 @@ function OutreachWorkspace({
     setResponseOpen(false);
     setResponseText("");
     setResponseResult(null);
+    setAiSuggestions({});
+    setAiSuggestionBusy(false);
     recommendedContentRef.current = null;
     failedAutoSaveFingerprintRef.current = "";
     if (!contact.id.startsWith("audience_result_")) {
@@ -1474,7 +1482,10 @@ function OutreachWorkspace({
   const selectedCallBranch = draft?.call?.branches?.find(
     (branch) => branch.key === draft.call?.selected_branch,
   );
-  const channelAlternatives = draft?.alternatives?.filter((item) => item.channel === activeChannel) || [];
+  const savedChannelAlternatives = draft?.alternatives?.filter((item) => item.channel === activeChannel) || [];
+  const channelAlternatives = aiSuggestions[activeChannel]
+    ? [...savedChannelAlternatives, aiSuggestions[activeChannel]!]
+    : savedChannelAlternatives;
   const applyAlternative = (id: string) => {
     if (!draft || !outreachPackage) return;
     setSelectedAlternative((current) => ({ ...current, [activeChannel]: id }));
@@ -1504,6 +1515,41 @@ function OutreachWorkspace({
       variant_id: alternative.id,
       metadata: { source: "approved_alternative" },
     }).catch(() => undefined);
+  };
+  const generateAISuggestion = async () => {
+    if (!draft || !outreachPackage || activeChannel === "call" || aiSuggestionBusy) return;
+    setAiSuggestionBusy(true);
+    try {
+      const suggestion = await onGenerateAISuggestion(outreachPackage.id, activeChannel);
+      setAiSuggestions((current) => ({ ...current, [activeChannel]: suggestion }));
+      setSelectedAlternative((current) => ({ ...current, [activeChannel]: suggestion.id }));
+      setDraft((current) => {
+        if (!current) return current;
+        if (activeChannel === "message") return { ...current, message: { body: suggestion.body } };
+        if (activeChannel === "form") return { ...current, form: { body: suggestion.body } };
+        return {
+          ...current,
+          email: {
+            subject: suggestion.subject || current.email?.subject || "",
+            body: suggestion.body,
+          },
+        };
+      });
+      void onRecordEvent(outreachPackage.id, {
+        channel: activeChannel,
+        event_type: "draft_edited",
+        variant_id: suggestion.id,
+        metadata: { source: "openai_suggestion" },
+      }).catch(() => undefined);
+    } catch (error) {
+      showToast({
+        title: "AI suggestion unavailable",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
+      });
+    } finally {
+      setAiSuggestionBusy(false);
+    }
   };
   const classifyResponse = async () => {
     if (!outreachPackage || !responseText.trim() || responseBusy) return;
@@ -1653,8 +1699,17 @@ function OutreachWorkspace({
                   <nav className="outreach-variant-picker" aria-label={`${channelMeta[activeChannel].label} draft options`}>
                     <button className={selectedAlternative[activeChannel] === "original" ? "active" : ""} type="button" onClick={() => applyAlternative("original")}>Recommended</button>
                     {channelAlternatives.map((alternative) => (
-                      <button className={selectedAlternative[activeChannel] === alternative.id ? "active" : ""} key={alternative.id} type="button" onClick={() => applyAlternative(alternative.id)}>{alternative.label}</button>
+                      <button className={selectedAlternative[activeChannel] === alternative.id ? "active" : ""} key={alternative.id} type="button" onClick={() => applyAlternative(alternative.id)}>
+                        {alternative.id.startsWith("openai:") ? <Sparkles size={12} /> : null}
+                        {alternative.label}
+                      </button>
                     ))}
+                    {activeChannel !== "call" && !aiSuggestions[activeChannel] ? (
+                      <button disabled={aiSuggestionBusy} type="button" onClick={() => void generateAISuggestion()}>
+                        <Sparkles size={12} />
+                        {aiSuggestionBusy ? "Generating..." : "AI suggestion"}
+                      </button>
+                    ) : null}
                   </nav>
                 ) : null}
                 <div className="outreach-editor-body">

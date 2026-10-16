@@ -34,7 +34,7 @@
 .outreach-response-toggle { align-items: center; background: transparent; border: 0; color: #667085; display: inline-flex; font-size: 12px; gap: 5px; padding: 5px 7px; }
 .outreach-response-toggle:hover, .outreach-response-toggle.active { color: #171a21; }
 .outreach-variant-picker { align-items: center; display: flex; gap: 4px; padding: 0 16px 10px; }
-.outreach-variant-picker button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: #7b8494; font-size: 11px; padding: 5px 7px; }
+.outreach-variant-picker button { align-items: center; background: transparent; border: 0; border-bottom: 2px solid transparent; color: #7b8494; display: inline-flex; font-size: 11px; gap: 4px; padding: 5px 7px; }
 .outreach-variant-picker button:hover { color: #242830; }
 .outreach-variant-picker button.active { border-bottom-color: #0a9f65; color: #242830; font-weight: 600; }
 .outreach-response-panel { border-top: 1px solid #e2e6eb; display: grid; gap: 16px; grid-template-columns: minmax(220px, .8fr) minmax(280px, 1.2fr); margin-top: 18px; padding: 18px 16px 4px; }

@@ -17,6 +17,7 @@ import type {
   DemoSite,
   OutreachPackage,
   OutreachChannel,
+  OutreachDraftAlternative,
   OutreachResponseClassification,
   OutreachAnalytics,
   AdminOutreachPlaybook,
@@ -347,6 +348,13 @@ export class ApiClient {
     return this.request<OutreachPackage>(`/outreach-packages/${id}`, {
       method: "PATCH",
       body: { content },
+    });
+  }
+
+  generateOutreachAISuggestion(id: string, channel: Exclude<OutreachChannel, "call">) {
+    return this.request<OutreachDraftAlternative>(`/outreach-packages/${id}/ai-suggestion`, {
+      method: "POST",
+      body: { channel },
     });
   }
 
