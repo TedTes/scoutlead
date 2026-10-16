@@ -15,6 +15,7 @@
     ]
   },
   "deploy": {
+    "preDeployCommand": "PYTHONPATH=agent alembic upgrade head",
     "startCommand": "python scripts/start_railway_service.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300

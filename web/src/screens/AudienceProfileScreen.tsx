@@ -1,5 +1,5 @@
 import { ArrowRight, Check, LoaderCircle, MapPin, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
@@ -10,81 +10,6 @@ import type {
   ProfileOptions,
   ProfileTrade,
 } from "../types/domain";
-
-const FALLBACK_SERVICES: ProfileOptions["services"] = [
-  {
-    key: "website_modernization",
-    label: "Website presence and modernization",
-    description: "Missing, insecure, or low-quality website.",
-    status: "active", enabled: true, signals: [],
-  },
-  {
-    key: "lead_capture",
-    label: "Lead capture and conversion",
-    description: "Missing contact paths, calls to action, or business details.",
-    status: "active", enabled: true, signals: [],
-  },
-  {
-    key: "booking_payments",
-    label: "Quotes, booking, and payments",
-    description: "Missing quote, scheduling, payment, or financing flows.",
-    status: "active", enabled: true, signals: [],
-  },
-  {
-    key: "performance_accessibility",
-    label: "Mobile performance and accessibility",
-    description: "Slow, unstable, inaccessible, or poorly adapted mobile experience.",
-    status: "active", enabled: true, signals: [],
-  },
-  {
-    key: "local_visibility",
-    label: "Local SEO and service-area visibility",
-    description: "Weak search readiness or missing local service content.",
-    status: "active", enabled: true, signals: [],
-  },
-  {
-    key: "reputation_trust",
-    label: "Reputation and trust",
-    description: "Weak reviews or missing customer and compliance signals.",
-    status: "active", enabled: true, signals: [],
-  },
-  {
-    key: "multilingual_localization",
-    label: "Multilingual website localization",
-    description: "Missing language declarations, alternate pages, or local-language support.",
-    status: "draft", enabled: false, signals: [{ key: "market_language_supported", label: "Market language supported", weight: 1 }],
-  },
-  {
-    key: "crm_follow_up_automation",
-    label: "CRM and follow-up automation",
-    description: "Missed responses, inconsistent follow-up, or manual lead handling.",
-    status: "draft", enabled: false, signals: [],
-  },
-  {
-    key: "social_media_management",
-    label: "Social media management",
-    description: "Inactive profiles, inconsistent publishing, or weak social engagement.",
-    status: "draft", enabled: false, signals: [],
-  },
-  {
-    key: "branding_creative",
-    label: "Branding and creative services",
-    description: "Outdated or inconsistent branding across public customer touchpoints.",
-    status: "draft", enabled: false, signals: [],
-  },
-  {
-    key: "recruiting_employer_branding",
-    label: "Recruiting and employer branding",
-    description: "Active hiring with weak recruiting pages or employer positioning.",
-    status: "draft", enabled: false, signals: [],
-  },
-  {
-    key: "maintenance_plan_consulting",
-    label: "Maintenance-plan consulting",
-    description: "No visible recurring service or customer-retention offering.",
-    status: "draft", enabled: false, signals: [],
-  },
-];
 
 const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
 
@@ -112,8 +37,18 @@ export function AudienceProfileScreen() {
   const [batchSize, setBatchSize] = useState<15 | 25 | 40>(25);
   const [services, setServices] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const submittingRef = useRef(false);
   const audienceDefined = Boolean(trades.length && city.trim().length >= 2);
-  const valid = Boolean(selectedProductId && audienceDefined && services.length);
+  const serviceOptions = profileOptions?.services || [];
+  const enabledServiceKeys = new Set(
+    serviceOptions.filter((service) => service.enabled).map((service) => service.key),
+  );
+  const valid = Boolean(
+    selectedProductId
+      && audienceDefined
+      && services.length
+      && services.every((service) => enabledServiceKeys.has(service)),
+  );
 
   const activeBatch = useMemo(
     () => profileBatch?.profile.id === selectedProfile?.id ? profileBatch : null,
@@ -137,11 +72,6 @@ export function AudienceProfileScreen() {
   }, [territoryApi]);
 
   const businessTypes = profileOptions?.business_types || [];
-  const serviceOptions = useMemo(() => {
-    const merged = new Map(FALLBACK_SERVICES.map((service) => [service.key, service]));
-    for (const service of profileOptions?.services || []) merged.set(service.key, service);
-    return [...merged.values()];
-  }, [profileOptions?.services]);
 
   if (selectedProfile) {
     const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
@@ -182,7 +112,8 @@ export function AudienceProfileScreen() {
   }
 
   const submit = async () => {
-    if (!valid || saving) return;
+    if (!valid || submittingRef.current) return;
+    submittingRef.current = true;
     const input: ProfileCreateInput = {
       product_id: selectedProductId,
       ...(name.trim() ? { name: name.trim() } : {}),
@@ -203,6 +134,7 @@ export function AudienceProfileScreen() {
     } catch (error) {
       showToast({ title: "Audience could not be created", message: error instanceof Error ? error.message : String(error), tone: "red" });
     } finally {
+      submittingRef.current = false;
       setSaving(false);
     }
   };
@@ -400,6 +332,16 @@ export function AudienceProfileScreen() {
                 );
               })}
             </div>
+            {!profileOptions && !optionsError ? (
+              <p className="audience-row-status">
+                <LoaderCircle className="sl-spin" size={14} />
+                Loading services
+              </p>
+            ) : null}
+            {optionsError ? <p className="audience-row-error">Services unavailable.</p> : null}
+            {profileOptions && !serviceOptions.length ? (
+              <p className="audience-row-error">No services are currently available.</p>
+            ) : null}
           </div>
         </section>
 
