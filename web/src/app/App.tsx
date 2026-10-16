@@ -92,6 +92,7 @@ function AppShell({
 }) {
   const [viewMode, setViewMode] = useState<AppViewMode>("auto");
   const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
+  const [leadListRequestId, setLeadListRequestId] = useState(0);
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
   const [sourceReviewSummary, setSourceReviewSummary] = useState<{ runId: string; count: number } | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
@@ -240,14 +241,15 @@ function AppShell({
 
   const openWorkflowView = (nextView: LeadWorkflowView) => {
     setLeadWorkflowView(nextView);
+    setLeadListRequestId((requestId) => requestId + 1);
     const targetRunId = selectedRunExists
       ? selectedDiscoveryRunId
       : selectedProfileRun?.id;
     if (targetRunId) {
       setSelectedDiscoveryRunId(targetRunId);
       void refreshSnapshot(targetRunId);
-      selectScreen("results");
     }
+    selectScreen("results");
     setMobileRailOpen(false);
   };
 
@@ -781,6 +783,7 @@ function AppShell({
                 },
               },
               {
+                listRequestId: leadListRequestId,
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
                 onCountsChange: handleWorkflowCountsChange,

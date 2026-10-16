@@ -117,12 +117,14 @@ type BulkEmailOverride = {
 
 export function ResultsScreen({
   accountControl,
+  listRequestId = 0,
   onWorkflowViewChange,
   onWorkflowCountsChange,
   onCreateAudience,
   workflowView,
 }: {
   accountControl?: ReactNode;
+  listRequestId?: number;
   onWorkflowViewChange: (view: LeadWorkflowView) => void;
   onWorkflowCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
   onCreateAudience?: () => void;
@@ -162,7 +164,7 @@ export function ResultsScreen({
   } = useAppData();
   const { showToast } = useToast();
   const [selectedContactId, setSelectedContactId] = useState("");
-  const [detailPanelOpen, setDetailPanelOpen] = useState(true);
+  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [outreachDraftDirty, setOutreachDraftDirty] = useState(false);
   const [leadSearch, setLeadSearch] = useState("");
   const [desktopSplitView, setDesktopSplitView] = useState(() =>
@@ -359,6 +361,12 @@ export function ResultsScreen({
     setRerunPromptOpen(false);
     setBulkOutreachOpen(false);
   }, [onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
+
+  useEffect(() => {
+    setSelectedContactId("");
+    setDetailPanelOpen(false);
+    setOutreachDraftDirty(false);
+  }, [listRequestId]);
 
   useEffect(() => {
     if (!selectedTerritory) {

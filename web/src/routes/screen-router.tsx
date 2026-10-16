@@ -23,12 +23,14 @@ export function renderScreen(
     onRunCreated?: (run: DiscoveryRun) => void;
   } = {},
   resultsNavigation: {
+    listRequestId?: number;
     view: LeadWorkflowView;
     onViewChange: (view: LeadWorkflowView) => void;
     onCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
     onCreateAudience?: () => void;
     accountControl?: ReactNode;
   } = {
+    listRequestId: 0,
     view: "this_week",
     onViewChange: () => undefined,
   },
@@ -46,6 +48,7 @@ export function renderScreen(
     case "results":
       return (
         <ResultsScreen
+          listRequestId={resultsNavigation.listRequestId}
           workflowView={resultsNavigation.view}
           onWorkflowViewChange={resultsNavigation.onViewChange}
           onWorkflowCountsChange={resultsNavigation.onCountsChange}
