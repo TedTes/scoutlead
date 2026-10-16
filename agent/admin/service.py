@@ -34,6 +34,8 @@ from db.models import (
     SourceItemModel,
     ValidationResultModel,
 )
+from outreach_packages.playbooks import ServicePlaybook
+from outreach_packages.repository import OutreachPlaybookRepository
 from business_validation.validation import BusinessValidationService
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
@@ -85,6 +87,84 @@ class AdminDataService:
             _service_definition_dict(service)
             for service in ServiceDefinitionRepository(self.session).list(status=status)
         ]
+
+    def list_outreach_playbooks(self):
+        return OutreachPlaybookRepository(self.session).list()
+
+    def update_outreach_playbook(
+        self,
+        service_key: str,
+        *,
+        definition: dict[str, Any],
+        reason: str,
+    ):
+        repository = OutreachPlaybookRepository(self.session)
+        existing = repository.get_row(service_key)
+        before = dict(existing.definition) if existing else None
+        try:
+            ServicePlaybook.model_validate(definition)
+            row = repository.save(service_key=service_key, definition=definition)
+        except (ValueError, TypeError) as exc:
+            raise ValidationError(
+                "Invalid outreach playbook definition",
+                {"service_key": service_key, "error": str(exc)},
+            ) from exc
+        after = dict(row.definition)
+        self._audit(
+            "outreach_playbook:update",
+            row.id,
+            reason,
+            before,
+            after,
+            entity_type="outreach_playbook",
+        )
+        self.session.commit()
+        return next(
+            item
+            for item in repository.list()
+            if item.service_key == service_key
+        )
+
+    def change_outreach_playbook_status(
+        self,
+        service_key: str,
+        *,
+        status: str,
+        reason: str,
+    ):
+        if status not in {"draft", "active", "inactive"}:
+            raise ValidationError("Unknown playbook status", {"status": status})
+        repository = OutreachPlaybookRepository(self.session)
+        row = repository.get_row(service_key)
+        if row is None:
+            default = next(
+                (
+                    item
+                    for item in repository.list()
+                    if item.service_key == service_key
+                ),
+                None,
+            )
+            if default is None:
+                raise NotFoundError("outreach playbook not found", {"service_key": service_key})
+            row = repository.save(service_key=service_key, definition=default.definition)
+        before = {"status": row.status, "version": row.version}
+        row.status = status
+        row.version += 1
+        self._audit(
+            f"outreach_playbook:status:{status}",
+            row.id,
+            reason,
+            before,
+            {"status": row.status, "version": row.version},
+            entity_type="outreach_playbook",
+        )
+        self.session.commit()
+        return next(
+            item
+            for item in repository.list()
+            if item.service_key == service_key
+        )
 
     def create_service_definition(
         self,

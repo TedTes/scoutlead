@@ -8,7 +8,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from outreach_packages.schemas import CallBranch, OutreachEvidence, OutreachStrategy
+from outreach_packages.schemas import (
+    CallBranch,
+    OutreachClaim,
+    OutreachEvidence,
+    OutreachStrategy,
+    ReplyPath,
+)
 
 
 class BranchDefinition(BaseModel):
@@ -19,6 +25,8 @@ class BranchDefinition(BaseModel):
     value_hypothesis: str | None = None
     next_step: str | None = None
     terminal: bool = False
+    keywords: list[str] = Field(default_factory=list)
+    channel_replies: dict[str, str] = Field(default_factory=dict)
 
 
 class SignalDefinition(BaseModel):
@@ -26,6 +34,9 @@ class SignalDefinition(BaseModel):
     match_values: list[bool | int | float | str | None] | None = None
     evidence_statement: str
     observation: str
+    observation_variants: list[str] = Field(default_factory=list)
+    consequence_hypotheses: list[str] = Field(default_factory=list)
+    uncertainty_clause: str | None = None
     discovery_question: str
     permitted_claims: list[str] = Field(default_factory=list)
     prohibited_claims: list[str] = Field(default_factory=list)
@@ -36,8 +47,11 @@ class ServicePlaybook(BaseModel):
     version: int
     goal: str
     seller_positioning: str
+    seller_positioning_variants: list[str] = Field(default_factory=list)
     value_hypothesis: str
+    value_hypothesis_variants: list[str] = Field(default_factory=list)
     next_step: str
+    next_step_variants: list[str] = Field(default_factory=list)
     branch_set: str
     signals: list[SignalDefinition]
 
@@ -46,7 +60,13 @@ class PlaybookCatalog(BaseModel):
     catalog_version: int
     permission_variants: list[str]
     branch_sets: dict[str, list[BranchDefinition]]
+    trade_contexts: dict[str, "TradeContext"] = Field(default_factory=dict)
     services: list[ServicePlaybook]
+
+
+class TradeContext(BaseModel):
+    customer_actions: list[str] = Field(default_factory=list)
+    consequence_templates: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class PlaybookMatch(BaseModel):
@@ -119,18 +139,56 @@ class PlaybookRepository:
         match: PlaybookMatch,
         *,
         stable_key: str,
+        trade_key: str = "default",
+        variant_offset: int = 0,
     ) -> OutreachStrategy:
         playbook = match.playbook
         signal = match.signal
-        variant_index = _stable_index(stable_key, len(self.catalog.permission_variants))
-        permission = self.catalog.permission_variants[variant_index]
+        selected: dict[str, int] = {}
+
+        def choose(stage: str, values: list[str], fallback: str) -> str:
+            options = values or [fallback]
+            index = (_stable_index(f"{stable_key}:{stage}", len(options)) + variant_offset) % len(options)
+            selected[stage] = index
+            return options[index]
+
+        permission = choose("permission", self.catalog.permission_variants, "Can I ask one quick question?")
+        observation_options = signal.observation_variants or [
+            signal.observation,
+            f"One item stood out in the latest check: {signal.evidence_statement}",
+        ]
+        observation = choose("observation", observation_options, signal.observation)
+        trade = self.catalog.trade_contexts.get(trade_key) or self.catalog.trade_contexts.get("default") or TradeContext()
+        consequences = signal.consequence_hypotheses or trade.consequence_templates.get(
+            playbook.service_key,
+            trade.consequence_templates.get("default", []),
+        )
+        customer_consequence = choose(
+            "consequence",
+            consequences,
+            playbook.value_hypothesis,
+        )
+        seller_positioning = choose(
+            "positioning",
+            playbook.seller_positioning_variants,
+            playbook.seller_positioning,
+        )
+        value_hypothesis = choose(
+            "value",
+            playbook.value_hypothesis_variants,
+            playbook.value_hypothesis,
+        )
+        next_step = choose("cta", playbook.next_step_variants, playbook.next_step)
         branches = [
             CallBranch.model_validate(item.model_dump())
             for item in self.catalog.branch_sets.get(playbook.branch_set, [])
         ]
         evidence_statement = _with_value(signal.evidence_statement, match.evidence.value)
-        observation = _with_value(signal.observation, match.evidence.value)
+        observation = _with_value(observation, match.evidence.value)
+        customer_consequence = _with_value(customer_consequence, match.evidence.value)
         permitted_claims = signal.permitted_claims or [evidence_statement]
+        reply_paths = [_reply_path(item) for item in self.catalog.branch_sets.get(playbook.branch_set, [])]
+        experiment_variant = "-".join(f"{key}:{value + 1}" for key, value in sorted(selected.items()))
         return OutreachStrategy(
             strategy_id=f"{playbook.service_key}:{signal.signal_key}",
             strategy_version=self.catalog.catalog_version,
@@ -142,17 +200,30 @@ class PlaybookRepository:
             goal=playbook.goal,
             evidence_statement=evidence_statement,
             observation=observation,
+            uncertainty_clause=signal.uncertainty_clause,
+            customer_consequence=customer_consequence,
             permission=permission,
             discovery_question=signal.discovery_question,
-            seller_positioning=playbook.seller_positioning,
-            value_hypothesis=playbook.value_hypothesis,
-            next_step=playbook.next_step,
+            seller_positioning=seller_positioning,
+            value_hypothesis=value_hypothesis,
+            next_step=next_step,
+            trade_key=trade_key,
+            customer_actions=trade.customer_actions,
             permitted_claims=permitted_claims,
             prohibited_claims=signal.prohibited_claims,
-            selected_variant=f"permission:{variant_index + 1}",
-            renderer_version=1,
+            claim_ledger=[
+                OutreachClaim(text=observation, kind="evidence", evidence_keys=[match.evidence.signal_key]),
+                OutreachClaim(text=customer_consequence, kind="hypothesis", evidence_keys=[match.evidence.signal_key]),
+                OutreachClaim(text=seller_positioning, kind="seller"),
+                OutreachClaim(text=next_step, kind="cta"),
+            ],
+            selected_variant=experiment_variant,
+            selected_variants=selected,
+            experiment_id=f"outreach-catalog-{self.catalog.catalog_version}",
+            renderer_version=2,
             phrasing_provider="deterministic",
             call_branches=branches,
+            reply_paths=reply_paths,
         )
 
 
@@ -205,3 +276,20 @@ def _display_value(value: object) -> str:
     if value is False:
         return "no"
     return str(value if value is not None else "unknown")
+
+
+def _reply_path(branch: BranchDefinition) -> ReplyPath:
+    base = " ".join(
+        value for value in [branch.acknowledgement, branch.question, branch.next_step] if value
+    )
+    replies = {
+        channel: text
+        for channel, text in branch.channel_replies.items()
+        if channel in {"message", "call", "form", "email"}
+    }
+    for channel in ("message", "call", "form", "email"):
+        replies.setdefault(channel, base)
+    return ReplyPath(
+        **branch.model_dump(exclude={"channel_replies"}),
+        channel_replies=replies,
+    )

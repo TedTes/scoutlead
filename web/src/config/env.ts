@@ -9,3 +9,7 @@ export function getStaticApiToken() {
 export function getClerkPublishableKey() {
   return import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || "";
 }
+
+export function isAuthDisabled() {
+  return import.meta.env.DEV && import.meta.env.VITE_DISABLE_AUTH === "true";
+}

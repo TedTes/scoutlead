@@ -16,6 +16,10 @@ import type {
   DiscoveryResult,
   DemoSite,
   OutreachPackage,
+  OutreachChannel,
+  OutreachResponseClassification,
+  OutreachAnalytics,
+  AdminOutreachPlaybook,
   RunDiagnostics,
   SourceItem,
   CampaignMessageApprovalInput,
@@ -343,6 +347,42 @@ export class ApiClient {
     return this.request<OutreachPackage>(`/outreach-packages/${id}`, {
       method: "PATCH",
       body: { content },
+    });
+  }
+
+  classifyOutreachResponse(id: string, channel: OutreachChannel, responseText: string) {
+    return this.request<OutreachResponseClassification>(`/outreach-packages/${id}/classify-response`, {
+      method: "POST",
+      body: { channel, response_text: responseText },
+    });
+  }
+
+  recordOutreachEvent(
+    id: string,
+    event: { channel: OutreachChannel; event_type: string; variant_id?: string | null; metadata?: Record<string, unknown> },
+  ) {
+    return this.request(`/outreach-packages/${id}/events`, { method: "POST", body: event });
+  }
+
+  getOutreachAnalytics() {
+    return this.request<OutreachAnalytics>("/outreach-packages/analytics/summary");
+  }
+
+  getAdminOutreachPlaybooks() {
+    return this.request<AdminOutreachPlaybook[]>("/admin/outreach-playbooks");
+  }
+
+  updateAdminOutreachPlaybook(serviceKey: string, definition: Record<string, unknown>, reason: string) {
+    return this.request<AdminOutreachPlaybook>(`/admin/outreach-playbooks/${encodeURIComponent(serviceKey)}`, {
+      method: "PUT",
+      body: { definition, reason },
+    });
+  }
+
+  changeAdminOutreachPlaybookStatus(serviceKey: string, status: "draft" | "active" | "inactive", reason: string) {
+    return this.request<AdminOutreachPlaybook>(`/admin/outreach-playbooks/${encodeURIComponent(serviceKey)}/status`, {
+      method: "POST",
+      body: { status, reason },
     });
   }
 

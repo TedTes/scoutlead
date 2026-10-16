@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 
@@ -12,6 +13,7 @@ def main() -> None:
     elif service == "web":
         command = [sys.executable, "scripts/serve_web_static.py"]
     else:
+        _run_database_migrations()
         command = [
             sys.executable,
             "-m",
@@ -25,6 +27,14 @@ def main() -> None:
 
     print(f"Starting ScoutLead {service}: {' '.join(command)}", flush=True)
     os.execvp(command[0], command)
+
+
+def _run_database_migrations() -> None:
+    if os.environ.get("SKIP_DB_MIGRATIONS", "").strip().lower() in {"1", "true", "yes"}:
+        return
+    command = [sys.executable, "-m", "alembic", "upgrade", "head"]
+    print(f"Applying database migrations: {' '.join(command)}", flush=True)
+    subprocess.run(command, check=True)
 
 
 def _service_kind() -> str:

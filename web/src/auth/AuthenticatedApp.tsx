@@ -2,11 +2,11 @@ import { RedirectToSignIn, RedirectToSignUp, UserButton, useAuth, useUser } from
 import { useCallback, useEffect, useRef } from "react";
 import { AdminApp } from "../admin/AdminApp";
 import { App } from "../app/App";
-import { getClerkPublishableKey } from "../config/env";
+import { getClerkPublishableKey, isAuthDisabled } from "../config/env";
 import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
 export default function AuthenticatedApp() {
-  const publishableKey = getClerkPublishableKey();
+  const publishableKey = isAuthDisabled() ? "" : getClerkPublishableKey();
   const adminRoute = isAdminRoute();
 
   if (!publishableKey) {

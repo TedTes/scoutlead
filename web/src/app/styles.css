@@ -30,6 +30,37 @@
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
+/* Outreach variants, response handling, and playbook administration. */
+.outreach-response-toggle { align-items: center; background: transparent; border: 0; color: #667085; display: inline-flex; font-size: 12px; gap: 5px; padding: 5px 7px; }
+.outreach-response-toggle:hover, .outreach-response-toggle.active { color: #171a21; }
+.outreach-variant-picker { align-items: center; display: flex; gap: 4px; padding: 0 16px 10px; }
+.outreach-variant-picker button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: #7b8494; font-size: 11px; padding: 5px 7px; }
+.outreach-variant-picker button:hover { color: #242830; }
+.outreach-variant-picker button.active { border-bottom-color: #0a9f65; color: #242830; font-weight: 600; }
+.outreach-response-panel { border-top: 1px solid #e2e6eb; display: grid; gap: 16px; grid-template-columns: minmax(220px, .8fr) minmax(280px, 1.2fr); margin-top: 18px; padding: 18px 16px 4px; }
+.outreach-response-input, .outreach-response-result { display: flex; flex-direction: column; gap: 9px; }
+.outreach-response-input label, .outreach-response-result span { color: #8a94a4; font-size: 10px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+.outreach-response-input textarea { border: 1px solid #d8dde4; border-radius: 6px; font: inherit; line-height: 1.5; min-height: 76px; padding: 10px; resize: vertical; }
+.outreach-response-input button { align-self: flex-start; background: #1b1e23; border: 1px solid #1b1e23; border-radius: 6px; color: #fff; font-size: 12px; padding: 7px 11px; }
+.outreach-response-input button:disabled { opacity: .45; }
+.outreach-response-result header { align-items: baseline; display: flex; justify-content: space-between; }
+.outreach-response-result header span { font-weight: 500; text-transform: none; }
+.outreach-response-result p { color: #2e333b; line-height: 1.55; margin: 2px 0 0; }
+.outreach-response-result > div { position: relative; }
+.outreach-response-result > div button { background: transparent; border: 0; color: #667085; padding: 5px; position: absolute; right: 0; top: -6px; }
+.outreach-outcome-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 5px; }
+.outreach-outcome-actions button { background: #fff; border: 1px solid #d8dde4; border-radius: 5px; color: #505866; font-size: 11px; padding: 6px 8px; }
+.outreach-outcome-actions button:hover { border-color: #98a2b3; color: #20242a; }
+.admin-workspace.admin-playbook-workspace { grid-template-columns: minmax(320px, .7fr) minmax(520px, 1.3fr); }
+.admin-playbook-editor { display: flex; flex-direction: column; gap: 14px; }
+.admin-playbook-editor > header { align-items: center; display: flex; justify-content: space-between; }
+.admin-playbook-editor > header div { display: flex; flex-direction: column; gap: 3px; }
+.admin-playbook-editor label { display: flex; flex-direction: column; gap: 6px; }
+.admin-playbook-editor label > span { color: #667085; font-size: 11px; font-weight: 600; }
+.admin-playbook-editor textarea { border: 1px solid #d8dde4; border-radius: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; min-height: 480px; padding: 12px; resize: vertical; }
+.admin-playbook-editor input { border: 1px solid #d8dde4; border-radius: 5px; min-height: 36px; padding: 7px 9px; }
+@media (max-width: 900px) { .outreach-response-panel, .admin-workspace.admin-playbook-workspace { grid-template-columns: 1fr; } }
+
 /* Public, evidence-grounded website concepts. */
 .demo-site-route { margin: 0; background: #fff; color: #171b22; }
 .public-demo-site { --demo-accent: #0d8f62; min-height: 100vh; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #fff; }

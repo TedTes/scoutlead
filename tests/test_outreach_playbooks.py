@@ -26,32 +26,37 @@ def test_every_catalog_signal_renders_every_channel_safely() -> None:
             )
 
             assert match is not None
-            strategy = repository.strategy_for(
-                match,
-                stable_key=f"business:{service.service_key}:{signal.signal_key}",
-            )
-            generation = render_outreach(
-                OutreachTemplateContext(
-                    business_name="Example Business",
-                    strategy=strategy,
-                    signature="Example Studio",
+            for variant_offset in range(3):
+                strategy = repository.strategy_for(
+                    match,
+                    stable_key=f"business:{service.service_key}:{signal.signal_key}",
+                    trade_key="painters",
+                    variant_offset=variant_offset,
                 )
-            )
-            validator.validate(strategy=strategy, generation=generation)
+                generation = render_outreach(
+                    OutreachTemplateContext(
+                        business_name="Example Business",
+                        strategy=strategy,
+                        signature="Example Studio",
+                    )
+                )
+                validator.validate(strategy=strategy, generation=generation)
 
-            assert generation.message.body.endswith("?")
-            assert strategy.observation in generation.message.body
-            assert strategy.observation in generation.form.body
-            assert strategy.observation in generation.email.body
-            assert strategy.observation == generation.call.observation
-            assert generation.call.discovery_question
-            assert generation.call.branches
-            assert len(generation.message.body) <= 460
-            assert len(generation.form.body) <= 900
-            assert len(generation.email.body) <= 1200
-            rendered += 1
+                assert generation.message.body.endswith("?")
+                assert strategy.observation in generation.message.body
+                assert strategy.observation in generation.form.body
+                assert strategy.observation in generation.email.body
+                assert strategy.observation in generation.call.observation
+                assert generation.call.discovery_question
+                assert generation.call.branches
+                assert strategy.reply_paths
+                assert strategy.claim_ledger
+                assert len(generation.message.body) <= 560
+                assert len(generation.form.body) <= 900
+                assert len(generation.email.body) <= 1200
+                rendered += 1
 
-    assert rendered == 35
+    assert rendered == 105
 
 
 def test_playbook_variant_is_stable_for_the_same_result() -> None:
@@ -74,3 +79,61 @@ def test_playbook_variant_is_stable_for_the_same_result() -> None:
 
     assert first.selected_variant == second.selected_variant
     assert first.permission == second.permission
+
+
+def test_every_response_path_classifies_for_every_channel() -> None:
+    repository = PlaybookRepository(load_playbook_catalog())
+    service = repository.catalog.services[0]
+    signal = service.signals[0]
+    evidence = OutreachEvidence(
+        signal_key=signal.signal_key,
+        label="Website",
+        statement="Stored",
+        value="not_listed",
+    )
+    match = repository.resolve(
+        service_keys=[service.service_key],
+        matched_services=[],
+        evidence=[evidence],
+    )
+    assert match is not None
+    strategy = repository.strategy_for(match, stable_key="response-matrix", trade_key="painters")
+
+    for path in strategy.reply_paths:
+        for channel in ("message", "call", "form", "email"):
+            result = ResponseClassifier().classify(
+                response_text=path.keywords[0],
+                channel=channel,
+                paths=strategy.reply_paths,
+            )
+            assert result.category == path.key
+            assert result.suggested_reply
+
+
+def test_policy_rejects_unqualified_hypothesis() -> None:
+    repository = PlaybookRepository(load_playbook_catalog())
+    service = repository.catalog.services[0]
+    signal = service.signals[0]
+    evidence = OutreachEvidence(
+        signal_key=signal.signal_key,
+        label="Website",
+        statement="Stored",
+        value="not_listed",
+    )
+    match = repository.resolve(
+        service_keys=[service.service_key],
+        matched_services=[],
+        evidence=[evidence],
+    )
+    assert match is not None
+    strategy = repository.strategy_for(match, stable_key="unsafe", trade_key="painters")
+    strategy.claim_ledger[1].text = "Customers are leaving the business."
+    generation = render_outreach(
+        OutreachTemplateContext(business_name="Example", strategy=strategy, signature="Studio")
+    )
+
+    with pytest.raises(Exception, match="hypotheses must be expressed as possibilities"):
+        OutreachPolicyValidator().validate(strategy=strategy, generation=generation)
+import pytest
+
+from outreach_packages.ai import ResponseClassifier

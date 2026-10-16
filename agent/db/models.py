@@ -650,6 +650,40 @@ class OutreachPackageModel(TimestampMixin, Base):
     prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class OutreachPlaybookModel(TimestampMixin, Base):
+    __tablename__ = "outreach_playbooks"
+    __table_args__ = (
+        UniqueConstraint("service_key", name="uq_outreach_playbooks_service_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    service_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+
+class OutreachEventModel(Base):
+    __tablename__ = "outreach_events"
+    __table_args__ = (
+        Index("ix_outreach_events_package_created", "package_id", "created_at"),
+        Index("ix_outreach_events_workspace_event", "workspace_id", "event_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=True, index=True
+    )
+    package_id: Mapped[str] = mapped_column(
+        ForeignKey("outreach_packages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    variant_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    event_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class BusinessSearchEvaluationModel(TimestampMixin, Base):
     __tablename__ = "business_search_evaluations"
     __table_args__ = (

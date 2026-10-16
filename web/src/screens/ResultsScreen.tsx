@@ -50,6 +50,8 @@ import type {
   Message,
   OutreachPackage,
   OutreachPackageContent,
+  OutreachChannel,
+  OutreachResponseClassification,
   Product,
   SenderProfile,
   SearchIntent,
@@ -1040,6 +1042,8 @@ export function ResultsScreen({
             onGetPackage={() => territoryApi.getOutreachPackage(detailContact.id)}
             onGeneratePackage={() => territoryApi.generateOutreachPackage(detailContact.id)}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
+            onClassifyResponse={(packageId, channel, responseText) => territoryApi.classifyOutreachResponse(packageId, channel, responseText)}
+            onRecordEvent={(packageId, event) => territoryApi.recordOutreachEvent(packageId, event)}
           />
         ) : (
           <ContactDrawer
@@ -1120,8 +1124,6 @@ export function ResultsScreen({
     </section>
   );
 }
-
-type OutreachChannel = "message" | "call" | "form" | "email";
 
 function AutoGrowTextarea({
   ariaLabel,
@@ -1207,6 +1209,8 @@ function OutreachWorkspace({
   onGetPackage,
   onDirtyChange,
   onSavePackage,
+  onClassifyResponse,
+  onRecordEvent,
   persistent = false,
 }: {
   contact: DiscoveryResult;
@@ -1215,6 +1219,8 @@ function OutreachWorkspace({
   onGetPackage: () => Promise<OutreachPackage | null>;
   onDirtyChange: (dirty: boolean) => void;
   onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
+  onClassifyResponse: (packageId: string, channel: OutreachChannel, responseText: string) => Promise<OutreachResponseClassification>;
+  onRecordEvent: (packageId: string, event: { channel: OutreachChannel; event_type: string; variant_id?: string | null; metadata?: Record<string, unknown> }) => Promise<unknown>;
   persistent?: boolean;
 }) {
   const { showToast } = useToast();
@@ -1226,8 +1232,14 @@ function OutreachWorkspace({
   const [loadError, setLoadError] = useState("");
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saved" | "saving" | "error">("idle");
   const [copiedChannel, setCopiedChannel] = useState<OutreachChannel | null>(null);
+  const [selectedAlternative, setSelectedAlternative] = useState<Record<OutreachChannel, string>>({ message: "original", call: "original", form: "original", email: "original" });
+  const [responseOpen, setResponseOpen] = useState(false);
+  const [responseText, setResponseText] = useState("");
+  const [responseResult, setResponseResult] = useState<OutreachResponseClassification | null>(null);
+  const [responseBusy, setResponseBusy] = useState(false);
   const [channelIndicator, setChannelIndicator] = useState({ left: 0, width: 0 });
   const failedAutoSaveFingerprintRef = useRef("");
+  const recommendedContentRef = useRef<OutreachPackageContent | null>(null);
   const onSavePackageRef = useRef(onSavePackage);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const saveFeedbackTimerRef = useRef<number | null>(null);
@@ -1318,6 +1330,11 @@ function OutreachWorkspace({
     setActiveChannel("message");
     setLoadError("");
     setAutoSaveStatus("idle");
+    setSelectedAlternative({ message: "original", call: "original", form: "original", email: "original" });
+    setResponseOpen(false);
+    setResponseText("");
+    setResponseResult(null);
+    recommendedContentRef.current = null;
     failedAutoSaveFingerprintRef.current = "";
     if (!contact.id.startsWith("audience_result_")) {
       setLoading(false);
@@ -1329,8 +1346,10 @@ function OutreachWorkspace({
         if (!current) return;
         if (!value) value = await onGeneratePackage();
         if (!current) return;
+        const initialContent = formatLegacyGeneratedMessage(value);
+        recommendedContentRef.current = initialContent;
         setOutreachPackage(value);
-        setDraft(formatLegacyGeneratedMessage(value));
+        setDraft(initialContent);
         setActiveChannel(value.channels[0] || "message");
       } catch (error) {
         if (current) {
@@ -1372,8 +1391,10 @@ function OutreachWorkspace({
     setLoadError("");
     try {
       const value = await onGeneratePackage();
+      const initialContent = formatLegacyGeneratedMessage(value);
+      recommendedContentRef.current = initialContent;
       setOutreachPackage(value);
-      setDraft(formatLegacyGeneratedMessage(value));
+      setDraft(initialContent);
       setActiveChannel(value.channels[0] || "message");
       showToast({ title: "Outreach ready", message: "Review and edit before using it.", tone: "green" });
     } catch (error) {
@@ -1384,7 +1405,7 @@ function OutreachWorkspace({
     }
   };
 
-  const copyText = async (value: string, label: string) => {
+  const copyText = async (value: string, label: string, eventType = "draft_copied") => {
     try {
       await navigator.clipboard.writeText(value);
       setCopiedChannel(activeChannel);
@@ -1398,6 +1419,15 @@ function OutreachWorkspace({
         message: hasUnsavedChanges ? "The copied text includes your unsaved edits." : undefined,
         tone: "green",
       });
+      if (outreachPackage) {
+        void onRecordEvent(outreachPackage.id, {
+          channel: activeChannel,
+          event_type: eventType,
+          variant_id: selectedAlternative[activeChannel] === "original"
+            ? outreachPackage.content.strategy?.selected_variant
+            : selectedAlternative[activeChannel],
+        }).catch(() => undefined);
+      }
     } catch {
       showToast({ title: "Copy failed", tone: "red" });
     }
@@ -1436,6 +1466,64 @@ function OutreachWorkspace({
   const selectedCallBranch = draft?.call?.branches?.find(
     (branch) => branch.key === draft.call?.selected_branch,
   );
+  const channelAlternatives = draft?.alternatives?.filter((item) => item.channel === activeChannel) || [];
+  const applyAlternative = (id: string) => {
+    if (!draft || !outreachPackage) return;
+    setSelectedAlternative((current) => ({ ...current, [activeChannel]: id }));
+    if (id === "original") {
+      const original = recommendedContentRef.current || outreachPackage.content;
+      setDraft((current) => {
+        if (!current) return current;
+        if (activeChannel === "message") return { ...current, message: original.message };
+        if (activeChannel === "form") return { ...current, form: original.form };
+        if (activeChannel === "email") return { ...current, email: original.email };
+        return current;
+      });
+      return;
+    }
+    const alternative = channelAlternatives.find((item) => item.id === id);
+    if (!alternative) return;
+    setDraft((current) => {
+      if (!current) return current;
+      if (activeChannel === "message") return { ...current, message: { body: alternative.body } };
+      if (activeChannel === "form") return { ...current, form: { body: alternative.body } };
+      if (activeChannel === "email") return { ...current, email: { subject: alternative.subject || current.email?.subject || "", body: alternative.body } };
+      return current;
+    });
+    void onRecordEvent(outreachPackage.id, {
+      channel: activeChannel,
+      event_type: "draft_edited",
+      variant_id: alternative.id,
+      metadata: { source: "approved_alternative" },
+    }).catch(() => undefined);
+  };
+  const classifyResponse = async () => {
+    if (!outreachPackage || !responseText.trim() || responseBusy) return;
+    setResponseBusy(true);
+    try {
+      setResponseResult(await onClassifyResponse(outreachPackage.id, activeChannel, responseText.trim()));
+    } catch (error) {
+      showToast({ title: "Could not classify response", message: error instanceof Error ? error.message : String(error), tone: "red" });
+    } finally {
+      setResponseBusy(false);
+    }
+  };
+  const recordResponseOutcome = async (eventType: "positive_reply" | "negative_reply" | "meeting_booked") => {
+    if (!outreachPackage) return;
+    try {
+      await onRecordEvent(outreachPackage.id, {
+        channel: activeChannel,
+        event_type: eventType,
+        variant_id: selectedAlternative[activeChannel] === "original"
+          ? outreachPackage.content.strategy?.selected_variant
+          : selectedAlternative[activeChannel],
+        metadata: responseResult ? { category: responseResult.category } : {},
+      });
+      showToast({ title: "Outcome recorded", tone: "green" });
+    } catch (error) {
+      showToast({ title: "Could not record outcome", message: error instanceof Error ? error.message : String(error), tone: "red" });
+    }
+  };
   const footerNote = activeChannel === "message"
     ? { label: outreachPackage?.phone ? "Send text to" : "Copy text to send", value: outreachPackage?.phone }
     : activeChannel === "call"
@@ -1509,6 +1597,13 @@ function OutreachWorkspace({
                   </div>
                   <div className="outreach-editor-tools">
                     <span className="outreach-editor-meta">{editorSubtitle}</span>
+                    <button
+                      aria-expanded={responseOpen}
+                      className={responseOpen ? "outreach-response-toggle active" : "outreach-response-toggle"}
+                      title="Handle a prospect response"
+                      type="button"
+                      onClick={() => setResponseOpen((current) => !current)}
+                    ><MessageCircle size={14} /><span>Response</span></button>
                     {copyValue ? (
                       <>
                         {saveState !== "idle" ? (
@@ -1546,6 +1641,14 @@ function OutreachWorkspace({
                     ) : null}
                   </div>
                 </header>
+                {channelAlternatives.length ? (
+                  <nav className="outreach-variant-picker" aria-label={`${channelMeta[activeChannel].label} draft options`}>
+                    <button className={selectedAlternative[activeChannel] === "original" ? "active" : ""} type="button" onClick={() => applyAlternative("original")}>Recommended</button>
+                    {channelAlternatives.map((alternative) => (
+                      <button className={selectedAlternative[activeChannel] === alternative.id ? "active" : ""} key={alternative.id} type="button" onClick={() => applyAlternative(alternative.id)}>{alternative.label}</button>
+                    ))}
+                  </nav>
+                ) : null}
                 <div className="outreach-editor-body">
                 {activeChannel === "message" ? (
                   <div className="outreach-editor-field outreach-message-editor">
@@ -1658,6 +1761,27 @@ function OutreachWorkspace({
                   </div>
                 ) : null}
                 </div>
+                {responseOpen ? (
+                  <section className="outreach-response-panel">
+                    <div className="outreach-response-input">
+                      <label htmlFor="outreach-response">Prospect response</label>
+                      <textarea id="outreach-response" placeholder="Paste or summarize what they said" value={responseText} onChange={(event) => { setResponseText(event.target.value); setResponseResult(null); }} />
+                      <button disabled={responseBusy || !responseText.trim()} type="button" onClick={() => void classifyResponse()}>{responseBusy ? "Reviewing..." : "Suggest next step"}</button>
+                    </div>
+                    {responseResult ? (
+                      <div className="outreach-response-result">
+                        <header><strong>{responseResult.label}</strong><span>{Math.round(responseResult.confidence * 100)}% · {responseResult.source}</span></header>
+                        {responseResult.path?.question ? <p><span>Clarify</span>{responseResult.path.question}</p> : null}
+                        {responseResult.suggested_reply ? <div><span>Suggested reply</span><p>{responseResult.suggested_reply}</p><button title="Copy suggested reply" type="button" onClick={() => void copyText(responseResult.suggested_reply || "", "Follow-up", "follow_up_copied")}><Copy size={14} /></button></div> : null}
+                        <nav className="outreach-outcome-actions" aria-label="Record response outcome">
+                          <button type="button" onClick={() => void recordResponseOutcome("positive_reply")}>Positive</button>
+                          <button type="button" onClick={() => void recordResponseOutcome("negative_reply")}>Negative</button>
+                          <button type="button" onClick={() => void recordResponseOutcome("meeting_booked")}>Meeting booked</button>
+                        </nav>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
               </section>
             </div>
 
@@ -1684,6 +1808,16 @@ function OutreachWorkspace({
                     type="button"
                     onClick={() => {
                       setActiveChannel(channel);
+                      setResponseOpen(false);
+                      setResponseText("");
+                      setResponseResult(null);
+                      if (outreachPackage) {
+                        void onRecordEvent(outreachPackage.id, {
+                          channel,
+                          event_type: "channel_viewed",
+                          variant_id: outreachPackage.content.strategy?.selected_variant,
+                        }).catch(() => undefined);
+                      }
                     }}
                   >
                     <span className="outreach-channel-icon">{channelMeta[channel].icon}</span>

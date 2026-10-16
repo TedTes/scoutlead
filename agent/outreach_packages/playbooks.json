@@ -1,5 +1,5 @@
 {
-  "catalog_version": 1,
+  "catalog_version": 2,
   "permission_variants": [
     "Can I ask you one quick question?",
     "Do you have a moment for a quick question?",
@@ -13,7 +13,8 @@
         "acknowledgement": "That makes sense. A large upfront quote can be difficult to justify.",
         "question": "What scope and price range were you quoted?",
         "value_hypothesis": "Depending on the scope, a smaller focused implementation may reduce delivery time and cost.",
-        "next_step": "Could I prepare a comparable fixed-scope option?"
+        "next_step": "Could I prepare a comparable fixed-scope option?",
+        "keywords": ["quote", "quoted", "expensive", "cost", "thousand", "price"]
       },
       {
         "key": "current_process_works",
@@ -21,7 +22,8 @@
         "acknowledgement": "That makes sense. There is no reason to replace a process that is working well.",
         "question": "Would an improvement mainly need to save time, support referrals, or generate additional inquiries to be worthwhile?",
         "value_hypothesis": "A focused improvement may support the current process without replacing it.",
-        "next_step": "Would a small example focused on that outcome be useful?"
+        "next_step": "Would a small example focused on that outcome be useful?",
+        "keywords": ["works", "fine", "referrals", "already", "happy with"]
       },
       {
         "key": "not_considered",
@@ -29,30 +31,95 @@
         "acknowledgement": "Understood. It may not have needed attention until now.",
         "question": "How do customers currently find the information they need or contact the business?",
         "value_hypothesis": "The right next step may be a small improvement rather than a large project.",
-        "next_step": "Would you be open to a short example?"
+        "next_step": "Would you be open to a short example?",
+        "keywords": ["not considered", "never thought", "haven't thought", "didn't know"]
       },
       {
         "key": "not_priority",
         "label": "Not a priority",
         "acknowledgement": "Understood. It sounds like the current setup is working well enough for now.",
         "question": "What would need to change for this to become worth revisiting?",
-        "next_step": "Would you prefer that I leave it there for now?"
+        "next_step": "Would you prefer that I leave it there for now?",
+        "keywords": ["not priority", "not interested", "busy", "later", "no thanks"],
+        "terminal": true
       },
       {
         "key": "evidence_incorrect",
         "label": "Information is incorrect",
         "acknowledgement": "Thanks for correcting me.",
         "question": "How is the current setup working for customer inquiries?",
-        "next_step": "I can update my notes and only follow up if there is a relevant improvement to discuss."
+        "next_step": "I can update my notes and only follow up if there is a relevant improvement to discuss.",
+        "keywords": ["incorrect", "wrong", "we have", "already have", "not true"]
       },
       {
         "key": "interested",
         "label": "Interested",
         "acknowledgement": "Great. I would like to keep the next step focused and practical.",
         "question": "What outcome would matter most to you?",
-        "next_step": "Could I prepare a short example with a clear scope and price?"
+        "next_step": "Could I prepare a short example with a clear scope and price?",
+        "keywords": ["interested", "sure", "yes", "send", "show me", "tell me more"]
       }
     ]
+  },
+  "trade_contexts": {
+    "default": {
+      "customer_actions": ["understand the available services", "contact the business", "request a quote"],
+      "consequence_templates": {
+        "default": [
+          "That may add friction for customers trying to understand the business or get in touch.",
+          "Customers comparing local providers may have fewer details available when deciding whom to contact."
+        ]
+      }
+    },
+    "painters": {
+      "customer_actions": ["view completed projects", "understand painting services", "request an estimate"],
+      "consequence_templates": {
+        "website_modernization": [
+          "That may make it harder for homeowners to view your work or request an estimate online.",
+          "Homeowners comparing painters may have fewer details about your work and how to request a quote."
+        ],
+        "default": [
+          "That may add friction for homeowners trying to review your work or request an estimate.",
+          "A clearer online path may help homeowners move from comparing painters to requesting a quote."
+        ]
+      }
+    },
+    "plumbers": {
+      "customer_actions": ["confirm the service area", "find emergency help", "request service"],
+      "consequence_templates": {
+        "default": [
+          "That may slow down customers trying to confirm coverage or request urgent service.",
+          "Customers with an immediate plumbing issue may have difficulty finding the right next step."
+        ]
+      }
+    },
+    "roofers": {
+      "customer_actions": ["review roofing work", "understand inspection options", "request an estimate"],
+      "consequence_templates": {
+        "default": [
+          "That may make it harder for property owners to review your work or request an inspection.",
+          "Property owners comparing roofers may have fewer details available before requesting an estimate."
+        ]
+      }
+    },
+    "hvac": {
+      "customer_actions": ["confirm available services", "request urgent support", "schedule an appointment"],
+      "consequence_templates": {
+        "default": [
+          "That may add friction for customers trying to request service or schedule an appointment.",
+          "Customers comparing HVAC providers may have difficulty finding the right service path."
+        ]
+      }
+    },
+    "electricians": {
+      "customer_actions": ["review electrical services", "confirm the service area", "request a quote"],
+      "consequence_templates": {
+        "default": [
+          "That may make it harder for customers to confirm the right service and request a quote.",
+          "Customers comparing electricians may have fewer details available before getting in touch."
+        ]
+      }
+    }
   },
   "services": [
     {
@@ -60,8 +127,21 @@
       "version": 1,
       "goal": "Understand whether a focused website improvement would support the business.",
       "seller_positioning": "I help local businesses improve how customers understand their services and request quotes online.",
+      "seller_positioning_variants": [
+        "I help local service businesses create a clear online path from reviewing their work to requesting a quote.",
+        "I build focused website improvements around the information and actions customers need most."
+      ],
       "value_hypothesis": "A focused website improvement may make it easier for customers to understand the business and request a quote.",
+      "value_hypothesis_variants": [
+        "A focused update could make the most important customer information and next step easier to find.",
+        "The useful first step may be a small customer-path improvement rather than a full website rebuild."
+      ],
       "next_step": "Would you be open to seeing a quick example?",
+      "next_step_variants": [
+        "Would it be useful if I sent a short example?",
+        "Could I put together one practical example for you to review?",
+        "Would you be open to a quick comparison of the current path and a simpler option?"
+      ],
       "branch_set": "consultative",
       "signals": [
         {
@@ -69,6 +149,11 @@
           "match_values": ["not_listed", "missing"],
           "evidence_statement": "The latest business listing does not include a website.",
           "observation": "I noticed your business listing doesn't include a website.",
+          "observation_variants": [
+            "I noticed your business listing doesn't link to a website.",
+            "The business listing I checked did not include a website link."
+          ],
+          "uncertainty_clause": "If you already have a website, the opportunity may simply be connecting it to the listing.",
           "discovery_question": "How do new customers currently learn about your services and request a quote?",
           "permitted_claims": ["The checked business listing does not include a website."],
           "prohibited_claims": ["You do not have a website.", "You are losing customers."]
@@ -121,8 +206,11 @@
       "version": 1,
       "goal": "Understand how website visitors currently become customer inquiries.",
       "seller_positioning": "I help local businesses make it easier for website visitors to become customer inquiries.",
+      "seller_positioning_variants": ["I help local businesses simplify the path from website visit to customer inquiry.", "I improve the contact steps customers use when they are ready to ask for a quote."],
       "value_hypothesis": "A clearer contact path may reduce friction for customers who are ready to ask a question or request a quote.",
+      "value_hypothesis_variants": ["A clearer contact path could help ready-to-act visitors reach the business with less effort.", "A focused contact-flow update may be enough to make the next step easier to find."],
       "next_step": "Would a short example of a clearer inquiry path be useful?",
+      "next_step_variants": ["Would it be useful if I sent a short inquiry-flow example?", "Could I show you one focused way to simplify that path?"],
       "branch_set": "consultative",
       "signals": [
         {"signal_key": "contact_form_present", "match_values": [false], "evidence_statement": "No contact form was found in the latest website check.", "observation": "I couldn't find a contact form during the latest website check.", "discovery_question": "How do website visitors usually contact the business today?"},
@@ -137,8 +225,11 @@
       "version": 1,
       "goal": "Understand how customers currently request quotes, schedule work, or make payments.",
       "seller_positioning": "I help local businesses simplify quote, booking, and payment workflows.",
+      "seller_positioning_variants": ["I help service businesses reduce friction in quote and booking requests.", "I build focused online flows for estimates, appointments, and payments."],
       "value_hypothesis": "A simpler request flow may make it easier for interested customers to take the next step.",
+      "value_hypothesis_variants": ["A shorter request flow could make it easier for interested customers to act.", "The useful first step may be simplifying one high-intent action rather than replacing the whole site."],
       "next_step": "Would a short example of a simpler request flow be useful?",
+      "next_step_variants": ["Would it help if I sent a simple request-flow example?", "Could I map one shorter path for you to review?"],
       "branch_set": "consultative",
       "signals": [
         {"signal_key": "quote_or_booking_form_present", "match_values": [false], "evidence_statement": "No quote or booking flow was found in the latest website check.", "observation": "I couldn't find an online quote or booking option on the website.", "discovery_question": "How do customers currently request a quote or schedule work?"},
@@ -151,8 +242,11 @@
       "version": 1,
       "goal": "Understand whether mobile performance or accessibility affects the customer experience.",
       "seller_positioning": "I help local businesses improve website speed, mobile usability, and accessibility.",
+      "seller_positioning_variants": ["I help local businesses remove the website issues that affect mobile use and accessibility.", "I make focused performance and accessibility improvements without requiring a full rebuild."],
       "value_hypothesis": "A faster and more accessible experience may make the website easier for more customers to use.",
+      "value_hypothesis_variants": ["A focused technical improvement could make the site easier to use on common devices.", "Addressing the highest-impact issue first may improve usability without expanding the project scope."],
       "next_step": "Would a short review of the most important issue be useful?",
+      "next_step_variants": ["Would it be useful if I sent the first issue I would address?", "Could I share a short priority list for review?"],
       "branch_set": "consultative",
       "signals": [
         {"signal_key": "mobile_viewport_present", "match_values": [false], "evidence_statement": "The latest website check did not find a mobile viewport declaration.", "observation": "The latest check found that the website may not be fully adapted for mobile visitors.", "discovery_question": "Do customers commonly use the website from their phones?"},
@@ -170,8 +264,11 @@
       "version": 1,
       "goal": "Understand how customers discover the business in its service area.",
       "seller_positioning": "I help local businesses improve how their services and locations appear in search.",
+      "seller_positioning_variants": ["I help service businesses make their services and coverage areas clearer in local search.", "I improve the local service information customers use when comparing nearby providers."],
       "value_hypothesis": "Clearer local service information may help relevant customers find and understand the business.",
+      "value_hypothesis_variants": ["Clearer service-area information could help relevant local customers understand where the business operates.", "A focused local-search update may make the business easier to evaluate for nearby customers."],
       "next_step": "Would a short local visibility review be useful?",
+      "next_step_variants": ["Would it be useful if I sent a short local visibility review?", "Could I share the first local-search improvement I would test?"],
       "branch_set": "consultative",
       "signals": [
         {"signal_key": "seo_score", "evidence_statement": "The latest website SEO score was {value}.", "observation": "The latest check found some search-readiness improvements to review.", "discovery_question": "How important is local search for bringing in new customers?"},
@@ -183,8 +280,11 @@
       "version": 1,
       "goal": "Understand how the business currently establishes trust with prospective customers.",
       "seller_positioning": "I help local businesses make their reputation and trust signals easier for customers to see.",
+      "seller_positioning_variants": ["I help service businesses present customer proof more clearly where prospects make decisions.", "I improve how reviews, project proof, and trust information appear in the customer journey."],
       "value_hypothesis": "Clearer trust signals may help prospective customers feel more comfortable taking the next step.",
+      "value_hypothesis_variants": ["Making existing trust signals easier to find could help prospects evaluate the business.", "A focused trust update may help customers feel more informed before reaching out."],
       "next_step": "Would a short review of the most visible trust opportunity be useful?",
+      "next_step_variants": ["Would it be useful if I sent the most visible trust opportunity?", "Could I show you one practical way to present that proof?"],
       "branch_set": "consultative",
       "signals": [
         {"signal_key": "google_rating", "evidence_statement": "The latest public rating in the checked record was {value}.", "observation": "I noticed an opportunity to strengthen how customer trust is presented online.", "discovery_question": "How do you currently ask satisfied customers for feedback?"},
@@ -199,8 +299,11 @@
       "version": 1,
       "goal": "Understand whether customers need website information in additional languages.",
       "seller_positioning": "I help businesses adapt website content for the languages their customers use.",
+      "seller_positioning_variants": ["I help businesses make key website information usable in the languages their customers prefer.", "I create focused multilingual paths for the pages and actions customers use most."],
       "value_hypothesis": "Appropriate language support may make important information easier for more customers to understand.",
+      "value_hypothesis_variants": ["Focused language support could make important service information clearer for more customers.", "Starting with the highest-use pages may test demand before a broader localization project."],
       "next_step": "Would a short localization example be useful?",
+      "next_step_variants": ["Would it be useful if I sent one localized page example?", "Could I show you a focused language-support example?"],
       "branch_set": "consultative",
       "signals": [
         {"signal_key": "html_language_present", "match_values": [false], "evidence_statement": "The latest website check did not find a declared page language.", "observation": "The latest check did not find a declared language for the website.", "discovery_question": "Which languages do your customers most commonly use?"},

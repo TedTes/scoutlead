@@ -34,8 +34,7 @@ import {
 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import worldMapTextureUrl from "../assets/world-map-equirectangular.svg";
-import { getClerkPublishableKey } from "../config/env";
-import { getApiBaseUrl } from "../config/env";
+import { getApiBaseUrl, getClerkPublishableKey, isAuthDisabled } from "../config/env";
 import type { DemoSite } from "../types/domain";
 import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
@@ -43,7 +42,7 @@ const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
 const APP_ROUTE = "/app";
 
 export function RootApp() {
-  const publishableKey = getClerkPublishableKey();
+  const publishableKey = isAuthDisabled() ? "" : getClerkPublishableKey();
   const app = <RootAppContent authEnabled={Boolean(publishableKey)} />;
 
   if (!publishableKey) return app;

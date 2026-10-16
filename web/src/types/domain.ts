@@ -481,6 +481,8 @@ export type OutreachEvidence = {
   value?: boolean | number | string | null;
 };
 
+export type OutreachChannel = "message" | "call" | "form" | "email";
+
 export type OutreachCallBranch = {
   key: string;
   label: string;
@@ -489,6 +491,19 @@ export type OutreachCallBranch = {
   value_hypothesis?: string | null;
   next_step?: string | null;
   terminal: boolean;
+};
+
+export type OutreachReplyPath = OutreachCallBranch & {
+  keywords: string[];
+  channel_replies: Partial<Record<OutreachChannel, string>>;
+};
+
+export type OutreachDraftAlternative = {
+  id: string;
+  label: string;
+  channel: OutreachChannel;
+  body: string;
+  subject?: string | null;
 };
 
 export type OutreachStrategy = {
@@ -502,17 +517,24 @@ export type OutreachStrategy = {
   goal: string;
   evidence_statement: string;
   observation: string;
+  uncertainty_clause?: string | null;
+  customer_consequence: string;
   permission: string;
   discovery_question: string;
   seller_positioning: string;
   value_hypothesis: string;
   next_step: string;
+  trade_key: string;
+  customer_actions: string[];
   permitted_claims: string[];
   prohibited_claims: string[];
   selected_variant: string;
+  selected_variants: Record<string, number>;
+  experiment_id?: string | null;
   renderer_version: number;
   phrasing_provider: string;
   call_branches: OutreachCallBranch[];
+  reply_paths: OutreachReplyPath[];
 };
 
 export type OutreachPackageContent = {
@@ -532,6 +554,8 @@ export type OutreachPackageContent = {
   email?: { subject: string; body: string } | null;
   demo_path?: string | null;
   strategy?: OutreachStrategy | null;
+  alternatives: OutreachDraftAlternative[];
+  reply_paths: OutreachReplyPath[];
 };
 
 export type OutreachPackage = {
@@ -543,13 +567,38 @@ export type OutreachPackage = {
   phone?: string | null;
   email?: string | null;
   contact_url?: string | null;
-  channels: Array<"message" | "call" | "form" | "email">;
+  channels: OutreachChannel[];
   content: OutreachPackageContent;
   provider: string;
   model?: string | null;
   usage: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+};
+
+export type OutreachResponseClassification = {
+  category: string;
+  label: string;
+  confidence: number;
+  source: "deterministic" | "openai" | "fallback";
+  suggested_reply?: string | null;
+  path?: OutreachReplyPath | null;
+};
+
+export type OutreachAnalytics = {
+  total_events: number;
+  by_event: Record<string, number>;
+  by_channel: Record<string, number>;
+  by_variant: Record<string, number>;
+};
+
+export type AdminOutreachPlaybook = {
+  id?: string | null;
+  service_key: string;
+  version: number;
+  status: "default" | "draft" | "active" | "inactive";
+  definition: Record<string, unknown>;
+  updated_at?: string | null;
 };
 
 export type TerritoryResolution = {

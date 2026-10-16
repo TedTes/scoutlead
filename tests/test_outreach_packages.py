@@ -15,7 +15,9 @@ from db.models import (
 )
 from db.session import create_database
 from outreach_packages.schemas import (
+    OutreachEventCreate,
     OutreachPackageUpdate,
+    OutreachResponseClassifyRequest,
 )
 from outreach_packages.service import OutreachPackageService
 from shared.errors import ValidationError, WorkflowBoundaryError
@@ -40,11 +42,14 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert package.model is None
         assert package.usage == {}
         assert "Lakeside Painting" in package.content.message.body
-        assert "quote or booking option" in package.content.message.body
-        assert "simplify quote, booking, and payment workflows" in package.content.message.body
-        assert package.content.message.body.count("\n\n") == 2
-        assert package.content.form.body.count("\n\n") == 5
-        assert package.content.call.ask == "Would a short example of a simpler request flow be useful?"
+        assert "quote or booking" in package.content.message.body
+        assert "quote" in package.content.message.body.lower()
+        assert package.content.strategy.customer_consequence in package.content.message.body
+        assert len(package.content.alternatives) == 6
+        assert package.content.reply_paths
+        assert package.content.message.body.count("\n\n") >= 3
+        assert package.content.form.body.count("\n\n") >= 5
+        assert package.content.call.ask.endswith("?")
         assert package.content.call.discovery_question == (
             "How do customers currently request a quote or schedule work?"
         )
@@ -72,6 +77,27 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         with pytest.raises(ValidationError, match="not part of this outreach playbook"):
             service.update(package.id, OutreachPackageUpdate(content=invalid))
 
+        classification = service.classify_response(
+            package.id,
+            OutreachResponseClassifyRequest(
+                channel="message",
+                response_text="We already received an expensive quote for this.",
+            ),
+        )
+        assert classification.category == "considered_expensive"
+        assert classification.suggested_reply
+        service.record_event(
+            package.id,
+            OutreachEventCreate(
+                channel="message",
+                event_type="draft_copied",
+                variant_id=package.content.strategy.selected_variant,
+            ),
+        )
+        analytics = service.analytics()
+        assert analytics.total_events == 2
+        assert analytics.by_event == {"response_classified": 1, "draft_copied": 1}
+
 
 def test_outreach_package_refreshes_older_template_copy() -> None:
     with _session_factory()() as session:
@@ -94,8 +120,9 @@ def test_outreach_package_refreshes_older_template_copy() -> None:
 
         assert refreshed is not None
         assert "on businesses in" not in refreshed.content.message.body
-        assert "simplify quote, booking, and payment workflows" in refreshed.content.message.body
-        assert row.prompt_version == 5
+        assert "quote" in refreshed.content.message.body.lower()
+        assert refreshed.content.strategy.customer_consequence in refreshed.content.message.body
+        assert row.prompt_version == 6
 
 
 def test_outreach_package_preserves_edited_older_template_copy() -> None:
@@ -118,7 +145,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         assert preserved.content.message.body == custom_body
         assert preserved.content.strategy is not None
         assert preserved.content.call.branches
-        assert session.get(OutreachPackageModel, package.id).prompt_version == 5
+        assert session.get(OutreachPackageModel, package.id).prompt_version == 6
 
 
 def test_outreach_package_rejects_unverified_opportunity() -> None:
@@ -224,13 +251,11 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
         assert package.content.observation == (
             "The latest business listing does not include a website."
         )
-        assert package.content.message.body == (
-            "Hi Lakeside Painting,\n\n"
-            "I noticed your business listing doesn't include a website.\n\n"
-            "I help local businesses improve how customers understand their services and "
-            "request quotes online. Would you be open to seeing a quick example?"
-        )
-        assert len(package.content.message.body) <= 306
+        assert "business listing" in package.content.message.body
+        assert "If you already have a website" in package.content.message.body
+        assert "homeowners" in package.content.message.body.lower()
+        assert "you do not have a website" not in package.content.message.body.lower()
+        assert package.content.message.body.endswith("?")
 
 
 def _session_factory():

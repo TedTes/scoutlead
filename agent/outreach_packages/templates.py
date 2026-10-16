@@ -30,17 +30,22 @@ class PhrasingAdapter(Protocol):
 class TextRenderer:
     def render(self, context: OutreachTemplateContext) -> WrittenDraft:
         strategy = context.strategy
-        demo = f" Here is a short example: {context.demo_path}." if context.demo_path else ""
-        close = _sentence_limit(
-            f"{strategy.seller_positioning}{demo} {strategy.next_step}",
-            390,
+        demo = f" I can include this example: {context.demo_path}." if context.demo_path else ""
+        relevance = " ".join(
+            value
+            for value in [
+                strategy.customer_consequence,
+                strategy.uncertainty_clause,
+            ]
+            if value
         )
+        close = f"{strategy.seller_positioning}{demo} {strategy.next_step}"
         return WrittenDraft(
             body=_sentence_limit(
                 "\n\n".join(
-                    [f"Hi {context.business_name},", strategy.observation, close]
+                    [f"Hi {context.business_name},", strategy.observation, relevance, close]
                 ),
-                460,
+                560,
             )
         )
 
@@ -54,7 +59,14 @@ class CallRenderer:
                 240,
             ),
             permission=_sentence_limit(strategy.permission, 240),
-            observation=_sentence_limit(strategy.observation, 320),
+            observation=_sentence_limit(
+                " ".join(
+                    value
+                    for value in [strategy.observation, strategy.uncertainty_clause]
+                    if value
+                ),
+                320,
+            ),
             discovery_question=_sentence_limit(strategy.discovery_question, 320),
             ask=_sentence_limit(strategy.next_step, 240),
             branches=strategy.call_branches,
@@ -63,7 +75,25 @@ class CallRenderer:
 
 class FormRenderer:
     def render(self, context: OutreachTemplateContext) -> WrittenDraft:
-        return WrittenDraft(body=_long_body(context, limit=900))
+        strategy = context.strategy
+        return WrittenDraft(
+            body=_sentence_limit(
+                "\n\n".join(
+                    value
+                    for value in [
+                        f"Hello {context.business_name} team,",
+                        strategy.observation,
+                        strategy.customer_consequence,
+                        strategy.uncertainty_clause,
+                        strategy.seller_positioning,
+                        strategy.next_step,
+                        f"Thanks,\n{context.signature}",
+                    ]
+                    if value
+                ),
+                900,
+            )
+        )
 
 
 class EmailRenderer:
@@ -116,14 +146,18 @@ def _long_body(context: OutreachTemplateContext, *, limit: int) -> str:
     demo = f" Here is a short example: {context.demo_path}." if context.demo_path else ""
     return _sentence_limit(
         "\n\n".join(
-            [
+            value
+            for value in [
                 f"Hi {context.business_name} team,",
                 strategy.observation,
+                strategy.customer_consequence,
+                strategy.uncertainty_clause,
                 strategy.value_hypothesis,
                 f"{strategy.seller_positioning}{demo}",
                 strategy.next_step,
                 f"Thanks,\n{context.signature}",
             ]
+            if value
         ),
         limit,
     )

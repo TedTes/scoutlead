@@ -19,6 +19,11 @@ from admin.schemas import (
 )
 from admin.service import AdminDataService
 from app.dependencies import AdminAuth, DbSession
+from outreach_packages.schemas import (
+    PlaybookAdminRead,
+    PlaybookAdminStateChange,
+    PlaybookAdminUpdate,
+)
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -256,6 +261,39 @@ def collect_service_signals(
         niche_slug=data.niche_slug,
         market_key=data.market_key,
         batch_size=data.batch_size,
+    )
+
+
+@router.get("/outreach-playbooks", response_model=list[PlaybookAdminRead])
+def list_outreach_playbooks(session: DbSession, auth: AdminAuth):
+    return _service(session, auth).list_outreach_playbooks()
+
+
+@router.put("/outreach-playbooks/{service_key}", response_model=PlaybookAdminRead)
+def update_outreach_playbook(
+    service_key: str,
+    data: PlaybookAdminUpdate,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).update_outreach_playbook(
+        service_key,
+        definition=data.definition,
+        reason=data.reason,
+    )
+
+
+@router.post("/outreach-playbooks/{service_key}/status", response_model=PlaybookAdminRead)
+def change_outreach_playbook_status(
+    service_key: str,
+    data: PlaybookAdminStateChange,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).change_outreach_playbook_status(
+        service_key,
+        status=data.status,
+        reason=data.reason,
     )
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from outreach_packages.schemas import OutreachGeneration, OutreachStrategy
 from shared.errors import ValidationError
 
@@ -24,8 +26,27 @@ class OutreachPolicyValidator:
                 generation.email.body,
             ]
         ).casefold()
-        if strategy.observation.casefold() not in rendered:
-            raise ValidationError("Outreach draft does not include its grounded observation.")
+        channel_bodies = {
+            "message": generation.message.body,
+            "call": " ".join(
+                filter(
+                    None,
+                    [generation.call.observation, generation.call.discovery_question, generation.call.ask],
+                )
+            ),
+            "form": generation.form.body,
+            "email": generation.email.body,
+        }
+        missing_observation = [
+            channel
+            for channel, body in channel_bodies.items()
+            if strategy.observation.casefold() not in body.casefold()
+        ]
+        if missing_observation:
+            raise ValidationError(
+                "Every outreach channel must include its grounded observation.",
+                {"channels": missing_observation},
+            )
         prohibited = [
             claim for claim in strategy.prohibited_claims if claim.casefold() in rendered
         ]
@@ -34,5 +55,44 @@ class OutreachPolicyValidator:
                 "Outreach draft contains a prohibited claim.",
                 {"claims": prohibited},
             )
+        unsafe_patterns = {
+            "guaranteed outcome": r"\b(?:guarantee|guaranteed|will increase|will generate)\b",
+            "unsupported loss claim": r"\b(?:losing customers|losing leads|missing out on customers)\b",
+            "unsupported price claim": r"(?:[$£€]\s?\d|\b\d[\d,]*\s*(?:dollars|usd|cad)\b)",
+        }
+        unsafe = [label for label, pattern in unsafe_patterns.items() if re.search(pattern, rendered, re.I)]
+        if unsafe:
+            raise ValidationError(
+                "Outreach draft contains an unsupported sales claim.",
+                {"claims": unsafe},
+            )
+        if strategy.primary_signal_key == "website_status" and strategy.primary_signal_value in {
+            "not_listed",
+            "missing",
+        }:
+            unsupported_no_site = re.search(
+                r"\b(?:you|your business)\s+(?:do not|don't|does not|doesn't|has no)\s+(?:have\s+)?(?:a\s+)?website\b",
+                rendered,
+            )
+            if unsupported_no_site:
+                raise ValidationError(
+                    "A missing listing link cannot be presented as proof that no website exists."
+                )
+        hypotheses = [claim for claim in strategy.claim_ledger if claim.kind == "hypothesis"]
+        unqualified = [
+            claim.text
+            for claim in hypotheses
+            if not re.search(r"\b(?:may|might|could|potential|possible)\b", claim.text, re.I)
+        ]
+        if unqualified:
+            raise ValidationError(
+                "Outreach hypotheses must be expressed as possibilities, not facts.",
+                {"claims": unqualified},
+            )
+        evidence_claims = [claim for claim in strategy.claim_ledger if claim.kind == "evidence"]
+        if not evidence_claims or any(
+            strategy.primary_signal_key not in claim.evidence_keys for claim in evidence_claims
+        ):
+            raise ValidationError("Every factual outreach claim must reference stored evidence.")
         if not generation.message.body.rstrip().endswith("?"):
             raise ValidationError("Text outreach must end with one clear next-step question.")
