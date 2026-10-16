@@ -1,0 +1,214 @@
+{
+  "catalog_version": 1,
+  "permission_variants": [
+    "Can I ask you one quick question?",
+    "Do you have a moment for a quick question?",
+    "Could I quickly ask how you currently handle this?"
+  ],
+  "branch_sets": {
+    "consultative": [
+      {
+        "key": "considered_expensive",
+        "label": "Received an expensive quote",
+        "acknowledgement": "That makes sense. A large upfront quote can be difficult to justify.",
+        "question": "What scope and price range were you quoted?",
+        "value_hypothesis": "Depending on the scope, a smaller focused implementation may reduce delivery time and cost.",
+        "next_step": "Could I prepare a comparable fixed-scope option?"
+      },
+      {
+        "key": "current_process_works",
+        "label": "Current process works",
+        "acknowledgement": "That makes sense. There is no reason to replace a process that is working well.",
+        "question": "Would an improvement mainly need to save time, support referrals, or generate additional inquiries to be worthwhile?",
+        "value_hypothesis": "A focused improvement may support the current process without replacing it.",
+        "next_step": "Would a small example focused on that outcome be useful?"
+      },
+      {
+        "key": "not_considered",
+        "label": "Has not considered it",
+        "acknowledgement": "Understood. It may not have needed attention until now.",
+        "question": "How do customers currently find the information they need or contact the business?",
+        "value_hypothesis": "The right next step may be a small improvement rather than a large project.",
+        "next_step": "Would you be open to a short example?"
+      },
+      {
+        "key": "not_priority",
+        "label": "Not a priority",
+        "acknowledgement": "Understood. It sounds like the current setup is working well enough for now.",
+        "question": "What would need to change for this to become worth revisiting?",
+        "next_step": "Would you prefer that I leave it there for now?"
+      },
+      {
+        "key": "evidence_incorrect",
+        "label": "Information is incorrect",
+        "acknowledgement": "Thanks for correcting me.",
+        "question": "How is the current setup working for customer inquiries?",
+        "next_step": "I can update my notes and only follow up if there is a relevant improvement to discuss."
+      },
+      {
+        "key": "interested",
+        "label": "Interested",
+        "acknowledgement": "Great. I would like to keep the next step focused and practical.",
+        "question": "What outcome would matter most to you?",
+        "next_step": "Could I prepare a short example with a clear scope and price?"
+      }
+    ]
+  },
+  "services": [
+    {
+      "service_key": "website_modernization",
+      "version": 1,
+      "goal": "Understand whether a focused website improvement would support the business.",
+      "seller_positioning": "I help local businesses improve how customers understand their services and request quotes online.",
+      "value_hypothesis": "A focused website improvement may make it easier for customers to understand the business and request a quote.",
+      "next_step": "Would you be open to seeing a quick example?",
+      "branch_set": "consultative",
+      "signals": [
+        {
+          "signal_key": "website_status",
+          "match_values": ["not_listed", "missing"],
+          "evidence_statement": "The latest business listing does not include a website.",
+          "observation": "I noticed your business listing doesn't include a website.",
+          "discovery_question": "How do new customers currently learn about your services and request a quote?",
+          "permitted_claims": ["The checked business listing does not include a website."],
+          "prohibited_claims": ["You do not have a website.", "You are losing customers."]
+        },
+        {
+          "signal_key": "website_status",
+          "match_values": ["unavailable", "parked"],
+          "evidence_statement": "The business website was unavailable during the latest check.",
+          "observation": "Your website was unavailable when I checked it.",
+          "discovery_question": "Is the website currently being updated, or has availability been an ongoing issue?",
+          "permitted_claims": ["The website was unavailable during the latest check."],
+          "prohibited_claims": ["Your website is permanently offline."]
+        },
+        {
+          "signal_key": "website_unavailable",
+          "evidence_statement": "The business website was unavailable during the latest check.",
+          "observation": "Your website was unavailable when I checked it.",
+          "discovery_question": "Is the website currently being updated, or has availability been an ongoing issue?"
+        },
+        {
+          "signal_key": "website_quality_score",
+          "evidence_statement": "The latest website quality score was {value}.",
+          "observation": "The latest check found room to improve the overall website experience.",
+          "discovery_question": "Is the current website mainly informational, or is it expected to generate inquiries?"
+        },
+        {
+          "signal_key": "best_practices_score",
+          "evidence_statement": "The latest website best-practices score was {value}.",
+          "observation": "The latest check found some website best-practice issues.",
+          "discovery_question": "Has the website been reviewed or updated recently?"
+        },
+        {
+          "signal_key": "uses_https",
+          "match_values": [false],
+          "evidence_statement": "The latest website check did not confirm HTTPS.",
+          "observation": "The latest check found that the website is not using HTTPS.",
+          "discovery_question": "Has anyone reviewed the website's security setup recently?"
+        },
+        {
+          "signal_key": "uses_http",
+          "match_values": [true],
+          "evidence_statement": "The latest website check found that the site is not using HTTPS.",
+          "observation": "The latest check found that the website is not using HTTPS.",
+          "discovery_question": "Has anyone reviewed the website's security setup recently?"
+        }
+      ]
+    },
+    {
+      "service_key": "lead_capture",
+      "version": 1,
+      "goal": "Understand how website visitors currently become customer inquiries.",
+      "seller_positioning": "I help local businesses make it easier for website visitors to become customer inquiries.",
+      "value_hypothesis": "A clearer contact path may reduce friction for customers who are ready to ask a question or request a quote.",
+      "next_step": "Would a short example of a clearer inquiry path be useful?",
+      "branch_set": "consultative",
+      "signals": [
+        {"signal_key": "contact_form_present", "match_values": [false], "evidence_statement": "No contact form was found in the latest website check.", "observation": "I couldn't find a contact form during the latest website check.", "discovery_question": "How do website visitors usually contact the business today?"},
+        {"signal_key": "no_contact_form", "match_values": [true], "evidence_statement": "No contact form was found in the latest website check.", "observation": "I couldn't find a contact form during the latest website check.", "discovery_question": "How do website visitors usually contact the business today?"},
+        {"signal_key": "primary_cta_present", "match_values": [false], "evidence_statement": "The latest website check did not find a primary call to action.", "observation": "The website does not currently show visitors one clear next step.", "discovery_question": "What action would you most want a website visitor to take?"},
+        {"signal_key": "click_to_call_present", "match_values": [false], "evidence_statement": "The latest website check did not find a click-to-call action.", "observation": "The latest mobile website check did not find a direct call action.", "discovery_question": "Do most customers prefer to call, text, or submit a request?"},
+        {"signal_key": "complete_contact_details", "match_values": [false], "evidence_statement": "The latest website check did not find complete contact details.", "observation": "Some contact details were difficult to find during the latest website check.", "discovery_question": "Which contact method should customers use first?"}
+      ]
+    },
+    {
+      "service_key": "booking_payments",
+      "version": 1,
+      "goal": "Understand how customers currently request quotes, schedule work, or make payments.",
+      "seller_positioning": "I help local businesses simplify quote, booking, and payment workflows.",
+      "value_hypothesis": "A simpler request flow may make it easier for interested customers to take the next step.",
+      "next_step": "Would a short example of a simpler request flow be useful?",
+      "branch_set": "consultative",
+      "signals": [
+        {"signal_key": "quote_or_booking_form_present", "match_values": [false], "evidence_statement": "No quote or booking flow was found in the latest website check.", "observation": "I couldn't find an online quote or booking option on the website.", "discovery_question": "How do customers currently request a quote or schedule work?"},
+        {"signal_key": "no_quote_flow", "match_values": [true, false], "evidence_statement": "No quote or booking flow was found in the latest website check.", "observation": "I couldn't find an online quote or booking option on the website.", "discovery_question": "How do customers currently request a quote or schedule work?"},
+        {"signal_key": "online_payment_or_financing_present", "match_values": [false], "evidence_statement": "The latest website check did not find an online payment or financing option.", "observation": "I couldn't find an online payment or financing option on the website.", "discovery_question": "How do customers currently handle deposits or payments?"}
+      ]
+    },
+    {
+      "service_key": "performance_accessibility",
+      "version": 1,
+      "goal": "Understand whether mobile performance or accessibility affects the customer experience.",
+      "seller_positioning": "I help local businesses improve website speed, mobile usability, and accessibility.",
+      "value_hypothesis": "A faster and more accessible experience may make the website easier for more customers to use.",
+      "next_step": "Would a short review of the most important issue be useful?",
+      "branch_set": "consultative",
+      "signals": [
+        {"signal_key": "mobile_viewport_present", "match_values": [false], "evidence_statement": "The latest website check did not find a mobile viewport declaration.", "observation": "The latest check found that the website may not be fully adapted for mobile visitors.", "discovery_question": "Do customers commonly use the website from their phones?"},
+        {"signal_key": "mobile_viewport_missing", "match_values": [true], "evidence_statement": "The latest website check did not find a mobile viewport declaration.", "observation": "The latest check found that the website may not be fully adapted for mobile visitors.", "discovery_question": "Do customers commonly use the website from their phones?"},
+        {"signal_key": "mobile_performance_score", "evidence_statement": "The latest mobile performance score was {value}.", "observation": "The latest check found room to improve the website's mobile performance.", "discovery_question": "Have customers mentioned that the website feels slow on mobile?"},
+        {"signal_key": "accessibility_score", "evidence_statement": "The latest accessibility score was {value}.", "observation": "The latest check found some accessibility improvements to review.", "discovery_question": "Has the website had an accessibility review recently?"},
+        {"signal_key": "lcp_ms", "evidence_statement": "The latest main-content load measurement was {value} ms.", "observation": "The latest check found that the main website content may load slowly.", "discovery_question": "Have customers mentioned slow loading or difficulty using the website?"},
+        {"signal_key": "cls_score", "evidence_statement": "The latest layout stability measurement was {value}.", "observation": "The latest check found some visual instability while the website loads.", "discovery_question": "Has the website's mobile experience been reviewed recently?"},
+        {"signal_key": "inp_ms", "evidence_statement": "The latest interaction response measurement was {value} ms.", "observation": "The latest check found that some website interactions may respond slowly.", "discovery_question": "Have customers reported difficulty using website controls?"},
+        {"signal_key": "tbt_ms", "evidence_statement": "The latest total blocking time was {value} ms.", "observation": "The latest check found that the website may pause while loading.", "discovery_question": "Has website speed been reviewed recently?"}
+      ]
+    },
+    {
+      "service_key": "local_visibility",
+      "version": 1,
+      "goal": "Understand how customers discover the business in its service area.",
+      "seller_positioning": "I help local businesses improve how their services and locations appear in search.",
+      "value_hypothesis": "Clearer local service information may help relevant customers find and understand the business.",
+      "next_step": "Would a short local visibility review be useful?",
+      "branch_set": "consultative",
+      "signals": [
+        {"signal_key": "seo_score", "evidence_statement": "The latest website SEO score was {value}.", "observation": "The latest check found some search-readiness improvements to review.", "discovery_question": "How important is local search for bringing in new customers?"},
+        {"signal_key": "service_area_pages_present", "match_values": [false], "evidence_statement": "The latest website check did not find service-area pages.", "observation": "I couldn't find pages explaining the areas the business serves.", "discovery_question": "Which locations or service areas are most important to the business?"}
+      ]
+    },
+    {
+      "service_key": "reputation_trust",
+      "version": 1,
+      "goal": "Understand how the business currently establishes trust with prospective customers.",
+      "seller_positioning": "I help local businesses make their reputation and trust signals easier for customers to see.",
+      "value_hypothesis": "Clearer trust signals may help prospective customers feel more comfortable taking the next step.",
+      "next_step": "Would a short review of the most visible trust opportunity be useful?",
+      "branch_set": "consultative",
+      "signals": [
+        {"signal_key": "google_rating", "evidence_statement": "The latest public rating in the checked record was {value}.", "observation": "I noticed an opportunity to strengthen how customer trust is presented online.", "discovery_question": "How do you currently ask satisfied customers for feedback?"},
+        {"signal_key": "google_review_count", "evidence_statement": "The business had {value} public reviews in the latest checked record.", "observation": "The latest checked listing has a relatively small number of public reviews.", "discovery_question": "How do you currently ask satisfied customers for reviews?"},
+        {"signal_key": "reviews_under_15", "evidence_statement": "The business had {value} public reviews in the latest checked record.", "observation": "The latest checked listing has a relatively small number of public reviews.", "discovery_question": "How do you currently ask satisfied customers for reviews?"},
+        {"signal_key": "testimonials_present", "match_values": [false], "evidence_statement": "The latest website check did not find customer testimonials.", "observation": "I couldn't find customer testimonials on the website.", "discovery_question": "Do you currently collect customer feedback that could be shared online?"},
+        {"signal_key": "privacy_policy_present", "match_values": [false], "evidence_statement": "The latest website check did not find a privacy policy.", "observation": "I couldn't find a privacy policy during the latest website check.", "discovery_question": "Has the website's customer-data and privacy information been reviewed recently?"}
+      ]
+    },
+    {
+      "service_key": "multilingual_localization",
+      "version": 1,
+      "goal": "Understand whether customers need website information in additional languages.",
+      "seller_positioning": "I help businesses adapt website content for the languages their customers use.",
+      "value_hypothesis": "Appropriate language support may make important information easier for more customers to understand.",
+      "next_step": "Would a short localization example be useful?",
+      "branch_set": "consultative",
+      "signals": [
+        {"signal_key": "html_language_present", "match_values": [false], "evidence_statement": "The latest website check did not find a declared page language.", "observation": "The latest check did not find a declared language for the website.", "discovery_question": "Which languages do your customers most commonly use?"},
+        {"signal_key": "hreflang_present", "match_values": [false], "evidence_statement": "The latest website check did not find alternate-language declarations.", "observation": "The latest check did not find alternate-language page declarations.", "discovery_question": "Does the website currently have content for more than one language?"},
+        {"signal_key": "language_selector_present", "match_values": [false], "evidence_statement": "The latest website check did not find a language selector.", "observation": "I couldn't find a language selector on the website.", "discovery_question": "Do customers ever ask for information in another language?"},
+        {"signal_key": "translated_page_count", "evidence_statement": "The latest website check found {value} translated pages.", "observation": "The latest check found limited translated website content.", "discovery_question": "Which pages would be most important to offer in another language?"},
+        {"signal_key": "market_language_supported", "match_values": [false], "evidence_statement": "The latest website check did not confirm support for the market language.", "observation": "The latest check did not confirm website support for a language used in the market.", "discovery_question": "Which languages are most important for customers in this market?"}
+      ]
+    }
+  ]
+}

@@ -481,14 +481,57 @@ export type OutreachEvidence = {
   value?: boolean | number | string | null;
 };
 
+export type OutreachCallBranch = {
+  key: string;
+  label: string;
+  acknowledgement: string;
+  question?: string | null;
+  value_hypothesis?: string | null;
+  next_step?: string | null;
+  terminal: boolean;
+};
+
+export type OutreachStrategy = {
+  strategy_id: string;
+  strategy_version: number;
+  playbook_id: string;
+  playbook_version: number;
+  service_key: string;
+  primary_signal_key: string;
+  primary_signal_value?: boolean | number | string | null;
+  goal: string;
+  evidence_statement: string;
+  observation: string;
+  permission: string;
+  discovery_question: string;
+  seller_positioning: string;
+  value_hypothesis: string;
+  next_step: string;
+  permitted_claims: string[];
+  prohibited_claims: string[];
+  selected_variant: string;
+  renderer_version: number;
+  phrasing_provider: string;
+  call_branches: OutreachCallBranch[];
+};
+
 export type OutreachPackageContent = {
   observation: string;
   evidence: OutreachEvidence[];
   message: { body: string };
-  call?: { opener: string; observation: string; ask: string } | null;
+  call?: {
+    opener: string;
+    observation: string;
+    ask: string;
+    permission?: string | null;
+    discovery_question?: string | null;
+    branches?: OutreachCallBranch[];
+    selected_branch?: string | null;
+  } | null;
   form?: { body: string } | null;
   email?: { subject: string; body: string } | null;
   demo_path?: string | null;
+  strategy?: OutreachStrategy | null;
 };
 
 export type OutreachPackage = {

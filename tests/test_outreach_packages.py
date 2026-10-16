@@ -18,7 +18,7 @@ from outreach_packages.schemas import (
     OutreachPackageUpdate,
 )
 from outreach_packages.service import OutreachPackageService
-from shared.errors import WorkflowBoundaryError
+from shared.errors import ValidationError, WorkflowBoundaryError
 from shared.utils import new_id, utcnow
 
 
@@ -41,10 +41,16 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert package.usage == {}
         assert "Lakeside Painting" in package.content.message.body
         assert "quote or booking option" in package.content.message.body
-        assert "I offer online booking and conversion improvements" in package.content.message.body
+        assert "simplify quote, booking, and payment workflows" in package.content.message.body
         assert package.content.message.body.count("\n\n") == 2
-        assert package.content.form.body.count("\n\n") == 4
-        assert package.content.call.ask == "Would a short example be useful?"
+        assert package.content.form.body.count("\n\n") == 5
+        assert package.content.call.ask == "Would a short example of a simpler request flow be useful?"
+        assert package.content.call.discovery_question == (
+            "How do customers currently request a quote or schedule work?"
+        )
+        assert len(package.content.call.branches) == 6
+        assert package.content.strategy.service_key == "booking_payments"
+        assert package.content.strategy.phrasing_provider == "deterministic"
         assert service.generate(result.id).id == package.id
         assert session.scalar(select(func.count()).select_from(OutreachPackageModel)) == 1
 
@@ -54,6 +60,17 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
 
         assert updated.content.message.body.startswith("Updated message")
         assert service.find_for_result(result.id).content.message.body == updated.content.message.body
+
+        content = updated.content.model_copy(deep=True)
+        content.call.selected_branch = "considered_expensive"
+        branched = service.update(package.id, OutreachPackageUpdate(content=content))
+
+        assert branched.content.call.selected_branch == "considered_expensive"
+
+        invalid = branched.content.model_copy(deep=True)
+        invalid.call.selected_branch = "invented-response"
+        with pytest.raises(ValidationError, match="not part of this outreach playbook"):
+            service.update(package.id, OutreachPackageUpdate(content=invalid))
 
 
 def test_outreach_package_refreshes_older_template_copy() -> None:
@@ -77,8 +94,8 @@ def test_outreach_package_refreshes_older_template_copy() -> None:
 
         assert refreshed is not None
         assert "on businesses in" not in refreshed.content.message.body
-        assert "I offer online booking and conversion improvements" in refreshed.content.message.body
-        assert row.prompt_version == 4
+        assert "simplify quote, booking, and payment workflows" in refreshed.content.message.body
+        assert row.prompt_version == 5
 
 
 def test_outreach_package_preserves_edited_older_template_copy() -> None:
@@ -90,6 +107,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         custom_body = "Hi Lakeside Painting, I wrote this custom message and want to keep it."
         custom_content = dict(row.content)
         custom_content["message"] = {"body": custom_body}
+        custom_content.pop("strategy", None)
         row.content = custom_content
         row.prompt_version = 1
         session.commit()
@@ -98,7 +116,9 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
 
         assert preserved is not None
         assert preserved.content.message.body == custom_body
-        assert row.prompt_version == 1
+        assert preserved.content.strategy is not None
+        assert preserved.content.call.branches
+        assert session.get(OutreachPackageModel, package.id).prompt_version == 5
 
 
 def test_outreach_package_rejects_unverified_opportunity() -> None:
@@ -111,6 +131,34 @@ def test_outreach_package_rejects_unverified_opportunity() -> None:
 
         with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
             service.generate(result.id)
+
+
+def test_outreach_package_rejects_unsupported_service_signal_pair() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        audience = session.get(TerritoryModel, result.audience_id)
+        audience.service_keys = ["website_modernization"]
+        snapshot = dict(result.match_snapshot)
+        raw = dict(snapshot["raw"])
+        raw["profile_match"] = {
+            "confirmed_signal_count": 1,
+            "matched_signals": [
+                {
+                    "signal_key": "google_review_count",
+                    "value": 5,
+                    "confidence": "confirmed",
+                }
+            ],
+        }
+        snapshot["raw"] = raw
+        result.match_snapshot = snapshot
+        session.commit()
+
+        with pytest.raises(WorkflowBoundaryError, match="No supported outreach playbook"):
+            OutreachPackageService(
+                session,
+                workspace_id="workspace:first",
+            ).generate(result.id)
 
 
 def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> None:
@@ -179,8 +227,8 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
         assert package.content.message.body == (
             "Hi Lakeside Painting,\n\n"
             "I noticed your business listing doesn't include a website.\n\n"
-            "I help local service businesses launch modern websites that generate more "
-            "quote requests. Would you be open to seeing a quick example?"
+            "I help local businesses improve how customers understand their services and "
+            "request quotes online. Would you be open to seeing a quick example?"
         )
         assert len(package.content.message.body) <= 306
 

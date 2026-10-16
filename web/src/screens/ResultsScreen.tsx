@@ -1235,12 +1235,7 @@ function OutreachWorkspace({
   const channelButtonRefs = useRef<Partial<Record<OutreachChannel, HTMLButtonElement | null>>>({});
   const displayedChannels = useMemo<OutreachChannel[]>(() => {
     if (!outreachPackage) return [];
-    return [
-      "message",
-      "call",
-      ...(outreachPackage.channels.includes("form") ? ["form" as const] : []),
-      "email",
-    ];
+    return ["message", "call", "form", "email"];
   }, [outreachPackage]);
   const hasUnsavedChanges = Boolean(
     outreachPackage
@@ -1425,7 +1420,9 @@ function OutreachWorkspace({
   const editorSubtitle = activeChannel === "message"
     ? `${draft?.message.body.length || 0} characters · ${messageSegments} SMS ${messageSegments === 1 ? "segment" : "segments"}`
     : activeChannel === "call"
-      ? draft?.call ? "3 talking points" : "No phone number"
+      ? draft?.call
+        ? `${draft.call.branches?.length || 0} response paths`
+        : "No phone number"
       : activeChannel === "form"
         ? "Message for the business contact form"
         : outreachPackage?.email || "No address found";
@@ -1436,12 +1433,15 @@ function OutreachWorkspace({
       : autoSaveStatus === "saved"
         ? "saved"
         : "idle";
+  const selectedCallBranch = draft?.call?.branches?.find(
+    (branch) => branch.key === draft.call?.selected_branch,
+  );
   const footerNote = activeChannel === "message"
     ? { label: outreachPackage?.phone ? "Send text to" : "Copy text to send", value: outreachPackage?.phone }
     : activeChannel === "call"
       ? { label: outreachPackage?.phone ? "Call" : "No phone number on file", value: outreachPackage?.phone }
       : activeChannel === "form"
-        ? { label: "Contact form opens in a new tab.", value: null }
+        ? { label: outreachPackage?.contact_url ? "Open the website form and paste the copied message." : "No website form found", value: null }
         : { label: outreachPackage?.email ? "Send email to" : "No email address on file", value: outreachPackage?.email };
   const copyValue = !draft
     ? ""
@@ -1449,9 +1449,19 @@ function OutreachWorkspace({
       ? draft.message.body
       : activeChannel === "form"
         ? draft.form?.body || ""
-        : activeChannel === "email"
+      : activeChannel === "email"
           ? [`Subject: ${draft.email?.subject || ""}`, draft.email?.body || ""].join("\n\n")
-          : [draft.call?.opener, draft.call?.observation, draft.call?.ask].filter(Boolean).join("\n\n");
+          : [
+              draft.call?.opener,
+              draft.call?.permission,
+              draft.call?.observation,
+              draft.call?.discovery_question,
+              selectedCallBranch?.acknowledgement,
+              selectedCallBranch?.question,
+              selectedCallBranch?.value_hypothesis,
+              selectedCallBranch?.next_step,
+              selectedCallBranch ? null : draft.call?.ask,
+            ].filter(Boolean).join("\n\n");
   const closeWorkspace = () => {
     if (hasUnsavedChanges && !window.confirm("Discard unsaved outreach changes?")) return;
     onClose();
@@ -1524,9 +1534,12 @@ function OutreachWorkspace({
                         aria-label="Open contact form"
                         className="outreach-inline-copy"
                         href={outreachPackage.contact_url}
+                        onClick={() => {
+                          if (draft.form?.body) void copyText(draft.form.body, "Form message");
+                        }}
                         rel="noreferrer"
                         target="_blank"
-                        title="Open contact form"
+                        title="Copy message and open contact form"
                       >
                         <ExternalLink size={15} />
                       </a>
@@ -1541,13 +1554,68 @@ function OutreachWorkspace({
                 ) : null}
 
                 {activeChannel === "call" && draft.call ? (
-                  <div className="outreach-call-script">
-                    {(["opener", "observation", "ask"] as const).map((part) => (
-                      <label key={part}>
-                        <span>{part === "observation" ? "Hook" : part}</span>
-                        <AutoGrowTextarea ariaLabel={`Call ${part}`} compact value={draft.call?.[part] || ""} onChange={(value) => setDraft({ ...draft, call: { ...draft.call!, [part]: value } })} />
-                      </label>
-                    ))}
+                  <div className="outreach-call-playbook">
+                    <div className="outreach-call-script">
+                      {([
+                        ["opener", "Open"],
+                        ...(draft.call.permission ? [["permission", "Permission"]] : []),
+                        ["observation", "Context"],
+                        ...(draft.call.discovery_question ? [["discovery_question", "Discover"]] : []),
+                      ] as Array<["opener" | "permission" | "observation" | "discovery_question", string]>).map(([part, label]) => (
+                        <label key={part}>
+                          <span>{label}</span>
+                          <AutoGrowTextarea ariaLabel={`Call ${label.toLowerCase()}`} compact value={draft.call?.[part] || ""} onChange={(value) => setDraft({ ...draft, call: { ...draft.call!, [part]: value } })} />
+                        </label>
+                      ))}
+                    </div>
+
+                    {draft.call.branches?.length ? (
+                      <section className="outreach-call-branches">
+                        <header>
+                          <strong>Prospect responds</strong>
+                          <span>Choose the closest response</span>
+                        </header>
+                        <div className="outreach-call-branch-options">
+                          {draft.call.branches.map((branch) => (
+                            <button
+                              className={selectedCallBranch?.key === branch.key ? "active" : ""}
+                              key={branch.key}
+                              type="button"
+                              onClick={() => setDraft({
+                                ...draft,
+                                call: { ...draft.call!, selected_branch: branch.key },
+                              })}
+                            >
+                              {branch.label}
+                            </button>
+                          ))}
+                        </div>
+                        {selectedCallBranch ? (
+                          <div className="outreach-call-branch-path" key={selectedCallBranch.key}>
+                            {([
+                              ["Reflect", selectedCallBranch.acknowledgement],
+                              ["Clarify", selectedCallBranch.question],
+                              ["Value", selectedCallBranch.value_hypothesis],
+                              ["Next step", selectedCallBranch.next_step],
+                            ] as Array<[string, string | null | undefined]>).filter(([, value]) => value).map(([label, value]) => (
+                              <div key={label}>
+                                <span>{label}</span>
+                                <p>{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="outreach-call-branch-hint">Listen first, then choose the response that best matches what they said.</p>
+                        )}
+                      </section>
+                    ) : (
+                      <div className="outreach-call-script outreach-call-script-legacy">
+                        <label>
+                          <span>Ask</span>
+                          <AutoGrowTextarea ariaLabel="Call ask" compact value={draft.call.ask} onChange={(ask) => setDraft({ ...draft, call: { ...draft.call!, ask } })} />
+                        </label>
+                      </div>
+                    )}
                   </div>
                 ) : null}
 
@@ -1565,6 +1633,14 @@ function OutreachWorkspace({
                     <AutoGrowTextarea ariaLabel="Website form message" value={draft.form.body} onChange={(body) => setDraft({ ...draft, form: { body } })} />
                     <small>The message is copied before the contact page opens.</small>
                   </label>
+                ) : null}
+
+                {activeChannel === "form" && !draft.form ? (
+                  <div className="outreach-channel-empty">
+                    <FileText size={30} />
+                    <strong>No website form found</strong>
+                    <span>Use another available contact channel for {contact.company_name}.</span>
+                  </div>
                 ) : null}
 
                 {activeChannel === "email" && draft.email ? (

@@ -21,12 +21,14 @@ from outreach_packages.schemas import (
     OutreachPackageRead,
     OutreachPackageUpdate,
 )
+from outreach_packages.playbooks import PlaybookRepository
+from outreach_packages.policy import OutreachPolicyValidator
 from outreach_packages.templates import OutreachTemplateContext, render_outreach
 from shared.errors import NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
 
-TEMPLATE_VERSION = 4
+TEMPLATE_VERSION = 5
 
 
 class OutreachPackageService:
@@ -47,8 +49,17 @@ class OutreachPackageService:
                 OutreachPackageModel.audience_result_id == result.id,
             )
         )
-        if row is not None and _should_refresh_template(row):
-            row.content = self._render_content(result, product, business, workspace).model_dump()
+        if row is not None and (
+            _should_refresh_template(row) or _needs_strategy_upgrade(row)
+        ):
+            fresh = self._render_content(
+                result, audience, product, business, workspace
+            )
+            row.content = (
+                fresh.model_dump()
+                if _should_refresh_template(row)
+                else _merge_legacy_draft(row.content, fresh).model_dump()
+            )
             row.prompt_version = TEMPLATE_VERSION
             self.session.commit()
             self.session.refresh(row)
@@ -68,16 +79,21 @@ class OutreachPackageService:
             )
         )
         if existing is not None:
-            if _should_refresh_template(existing):
-                existing.content = self._render_content(
-                    result, product, business, workspace
-                ).model_dump()
+            if _should_refresh_template(existing) or _needs_strategy_upgrade(existing):
+                fresh = self._render_content(
+                    result, audience, product, business, workspace
+                )
+                existing.content = (
+                    fresh.model_dump()
+                    if _should_refresh_template(existing)
+                    else _merge_legacy_draft(existing.content, fresh).model_dump()
+                )
                 existing.prompt_version = TEMPLATE_VERSION
                 self.session.commit()
                 self.session.refresh(existing)
             return self._read(existing, business, result)
 
-        content = self._render_content(result, product, business, workspace)
+        content = self._render_content(result, audience, product, business, workspace)
         row = OutreachPackageModel(
             id=new_id("outreach_package"),
             workspace_id=self.workspace_id,
@@ -97,6 +113,7 @@ class OutreachPackageService:
     def _render_content(
         self,
         result: AudienceResultModel,
+        audience: TerritoryModel,
         product: ProductModel,
         business: BusinessModel,
         workspace: WorkspaceModel | None,
@@ -115,7 +132,38 @@ class OutreachPackageService:
             )
 
         evidence = [_evidence(item) for item in matched[:6]]
-        observation = evidence[0].statement
+        matched_services = [
+            item
+            for item in profile_match.get("matched_services") or []
+            if isinstance(item, dict)
+        ]
+        playbook_match = PlaybookRepository().resolve(
+            service_keys=list(audience.service_keys or []),
+            matched_services=matched_services,
+            evidence=evidence,
+        )
+        if playbook_match is None:
+            raise WorkflowBoundaryError(
+                "No supported outreach playbook matches this opportunity.",
+                {
+                    "result_id": result.id,
+                    "service_keys": list(audience.service_keys or []),
+                    "signal_keys": [item.signal_key for item in evidence],
+                    "user_message": "Review this opportunity manually before contacting the business.",
+                },
+            )
+        strategy = PlaybookRepository().strategy_for(
+            playbook_match,
+            stable_key=f"{result.id}:{business.id}",
+        )
+        primary_evidence = playbook_match.evidence.model_copy(
+            update={"statement": strategy.evidence_statement}
+        )
+        evidence = [
+            primary_evidence,
+            *(item for item in evidence if item is not playbook_match.evidence),
+        ][:6]
+        observation = strategy.evidence_statement
         raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
         contact_url = _find_string(raw, _CONTACT_URL_KEYS)
         email = _optional_string(snapshot.get("contact_email")) or _find_string(raw, _EMAIL_KEYS)
@@ -135,13 +183,12 @@ class OutreachPackageService:
         generated = render_outreach(
             OutreachTemplateContext(
                 business_name=business.display_name,
-                evidence=evidence[0],
-                offer=product.offer_summary or product.value_proposition or product.product_name,
-                call_to_action=product.outreach_objective,
+                strategy=strategy,
                 signature=signature,
                 demo_path=demo_path,
             )
         )
+        OutreachPolicyValidator().validate(strategy=strategy, generation=generated)
         return OutreachPackageContent(
             observation=observation,
             evidence=evidence,
@@ -150,14 +197,25 @@ class OutreachPackageService:
             form=generated.form if contact_url else None,
             email=generated.email if email else None,
             demo_path=demo_path,
+            strategy=strategy,
         )
 
     def update(self, package_id: str, data: OutreachPackageUpdate) -> OutreachPackageRead:
         row = self._owned(package_id)
         result, _, _, business, _ = self._context(row.audience_result_id)
         original = OutreachPackageContent.model_validate(row.content)
-        if data.content.observation != original.observation or data.content.evidence != original.evidence:
+        if (
+            data.content.observation != original.observation
+            or data.content.evidence != original.evidence
+            or data.content.strategy != original.strategy
+        ):
             raise ValidationError("Verified outreach evidence cannot be edited in a draft update.")
+        if data.content.call and data.content.call.selected_branch:
+            branch_keys = {branch.key for branch in data.content.call.branches}
+            if data.content.call.selected_branch not in branch_keys:
+                raise ValidationError(
+                    "Selected call response is not part of this outreach playbook."
+                )
         row.content = data.content.model_dump()
         self.session.commit()
         self.session.refresh(row)
@@ -333,3 +391,28 @@ def _should_refresh_template(row: OutreachPackageModel) -> bool:
             "that help local service businesses generate more qualified inquiries and quote requests",
         )
     )
+
+
+def _needs_strategy_upgrade(row: OutreachPackageModel) -> bool:
+    if row.provider != "template" or row.prompt_version >= TEMPLATE_VERSION:
+        return False
+    content = row.content if isinstance(row.content, dict) else {}
+    return not isinstance(content.get("strategy"), dict)
+
+
+def _merge_legacy_draft(
+    legacy_data: dict[str, Any],
+    fresh: OutreachPackageContent,
+) -> OutreachPackageContent:
+    legacy = OutreachPackageContent.model_validate(legacy_data)
+    merged = fresh.model_copy(deep=True)
+    merged.message = legacy.message
+    if legacy.call and merged.call:
+        merged.call.opener = legacy.call.opener
+        merged.call.observation = legacy.call.observation
+        merged.call.ask = legacy.call.ask
+    if legacy.form and merged.form:
+        merged.form = legacy.form
+    if legacy.email and merged.email:
+        merged.email = legacy.email
+    return merged
