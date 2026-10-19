@@ -115,6 +115,14 @@ def _record(
             website_status=value("website_status"),
             quote_or_booking_form_present=value("quote_or_booking_form_present"),
             contact_form_present=value("contact_form_present"),
+            uses_https=value("uses_https"),
+            mobile_viewport_present=value("mobile_viewport_present"),
+            primary_cta_present=value("primary_cta_present"),
+            click_to_call_present=value("click_to_call_present"),
+            online_payment_or_financing_present=value(
+                "online_payment_or_financing_present"
+            ),
+            service_area_pages_present=value("service_area_pages_present"),
             review_count=int(review_count) if review_count is not None else None,
             is_chain=business.is_chain,
             is_franchise=business.is_franchise,

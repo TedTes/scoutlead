@@ -590,7 +590,7 @@ def _usable_evidence_condition(
     *,
     include_probable: bool,
 ) -> Any:
-    acceptable_quality = fact.quality_state.notin_(("rejected", "quarantined"))
+    acceptable_quality = fact.quality_state == "published"
     confirmed = and_(
         fact.resolution_state == "confirmed",
         fact.confidence >= int(spec.config.get("minimum_confidence", 90)),
@@ -610,7 +610,7 @@ def _signal_match_confidence(
 ) -> str | None:
     if fact is None:
         return None
-    if fact.quality_state in {"rejected", "quarantined"}:
+    if fact.quality_state != "published":
         return None
     if (
         fact.resolution_state == "confirmed"

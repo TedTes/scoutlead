@@ -1317,7 +1317,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         ]
 
 
-def test_profile_can_rank_with_active_dynamic_signal_definition() -> None:
+def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -1374,13 +1374,10 @@ def test_profile_can_rank_with_active_dynamic_signal_definition() -> None:
             limit=25,
         )
 
-        assert [row["title"] for row in rows] == [businesses[0].display_name]
-        evidence = rows[0]["raw"]["profile_match"]["signals"][definition.key]
-        assert evidence["matched"] is True
-        assert evidence["value"] is False
+        assert rows == []
 
 
-def test_profile_can_rank_probable_not_listed_website_evidence() -> None:
+def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -1446,13 +1443,7 @@ def test_profile_can_rank_probable_not_listed_website_evidence() -> None:
             limit=25,
         )
 
-        assert len(rows) == 2
-        assert business.display_name in {row["title"] for row in rows}
-        for row in rows:
-            match = row["raw"]["profile_match"]
-            assert match["confirmed_signal_count"] == 0
-            assert match["possible_signal_count"] == 1
-            assert match["signals"][definition.key]["confidence"] == "possible"
+        assert rows == []
 
 
 def test_profile_service_expands_signals_and_reports_service_evidence() -> None:

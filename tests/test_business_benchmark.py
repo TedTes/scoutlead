@@ -76,6 +76,35 @@ def test_unknown_predictions_are_not_treated_as_negative_evidence() -> None:
     assert report.gate.passed is False
 
 
+def test_website_action_signal_false_positive_is_measured() -> None:
+    base = _record(
+        website_observed="present",
+        website_expected="present",
+        reviews_observed=20,
+        reviews_expected=20,
+    )
+    record = base.model_copy(
+        update={
+            "observed": base.observed.model_copy(
+                update={"primary_cta_present": False}
+            ),
+            "labels": base.labels.model_copy(
+                update={"primary_cta_present": "yes"}
+            ),
+        }
+    )
+
+    report = evaluate_records(
+        [record],
+        thresholds={"no_primary_cta": 0.9},
+        minimum_reviewed=1,
+        minimum_labels_per_metric=1,
+    )
+
+    assert report.metrics["no_primary_cta"].false_positive == 1
+    assert report.gate.passed is False
+
+
 def test_benchmark_gate_requires_review_volume_and_requested_scope() -> None:
     record = _record(
         website_observed="missing",

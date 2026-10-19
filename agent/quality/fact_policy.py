@@ -15,6 +15,12 @@ FACT_DIMENSIONS = {
     "google_review_count": "reviews_under_15",
     "quote_or_booking_form_present": "no_quote_flow",
     "contact_form_present": "no_contact_form",
+    "uses_https": "missing_https",
+    "mobile_viewport_present": "missing_mobile_viewport",
+    "primary_cta_present": "no_primary_cta",
+    "click_to_call_present": "no_click_to_call",
+    "online_payment_or_financing_present": "no_online_payment_or_financing",
+    "service_area_pages_present": "no_service_area_pages",
 }
 FACT_KEYS_BY_DIMENSION = {value: key for key, value in FACT_DIMENSIONS.items()}
 PRECISION_THRESHOLDS = {
@@ -22,6 +28,12 @@ PRECISION_THRESHOLDS = {
     "reviews_under_15": 0.98,
     "no_quote_flow": 0.90,
     "no_contact_form": 0.90,
+    "missing_https": 0.98,
+    "missing_mobile_viewport": 0.95,
+    "no_primary_cta": 0.90,
+    "no_click_to_call": 0.95,
+    "no_online_payment_or_financing": 0.90,
+    "no_service_area_pages": 0.90,
 }
 MINIMUM_SAMPLE = 30
 MINIMUM_PRECISION_LOWER_BOUND = 0.80

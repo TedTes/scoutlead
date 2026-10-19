@@ -8,6 +8,16 @@ from quality.fact_policy import FactQualityPolicyService
 from quality.repository import QualityRepository, QualityScope
 
 
+NEGATIVE_SIGNAL_DIMENSIONS = {
+    "missing_https": "uses_https",
+    "missing_mobile_viewport": "mobile_viewport_present",
+    "no_primary_cta": "primary_cta_present",
+    "no_click_to_call": "click_to_call_present",
+    "no_online_payment_or_financing": "online_payment_or_financing_present",
+    "no_service_area_pages": "service_area_pages_present",
+}
+
+
 def import_reviewed_records(
     session,
     records: list[BenchmarkRecord],
@@ -107,6 +117,12 @@ def _record_labels(record: BenchmarkRecord):
             expected_contact,
             _negative_boolean(record.observed.contact_form_present),
         )
+    for dimension, field in NEGATIVE_SIGNAL_DIMENSIONS.items():
+        expected = _negative_truth(getattr(record.labels, field))
+        if expected is not None:
+            yield dimension, expected, _negative_boolean(
+                getattr(record.observed, field)
+            )
 
 
 def _truth(value: str) -> bool | None:
