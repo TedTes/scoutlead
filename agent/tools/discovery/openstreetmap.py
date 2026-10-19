@@ -10,6 +10,8 @@ from campaigns.schemas import CampaignRead
 from canonical.normalization import normalize_business_name, normalize_phone
 from shared.errors import ConfigurationError
 from shared.utils import normalize_text, normalize_url
+from source_providers.catalog import niche_slug_for_category
+from source_providers.registry import SourceProviderRegistry
 from tools.base import ToolResult, ToolSlot, measured_tool_result
 from tools.search import SearchResult
 
@@ -17,15 +19,7 @@ from tools.search import SearchResult
 DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
 DEFAULT_NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
 
-_CATEGORY_TAGS: tuple[tuple[tuple[str, ...], tuple[str, str], str], ...] = (
-    (("paint", "painter"), ("craft", "painter"), "paint|painter|painting"),
-    (("roof", "roofer"), ("craft", "roofer"), "roof|roofer|roofing"),
-    (("plumb", "plumber"), ("craft", "plumber"), "plumb|plumber|plumbing"),
-    (("hvac", "heating", "cooling"), ("craft", "hvac"), "hvac|heating|cooling"),
-    (("electric", "electrician"), ("craft", "electrician"), "electric|electrician"),
-    (("landscap", "lawn", "gardener"), ("craft", "gardener"), "landscap|lawn|gardener"),
-    (("clean", "maid"), ("craft", "cleaner"), "cleaning|cleaner|maid"),
-)
+_SOURCE_REGISTRY = SourceProviderRegistry()
 
 
 class OpenStreetMapDiscoveryAdapter:
@@ -210,10 +204,17 @@ def result_from_osm_element(
 
 
 def _category_rule(category: str) -> tuple[tuple[str, str] | None, str]:
-    normalized = category.lower()
-    for terms, tag, pattern in _CATEGORY_TAGS:
-        if any(term in normalized for term in terms):
-            return tag, pattern
+    normalized = re.sub(r"[^a-z0-9]+", " ", category.lower()).strip()
+    niche_slug = niche_slug_for_category(normalized)
+    templates = _SOURCE_REGISTRY.templates(
+        provider_id="openstreetmap",
+        niche_slug=niche_slug,
+    )
+    if templates:
+        metadata = templates[0].metadata
+        tag_filters = tuple(metadata.get("tag_filters") or ())
+        tag = tuple(tag_filters[0]) if tag_filters else None
+        return tag, str(metadata["name_pattern"])
     words = [
         re.escape(word)
         for word in re.findall(r"[a-z0-9]+", normalized)

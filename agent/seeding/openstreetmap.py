@@ -8,6 +8,7 @@ import httpx
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from seeding.schemas import BusinessSeedInput
 from shared.utils import normalize_text, normalize_url
+from source_providers.registry import SourceProviderRegistry
 
 
 DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
@@ -28,69 +29,16 @@ class OpenStreetMapNichePlan:
 
 
 NICHE_PLANS = {
-    "home_service_roofing": OpenStreetMapNichePlan(
-        seed_niche="home_service_roofing",
-        query_label="roofing contractors",
-        name_pattern="roofing|roofer",
-        tag_filters=(("craft", "roofer"),),
-        required_name_terms=("roofing", "roofer"),
-        excluded_name_terms=("supply", "supplies", "truss", "waterproof"),
-    ),
-    "home_service_hvac": OpenStreetMapNichePlan(
-        seed_niche="home_service_hvac",
-        query_label="HVAC heating and cooling contractors",
-        name_pattern="hvac|heating|cooling|air conditioning",
-        tag_filters=(("craft", "hvac"),),
-        required_name_terms=("hvac", "heating", "cooling", "air conditioning"),
-        excluded_name_terms=(
-            "association",
-            "hospital",
-            "plant",
-            "supply",
-            "supplies",
-            "water cooling system",
-        ),
-        excluded_tag_terms=("doityourself",),
-    ),
-    "home_service_plumbing": OpenStreetMapNichePlan(
-        seed_niche="home_service_plumbing",
-        query_label="plumbing contractors",
-        name_pattern="plumb|drain service",
-        tag_filters=(("craft", "plumber"),),
-        required_name_terms=("plumb", "drain service"),
-        excluded_name_terms=("supply", "supplies", "wholesale"),
-    ),
-    "home_service_electrical": OpenStreetMapNichePlan(
-        seed_niche="home_service_electrical",
-        query_label="electrical contractors",
-        name_pattern="electric|electrical",
-        tag_filters=(("craft", "electrician"),),
-        required_name_terms=("electric", "electrical"),
-        excluded_name_terms=("supply", "supplies", "utility", "wholesale"),
-    ),
-    "home_service_landscaping": OpenStreetMapNichePlan(
-        seed_niche="home_service_landscaping",
-        query_label="landscaping and lawn care companies",
-        name_pattern="landscap|lawn care|garden service",
-        tag_filters=(("craft", "gardener"),),
-        required_name_terms=("landscap", "lawn care", "garden service"),
-        excluded_name_terms=("architect", "network", "pest", "station", "supply", "supplies"),
-    ),
-    "home_service_cleaning": OpenStreetMapNichePlan(
-        seed_niche="home_service_cleaning",
-        query_label="residential and house cleaning companies",
-        name_pattern="cleaning|cleaners|maid",
-        tag_filters=(("craft", "cleaner"),),
-        required_name_terms=(
-            "house cleaning",
-            "home cleaning",
-            "maid",
-            "residential cleaning",
-            "cleaning service",
-        ),
-        excluded_name_terms=("dry clean", "laundry", "carpet", "duct"),
-        excluded_tag_terms=("dry_cleaning", "laundry", "clothes"),
-    ),
+    template.niche_slug: OpenStreetMapNichePlan(
+        seed_niche=template.niche_slug,
+        query_label=template.template,
+        name_pattern=str(template.metadata["name_pattern"]),
+        tag_filters=tuple(template.metadata.get("tag_filters") or ()),
+        required_name_terms=tuple(template.metadata.get("required_name_terms") or ()),
+        excluded_name_terms=tuple(template.metadata.get("excluded_name_terms") or ()),
+        excluded_tag_terms=tuple(template.metadata.get("excluded_tag_terms") or ()),
+    )
+    for template in SourceProviderRegistry().templates(provider_id="openstreetmap")
 }
 
 

@@ -58,6 +58,20 @@ def test_openstreetmap_query_uses_category_tag_and_name_pattern() -> None:
     assert 'paint|painter|painting' in query
 
 
+def test_openstreetmap_query_supports_new_service_categories() -> None:
+    pest_query = build_overpass_query(
+        "pest control services", bbox=(43.5, -79.7, 43.9, -79.1)
+    )
+    garage_query = build_overpass_query(
+        "garage-door repair and installation services",
+        bbox=(43.5, -79.7, 43.9, -79.1),
+    )
+
+    assert '["craft"="pest_control"]' in pest_query
+    assert "pest control|exterminat|wildlife removal" in pest_query
+    assert "garage door|overhead door" in garage_query
+
+
 def _source() -> CampaignSourceRead:
     return CampaignSourceRead(
         id="source_1",

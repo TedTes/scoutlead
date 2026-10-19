@@ -459,6 +459,10 @@ def test_profile_options_come_from_backend_capabilities_and_hide_disabled_niches
             "roofers",
             "plumbers",
             "electricians",
+            "cleaners",
+            "landscapers",
+            "pest_control",
+            "garage_doors",
         ]
 
         disabled = _niche(

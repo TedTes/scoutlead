@@ -12,6 +12,7 @@ from products.repository import ProductRepository
 from products.schemas import ProductRead
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.schemas import SourceRequestCreate, SourceRequestIntent
+from source_providers.registry import SourceProviderRegistry
 from territories.profile_catalog import profile_trade_spec
 
 
@@ -37,7 +38,15 @@ def enqueue_profile_source_expansion(
     )
     segments = BusinessIndexRepository(session)
     queue = QueueService(session)
-    compiler = SourceRequestCompiler()
+    compiler = SourceRequestCompiler(
+        SourceProviderRegistry.configured(
+            google_places_configured=google_places_configured,
+            search_configured=search_configured,
+            openstreetmap_enabled=openstreetmap_enabled,
+            apify_sources=apify_sources,
+            source_templates=source_recipes,
+        )
+    )
     target_business_count = min(100, max(profile.batch_size * 4, profile.batch_size))
     queued_segment_ids: list[str] = []
 
@@ -66,11 +75,6 @@ def enqueue_profile_source_expansion(
                 run_immediately=False,
             ),
             product=product,
-            google_places_configured=google_places_configured,
-            search_configured=search_configured,
-            openstreetmap_enabled=openstreetmap_enabled,
-            apify_sources=apify_sources,
-            source_recipes=source_recipes,
             intent=intent,
             website_policy="any",
         )

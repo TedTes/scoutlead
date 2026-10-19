@@ -34,6 +34,7 @@ from source_items.schemas import (
 )
 from source_requests.schemas import SourceTask
 from source_requests.compiler import SourceRequestCompiler
+from source_providers.registry import SourceProviderRegistry
 from source_requests.schemas import SourceRequestCreate, SourceRequestIntent
 from territories.opportunity_audit import (
     WEBSITE_PRESENCE_SOURCE,
@@ -355,20 +356,33 @@ class BusinessIndexRefreshService:
             repository.session.commit()
 
     def rebuild_source_plan(self, segment, product: ProductRead) -> None:
-        if self.discovery_config is None:
-            return
-        apify_sources = [
-            source
-            for source in self.discovery_config.get("apify_sources", [])
-            if source.get("api_token")
-            and source.get("actor_id")
-            and (
-                source.get("input_template")
-                or source.get("search_url_template")
-                or source.get("input_kind")
+        provider_registry = getattr(self.registry, "provider_registry", None)
+        if provider_registry is None:
+            if self.discovery_config is None:
+                return
+            apify_sources = [
+                source
+                for source in self.discovery_config.get("apify_sources", [])
+                if source.get("api_token")
+                and source.get("actor_id")
+                and (
+                    source.get("input_template")
+                    or source.get("search_url_template")
+                    or source.get("input_kind")
+                )
+            ]
+            provider_registry = SourceProviderRegistry.configured(
+                google_places_configured=bool(
+                    self.discovery_config.get("google_places_configured")
+                ),
+                search_configured=bool(self.discovery_config.get("search_configured")),
+                openstreetmap_enabled=bool(
+                    self.discovery_config.get("openstreetmap_enabled", True)
+                ),
+                apify_sources=apify_sources,
+                source_templates=list(self.discovery_config.get("source_recipes", [])),
             )
-        ]
-        plan = SourceRequestCompiler().compile_auto(
+        plan = SourceRequestCompiler(provider_registry).compile_auto(
             request=SourceRequestCreate(
                 product_id=product.id,
                 source="auto",
@@ -379,15 +393,6 @@ class BusinessIndexRefreshService:
                 run_immediately=False,
             ),
             product=product,
-            google_places_configured=bool(
-                self.discovery_config.get("google_places_configured")
-            ),
-            search_configured=bool(self.discovery_config.get("search_configured")),
-            openstreetmap_enabled=bool(
-                self.discovery_config.get("openstreetmap_enabled", True)
-            ),
-            apify_sources=apify_sources,
-            source_recipes=list(self.discovery_config.get("source_recipes", [])),
             intent=SourceRequestIntent(
                 business_category=segment.niche.category or segment.niche.label,
                 location=segment.market_label,

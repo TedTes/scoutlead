@@ -164,7 +164,7 @@ class Settings(BaseSettings):
         ]
 
     @property
-    def discovery_source_recipe_configs(self) -> list[dict[str, Any]]:
+    def source_template_configs(self) -> list[dict[str, Any]]:
         if not self.discovery_source_recipes:
             return []
         parsed = json.loads(self.discovery_source_recipes)
@@ -179,6 +179,11 @@ class Settings(BaseSettings):
             if recipe_id and query_template:
                 recipes.append({**item, "id": recipe_id, "query_template": query_template})
         return recipes
+
+    @property
+    def discovery_source_recipe_configs(self) -> list[dict[str, Any]]:
+        """Backward-compatible alias for the centralized source-template config."""
+        return self.source_template_configs
 
     def _parse_apify_sources(self) -> list[dict[str, Any]]:
         if not self.apify_sources:

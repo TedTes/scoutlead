@@ -109,7 +109,7 @@ def run_once() -> bool:
                                 or source.get("input_kind")
                             )
                         ],
-                        source_recipes=services.settings.discovery_source_recipe_configs,
+                        source_recipes=services.settings.source_template_configs,
                     )
                     for request in session.query(CoverageRequestModel).filter(
                         CoverageRequestModel.run_id == run.id,
@@ -302,7 +302,7 @@ def _source_request_service(
         apify_source_provider_id=services.settings.apify_source_provider_id,
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,
-        source_recipes=services.settings.discovery_source_recipe_configs,
+        source_recipes=services.settings.source_template_configs,
     )
 
 

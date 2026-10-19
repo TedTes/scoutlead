@@ -10,6 +10,8 @@ from products.discovery_policy import (
 from products.schemas import ProductRead
 from shared.errors import ValidationError
 from shared.utils import normalize_text, truncate
+from source_providers.catalog import SourceTemplateSpec
+from source_providers.registry import SourceProviderRegistry
 from source_requests.schemas import (
     AUTO_PROVIDER_ID,
     CONFIGURED_SEARCH_PROVIDER_ID,
@@ -32,6 +34,9 @@ URL_INPUT_KINDS = {
 DEFAULT_SOURCE_RESULT_QUOTA = 25
 
 class SourceRequestCompiler:
+    def __init__(self, registry: SourceProviderRegistry) -> None:
+        self.registry = registry
+
     def compile_google_places(
         self,
         *,
@@ -48,6 +53,7 @@ class SourceRequestCompiler:
         )
         query = queries[0]
         region_code = normalize_places_region_code(intent.country or product.target_geography)
+        provider = self.registry.provider(GOOGLE_PLACES_PROVIDER_ID)
         return SourceRequestPlan(
             source=GOOGLE_PLACES_PROVIDER_ID,
             action=SourceRequestAction.LIST_CONTACTS,
@@ -74,8 +80,8 @@ class SourceRequestCompiler:
                 SourceTask(
                     provider_id=GOOGLE_PLACES_PROVIDER_ID,
                     query=query,
-                    stage=1,
-                    priority=10,
+                    stage=provider.stage if provider else 1,
+                    priority=provider.priority if provider else 10,
                     max_results=min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA),
                     reason="Primary structured local-business discovery.",
                     input={
@@ -103,6 +109,7 @@ class SourceRequestCompiler:
     ) -> SourceRequestPlan:
         source_id = str(source_config.get("id") or request.source).strip()
         source_label = str(source_config.get("label") or source_id)
+        provider = self.registry.provider(source_id)
         quota_request = request.model_copy(
             update={"max_results": min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA)}
         )
@@ -141,8 +148,8 @@ class SourceRequestCompiler:
                 SourceTask(
                     provider_id=source_id,
                     query=query,
-                    stage=3,
-                    priority=30,
+                    stage=provider.stage if provider else 3,
+                    priority=provider.priority if provider else 30,
                     max_results=min(request.max_results, DEFAULT_SOURCE_RESULT_QUOTA),
                     reason=f"Configured fallback discovery through {source_label}.",
                     input={
@@ -163,11 +170,6 @@ class SourceRequestCompiler:
         *,
         request: SourceRequestCreate,
         product: ProductRead,
-        google_places_configured: bool,
-        search_configured: bool,
-        openstreetmap_enabled: bool,
-        apify_sources: list[dict[str, Any]],
-        source_recipes: list[dict[str, Any]],
         intent: SourceRequestIntent,
         website_policy: str = "any",
     ) -> SourceRequestPlan:
@@ -179,18 +181,20 @@ class SourceRequestCompiler:
         )
         queries = list(google_plan.source_inputs.get("search_queries") or [google_plan.query])
         tasks: list[SourceTask] = []
-        if google_places_configured:
+        google_provider = self.registry.provider(GOOGLE_PLACES_PROVIDER_ID)
+        if google_provider and google_provider.enabled:
             tasks.extend(
                 task.model_copy(update={"max_results": DEFAULT_SOURCE_RESULT_QUOTA})
                 for task in google_plan.tasks
             )
-        if openstreetmap_enabled:
+        osm_provider = self.registry.provider(OPENSTREETMAP_PROVIDER_ID)
+        if osm_provider and osm_provider.enabled:
             tasks.append(
                 SourceTask(
                     provider_id=OPENSTREETMAP_PROVIDER_ID,
                     query=intent.search_query,
-                    stage=2,
-                    priority=20,
+                    stage=osm_provider.stage,
+                    priority=osm_provider.priority,
                     max_results=DEFAULT_SOURCE_RESULT_QUOTA,
                     reason="Expand local-business coverage with open map data.",
                     input={
@@ -201,13 +205,14 @@ class SourceRequestCompiler:
                     config={"website_policy": website_policy},
                 )
             )
-        if search_configured:
+        search_provider = self.registry.provider(CONFIGURED_SEARCH_PROVIDER_ID)
+        if search_provider and search_provider.enabled:
             tasks.append(
                 SourceTask(
                     provider_id=CONFIGURED_SEARCH_PROVIDER_ID,
                     query=intent.search_query,
-                    stage=2,
-                    priority=25,
+                    stage=search_provider.stage,
+                    priority=search_provider.priority,
                     max_results=DEFAULT_SOURCE_RESULT_QUOTA,
                     reason="Expand coverage through public-web business results.",
                     input={
@@ -218,38 +223,46 @@ class SourceRequestCompiler:
                     config={"website_policy": website_policy},
                 )
             )
-        if search_configured:
-            for index, recipe in enumerate(source_recipes):
-                query = _render_search_recipe(recipe, intent=intent, product=product)
+        if search_provider and search_provider.enabled:
+            recipes = self.registry.templates_for_category(
+                CONFIGURED_SEARCH_PROVIDER_ID,
+                intent.business_category,
+            )
+            for index, recipe in enumerate(recipes):
+                query = _render_search_template(recipe, intent=intent, product=product)
                 if not query:
                     continue
                 tasks.append(
                     SourceTask(
                         provider_id=CONFIGURED_SEARCH_PROVIDER_ID,
                         query=query,
-                        stage=int(recipe.get("stage") or 3),
-                        priority=int(recipe.get("priority") or 40 + index),
+                        stage=int(recipe.metadata.get("stage") or 3),
+                        priority=int(recipe.metadata.get("priority") or 40 + index),
                         max_results=min(
                             DEFAULT_SOURCE_RESULT_QUOTA,
-                            int(recipe.get("max_results") or DEFAULT_SOURCE_RESULT_QUOTA),
+                            int(
+                                recipe.metadata.get("max_results")
+                                or DEFAULT_SOURCE_RESULT_QUOTA
+                            ),
                         ),
                         reason=str(
-                            recipe.get("reason")
-                            or f"Search configured public source {recipe['id']}."
+                            recipe.metadata.get("reason")
+                            or f"Search configured public source {recipe.id}."
                         ),
                         input={
                             "source_type": "web_search",
-                            "source_recipe_id": recipe["id"],
+                            "source_recipe_id": recipe.id,
+                            "source_template_version": recipe.version,
                             "business_category": intent.business_category,
                             "location": intent.location,
                         },
                         config={"website_policy": website_policy},
                     )
                 )
-        for source_config in apify_sources:
-            source_id = str(source_config.get("id") or "").strip()
-            if not source_id:
+        for provider in self.registry.providers(enabled_only=True):
+            if provider.adapter_kind != "apify_actor":
                 continue
+            source_config = self.registry.config(provider.id)
             apify_plan = self.compile_apify_source(
                 request=request.model_copy(update={"max_results": DEFAULT_SOURCE_RESULT_QUOTA}),
                 product=product,
@@ -372,8 +385,8 @@ def _template_values(
     }
 
 
-def _render_search_recipe(
-    recipe: dict[str, Any],
+def _render_search_template(
+    recipe: SourceTemplateSpec,
     *,
     intent: SourceRequestIntent,
     product: ProductRead,
@@ -388,9 +401,9 @@ def _render_search_recipe(
         "region": region,
         "country": country or normalize_text(intent.country) or product.target_geography,
         "query": normalize_text(intent.search_query),
-        "domain": normalize_text(recipe.get("domain")),
+        "domain": normalize_text(recipe.metadata.get("domain")),
     }
-    return normalize_text(_render_template(str(recipe.get("query_template") or ""), values))
+    return normalize_text(_render_template(recipe.template, values))
 
 
 def _country_hint(value: str) -> str:

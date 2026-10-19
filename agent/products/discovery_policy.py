@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from shared.errors import ValidationError
+from source_providers.registry import SourceProviderRegistry
 
 
 LOCAL_MARKET_AREAS: dict[str, tuple[str, ...]] = {
@@ -16,15 +17,7 @@ LOCAL_MARKET_AREAS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-CATEGORY_SEARCH_VARIANTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
-    (("paint", "painter"), ("painters", "painting contractors", "house painters")),
-    (("roof", "roofer"), ("roofers", "roofing contractors")),
-    (("plumb", "plumber"), ("plumbers", "plumbing contractors")),
-    (("hvac", "heating", "cooling"), ("HVAC contractors", "heating contractors")),
-    (("electric", "electrician"), ("electricians", "electrical contractors")),
-    (("landscap", "lawn"), ("landscapers", "lawn care companies")),
-    (("clean", "maid"), ("cleaning companies", "house cleaners")),
-)
+_SOURCE_REGISTRY = SourceProviderRegistry()
 
 
 def normalize_places_region_code(value: str | None) -> str | None:
@@ -93,11 +86,12 @@ def build_local_business_queries(
 
 
 def _category_search_variants(category: str) -> tuple[str, ...]:
-    normalized = category.lower()
-    for terms, variants in CATEGORY_SEARCH_VARIANTS:
-        if any(term in normalized for term in terms):
-            return tuple(variant for variant in variants if variant.lower() != normalized)
-    return ()
+    variants = []
+    for template in _SOURCE_REGISTRY.templates_for_category("google_places", category):
+        prefix = template.template.split("{location}", 1)[0].strip()
+        if prefix and prefix.lower() != category.lower():
+            variants.append(prefix)
+    return tuple(dict.fromkeys(variants[:3]))
 
 
 def validate_local_business_intent(

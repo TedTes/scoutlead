@@ -50,6 +50,10 @@ class ProfileTrade(StrEnum):
     ROOFERS = "roofers"
     PLUMBERS = "plumbers"
     ELECTRICIANS = "electricians"
+    CLEANERS = "cleaners"
+    LANDSCAPERS = "landscapers"
+    PEST_CONTROL = "pest_control"
+    GARAGE_DOORS = "garage_doors"
 
 
 class ProfileCustomerKind(StrEnum):
@@ -203,7 +207,7 @@ class ProfileMarket(BaseModel):
 class ProfileCreate(BaseModel):
     product_id: str = Field(min_length=1)
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    trades: list[ProfileTrade] = Field(min_length=1, max_length=5)
+    trades: list[ProfileTrade] = Field(min_length=1, max_length=9)
     customer_kind: ProfileCustomerKind
     market: ProfileMarket
     services: list[str] = Field(default_factory=list, max_length=20)

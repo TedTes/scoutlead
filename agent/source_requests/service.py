@@ -22,6 +22,7 @@ from products.schemas import ProductRead
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.errors import ValidationError
 from shared.utils import utcnow
+from source_providers.registry import SourceProviderRegistry
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.intent import (
     SearchIntentInterpreter,
@@ -53,12 +54,12 @@ class SourceRequestService:
         search_configured: bool | None = None,
         openstreetmap_enabled: bool = True,
         source_recipes: list[dict[str, Any]] | None = None,
+        provider_registry: SourceProviderRegistry | None = None,
     ) -> None:
         self.products = products
         self.campaigns = campaigns
         self.llm = llm or campaigns.llm
         self.intent_interpreter = SearchIntentInterpreter(self.llm)
-        self.compiler = SourceRequestCompiler()
         self.apify_source_provider_id = apify_source_provider_id
         self.apify_source_label = apify_source_label
         self.google_places_configured = (
@@ -78,6 +79,18 @@ class SourceRequestService:
             fallback_provider_id=apify_source_provider_id,
             fallback_label=apify_source_label,
         )
+        self.provider_registry = provider_registry or SourceProviderRegistry.configured(
+            google_places_configured=self.google_places_configured,
+            search_configured=self.search_configured,
+            openstreetmap_enabled=self.openstreetmap_enabled,
+            apify_sources=[
+                config
+                for config in self.apify_sources.values()
+                if _apify_source_is_configured(config)
+            ],
+            source_templates=self.source_recipes,
+        )
+        self.compiler = SourceRequestCompiler(self.provider_registry)
 
     def plan(self, request: SourceRequestCreate) -> SourceRequestPlan:
         return self._prepare(request)[4]
@@ -95,15 +108,6 @@ class SourceRequestService:
             return self.compiler.compile_auto(
                 request=request,
                 product=product,
-                google_places_configured=self.google_places_configured,
-                search_configured=self.search_configured,
-                openstreetmap_enabled=self.openstreetmap_enabled,
-                apify_sources=[
-                    config
-                    for config in self.apify_sources.values()
-                    if _apify_source_is_configured(config)
-                ],
-                source_recipes=self.source_recipes,
                 intent=intent,
                 website_policy=website_policy,
             )

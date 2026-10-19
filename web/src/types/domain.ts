@@ -356,7 +356,16 @@ export type Territory = {
   updated_at: string;
 };
 
-export type ProfileTrade = "painters" | "hvac" | "roofers" | "plumbers" | "electricians";
+export type ProfileTrade =
+  | "painters"
+  | "hvac"
+  | "roofers"
+  | "plumbers"
+  | "electricians"
+  | "cleaners"
+  | "landscapers"
+  | "pest_control"
+  | "garage_doors";
 export type ProfileCustomerKind = "residential" | "commercial";
 export type ProfileSignal = string;
 export type ProfileExclusion = "closed" | "chains" | "franchises" | "directories" | "agencies";

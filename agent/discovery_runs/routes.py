@@ -144,7 +144,7 @@ def _source_request_service(
         google_places_configured=bool(services.settings.google_places_api_key),
         search_configured=services.search.is_configured,
         openstreetmap_enabled=services.settings.openstreetmap_enabled,
-        source_recipes=services.settings.discovery_source_recipe_configs,
+        source_recipes=services.settings.source_template_configs,
     )
 
 

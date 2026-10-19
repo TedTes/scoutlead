@@ -11,6 +11,7 @@ import httpx
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from seeding.schemas import BusinessSeedInput
 from shared.utils import normalize_text, normalize_url
+from source_providers.registry import SourceProviderRegistry
 from tools.discovery.google_places import DEFAULT_GOOGLE_PLACES_ENDPOINT
 
 
@@ -33,59 +34,31 @@ GOOGLE_PLACES_SEED_FIELD_MASK = ",".join(
 )
 
 
-PAINTING_SERVICE_QUERIES = [
-    "residential painters {city}",
-    "house painters {city}",
-    "painting contractors {city}",
-    "interior painters {city}",
-    "exterior painters {city}",
-    "cabinet painters {city}",
-]
-
+_SOURCE_REGISTRY = SourceProviderRegistry()
 NICHE_QUERY_TEMPLATES = {
-    "home_service_painting": PAINTING_SERVICE_QUERIES,
-    "home_service_roofing": [
-        "roofing contractors {city}",
-        "residential roofers {city}",
-        "roof repair companies {city}",
-    ],
-    "home_service_hvac": [
-        "HVAC contractors {city}",
-        "heating and cooling companies {city}",
-        "furnace and air conditioning service {city}",
-    ],
-    "home_service_plumbing": [
-        "plumbers {city}",
-        "plumbing contractors {city}",
-        "residential plumbing services {city}",
-    ],
-    "home_service_electrical": [
-        "electricians {city}",
-        "electrical contractors {city}",
-        "residential electrical services {city}",
-    ],
-    "home_service_landscaping": [
-        "landscaping companies {city}",
-        "residential landscapers {city}",
-        "lawn care services {city}",
-    ],
-    "home_service_cleaning": [
-        "house cleaning companies {city}",
-        "residential cleaning services {city}",
-        "home cleaners {city}",
-    ],
+    template.niche_slug: [
+        row.template
+        for row in _SOURCE_REGISTRY.templates(
+            provider_id="google_places",
+            niche_slug=template.niche_slug,
+        )
+    ]
+    for template in _SOURCE_REGISTRY.templates(provider_id="google_places")
 }
-
+PAINTING_SERVICE_QUERIES = NICHE_QUERY_TEMPLATES["home_service_painting"]
 NICHE_INCLUDED_TYPES = {
-    "home_service_painting": "painter",
-    "home_service_roofing": "roofing_contractor",
-    # Google Places has no HVAC filter type. Keep HVAC precision in the query
-    # text and enforce geography/identity after the response.
-    "home_service_hvac": None,
-    "home_service_plumbing": "plumber",
-    "home_service_electrical": "electrician",
-    "home_service_landscaping": "landscaper",
-    "home_service_cleaning": "cleaning_service",
+    slug: next(
+        (
+            row.metadata.get("place_type")
+            for row in _SOURCE_REGISTRY.templates(
+                provider_id="google_places",
+                niche_slug=slug,
+            )
+            if row.metadata.get("place_type")
+        ),
+        None,
+    )
+    for slug in NICHE_QUERY_TEMPLATES
 }
 
 
@@ -327,7 +300,7 @@ def build_niche_queries(
     place_type = included_type if included_type is not None else NICHE_INCLUDED_TYPES.get(seed_niche)
     return [
         GooglePlacesSeedQuery(
-            text_query=template.format(city=search_city),
+            text_query=template.format(city=search_city, location=search_city),
             seed_market=seed_market,
             region_code=region_code,
             included_type=place_type,

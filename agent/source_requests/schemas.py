@@ -6,12 +6,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from campaigns.schemas import CampaignRead
+from source_providers.catalog import (
+    AUTO_PROVIDER_ID,
+    CONFIGURED_SEARCH_PROVIDER_ID,
+    GOOGLE_PLACES_PROVIDER_ID,
+    OPENSTREETMAP_PROVIDER_ID,
+)
 
-
-GOOGLE_PLACES_PROVIDER_ID = "google_places"
-AUTO_PROVIDER_ID = "auto"
-OPENSTREETMAP_PROVIDER_ID = "openstreetmap"
-CONFIGURED_SEARCH_PROVIDER_ID = "configured_search"
 
 
 class SourceRequestAction(StrEnum):

@@ -4,6 +4,7 @@ from app.dependencies import AppServices
 from business_index.refresh import BusinessIndexRefreshService
 from business_index.pipeline import BusinessIndexPipelineService
 from campaigns.service import CampaignService
+from source_providers.registry import SourceProviderRegistry
 from territories.opportunity_audit import BusinessOpportunityAuditor
 from tools.verify import EmailVerificationTool
 from tools.source_registry import SourceAdapterRegistry
@@ -61,21 +62,23 @@ def business_index_refresh_service(
     services: AppServices,
 ) -> BusinessIndexRefreshService:
     settings = services.settings
+    provider_registry = SourceProviderRegistry.configured(
+        google_places_configured=bool(settings.google_places_api_key),
+        search_configured=services.search.is_configured,
+        openstreetmap_enabled=settings.openstreetmap_enabled,
+        apify_sources=settings.apify_source_configs,
+        source_templates=settings.source_template_configs,
+        google_places_config={
+            "api_key": settings.google_places_api_key,
+            "endpoint": settings.google_places_api_endpoint,
+        },
+    )
     return BusinessIndexRefreshService(
         session=session,
         registry=SourceAdapterRegistry(
             search_tool=services.search,
-            google_places_api_key=settings.google_places_api_key,
-            google_places_api_endpoint=settings.google_places_api_endpoint,
-            apify_api_token=settings.apify_api_token,
-            apify_api_base_url=settings.apify_api_base_url,
-            apify_source_provider_id=settings.apify_source_provider_id,
-            apify_actor_id=settings.apify_actor_id,
-            apify_actor_input_template=settings.apify_actor_input_template,
-            apify_actor_result_mapping=settings.apify_actor_result_mapping,
-            apify_actor_max_charge_usd=settings.apify_actor_max_charge_usd,
-            apify_sources=settings.apify_source_configs,
             timeout_seconds=settings.request_timeout_seconds,
+            provider_registry=provider_registry,
         ),
         campaigns=campaign_service(session=session, services=services, workspace_id=None),
         auditor=BusinessOpportunityAuditor(
@@ -87,13 +90,6 @@ def business_index_refresh_service(
             browser_render_api_key=settings.browser_render_api_key,
         ),
         embedding=services.embedding,
-        discovery_config={
-            "google_places_configured": bool(settings.google_places_api_key),
-            "search_configured": services.search.is_configured,
-            "openstreetmap_enabled": settings.openstreetmap_enabled,
-            "apify_sources": settings.apify_source_configs,
-            "source_recipes": settings.discovery_source_recipe_configs,
-        },
     )
 
 
