@@ -379,7 +379,14 @@ def _quote_form_fact(
             is None
         ):
             continue
-        value = bool(enrichment.get("has_quote_form") or enrichment.get("has_booking_form"))
+        quote = enrichment.get("has_quote_form")
+        booking = enrichment.get("has_booking_form")
+        if quote is True or booking is True:
+            value = True
+        elif quote is False and booking is False:
+            value = False
+        else:
+            continue
         return BusinessFactValue(
             key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
             value=value,
@@ -413,9 +420,12 @@ def _contact_form_fact(
             is None
         ):
             continue
+        value = enrichment.get("has_contact_form")
+        if not isinstance(value, bool):
+            continue
         return BusinessFactValue(
             key=BusinessFactKey.CONTACT_FORM_PRESENT,
-            value=bool(enrichment.get("has_contact_form")),
+            value=value,
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
             confidence=100,

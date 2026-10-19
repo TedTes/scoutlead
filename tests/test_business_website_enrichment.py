@@ -690,6 +690,95 @@ def test_javascript_shell_uses_configured_renderer_for_booking_evidence(monkeypa
     assert result.inspected_urls == ["https://dynamic.example/"]
 
 
+def test_newsletter_form_and_marketing_copy_are_not_conversion_signals(monkeypatch) -> None:
+    html = """
+        <html><body>
+          <p>Contact us to learn about financing available for your next project.</p>
+          <form aria-label="Newsletter signup">
+            <input type="email" name="email" />
+            <button>Subscribe</button>
+          </form>
+        </body></html>
+    """
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda url, **kwargs: FakeResponse(url, html),
+    )
+
+    result = WebsiteEnrichmentClient(max_pages_per_business=1, page_delay_seconds=0).inspect(
+        _target("https://newsletter.example")
+    )
+
+    assert result.has_contact_form is False
+    assert result.has_quote_form is False
+    assert result.page_signals["has_primary_cta"] is False
+    assert result.page_signals["has_online_payment_or_financing"] is False
+
+
+def test_semantic_actions_record_exact_signal_evidence(monkeypatch) -> None:
+    html = """
+        <html><head><meta name="viewport" content="width=device-width"></head><body>
+          <a class="primary" href="/estimate">Request a quote</a>
+          <a href="tel:+14165550101">Call now</a>
+          <a href="/areas-we-serve">Areas we serve</a>
+          <form action="/estimate" aria-label="Request an estimate">
+            <input name="name" />
+            <input type="email" name="email" />
+            <textarea name="project-details"></textarea>
+          </form>
+        </body></html>
+    """
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda url, **kwargs: FakeResponse(url, html),
+    )
+
+    result = WebsiteEnrichmentClient(max_pages_per_business=1, page_delay_seconds=0).inspect(
+        _target("https://actions.example")
+    )
+
+    assert result.has_quote_form is True
+    assert result.page_signals["has_primary_cta"] is True
+    assert result.page_signals["has_click_to_call"] is True
+    assert result.page_signals["has_service_area_pages"] is True
+    evidence = result.page_signals["signal_evidence"]
+    assert evidence["quote_or_booking_form_present"]
+    assert evidence["click_to_call_present"][0]["match"].startswith("tel:")
+
+
+def test_unrendered_javascript_shell_returns_unknown_negative_signals(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda url, **kwargs: FakeResponse(
+            url,
+            "<html><body><div id='root'></div><script></script><script></script>"
+            "<script></script></body></html>",
+        ),
+    )
+
+    result = WebsiteEnrichmentClient(max_pages_per_business=1, page_delay_seconds=0).inspect(
+        _target("https://dynamic.example")
+    )
+
+    assert result.has_contact_form is None
+    assert result.has_quote_form is None
+    assert result.has_booking_form is None
+    assert result.page_signals["has_primary_cta"] is None
+    assert result.page_signals["inspection"]["complete"] is False
+
+
+def _target(website_url: str) -> BusinessTarget:
+    return BusinessTarget(
+        id="business_test",
+        display_name="Example Services",
+        website_url=website_url,
+        phone=None,
+        address=None,
+        geography="Toronto",
+        semantic_text=None,
+    )
+
+
 class FakeResponse:
     def __init__(self, url: str, text: str) -> None:
         self.url = url
@@ -726,7 +815,11 @@ def fake_get(url: str, **kwargs) -> FakeResponse:
             <html>
               <head><title>Request an Estimate</title></head>
               <body>
-                <form><input name="quote" /></form>
+                <form aria-label="Request a free estimate">
+                  <input name="name" />
+                  <input name="email" type="email" />
+                  <textarea name="project-details"></textarea>
+                </form>
                 Request a free quote for interior painting and exterior painting.
               </body>
             </html>

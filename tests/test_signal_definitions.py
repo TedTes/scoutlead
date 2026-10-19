@@ -150,6 +150,54 @@ def test_dynamic_signal_collects_from_existing_observation() -> None:
         assert fact.quality_state == "staged"
 
 
+def test_incomplete_javascript_crawl_does_not_claim_signal_absence(monkeypatch) -> None:
+    class Response:
+        url = "https://dynamic.example/"
+        text = (
+            "<html><body><div id='root'></div><script></script><script></script>"
+            "<script></script></body></html>"
+        )
+        headers = {"content-type": "text/html"}
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda *args, **kwargs: Response(),
+    )
+    factory = _session_factory()
+    with factory() as session:
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="contact_form_present",
+            label="Contact form present",
+            value_type="boolean",
+            category="conversion",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="contact_form",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={},
+            version=1,
+        )
+        business = _business(session)
+        business.website_url = "https://dynamic.example"
+        session.add(definition)
+        session.commit()
+
+        summary = SignalCollectionService(session).collect(
+            definition.id,
+            expected_version=1,
+            business_ids=[business.id],
+        )
+
+        assert summary == {"requested": 1, "observed": 1, "claimed": 0, "unknown": 1}
+        assert all(fact.fact_key != definition.key for fact in business.facts)
+
+
 def test_domain_age_signal_collects_registration_age_from_rdap(monkeypatch) -> None:
     class Response:
         def raise_for_status(self) -> None:

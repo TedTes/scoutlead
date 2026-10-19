@@ -23,6 +23,7 @@ from shared.utils import utcnow
 
 
 RESOLVER_VERSION = 1
+WEBSITE_EXTRACTOR_VERSION = 2
 WEBSITE_COLLECTORS = {"website_http", "website_dom"}
 GOOGLE_SOURCES = {"google_places", "google_places_seed"}
 DOMAIN_COLLECTORS = {"domain_rdap"}
@@ -103,7 +104,11 @@ class SignalCollectionService:
                     source_observation_id=observation.id,
                     confidence=int((definition.config or {}).get("confidence", 100)),
                     extractor=definition.extractor_key or "configured_extractor",
-                    extractor_version=definition.version,
+                    extractor_version=(
+                        WEBSITE_EXTRACTOR_VERSION
+                        if definition.collector_key in WEBSITE_COLLECTORS
+                        else definition.version
+                    ),
                     observed_at=observation.observed_at,
                     expires_at=observation.observed_at
                     + timedelta(days=definition.freshness_days),
@@ -364,6 +369,7 @@ def _website_payload(
             "signal_key": definition.key,
             "signal_version": definition.version,
             "collector_key": definition.collector_key,
+            "extractor_version": WEBSITE_EXTRACTOR_VERSION,
         },
         "website_enrichment": {
             "inspected_urls": enrichment.inspected_urls,

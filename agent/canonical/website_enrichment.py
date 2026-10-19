@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
@@ -68,14 +68,6 @@ QUOTE_TERMS = (
     "on-site estimate",
     "consultation",
 )
-BOOKING_TERMS = (
-    "book online",
-    "book now",
-    "booking",
-    "schedule online",
-    "schedule service",
-    "appointment",
-)
 EMBEDDED_BOOKING_MARKERS = (
     "calendly.com",
     "housecallpro.com",
@@ -85,6 +77,96 @@ EMBEDDED_BOOKING_MARKERS = (
     "setmore.com",
     "servicetitan.com",
     "square.site/appointments",
+)
+EMBEDDED_FORM_MARKERS = (
+    "cognitoforms.com",
+    "form.jotform.com",
+    "formstack.com",
+    "forms.gle",
+    "hubspot.com/forms",
+    "typeform.com",
+    "wufoo.com",
+)
+DYNAMIC_WIDGET_MARKERS = (
+    *EMBEDDED_BOOKING_MARKERS,
+    *EMBEDDED_FORM_MARKERS,
+    "js.hsforms.net",
+    "embed.typeform.com",
+)
+FORM_EXCLUSION_TERMS = (
+    "search",
+    "newsletter",
+    "subscribe",
+    "sign in",
+    "signin",
+    "log in",
+    "login",
+    "coupon",
+)
+CONTACT_FORM_TERMS = (
+    "contact",
+    "message",
+    "inquiry",
+    "enquiry",
+    "send message",
+    "get in touch",
+)
+CONTACT_FIELD_TERMS = (
+    "email",
+    "phone",
+    "telephone",
+    "message",
+    "comments",
+    "details",
+    "name",
+)
+QUOTE_FORM_TERMS = (
+    "quote",
+    "estimate",
+    "pricing request",
+    "project details",
+    "service request",
+)
+BOOKING_FORM_TERMS = (
+    "book",
+    "booking",
+    "schedule",
+    "appointment",
+    "availability",
+    "date",
+    "time slot",
+)
+PRIMARY_CTA_TERMS = (
+    "get a quote",
+    "request a quote",
+    "free estimate",
+    "request an estimate",
+    "book now",
+    "book online",
+    "schedule service",
+    "contact us",
+    "call now",
+    "get started",
+)
+PAYMENT_TERMS = (
+    "pay online",
+    "make a payment",
+    "payment portal",
+    "apply for financing",
+    "financing available",
+)
+PAYMENT_HOST_MARKERS = (
+    "affirm.com",
+    "financeit.ca",
+    "paypal.com",
+    "stripe.com",
+    "squareup.com",
+)
+SERVICE_AREA_TERMS = (
+    "service area",
+    "areas we serve",
+    "locations served",
+    "communities we serve",
 )
 SERVICE_TERMS = (
     "interior painting",
@@ -205,10 +287,13 @@ class WebsitePage:
     emails: list[str] = field(default_factory=list)
     phones: list[str] = field(default_factory=list)
     links: list[str] = field(default_factory=list)
-    has_form: bool = False
-    has_quote_form: bool = False
-    has_booking_form: bool = False
-    has_mobile_viewport: bool = False
+    has_form: bool | None = None
+    has_contact_form: bool | None = None
+    has_quote_form: bool | None = None
+    has_booking_form: bool | None = None
+    has_mobile_viewport: bool | None = None
+    dom_complete: bool = True
+    signal_evidence: dict[str, list[dict[str, str]]] = field(default_factory=dict)
     html_language: str | None = None
     alternate_languages: list[str] = field(default_factory=list)
     alternate_language_urls: list[str] = field(default_factory=list)
@@ -229,9 +314,9 @@ class BusinessWebsiteEnrichment:
     phones: list[str]
     contact_name: str | None
     contact_role: str | None
-    has_contact_form: bool
-    has_quote_form: bool
-    has_booking_form: bool
+    has_contact_form: bool | None
+    has_quote_form: bool | None
+    has_booking_form: bool | None
     uses_https: bool | None
     has_mobile_viewport: bool | None
     quote_signals: list[str]
@@ -407,12 +492,14 @@ class WebsiteEnrichmentClient:
             )
 
         html = response.text or ""
+        render_required = _needs_browser_render(html)
         rendered = self._render_page(str(response.url), html)
         if rendered is not None:
             response_url, html, response_status = rendered
         else:
             response_url = str(response.url)
             response_status = getattr(response, "status_code", 200)
+        dom_complete = not render_required or rendered is not None
         soup = BeautifulSoup(html, "html.parser")
         html_tag = soup.find("html")
         html_language = _normalized_language_code(
@@ -444,6 +531,8 @@ class WebsiteEnrichmentClient:
             }
         )
         has_language_selector = _has_language_selector(soup, alternate_languages)
+        form_signals = _classify_forms(soup, response_url)
+        element_signals = _classify_action_elements(soup, response_url)
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
         title = normalize_text(soup.title.string if soup.title else "")
@@ -456,12 +545,7 @@ class WebsiteEnrichmentClient:
             urljoin(response_url, str(link["href"]))
             for link in soup.find_all("a", href=True)
         ]
-        form_text = " ".join(
-            normalize_text(form.get_text(" "))
-            for form in soup.find_all("form")
-        ).lower()
         has_form = bool(soup.find("form"))
-        form_context = f"{title} {description} {text} {form_text}"
         viewport = soup.find(
             "meta",
             attrs={"name": re.compile(r"^viewport$", re.IGNORECASE)},
@@ -477,12 +561,30 @@ class WebsiteEnrichmentClient:
             phones=_extract_phones(text),
             links=sorted(set(links)),
             has_form=has_form,
-            has_quote_form=has_form and _has_quote_signal(form_context),
-            has_booking_form=(
-                (has_form and bool(_term_hits(form_context, BOOKING_TERMS)))
-                or booking_embed
+            has_contact_form=_known_boolean(
+                bool(form_signals["contact_form"]), dom_complete=dom_complete
+            ),
+            has_quote_form=_known_boolean(
+                bool(form_signals["quote_form"]), dom_complete=dom_complete
+            ),
+            has_booking_form=_known_boolean(
+                bool(form_signals["booking_form"]) or booking_embed,
+                dom_complete=dom_complete,
             ),
             has_mobile_viewport=viewport is not None,
+            dom_complete=dom_complete,
+            signal_evidence={
+                **form_signals,
+                **element_signals,
+                "booking_form": [
+                    *form_signals["booking_form"],
+                    *(
+                        [{"url": response_url, "match": "recognized booking embed"}]
+                        if booking_embed
+                        else []
+                    ),
+                ],
+            },
             html_language=html_language,
             alternate_languages=alternate_languages,
             alternate_language_urls=alternate_language_urls,
@@ -828,6 +930,161 @@ def _target_from_business(business: BusinessModel) -> BusinessTarget:
     )
 
 
+def _known_boolean(value: bool, *, dom_complete: bool) -> bool | None:
+    return value if value or dom_complete else None
+
+
+def _tag_text(tag: Tag) -> str:
+    attributes = " ".join(
+        str(tag.get(name) or "")
+        for name in ("id", "class", "name", "action", "aria-label", "title", "value")
+    )
+    return normalize_text(f"{attributes} {tag.get_text(' ')}").lower()
+
+
+def _form_context(form: Tag, page_url: str) -> str:
+    pieces = [_tag_text(form), urlparse(page_url).path.replace("-", " ").replace("_", " ")]
+    parent = form.find_parent(["section", "article", "main"])
+    if isinstance(parent, Tag):
+        heading = parent.find(["h1", "h2", "h3", "legend"])
+        if isinstance(heading, Tag):
+            pieces.append(normalize_text(heading.get_text(" ")).lower())
+    previous_heading = form.find_previous(["h1", "h2", "h3", "legend"])
+    if isinstance(previous_heading, Tag):
+        pieces.append(normalize_text(previous_heading.get_text(" ")).lower())
+    return " ".join(pieces)
+
+
+def _form_fields(form: Tag) -> set[str]:
+    fields: set[str] = set()
+    for control in form.find_all(["input", "textarea", "select"]):
+        if not isinstance(control, Tag):
+            continue
+        control_type = str(control.get("type") or "").lower()
+        if control_type in {"hidden", "submit", "button", "reset", "image"}:
+            continue
+        text = _tag_text(control)
+        for term in (*CONTACT_FIELD_TERMS, "service", "project", "address", "date", "time"):
+            if term in text:
+                fields.add(term)
+        if control.name == "textarea":
+            fields.add("message")
+    return fields
+
+
+def _evidence(url: str, match: str) -> dict[str, str]:
+    return {"url": url, "match": truncate(normalize_text(match), 240)}
+
+
+def _classify_forms(soup: BeautifulSoup, page_url: str) -> dict[str, list[dict[str, str]]]:
+    evidence: dict[str, list[dict[str, str]]] = {
+        "contact_form": [],
+        "quote_form": [],
+        "booking_form": [],
+    }
+    for form in soup.find_all("form"):
+        if not isinstance(form, Tag):
+            continue
+        context = _form_context(form, page_url)
+        fields = _form_fields(form)
+        has_contact_method = bool(fields.intersection({"email", "phone", "telephone"}))
+        has_message = bool(fields.intersection({"message", "comments", "details"}))
+        has_identity = "name" in fields
+        substantive = has_message or len(fields) >= 3
+        excluded = any(term in context for term in FORM_EXCLUSION_TERMS)
+        quote_intent = any(term in context for term in QUOTE_FORM_TERMS)
+        booking_intent = any(term in context for term in BOOKING_FORM_TERMS)
+        contact_intent = any(term in context for term in CONTACT_FORM_TERMS)
+
+        if quote_intent and (substantive or (has_contact_method and has_identity)):
+            evidence["quote_form"].append(_evidence(page_url, context))
+        if booking_intent and (
+            substantive
+            or bool(fields.intersection({"date", "time", "service"}))
+            or (has_contact_method and has_identity)
+        ):
+            evidence["booking_form"].append(_evidence(page_url, context))
+        if (
+            contact_intent
+            and not excluded
+            and has_contact_method
+            and (has_message or has_identity)
+        ):
+            evidence["contact_form"].append(_evidence(page_url, context))
+    page_path = urlparse(page_url).path.replace("-", " ").replace("_", " ").lower()
+    for frame in soup.find_all("iframe"):
+        if not isinstance(frame, Tag):
+            continue
+        source = str(frame.get("src") or "")
+        context = f"{_tag_text(frame)} {source.lower()} {page_path}"
+        is_embedded_form = any(marker in source.lower() for marker in EMBEDDED_FORM_MARKERS)
+        if any(marker in source.lower() for marker in EMBEDDED_BOOKING_MARKERS):
+            evidence["booking_form"].append(_evidence(page_url, context))
+        elif is_embedded_form and any(term in context for term in QUOTE_FORM_TERMS):
+            evidence["quote_form"].append(_evidence(page_url, context))
+        elif is_embedded_form and any(term in context for term in CONTACT_FORM_TERMS):
+            evidence["contact_form"].append(_evidence(page_url, context))
+    return evidence
+
+
+def _classify_action_elements(
+    soup: BeautifulSoup,
+    page_url: str,
+) -> dict[str, list[dict[str, str]]]:
+    evidence: dict[str, list[dict[str, str]]] = {
+        "primary_cta": [],
+        "click_to_call": [],
+        "online_payment_or_financing": [],
+        "service_area_pages": [],
+    }
+    for element in soup.find_all(["a", "button", "input"]):
+        if not isinstance(element, Tag):
+            continue
+        if element.name == "input" and str(element.get("type") or "").lower() not in {
+            "button",
+            "image",
+            "submit",
+        }:
+            continue
+        href = str(element.get("href") or "").strip()
+        absolute_href = urljoin(page_url, href) if href else ""
+        context = _tag_text(element)
+        match = context or absolute_href
+        if href.lower().startswith("tel:"):
+            evidence["click_to_call"].append(_evidence(page_url, absolute_href))
+        if any(term in context for term in PRIMARY_CTA_TERMS):
+            evidence["primary_cta"].append(_evidence(page_url, match))
+        if (
+            any(term in context for term in PAYMENT_TERMS)
+            or any(marker in absolute_href.lower() for marker in PAYMENT_HOST_MARKERS)
+        ):
+            evidence["online_payment_or_financing"].append(_evidence(page_url, match))
+        path_text = urlparse(absolute_href).path.replace("-", " ").replace("_", " ").lower()
+        if any(term in f"{context} {path_text}" for term in SERVICE_AREA_TERMS):
+            evidence["service_area_pages"].append(_evidence(page_url, match))
+    return evidence
+
+
+def _aggregate_boolean(pages: list[WebsitePage], attribute: str) -> bool | None:
+    values = [getattr(page, attribute) for page in pages]
+    if any(value is True for value in values):
+        return True
+    if values and all(value is False for value in values):
+        return False
+    return None
+
+
+def _aggregate_evidence(
+    pages: list[WebsitePage],
+    evidence_key: str,
+) -> list[dict[str, str]]:
+    unique: dict[tuple[str, str], dict[str, str]] = {}
+    for page in pages:
+        for item in page.signal_evidence.get(evidence_key, []):
+            unique[(item.get("url", ""), item.get("match", ""))] = item
+    return list(unique.values())[:10]
+
+
 def _enrichment_from_pages(
     *,
     business: BusinessModel | BusinessTarget,
@@ -840,9 +1097,9 @@ def _enrichment_from_pages(
     phones = sorted({phone for page in pages for phone in page.phones})
     quote_signals = _term_hits(combined_text, QUOTE_TERMS)
     service_signals = _term_hits(combined_text, SERVICE_TERMS)
-    has_contact_form = any(page.has_form for page in pages)
-    has_quote_form = any(page.has_quote_form for page in pages)
-    has_booking_form = any(page.has_booking_form for page in pages)
+    has_contact_form = _aggregate_boolean(pages, "has_contact_form")
+    has_quote_form = _aggregate_boolean(pages, "has_quote_form")
+    has_booking_form = _aggregate_boolean(pages, "has_booking_form")
     page_signals = _page_signals(
         pages,
         business=business,
@@ -850,6 +1107,30 @@ def _enrichment_from_pages(
         emails=emails,
         phones=phones,
     )
+    uses_https = pages[0].url.lower().startswith("https://") if pages else None
+    has_mobile_viewport = pages[0].has_mobile_viewport if pages else None
+    signal_evidence = page_signals.setdefault("signal_evidence", {})
+    signal_evidence["uses_https"] = (
+        [_evidence(pages[0].url, f"final URL uses {'HTTPS' if uses_https else 'HTTP'}")]
+        if pages
+        else []
+    )
+    signal_evidence["mobile_viewport_present"] = (
+        [_evidence(pages[0].url, "viewport meta declaration")]
+        if has_mobile_viewport is True
+        else []
+    )
+    page_signals["inspection"] = {
+        "complete": bool(page_signals.get("crawl_complete")),
+        "pages": [
+            {
+                "url": page.url,
+                "status_code": page.status_code,
+                "dom_complete": page.dom_complete,
+            }
+            for page in pages
+        ],
+    }
     contact_name, contact_role = _extract_contact_name(combined_text)
     best_email = _best_email(emails, business.website_url)
     source_url = _best_source_url(pages)
@@ -885,8 +1166,8 @@ def _enrichment_from_pages(
         has_contact_form=has_contact_form,
         has_quote_form=has_quote_form,
         has_booking_form=has_booking_form,
-        uses_https=pages[0].url.startswith("https://") if pages else None,
-        has_mobile_viewport=any(page.has_mobile_viewport for page in pages) if pages else None,
+        uses_https=uses_https,
+        has_mobile_viewport=has_mobile_viewport,
         quote_signals=quote_signals,
         service_signals=service_signals,
         source_url=source_url,
@@ -906,10 +1187,6 @@ def _page_signals(
     emails: list[str],
     phones: list[str],
 ) -> dict[str, Any]:
-    text = " ".join(
-        f"{page.title} {page.description} {page.text}" for page in pages
-    ).lower()
-    html = " ".join(page.html for page in pages).lower()
     links = [link.lower() for page in pages for link in page.links]
     declared_languages = sorted(
         {
@@ -927,37 +1204,46 @@ def _page_signals(
     }
     expected_market_languages = _market_languages(business)
 
-    def contains(*terms: str) -> bool:
-        return any(term in text or term in html for term in terms)
+    dom_complete = bool(pages) and all(page.dom_complete for page in pages)
+
+    def evidence_boolean(key: str) -> bool | None:
+        found = bool(_aggregate_evidence(pages, key))
+        return _known_boolean(found, dom_complete=dom_complete)
+
+    text = " ".join(
+        f"{page.title} {page.description} {page.text}" for page in pages
+    ).lower()
+
+    def text_boolean(*terms: str) -> bool | None:
+        return _known_boolean(
+            any(term in text for term in terms),
+            dom_complete=dom_complete,
+        )
+
+    signal_evidence = {
+        "contact_form_present": _aggregate_evidence(pages, "contact_form"),
+        "quote_or_booking_form_present": [
+            *_aggregate_evidence(pages, "quote_form"),
+            *_aggregate_evidence(pages, "booking_form"),
+        ][:10],
+        "primary_cta_present": _aggregate_evidence(pages, "primary_cta"),
+        "click_to_call_present": _aggregate_evidence(pages, "click_to_call"),
+        "online_payment_or_financing_present": _aggregate_evidence(
+            pages, "online_payment_or_financing"
+        ),
+        "service_area_pages_present": _aggregate_evidence(pages, "service_area_pages"),
+    }
 
     return {
-        "has_primary_cta": contains(
-            "get a quote",
-            "request a quote",
-            "free estimate",
-            "book now",
-            "schedule service",
-            "contact us",
-            "call now",
-            "get started",
+        "crawl_complete": dom_complete,
+        "signal_evidence": signal_evidence,
+        "has_primary_cta": evidence_boolean("primary_cta"),
+        "has_click_to_call": evidence_boolean("click_to_call"),
+        "has_online_payment_or_financing": evidence_boolean(
+            "online_payment_or_financing"
         ),
-        "has_click_to_call": any(link.startswith("tel:") for link in links),
-        "has_online_payment_or_financing": contains(
-            "pay online",
-            "online payment",
-            "payment plan",
-            "financing available",
-            "apply for financing",
-            "financeit",
-            "affirm",
-        ),
-        "has_service_area_pages": contains(
-            "service area",
-            "areas we serve",
-            "locations served",
-            "communities we serve",
-        ),
-        "has_testimonials": contains(
+        "has_service_area_pages": evidence_boolean("service_area_pages"),
+        "has_testimonials": text_boolean(
             "testimonials",
             "customer reviews",
             "client reviews",
@@ -965,8 +1251,12 @@ def _page_signals(
             "what our clients say",
         ),
         "has_privacy_policy": any("privacy" in link for link in links)
-        or contains("privacy policy"),
-        "has_complete_contact_details": bool(phones and (emails or has_contact_form)),
+        or "privacy policy" in text,
+        "has_complete_contact_details": (
+            bool(phones and (emails or has_contact_form is True))
+            if has_contact_form is not None or emails
+            else None
+        ),
         "html_language_present": any(page.html_language for page in pages),
         "hreflang_present": any(page.alternate_languages for page in pages),
         "language_selector_present": any(page.has_language_selector for page in pages),
@@ -1062,7 +1352,10 @@ def _needs_browser_render(html: str) -> bool:
         soup.find(id=value) is not None
         for value in ("app", "root", "__next", "__nuxt")
     )
-    return len(visible) < 120 and (script_count >= 3 or has_app_root)
+    has_dynamic_widget = any(marker in html.lower() for marker in DYNAMIC_WIDGET_MARKERS)
+    return has_dynamic_widget or (has_app_root and script_count >= 1) or (
+        len(visible) < 120 and script_count >= 3
+    )
 
 
 def _availability_assessment(
@@ -1610,10 +1903,6 @@ def _term_hits(text: str, terms: tuple[str, ...]) -> list[str]:
     return [term for term in terms if term in lower]
 
 
-def _has_quote_signal(text: str) -> bool:
-    return bool(_term_hits(text, QUOTE_TERMS))
-
-
 def _business_ids_with_email(session: Session, business_ids: list[str]) -> set[str]:
     if not business_ids:
         return set()
@@ -1663,9 +1952,9 @@ def _empty_enrichment(
         phones=[],
         contact_name=None,
         contact_role=None,
-        has_contact_form=False,
-        has_quote_form=False,
-        has_booking_form=False,
+        has_contact_form=None,
+        has_quote_form=None,
+        has_booking_form=None,
         uses_https=None,
         has_mobile_viewport=None,
         quote_signals=[],
@@ -1675,6 +1964,11 @@ def _empty_enrichment(
         errors=errors or [error],
         availability_status=availability_status,
         availability_reason=availability_reason,
+        page_signals={
+            "crawl_complete": False,
+            "signal_evidence": {},
+            "inspection": {"complete": False, "pages": []},
+        },
     )
 
 
