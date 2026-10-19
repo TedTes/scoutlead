@@ -36,7 +36,6 @@ export function TraceDebugScreen({ onExit }: TraceDebugScreenProps) {
     selectedDiscoveryRunId,
     setSelectedDiscoveryRunId,
     refreshSnapshot,
-    snapshot,
   } = useAppData();
   const urlRunId = useMemo(() => new URLSearchParams(window.location.search).get("run") || "", []);
   const [runId, setRunId] = useState(urlRunId || selectedDiscoveryRunId || discoveryRuns[0]?.id || "");

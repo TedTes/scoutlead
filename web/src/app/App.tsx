@@ -1,6 +1,5 @@
 import {
   ArrowRight,
-  CalendarClock,
   Check,
   ChevronDown,
   CircleX,
@@ -30,7 +29,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  type SetStateAction,
 } from "react";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
@@ -38,7 +36,6 @@ import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-
 import { AppDataProvider, useAppData } from "../state/app-data";
 import type {
   DiscoveryResult,
-  DiscoveryRun,
   Product,
   ProductProfileInput,
   Territory,
@@ -94,14 +91,12 @@ function AppShell({
   const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
   const [leadListRequestId, setLeadListRequestId] = useState(0);
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
-  const [sourceReviewSummary, setSourceReviewSummary] = useState<{ runId: string; count: number } | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [productMenuOpen, setProductMenuOpen] = useState(false);
   const [renameAudience, setRenameAudience] = useState<Territory | null>(null);
   const [deleteAudience, setDeleteAudience] = useState<Territory | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [draftRunName, setDraftRunNameState] = useState<string | null>(null);
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
@@ -144,16 +139,10 @@ function AppShell({
     renameProfile,
     deleteProfile,
     deleteProduct,
-    deleteDiscoveryRuns,
-    renameDiscoveryRun,
     refreshSnapshot,
   } = useAppData();
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
-  const productRunLabels = useMemo(
-    () => groupedRunLabels(productDiscoveryRuns, territories.filter((territory) => territory.product_id === selectedProductId)),
-    [productDiscoveryRuns, selectedProductId, territories],
-  );
   const isTraceRoute =
     routePath === "/trace" ||
     routePath === "/debug/trace" ||
@@ -253,17 +242,6 @@ function AppShell({
     setMobileRailOpen(false);
   };
 
-  const setDraftRunName = (nextValue: SetStateAction<string | null>) => {
-    setDraftRunNameState((current) => {
-      const next =
-        typeof nextValue === "function"
-          ? (nextValue as (value: string | null) => string | null)(current)
-          : nextValue;
-      writeDraftRunName(selectedProductId, next);
-      return next;
-    });
-  };
-
   const returnToApp = () => {
     window.history.pushState(null, "", "/app");
     setRoutePath("/app");
@@ -297,41 +275,15 @@ function AppShell({
     setLeadWorkflowView("inbox");
     setWorkflowSummary(null);
     setWorkspaceExpanded(false);
-    setDraftRunNameState(readDraftRunName(productId));
     setViewMode("overview");
   };
 
   const handleDeleteSelectedProduct = async () => {
     if (!selectedProduct) return;
     await deleteProduct(selectedProduct.id);
-    writeDraftRunName(selectedProduct.id, null);
-    setDraftRunNameState(null);
     setSelectedDiscoveryRunId("");
     setViewMode("overview");
     showToast({ title: "Product deleted", message: `${selectedProductName} was removed.`, tone: "green" });
-  };
-
-  const handleRenameRun = async (runId: string, name: string) => {
-    const existingNames = productRunLabels
-      .filter((item) => item.run.id !== runId)
-      .map((item) => item.title);
-    await renameDiscoveryRun(runId, uniqueListName(name, existingNames));
-    showToast({ title: "List renamed", tone: "green" });
-  };
-
-  const handleDeleteRun = async (run: DiscoveryRun) => {
-    await deleteDiscoveryRuns([run.id]);
-    if (selectedDiscoveryRunId === run.id) {
-      setSelectedDiscoveryRunId("");
-      setViewMode("overview");
-    }
-    showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
-  };
-
-  const handleDeleteDraftRun = () => {
-    setDraftRunName(null);
-    setSelectedDiscoveryRunId("");
-    setViewMode("overview");
   };
 
   const handleRenameAudience = async (profile: Territory, label: string) => {
@@ -403,14 +355,6 @@ function AppShell({
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
-
-  useEffect(() => {
-    if (!selectedProductId) {
-      setDraftRunNameState(null);
-      return;
-    }
-    setDraftRunNameState(readDraftRunName(selectedProductId));
-  }, [selectedProductId]);
 
   useEffect(() => {
     if (loading || products.length || localStorage.getItem(onboardingStorageKey) === "dismissed") return;
@@ -767,20 +711,10 @@ function AppShell({
           ) : (
             renderScreen(
               activeScreen,
-              selectScreen,
               {
                 isCreatingProduct: false,
                 onCreatingProductChange: setIsCreatingProduct,
                 onDeleteProduct: handleDeleteSelectedProduct,
-              },
-              {
-                draftRunName: draftRunName ?? undefined,
-                onRunCreated: (run) => {
-                  writeDraftRunName(run.product_id, null);
-                  if (run.product_id === selectedProductId) setDraftRunNameState(null);
-                  setSelectedDiscoveryRunId(run.id);
-                  setViewMode("auto");
-                },
               },
               {
                 listRequestId: leadListRequestId,
@@ -794,9 +728,6 @@ function AppShell({
                     <AccountControl accountSlot={accountSlot} placement="desktop" />
                   </div>
                 ),
-              },
-              {
-                onCountChange: (runId, count) => setSourceReviewSummary({ runId, count }),
               },
             )
           )}
@@ -1064,247 +995,6 @@ function resolveActiveScreen(
   if (viewMode === "product" || viewMode === "integrations") return viewMode;
   if (viewMode !== "auto") return viewMode;
   return hasSelectedRun ? "results" : "overview";
-}
-
-function RunHistoryDraft({
-  active,
-  existingNames,
-  value,
-  onChange,
-  onSelect,
-  onDelete,
-}: {
-  active: boolean;
-  existingNames: string[];
-  value: string;
-  onChange: (value: string) => void;
-  onSelect: () => void;
-  onDelete: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const displayName = value.trim() || "New search";
-
-  useEffect(() => {
-    if (!active) setEditing(false);
-  }, [active]);
-
-  const commitName = () => {
-    onChange(uniqueListName(displayName, existingNames));
-    setEditing(false);
-  };
-
-  const confirmDelete = () => {
-    setConfirmingDelete(false);
-    setEditing(false);
-    onDelete();
-  };
-
-  return (
-    <div className={active ? "list-row-shell run draft active is-active" : "list-row-shell run draft"}>
-      {editing ? (
-        <div className="list-row-editor">
-          <span className="run-dot is-new" />
-          <input
-            aria-label="New list name"
-            autoFocus
-            value={value}
-            onBlur={commitName}
-            onChange={(event) => onChange(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                event.stopPropagation();
-                commitName();
-              }
-            }}
-          />
-        </div>
-      ) : (
-        <button className="list-row-main" type="button" onClick={onSelect} onDoubleClick={() => setEditing(true)}>
-          <span className="run-title">{displayName}</span>
-          <span className="run-meta">
-            <span className="run-dot is-new" />
-            <span className="run-yield">new search</span>
-            <span className="run-when">draft</span>
-          </span>
-        </button>
-      )}
-      {confirmingDelete ? (
-        <div className="run-confirm">
-          <span className="q">Delete draft?</span>
-          <button className="yes" type="button" onClick={confirmDelete}>
-            Delete
-          </button>
-          <button type="button" onClick={() => setConfirmingDelete(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      <div className="list-row-actions run-actions">
-        <button
-          aria-label={`Rename ${displayName}`}
-          className="list-row-action run-act"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            setConfirmingDelete(false);
-            setEditing(true);
-          }}
-        >
-          <Pencil size={12} />
-        </button>
-        <button
-          aria-label={`Delete ${displayName}`}
-          className="list-row-action run-act del danger"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            setEditing(false);
-            setConfirmingDelete(true);
-          }}
-        >
-          <Trash2 size={12} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function RunHistoryItem({
-  active,
-  run,
-  title,
-  contacts,
-  territory,
-  onDelete,
-  onRename,
-  onSelect,
-}: {
-  active: boolean;
-  run: DiscoveryRun;
-  title: string;
-  contacts: DiscoveryResult[];
-  territory?: Territory;
-  onDelete: () => void | Promise<void>;
-  onRename: (runId: string, name: string) => Promise<void>;
-  onSelect: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(title);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    if (!editing) setName(title);
-  }, [editing, title]);
-
-  const commitName = async () => {
-    const nextName = name.trim();
-    if (!nextName) {
-      setName(title);
-      setEditing(false);
-      return;
-    }
-    if (nextName !== title) await onRename(run.id, nextName);
-    setEditing(false);
-  };
-
-  const confirmDelete = async () => {
-    setDeleting(true);
-    try {
-      await onDelete();
-    } finally {
-      setDeleting(false);
-      setConfirmingDelete(false);
-    }
-  };
-
-  return (
-    <div className={active ? "list-row-shell run active is-active" : "list-row-shell run"} title={getRunPrompt(run) || title}>
-      {editing ? (
-        <div className="list-row-editor">
-          <span className={`run-dot ${runDotClass(run)}`} />
-          <input
-            aria-label="Rename run"
-            autoFocus
-            value={name}
-            onBlur={() => void commitName()}
-            onChange={(event) => setName(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setName(title);
-                setEditing(false);
-              }
-              if (event.key === "Enter") void commitName();
-            }}
-          />
-        </div>
-      ) : (
-        <button className="list-row-main" type="button" onClick={onSelect} onDoubleClick={() => setEditing(true)}>
-          <span className="run-title">{title}</span>
-          <span className="run-meta">
-            <span className={`run-dot ${runDotClass(run)}`} />
-            {territory?.unreviewed_batch_count ? (
-              <span className="run-new-badge">New {territory.unreviewed_batch_count}</span>
-            ) : null}
-            <span className="run-yield">
-              {territory?.last_run_at
-                ? `${territory.last_batch_count} leads`
-                : runYield(run, contacts)}
-            </span>
-            <span className={territory?.status === "paused" ? "run-status is-paused" : "run-status"}>
-              {territory ? (
-                <><CalendarClock size={10} /> {territory.status === "active" ? "weekly" : "paused"}</>
-              ) : listMeta(run)}
-            </span>
-            <span className="run-when">
-              {territory?.next_run_at ? formatScheduleDate(territory.next_run_at) : formatRunDate(run.created_at)}
-            </span>
-          </span>
-        </button>
-      )}
-      {confirmingDelete ? (
-        <div className="run-confirm">
-          <span className="q">Delete run?</span>
-          <button className="yes" type="button" disabled={deleting} onClick={() => void confirmDelete()}>
-            Delete
-          </button>
-          <button type="button" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      {!territory ? <div className="list-row-actions run-actions">
-        <button
-          aria-label={`Rename ${title}`}
-          className="list-row-action run-act"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            setConfirmingDelete(false);
-            setEditing(true);
-          }}
-        >
-          <Pencil size={12} />
-        </button>
-        <button
-          aria-label={`Delete ${title}`}
-          className="list-row-action run-act del danger"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            setEditing(false);
-            setConfirmingDelete(true);
-          }}
-        >
-          <Trash2 size={12} />
-        </button>
-      </div> : null}
-    </div>
-  );
 }
 
 function RenameAudienceDialog({
@@ -1581,139 +1271,6 @@ function displayProductName(product: Product) {
   return sentenceStartName?.[1] || savedName || "Unnamed product";
 }
 
-function listLabel(run: DiscoveryRun) {
-  if (run.name && !isGeneratedRunName(run.name) && !isPlaceholderRunName(run.name)) return run.name;
-  const intent = run.source_inputs?.source_request_intent;
-  if (isRecord(intent)) {
-    const category = typeof intent.business_category === "string" ? intent.business_category.trim() : "";
-    const location = typeof intent.location === "string" ? intent.location.trim() : "";
-    if (category && location) return `${titleCase(category)} · ${titleCase(location)}`;
-    if (category) return titleCase(category);
-  }
-  const prompt = getRunPrompt(run);
-  if (prompt) return titleFromQuery(prompt) || prompt;
-  if (run.name && !isPlaceholderRunName(run.name)) return run.name;
-  return "Untitled search";
-}
-
-function groupedRunLabels(runs: DiscoveryRun[], territories: Territory[]) {
-  const territoryById = new Map(territories.map((territory) => [territory.id, territory]));
-  const groupedIds = new Set<string>();
-  const labels: Array<{
-    run: DiscoveryRun;
-    runIds: string[];
-    territory?: Territory;
-    title: string;
-  }> = [];
-  const usedNames: string[] = [];
-
-  for (const run of runs) {
-    const territory = run.territory_id ? territoryById.get(run.territory_id) : undefined;
-    if (territory) {
-      if (groupedIds.has(territory.id)) continue;
-      groupedIds.add(territory.id);
-      const territoryRuns = runs.filter((candidate) => candidate.territory_id === territory.id);
-      const title = uniqueListName(territory.label, usedNames);
-      usedNames.push(title);
-      labels.push({ run: territoryRuns[0] || run, runIds: territoryRuns.map((candidate) => candidate.id), territory, title });
-      continue;
-    }
-    const title = uniqueListName(listLabel(run), usedNames);
-    usedNames.push(title);
-    labels.push({ run, runIds: [run.id], title });
-  }
-  return labels;
-}
-
-function uniqueListName(requestedName: string, existingNames: string[]) {
-  const baseName = collapseListName(requestedName) || "Untitled list";
-  const existing = new Set(existingNames.map(nameKey).filter(Boolean));
-  if (!existing.has(nameKey(baseName))) return baseName;
-
-  let suffix = 1;
-  while (true) {
-    const candidate = `${baseName} ${suffix}`;
-    if (!existing.has(nameKey(candidate))) return candidate;
-    suffix += 1;
-  }
-}
-
-function nameKey(value: string) {
-  return collapseListName(value).toLowerCase();
-}
-
-function collapseListName(value: string) {
-  return value.trim().replace(/\s+/g, " ");
-}
-
-function isGeneratedRunName(value: string) {
-  return /\b(source request|discovery|validation)\b.*\d{4}-\d{2}-\d{2}/i.test(value);
-}
-
-function isPlaceholderRunName(value: string) {
-  return /^(?:page name|test|new test\s*\d*|new search(?:\s+\d+)?)$/i.test(collapseListName(value));
-}
-
-function listMeta(run: DiscoveryRun) {
-  const status = run.status.replace(/_/g, " ");
-  return status;
-}
-
-function runDotClass(run: DiscoveryRun) {
-  const status = run.status.toLowerCase();
-  if (
-    ["expanding", "discovering", "researching", "qualifying", "drafting_outreach", "sending"].includes(
-      status,
-    )
-  ) {
-    return "is-running";
-  }
-  if (["draft", "paused"].includes(status)) return "is-new";
-  if (status === "failed") return "is-failed";
-  return "is-done";
-}
-
-function runYield(run: DiscoveryRun, contacts: DiscoveryResult[]) {
-  const runContacts = contacts.filter((contact) => contact.campaign_id === run.id);
-  const verifiedCount = runContacts.filter((contact) => contact.verification_status === "valid").length;
-  if (runContacts.length && verifiedCount) return `${runContacts.length} · ${verifiedCount} verified`;
-  if (runContacts.length) return `${runContacts.length} found`;
-  if (runDotClass(run) === "is-running") return "searching";
-  return "0 found";
-}
-
-function formatRunDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function formatScheduleDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "weekly";
-  return `next ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
-}
-
-function draftRunStorageKey(productId: string) {
-  return `draftDiscoveryRunName:${productId}`;
-}
-
-function readDraftRunName(productId: string) {
-  if (!productId) return null;
-  const savedName = localStorage.getItem(draftRunStorageKey(productId));
-  return savedName && isPlaceholderRunName(savedName) ? "New search" : savedName;
-}
-
-function writeDraftRunName(productId: string, value: string | null) {
-  if (!productId) return;
-  const key = draftRunStorageKey(productId);
-  if (value === null) {
-    localStorage.removeItem(key);
-    return;
-  }
-  localStorage.setItem(key, value);
-}
-
 function readStoredDimension(key: string, fallback: number, min: number, max: number) {
   try {
     const stored = Number.parseInt(localStorage.getItem(key) || "", 10);
@@ -1729,46 +1286,6 @@ function writeStoredDimension(key: string, value: number) {
   } catch {
     // Resizing remains available when browser storage is disabled.
   }
-}
-
-function titleFromQuery(query: string) {
-  const clean = query
-    .replace(/^(list|find|get|show|search for)\s+/i, "")
-    .replace(/\bcontacts?\b/gi, "")
-    .replace(/^(independent|local|small)\s+/i, "")
-    .trim();
-  const match = clean.match(/^(.+?)\s+(?:in|near|around)\s+(.+?)(?:\s+(?:with|that|who|which|where)\b|$)/i);
-  if (!match) return "";
-  const subject = match[1]
-    .replace(/\bcontacts?\b/gi, "")
-    .replace(/\bcompanies\b/gi, "businesses")
-    .trim();
-  const location = match[2].replace(/[,.].*$/, "").trim();
-  if (!subject || !location) return "";
-  return `${titleCase(subject)} · ${titleCase(location)}`;
-}
-
-function getRunPrompt(run: DiscoveryRun) {
-  const prompt = run.source_inputs?.source_request_prompt;
-  if (typeof prompt === "string" && prompt.trim()) return prompt.trim();
-  const compiledQuery = run.source_inputs?.compiled_query;
-  if (typeof compiledQuery === "string" && compiledQuery.trim() && !compiledQuery.startsWith("http")) {
-    return compiledQuery.trim();
-  }
-  if (run.source_input?.trim() && !run.source_input.trim().startsWith("http")) return run.source_input.trim();
-  return "";
-}
-
-function titleCase(value: string) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
-    .join(" ");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function exportProductContactsCsv(contacts: DiscoveryResult[], fileName: string) {

@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   CircleX,
   Download,
-  ExternalLink,
   Globe,
   ListChecks,
   LoaderCircle,
@@ -497,7 +496,6 @@ const PREVIEW_LEADS = [
 
 const PREVIEW_LEAD_TOTAL = PREVIEW_LEADS.length;
 const PREVIEW_VERIFIED_TOTAL = PREVIEW_LEADS.filter((lead) => lead.statusTone === "green").length;
-const PREVIEW_QUERY = "Toronto Painters Missing Website";
 
 const PREVIEW_RUNS = [
   { title: "Toronto Roofers - Low Reviews", meta: "12 · 9 verified", count: "", date: "Oct 2", tone: "green" },
@@ -1167,15 +1165,6 @@ function DraftSequenceStep({
   );
 }
 
-type PreviewIntegrationTarget = "gmail" | "resend" | "sheets" | "webhook";
-
-const INITIAL_PREVIEW_INTEGRATIONS: Record<PreviewIntegrationTarget, boolean> = {
-  gmail: false,
-  resend: false,
-  sheets: false,
-  webhook: false,
-};
-
 function PreviewRail({
   activeManage,
   activeRun,
@@ -1278,23 +1267,6 @@ function PreviewManageRow({ active, icon, label }: { active: boolean; icon: Reac
   );
 }
 
-function PreviewAppTopbar({ pageName }: { pageName: string }) {
-  return (
-    <div className="preview-appbar">
-      <button className="preview-product-trigger" type="button" tabIndex={-1}>
-        <span>Product</span>
-        <strong>Quotevan</strong>
-        <em>- {pageName}</em>
-        <ChevronDown size={13} />
-      </button>
-      <button className="preview-icon-button" type="button" tabIndex={-1} aria-label="Add preview page">
-        <Plus size={15} />
-      </button>
-      <button className="preview-avatar" type="button" tabIndex={-1} aria-label="Preview account" />
-    </div>
-  );
-}
-
 function PreviewCursor({
   className = "",
   pressed = false,
@@ -1319,59 +1291,6 @@ function PreviewCursor({
           strokeLinejoin="round"
         />
       </svg>
-    </div>
-  );
-}
-
-function PreviewDiscovery({
-  cursorPressed = false,
-  cursorVisible = false,
-  typedLength = PREVIEW_QUERY.length,
-}: {
-  cursorPressed?: boolean;
-  cursorVisible?: boolean;
-  typedLength?: number;
-}) {
-  return (
-    <section className="preview-discovery-screen" aria-label="Preview discovery input">
-      <h3>Define your next audience</h3>
-      <p>Choose the business type, city, and signals. ScoutLead builds the batch and scores each business against your offer.</p>
-      <div className="preview-composer">
-        <span>
-          {PREVIEW_QUERY.slice(0, typedLength)}
-          <span className="preview-cursor" aria-hidden="true" />
-        </span>
-        <div className="preview-composer-send">
-          <button type="button" tabIndex={-1} aria-label="Create preview audience">
-            <ArrowRight size={14} />
-          </button>
-          <PreviewCursor className="preview-cursor-actor--composer" pressed={cursorPressed} visible={cursorVisible} />
-        </div>
-      </div>
-      <span className="preview-section-label">Or start from a signal</span>
-      <div className="preview-template-grid">
-        <PreviewTemplate title="Missing website" tag="Signal">
-          painting businesses in Toronto with no website listed and a public phone number
-        </PreviewTemplate>
-        <PreviewTemplate title="Low reviews" tag="Signal">
-          HVAC businesses in Toronto with fewer than 15 public reviews
-        </PreviewTemplate>
-        <PreviewTemplate title="No quote flow" tag="Signal">
-          roofers in Toronto with no quote or booking flow on their site
-        </PreviewTemplate>
-      </div>
-    </section>
-  );
-}
-
-function PreviewTemplate({ children, tag, title }: { children: ReactNode; tag: string; title: string }) {
-  return (
-    <div className="preview-template">
-      <div>
-        <strong>{title}</strong>
-        <span>{tag}</span>
-      </div>
-      <p>{children}</p>
     </div>
   );
 }
@@ -1690,192 +1609,6 @@ function PreviewDetailRow({
       {icon}
       <dt>{label}</dt>
       <dd>{value}</dd>
-    </div>
-  );
-}
-
-function PreviewIntegrations({
-  connected = INITIAL_PREVIEW_INTEGRATIONS,
-  cursorPressed = false,
-  cursorTarget = "",
-  revealStep = 3,
-}: {
-  connected?: Record<PreviewIntegrationTarget, boolean>;
-  cursorPressed?: boolean;
-  cursorTarget?: PreviewIntegrationTarget | "";
-  revealStep?: number;
-}) {
-  return (
-    <section className="preview-integrations-screen" aria-label="Preview integrations">
-      <p>
-        Connect where approved contacts and outreach go. Nothing sends or exports until you approve a lead.
-      </p>
-      <div aria-hidden={revealStep < 1} className={`preview-reveal${revealStep >= 1 ? "" : " is-hidden"}`}>
-        <div className="preview-account-banner">
-          <CheckCircle2 size={14} />
-          <strong>Gmail & account services connect once, on your account</strong>
-          <span>Account connections <ArrowRight size={12} /></span>
-        </div>
-      </div>
-      <div aria-hidden={revealStep < 2} className={`preview-reveal${revealStep >= 2 ? "" : " is-hidden"}`}>
-        <PreviewIntegrationGroup label="Sending">
-          <PreviewIntegrationRow
-            actionClicked={cursorTarget === "gmail" && cursorPressed}
-            actionConnected={connected.gmail}
-            connected={connected.gmail}
-            showCursor={cursorTarget === "gmail"}
-            badge="G"
-            gmail
-            title="Gmail"
-            status={connected.gmail ? "Connected" : "Off"}
-            body={
-              connected.gmail
-                ? "Approved outreach now sends from your connected Gmail account."
-                : "Send approved outreach from your connected Gmail account."
-            }
-            action={connected.gmail ? "Connected" : "Connect"}
-          />
-          <PreviewIntegrationRow
-            actionClicked={cursorTarget === "resend" && cursorPressed}
-            actionConnected={connected.resend}
-            connected={connected.resend}
-            showCursor={cursorTarget === "resend"}
-            badge="R"
-            dark
-            title="Resend"
-            status={connected.resend ? "Enabled" : "Disabled"}
-            body={
-              connected.resend
-                ? "Transactional sending is enabled as a verified-domain alternative."
-                : "Transactional sending from a verified domain - alternative to Gmail"
-            }
-            action={connected.resend ? "Enabled" : "Enable"}
-          />
-        </PreviewIntegrationGroup>
-      </div>
-      <div aria-hidden={revealStep < 3} className={`preview-reveal${revealStep >= 3 ? "" : " is-hidden"}`}>
-        <PreviewIntegrationGroup label="Workflow outputs">
-          <PreviewIntegrationRow
-            actionClicked={cursorTarget === "sheets" && cursorPressed}
-            connected={connected.sheets}
-            showCursor={cursorTarget === "sheets"}
-            badge="S"
-            green
-            title="Google Sheets"
-            status={connected.sheets ? "On" : undefined}
-            body={
-              connected.sheets
-                ? "Approved contacts sync to the connected sheet after review."
-                : "needs Google Sheets permission - connect separately"
-            }
-            toggle
-            toggleOn={connected.sheets}
-          />
-          <PreviewIntegrationRow
-            actionClicked={cursorTarget === "webhook" && cursorPressed}
-            actionConnected={connected.webhook}
-            connected={connected.webhook}
-            showCursor={cursorTarget === "webhook"}
-            badge="{}"
-            purple
-            title="Webhook"
-            status={connected.webhook ? "Linked" : undefined}
-            body={
-              connected.webhook
-                ? "Webhook link added for approved contacts and outreach events."
-                : "POST approved contacts as JSON - Airtable, Notion, custom, Zapier"
-            }
-            action={connected.webhook ? "Linked" : "Add link"}
-            toggle
-            toggleOn={connected.webhook}
-          />
-          <PreviewIntegrationRow
-            badge="H"
-            coral
-            title="HubSpot"
-            status="Later"
-            body="Create or update CRM contacts with fit verdict and evidence"
-            action="Soon"
-          />
-        </PreviewIntegrationGroup>
-      </div>
-    </section>
-  );
-}
-
-function PreviewIntegrationGroup({ children, label }: { children: ReactNode; label: string }) {
-  return (
-    <div className="preview-integration-group">
-      <span className="preview-section-label">{label}</span>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-function PreviewIntegrationRow({
-  action,
-  actionClicked = false,
-  actionConnected = false,
-  badge,
-  body,
-  connected = false,
-  coral = false,
-  dark = false,
-  gmail = false,
-  green = false,
-  purple = false,
-  showCursor = false,
-  status,
-  title,
-  toggle = false,
-  toggleOn = false,
-}: {
-  action?: string;
-  actionClicked?: boolean;
-  actionConnected?: boolean;
-  badge: string;
-  body: string;
-  connected?: boolean;
-  coral?: boolean;
-  dark?: boolean;
-  gmail?: boolean;
-  green?: boolean;
-  purple?: boolean;
-  showCursor?: boolean;
-  status?: string;
-  title: string;
-  toggle?: boolean;
-  toggleOn?: boolean;
-}) {
-  const badgeTone = gmail ? " gmail" : dark ? " dark" : green ? " green" : purple ? " purple" : coral ? " coral" : "";
-  return (
-    <div className={`preview-integration-row${connected ? " is-connected" : ""}`}>
-      <span className={`preview-integration-badge${badgeTone}`}>{badge}</span>
-      <div>
-        <strong>
-          {title} {status ? <em>{status}</em> : null}
-        </strong>
-        <p>{body}</p>
-      </div>
-      <div className="preview-integration-actions">
-        {action ? (
-          <span className="preview-integration-action-wrap">
-            <button
-              className={`${actionClicked ? "is-clicked" : ""}${actionConnected ? " is-connected" : ""}`.trim()}
-              tabIndex={-1}
-              type="button"
-            >
-              {actionConnected ? <CheckCircle2 size={12} /> : null}
-              {action}
-            </button>
-            <PreviewCursor className="preview-cursor-actor--connect" pressed={actionClicked} visible={showCursor} />
-          </span>
-        ) : null}
-        {toggle ? <span className={`preview-toggle${toggleOn ? " is-on" : ""}`} /> : null}
-        {!action ? (
-          <PreviewCursor className="preview-cursor-actor--connect" pressed={actionClicked} visible={showCursor} />
-        ) : null}
-      </div>
     </div>
   );
 }

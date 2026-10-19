@@ -7541,146 +7541,6 @@ body.is-resizing-navigation .rail {
   margin: 0 12px 12px 40px;
 }
 
-.source-review-tabs {
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  gap: 18px;
-  margin-bottom: 12px;
-}
-
-.source-review-page {
-  margin: 0 auto;
-  max-width: 1040px;
-  padding: 28px 24px 64px;
-  width: 100%;
-}
-
-.source-review-header {
-  align-items: flex-start;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 18px;
-}
-
-.source-review-header > div {
-  min-width: 0;
-}
-
-.source-review-header span {
-  color: var(--faint);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.source-review-header h1 {
-  font-size: 22px;
-  margin: 4px 0;
-}
-
-.source-review-header p,
-.source-review-empty,
-.source-review-error {
-  color: var(--muted);
-  margin: 0;
-}
-
-.source-review-error {
-  color: var(--danger);
-  margin-bottom: 12px;
-}
-
-.source-review-tabs button {
-  background: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
-  padding: 7px 1px;
-}
-
-.source-review-tabs button.active {
-  border-bottom-color: #6f51df;
-  color: var(--text);
-}
-
-.source-review-tabs button span {
-  color: var(--faint);
-  font-size: 10px;
-  margin-left: 3px;
-}
-
-.source-review-list {
-  display: grid;
-  gap: 8px;
-}
-
-.source-review-row {
-  align-items: start;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  padding: 11px 12px;
-}
-
-.source-review-main {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.source-review-main span,
-.source-review-main a,
-.source-review-main small {
-  color: var(--muted);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.source-review-main a {
-  color: var(--text);
-}
-
-.source-review-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.source-review-actions .icon-button {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  color: var(--muted);
-  display: inline-flex;
-  height: 30px;
-  justify-content: center;
-  padding: 0;
-  width: 30px;
-}
-
-.source-review-actions .icon-button:hover:not(:disabled) {
-  background: var(--panel-muted);
-  color: var(--text);
-}
-
-.source-review-row > .trace-json-panel {
-  grid-column: 1 / -1;
-}
-
-@media (max-width: 720px) {
-  .source-review-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .source-review-actions {
-    grid-column: 1 / -1;
-  }
-}
-
 .legacy-trace {
   border-top: 1px solid var(--line);
   margin-top: 22px;
@@ -12676,14 +12536,6 @@ button.bulk-recipient-select:hover {
   margin: 0;
 }
 
-.approval-send-warning {
-  color: var(--muted);
-  flex-basis: 100%;
-  font-size: 12px;
-  line-height: 1.45;
-  margin: 8px 0 0;
-}
-
 .drawer-detail-list {
   margin: 0;
 }
@@ -13427,7 +13279,6 @@ button.bulk-recipient-select:hover {
 .metric-card,
 .status-card,
 .product-list-card,
-.approval-card,
 .conversation-card,
 .connection-card,
 .trace-card {
@@ -13445,7 +13296,6 @@ button.bulk-recipient-select:hover {
 .stats-grid,
 .connection-grid,
 .product-grid,
-.approval-grid,
 .trace-grid {
   display: flex;
   flex-wrap: wrap;

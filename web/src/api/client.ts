@@ -36,7 +36,6 @@ import type {
   ProductProfileInput,
   ProfileBatch,
   ProfileCreateInput,
-  ProfileFactChange,
   ProfileOptions,
   ProfileQueued,
   SourceRequestInput,
@@ -291,10 +290,6 @@ export class ApiClient {
     return this.request<Territory[]>("/territories");
   }
 
-  getProfiles() {
-    return this.request<Territory[]>("/profiles");
-  }
-
   getProfileOptions() {
     return this.request<ProfileOptions>("/profiles/options");
   }
@@ -317,11 +312,6 @@ export class ApiClient {
 
   getProfileBatch(id: string) {
     return this.request<ProfileBatch>(`/profiles/${id}/current-batch`);
-  }
-
-  getProfileChanges(id: string, since?: string) {
-    const query = since ? `?since=${encodeURIComponent(since)}` : "";
-    return this.request<ProfileFactChange[]>(`/profiles/${id}/changes${query}`);
   }
 
   generateDemoSite(resultId: string) {
@@ -418,10 +408,6 @@ export class ApiClient {
 
   updateTerritory(id: string, update: Partial<Pick<Territory, "label" | "status" | "batch_size" | "min_fit" | "refill_policy">>) {
     return this.request<Territory>(`/territories/${id}`, { method: "PATCH", body: update });
-  }
-
-  deleteTerritory(id: string) {
-    return this.request<void>(`/territories/${id}`, { method: "DELETE" });
   }
 
   refreshTerritory(id: string) {
@@ -546,10 +532,6 @@ export class ApiClient {
 
   getMessages(runId: string) {
     return this.request<Message[]>(`/discovery-runs/${runId}/messages`);
-  }
-
-  getWebhookDeliveries(runId: string) {
-    return this.request<WebhookDelivery[]>(`/discovery-runs/${runId}/webhook-deliveries`);
   }
 
   sendApprovedShortlistWebhook(runId: string) {

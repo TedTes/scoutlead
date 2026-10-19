@@ -23,7 +23,6 @@ import {
   Sparkles,
   Star,
   Trash2,
-  User,
   Users,
   Workflow,
   X,
@@ -161,7 +160,6 @@ export function ResultsScreen({
     territoryApi,
     refillProfile,
     refreshAll,
-    refreshSnapshot,
   } = useAppData();
   const { showToast } = useToast();
   const [selectedContactId, setSelectedContactId] = useState("");
@@ -3740,12 +3738,6 @@ function bulkOutreachSkipReason(contact: DiscoveryResult) {
   return "Not ready for outreach.";
 }
 
-function contactStatusLabel(contact: DiscoveryResult) {
-  if (contact.qualification?.qualified) return "Qualified";
-  if (contact.status === "disqualified") return "Disqualified";
-  return "Review";
-}
-
 function reviewStatus(contact: DiscoveryResult): LeadReviewStatus {
   return contact.review_status || "unreviewed";
 }
@@ -3921,14 +3913,6 @@ function contactSearchMatch(contact: DiscoveryResult): {
   return { status: "", reason: "" };
 }
 
-function displayReviewDecision(contact: DiscoveryResult): { label: string; className: string } | null {
-  const status = reviewStatus(contact);
-  if (status === "unreviewed") return null;
-  if (status === "good_fit") return { label: "Accepted", className: "fit-good" };
-  if (status === "maybe") return { label: "Maybe", className: "fit-maybe" };
-  return { label: "Rejected", className: "fit-bad" };
-}
-
 function displayAgentFitStatus(contact: DiscoveryResult): { label: string; className: string } {
   if (searchMatchStatus(contact) === "unknown") {
     return { label: "Needs verification", className: "fit-neutral" };
@@ -3960,10 +3944,6 @@ function contactFitScore(contact: DiscoveryResult) {
 
 function contactReachabilityScore(contact: DiscoveryResult) {
   return getScoreBreakdown(contact).reachabilityScore;
-}
-
-function contactSourceQualityScore(contact: DiscoveryResult) {
-  return getScoreBreakdown(contact).sourceQualityScore;
 }
 
 function legacyFitScore(contact: DiscoveryResult) {
@@ -4016,45 +3996,6 @@ function contactReadinessLabel(contact: DiscoveryResult) {
   if (email) return "Email found";
   if (getPhone(contact)) return "Phone only";
   return "No contact";
-}
-
-function contactReachabilityClass(contact: DiscoveryResult) {
-  const score = contactReachabilityScore(contact);
-  if (verificationStatus(contact) === "invalid") return "quality-bad";
-  if (score >= 65) return "quality-good";
-  if (score >= 25) return "quality-warn";
-  return "quality-muted";
-}
-
-function sourceQualityTierLabel(contact: DiscoveryResult) {
-  const score = contactSourceQualityScore(contact);
-  if (score >= 80) return "Strong";
-  if (score >= 65) return "OK";
-  if (score >= 45) return "Weak";
-  return "Unclear";
-}
-
-function contactSourceQualityLabel(contact: DiscoveryResult) {
-  return `${sourceQualityTierLabel(contact)} source`;
-}
-
-function contactSourceQualityClass(contact: DiscoveryResult) {
-  const score = contactSourceQualityScore(contact);
-  if (score >= 80) return "quality-good";
-  if (score >= 65) return "quality-neutral";
-  if (score >= 45) return "quality-warn";
-  return "quality-muted";
-}
-
-function contactEvidenceLine(contact: DiscoveryResult) {
-  const assessment = getAgentAssessment(contact);
-  const evidence =
-    assessment?.positiveSignals[0] ||
-    contact.research?.signals?.[0] ||
-    contact.research?.summary ||
-    contact.description ||
-    "Open details to review public evidence.";
-  return truncateText(cleanContactEvidenceText(evidence) || evidence, 128);
 }
 
 function contactListCategoryLabel(contact: DiscoveryResult) {
@@ -4782,12 +4723,6 @@ function contactSignals(contact: DiscoveryResult) {
   return signals.length ? [...new Set(signals)].slice(0, 5) : [contact.status.replace(/_/g, " ")];
 }
 
-function disqualificationReason(contact: DiscoveryResult) {
-  if (contact.status !== "disqualified") return "";
-  const flags = contact.research?.disqualifiers?.length ? `Flags: ${contact.research.disqualifiers.join(", ")}` : "";
-  return [contact.qualification?.rationale, flags].filter(Boolean).join(" ");
-}
-
 function runTitle(runName: string, query: string) {
   const cleaned = runName.replace(/\s+discovery\s+\d{4}-.*/i, "").trim();
   if (cleaned && !/^contacts$/i.test(cleaned) && !/\bdiscovery\b/i.test(runName)) return titleCase(cleaned);
@@ -5029,10 +4964,6 @@ function exportContactsCsv(contacts: DiscoveryResult[], fileName: string) {
 function csvCell(value: string | number | undefined) {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
-}
-
-function formatVerificationDetails(details: Record<string, unknown> | null | undefined) {
-  return verificationDetailChips(details).join("; ");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

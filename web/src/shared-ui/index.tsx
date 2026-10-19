@@ -230,7 +230,7 @@ export function LimitRow({ label, value, width, tone }: { label: string; value: 
     <div className="limit-row">
       <span>{label}</span>
       <div className="limit-track">
-        <i className={`tone-${tone}`} />
+        <i className={`tone-${tone}`} style={{ width: `${Math.max(0, Math.min(100, width))}%` }} />
       </div>
       <strong>{value}</strong>
     </div>
