@@ -18,6 +18,7 @@ from business_index.scheduler import (
 from campaigns.service import CampaignService
 from campaigns.schemas import CampaignRead
 from db.models import (
+    BusinessNicheMembershipModel,
     NicheModel,
     QueueJobModel,
     SourceItemDecisionModel,
@@ -383,6 +384,7 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
             queue.complete(job.id)
 
         items = session.query(SourceItemModel).all()
+        memberships = session.query(BusinessNicheMembershipModel).all()
         segment = BusinessIndexRepository(session).get(segment_id)
 
     assert planned["source_job_count"] == 3
@@ -392,6 +394,8 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
         JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
     }
     assert all(item.state == "eligible" for item in items)
+    assert memberships
+    assert all(membership.source_observation_id for membership in memberships)
     assert segment is not None
     assert segment.next_refresh_at > segment.last_refresh_at
 
@@ -543,4 +547,4 @@ def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:
         "status": "unknown",
         "reason": "Website presence has not been verified.",
     }
-    assert raw["business_facts"]["website_status"]["value"] == "not_listed"
+    assert raw["business_facts"]["website_status"]["value"] == "unknown"

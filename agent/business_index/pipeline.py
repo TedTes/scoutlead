@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient
+from business_validation.policy import publication_decision
+from business_validation.validation import BusinessValidationService
 from business_index.refresh import (
     BusinessIndexRefreshService,
     _campaign_source,
@@ -22,7 +24,9 @@ from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessFactModel,
+    BusinessModel,
     QueueJobModel,
+    SourceItemDecisionModel,
     SourceItemModel,
     SourceObservationModel,
 )
@@ -318,20 +322,16 @@ class BusinessIndexPipelineService:
                 "state": "needs_review",
                 "candidate_business_ids": list(link.identity_candidate_ids),
             }
-        self.segments.assign_business(
-            segment,
-            business_id=link.business_id,
-            source_observation_id=link.source_observation_id,
-        )
         self.items.add_decision(
             item.id,
             SourceItemDecisionCreate(
                 stage=SourceItemStage.IDENTITY,
                 decision=SourceItemDecisionValue.RESOLVED,
-                reason="Resolved and assigned to a searchable business segment.",
+                reason="Resolved; business validation is required before publication.",
                 details={
                     "business_id": link.business_id,
                     "resolution": link.identity_resolution,
+                    "source_observation_id": link.source_observation_id,
                 },
             ),
             next_state=SourceItemState.AUDIT_PENDING,
@@ -344,7 +344,7 @@ class BusinessIndexPipelineService:
         )
         return {
             "business_id": link.business_id,
-            "state": "searchable",
+            "state": "validation_pending",
             "signal_collection_queued": True,
         }
 
@@ -361,6 +361,61 @@ class BusinessIndexPipelineService:
         if not resolved_segment_id:
             raise ValueError("segment_id is required when auditing without a source item")
         segment = self._segment(resolved_segment_id)
+        if item is not None:
+            business = self.session.get(BusinessModel, business_id)
+            if business is None:
+                raise ValueError(f"business not found: {business_id}")
+            validator = BusinessValidationService(self.session)
+            validation_candidates = validator.evaluate(
+                business=business,
+                source_item=item,
+                segment=segment,
+            )
+            validation_results = validator.record(validation_candidates, commit=False)
+            decision = publication_decision(validation_results)
+            if not decision.publishable:
+                source_decision = (
+                    SourceItemDecisionValue.REJECTED
+                    if decision.status == "rejected"
+                    else SourceItemDecisionValue.NEEDS_REVIEW
+                )
+                next_state = (
+                    SourceItemState.REJECTED
+                    if decision.status == "rejected"
+                    else SourceItemState.NEEDS_REVIEW
+                )
+                self.items.add_decision(
+                    item.id,
+                    SourceItemDecisionCreate(
+                        stage=SourceItemStage.RELEVANCE,
+                        decision=source_decision,
+                        reason=" ".join(decision.reasons)
+                        or "Business validation requires review.",
+                        details={
+                            "business_id": business_id,
+                            "publication_status": decision.status,
+                            "missing_validations": list(decision.missing),
+                            "validation_results": {
+                                result.validation_type: result.status
+                                for result in validation_results
+                            },
+                        },
+                    ),
+                    next_state=next_state,
+                    business_id=business_id,
+                )
+                if job_id:
+                    self._maybe_complete(segment, current_job_id=job_id)
+                return {
+                    "business_id": business_id,
+                    "state": decision.status,
+                    "reasons": list(decision.reasons),
+                }
+            self.segments.assign_business(
+                segment,
+                business_id=business_id,
+                source_observation_id=_source_observation_id(self.session, item),
+            )
         self.auditor.audit_businesses(
             [business_id],
             category=segment.niche.category if segment.niche else None,
@@ -462,3 +517,16 @@ class BusinessIndexPipelineService:
 
 def _aware(value):
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _source_observation_id(session: Session, item: SourceItemModel) -> str | None:
+    decisions = session.scalars(
+        select(SourceItemDecisionModel)
+        .where(SourceItemDecisionModel.source_item_id == item.id)
+        .order_by(SourceItemDecisionModel.created_at.desc())
+    )
+    for decision in decisions:
+        value = (decision.details or {}).get("source_observation_id")
+        if value:
+            return str(value)
+    return None

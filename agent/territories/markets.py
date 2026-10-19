@@ -14,6 +14,49 @@ MARKET_CENTERS: dict[str, tuple[float, float]] = {
     "markham": (43.8561, -79.3370),
 }
 
+MARKET_LOCATION_TERMS: dict[str, frozenset[str]] = {
+    "toronto gta": frozenset(
+        {
+            "ajax",
+            "aurora",
+            "brampton",
+            "burlington",
+            "etobicoke",
+            "markham",
+            "milton",
+            "mississauga",
+            "newmarket",
+            "north york",
+            "oakville",
+            "oshawa",
+            "pickering",
+            "richmond hill",
+            "scarborough",
+            "toronto",
+            "vaughan",
+            "whitby",
+            "york",
+        }
+    ),
+}
+
 
 def market_center(city: str) -> tuple[float, float] | None:
-    return MARKET_CENTERS.get(semantic_key(city))
+    key = semantic_key(city)
+    if key == "toronto gta":
+        key = "toronto"
+    return MARKET_CENTERS.get(key)
+
+
+def market_matches_location(market_label: str, location: str) -> tuple[bool, list[str]]:
+    market_key = semantic_key(market_label) or ""
+    location_key = semantic_key(location) or ""
+    terms = MARKET_LOCATION_TERMS.get(market_key)
+    if terms is None:
+        terms = frozenset(
+            term
+            for term in market_key.split()
+            if len(term) >= 4 and term not in {"area", "greater", "region"}
+        )
+    matched = sorted(term for term in terms if term in location_key)
+    return bool(matched), matched

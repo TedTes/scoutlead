@@ -13,6 +13,7 @@ from db.models import (
     NicheModel,
     SeedBatchModel,
     SourceObservationModel,
+    ValidationResultModel,
 )
 from db.session import create_database
 from seeding.schemas import BusinessSeedInput
@@ -126,6 +127,34 @@ def test_business_seed_import_is_idempotent() -> None:
         assert _count(session, NicheModel) == 1
         assert _count(session, SeedBatchModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
+
+
+def test_seed_import_records_validation_and_rejects_generic_listing_title() -> None:
+    session_factory = _session_factory()
+
+    with session_factory() as session:
+        BusinessSeedService(session).import_seeds(
+            [
+                painting_seed(
+                    company_name="Professional Painter for hire",
+                    website_url=None,
+                    contact_email=None,
+                )
+            ],
+            batch_id="generic-painting-v1",
+        )
+
+        results = {
+            row.validation_type: row.status
+            for row in session.scalars(select(ValidationResultModel))
+        }
+
+        assert results == {
+            "identity": "passed",
+            "business_identity": "failed",
+            "trade": "passed",
+            "location": "passed",
+        }
 
 
 def test_quarantined_external_identity_is_not_reused() -> None:

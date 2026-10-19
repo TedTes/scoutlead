@@ -5,8 +5,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from business_validation.policy import business_is_publishable
 from canonical.semantics import market_is_compatible, semantic_key
 from db.models import (
+    BusinessModel,
     BusinessIndexSegmentModel,
     BusinessNicheMembershipModel,
     NicheModel,
@@ -102,13 +104,36 @@ class BusinessIndexRepository:
                 BusinessNicheMembershipModel.niche_id == segment.niche_id
             ).where(active_membership_condition())
         )
-        return list(
+        candidate_ids = list(
             dict.fromkeys(
                 membership.business_id
                 for membership in memberships
                 if market_is_compatible(segment.market_key, membership.market_key)
             )
         )
+        if not candidate_ids:
+            return []
+        active_ids = set(
+            self.session.scalars(
+                select(BusinessModel.id).where(
+                    BusinessModel.id.in_(candidate_ids),
+                    BusinessModel.status == "active",
+                )
+            )
+        )
+        eligible: list[str] = []
+        for business_id in candidate_ids:
+            if business_id not in active_ids:
+                continue
+            if not business_is_publishable(
+                self.session,
+                business_id=business_id,
+                niche_id=segment.niche_id,
+                market_key=segment.market_key,
+            ):
+                continue
+            eligible.append(business_id)
+        return eligible
 
     def assign_business(
         self,

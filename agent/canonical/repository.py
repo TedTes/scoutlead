@@ -32,6 +32,7 @@ from canonical.semantics import (
 )
 from canonical.website_evidence import trusted_website_evidence
 from business_facts.service import reconcile_business_facts
+from business_validation.policy import business_is_publishable
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
@@ -227,6 +228,13 @@ class CanonicalRepository:
             if business.id in seen_business_ids:
                 continue
             if not market_is_compatible(resolution.market_key, membership.market_key):
+                continue
+            if business.status != "active" or not business_is_publishable(
+                self.session,
+                business_id=business.id,
+                niche_id=membership.niche_id,
+                market_key=membership.market_key,
+            ):
                 continue
             seen_business_ids.add(business.id)
             row = _observation_to_search_result(observation, business)
@@ -698,6 +706,13 @@ class CanonicalRepository:
         for business, membership in self.session.execute(statement).all():
             if not market_is_compatible(market_key, membership.market_key):
                 continue
+            if business.status != "active" or not business_is_publishable(
+                self.session,
+                business_id=business.id,
+                niche_id=membership.niche_id,
+                market_key=membership.market_key,
+            ):
+                continue
             score = cosine_similarity(query_embedding, business.embedding)
             if score >= min_score:
                 matches.append(NicheBusinessMatch(score, business, membership))
@@ -736,6 +751,13 @@ class CanonicalRepository:
             NicheBusinessMatch(None, business, membership)
             for business, membership in self.session.execute(statement).all()
             if market_is_compatible(market_key, membership.market_key)
+            and business.status == "active"
+            and business_is_publishable(
+                self.session,
+                business_id=business.id,
+                niche_id=membership.niche_id,
+                market_key=membership.market_key,
+            )
         ]
         return matches[:limit]
 

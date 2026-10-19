@@ -16,17 +16,23 @@ from db.models import (
     SourceObservationModel,
 )
 from business_validation.repository import ValidationRepository, ValidationResult
+from niches.catalog import NICHE_BY_SLUG
 from shared.utils import utcnow
-from territories.markets import market_center
+from territories.markets import market_center, market_matches_location
 
 
-VALIDATOR_VERSION = 1
+VALIDATOR_VERSION = 2
 BLOCKED_HOSTS = {
+    "angi.com",
+    "bbb.org",
     "kijiji.ca",
     "craigslist.org",
     "facebook.com",
     "homestars.com",
     "houzz.com",
+    "mapquest.com",
+    "thumbtack.com",
+    "trustedpros.ca",
     "yelp.ca",
     "yelp.com",
     "yellowpages.ca",
@@ -53,11 +59,7 @@ GENERIC_TRADE_TERMS = {
     "services",
 }
 TRADE_TERMS = {
-    "home_service_painting": {"paint", "painter", "painting", "decorating"},
-    "home_service_hvac": {"hvac", "heating", "cooling", "furnace", "air conditioning"},
-    "home_service_roofing": {"roof", "roofer", "roofing"},
-    "home_service_plumbing": {"plumb", "plumber", "plumbing"},
-    "home_service_electrical": {"electric", "electrical", "electrician"},
+    slug: set(spec.trade_terms) for slug, spec in NICHE_BY_SLUG.items()
 }
 
 
@@ -73,17 +75,41 @@ class BusinessValidationService:
         source_item: SourceItemModel,
         segment: BusinessIndexSegmentModel,
     ) -> list:
+        candidates = self.evaluate(
+            business=business,
+            source_item=source_item,
+            segment=segment,
+        )
+        return self.record(candidates)
+
+    def record(
+        self,
+        candidates: list[ValidationResult],
+        *,
+        commit: bool = True,
+    ) -> list:
+        models = [self.results.record(result) for result in candidates]
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
+        return models
+
+    def evaluate(
+        self,
+        *,
+        business: BusinessModel,
+        source_item: SourceItemModel,
+        segment: BusinessIndexSegmentModel,
+    ) -> list[ValidationResult]:
         now = utcnow()
         expires_at = now + timedelta(days=30)
-        candidates = [
+        return [
             self._identity(business, source_item, now, expires_at),
             self._business_type(business, source_item, now, expires_at),
             self._trade(business, source_item, segment, now, expires_at),
             self._location(business, source_item, segment, now, expires_at),
         ]
-        models = [self.results.record(result) for result in candidates]
-        self.session.commit()
-        return models
 
     def validate_observation(
         self,
@@ -92,6 +118,20 @@ class BusinessValidationService:
         observation: SourceObservationModel,
         segment: BusinessIndexSegmentModel,
     ) -> list:
+        candidates = self.evaluate_observation(
+            business=business,
+            observation=observation,
+            segment=segment,
+        )
+        return self.record(candidates)
+
+    def evaluate_observation(
+        self,
+        *,
+        business: BusinessModel,
+        observation: SourceObservationModel,
+        segment: BusinessIndexSegmentModel,
+    ) -> list[ValidationResult]:
         payload = observation.raw_payload or {}
         item = SimpleNamespace(
             id=None,
@@ -101,7 +141,7 @@ class BusinessValidationService:
             title=payload.get("title") or payload.get("displayName") or business.display_name,
             raw_payload=payload,
         )
-        return self.validate(
+        return self.evaluate(
             business=business,
             source_item=item,
             segment=segment,
@@ -127,7 +167,7 @@ class BusinessValidationService:
         host = urlparse(item.source_url or "").netloc.lower().removeprefix("www.")
         title = _normalized(item.title or business.display_name)
         blocked = any(host == value or host.endswith(f".{value}") for value in BLOCKED_HOSTS)
-        generic = title in GENERIC_TITLES or len(title) < 4
+        generic = _is_generic_business_title(title)
         directory = business.is_directory is True
         passed = not (blocked or generic or directory)
         reason = (
@@ -156,26 +196,62 @@ class BusinessValidationService:
         independent_fields = {
             "title": item.title,
             "snippet": payload.get("snippet"),
+            "description": payload.get("description"),
+            "primary_category": payload.get("category"),
             "primary_type": provider_payload.get("primaryTypeDisplayName"),
             "types": provider_payload.get("types"),
             "categories": provider_payload.get("categories"),
         }
         text = _normalized(json.dumps(independent_fields, default=str))
         matched = sorted(term for term in terms if term in text)
-        status = "passed" if matched else "uncertain"
+        spec = NICHE_BY_SLUG.get(slug)
+        excluded = sorted(
+            term for term in (spec.excluded_terms if spec else ()) if term in text
+        )
+        decisive_text = _normalized(
+            " ".join(
+                str(value or "")
+                for value in (
+                    independent_fields["title"],
+                    independent_fields["primary_category"],
+                    independent_fields["primary_type"],
+                )
+            )
+        )
+        decisive_exclusions = sorted(
+            term
+            for term in (spec.excluded_terms if spec else ())
+            if term in decisive_text
+        )
+        status = (
+            "failed"
+            if decisive_exclusions
+            else "passed"
+            if matched
+            else "uncertain"
+        )
         return _result(
             business,
             item,
             segment,
             "trade",
             status,
-            95 if matched else 35,
-            "Independent source fields support the requested trade."
+            95 if decisive_exclusions else 95 if matched else 35,
+            "Independent source fields conflict with the requested trade."
+            if decisive_exclusions
+            else "Independent source fields support the requested trade."
             if matched
             else "The discovery query is not independent evidence of the business trade.",
             observed_at,
             expires_at,
-            evidence=[{"matched_terms": matched, "niche": slug}],
+            evidence=[
+                {
+                    "matched_terms": matched,
+                    "excluded_terms": excluded,
+                    "decisive_excluded_terms": decisive_exclusions,
+                    "niche": slug,
+                }
+            ],
         )
 
     def _location(self, business, item, segment, observed_at, expires_at) -> ValidationResult:
@@ -185,11 +261,14 @@ class BusinessValidationService:
             distance = _distance_km(
                 center[0], center[1], business.latitude, business.longitude
             )
-        market = _normalized(segment.market_label)
         address = _normalized(" ".join([business.address or "", business.geography or ""]))
+        location_matches, matched_market_terms = market_matches_location(
+            segment.market_label,
+            address,
+        )
         supported = bool(
             (distance is not None and distance <= 75)
-            or (market and market in address)
+            or location_matches
         )
         return _result(
             business,
@@ -203,7 +282,12 @@ class BusinessValidationService:
             else "Location could not be independently confirmed for the requested market.",
             observed_at,
             expires_at,
-            evidence=[{"distance_km": round(distance, 2) if distance is not None else None}],
+            evidence=[
+                {
+                    "distance_km": round(distance, 2) if distance is not None else None,
+                    "matched_market_terms": matched_market_terms,
+                }
+            ],
         )
 
 
@@ -240,6 +324,17 @@ def _result(
 
 def _normalized(value: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+
+
+def _is_generic_business_title(title: str) -> bool:
+    return bool(
+        title in GENERIC_TITLES
+        or len(title) < 4
+        or re.match(r"^find\s+.+\s+in\s+", title)
+        or re.match(r"^top\s+\d+\s+", title)
+        or re.search(r"\b(service|services|contractor|contractors)\s+near\s+me$", title)
+        or re.search(r"\bfor\s+hire$", title)
+    )
 
 
 def _trade_terms(niche) -> set[str]:

@@ -236,6 +236,8 @@ def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:
                     "availability_status": "active",
                     "inspected_urls": ["https://maxpaintworks.example"],
                     "phones": ["845-555-0199"],
+                    "has_contact_form": True,
+                    "has_quote_form": True,
                 },
             },
         )
@@ -243,6 +245,8 @@ def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:
         assert business.website_url is None
         facts = BusinessFactRepository(session).map_for_businesses([business.id])
         assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "not_listed"
+        assert BusinessFactKey.CONTACT_FORM_PRESENT.value not in facts[business.id]
+        assert BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value not in facts[business.id]
 
 
 def test_reconciliation_updates_materialized_lead_fact_snapshot() -> None:

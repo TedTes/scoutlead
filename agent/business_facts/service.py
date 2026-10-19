@@ -62,6 +62,28 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
         for key, fact in resolved.items()
     }
     repository = BusinessFactRepository(session)
+    if trusted is None:
+        existing_facts = repository.map_for_businesses([business.id]).get(business.id, {})
+        for key in (
+            BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+            BusinessFactKey.CONTACT_FORM_PRESENT,
+        ):
+            if key.value in resolved or key.value not in existing_facts:
+                continue
+            repository.upsert(
+                business.id,
+                BusinessFactValue(
+                    key=key,
+                    value="unknown",
+                    observed_at=utcnow(),
+                    source_observation_id=None,
+                    confidence=0,
+                    resolution_state="unknown",
+                    quality_state="staged",
+                    expires_at=fact_expires_at(key.value, utcnow()),
+                    resolver_version=RESOLVER_VERSION,
+                ),
+            )
     website_fact_changed = False
     for fact in resolved.values():
         model, value_changed = repository.upsert_with_value_change(business.id, fact)
@@ -86,13 +108,11 @@ def _resolve_facts(
     website = _website_status_fact(business, observations)
     if website is not None:
         facts[website.key.value] = website
-    for resolver in (
-        _quote_form_fact,
-        _contact_form_fact,
-        _google_rating_fact,
-        _google_review_count_fact,
-        _operational_fact,
-    ):
+    for resolver in (_quote_form_fact, _contact_form_fact):
+        fact = resolver(business, observations)
+        if fact is not None:
+            facts[fact.key.value] = fact
+    for resolver in (_google_rating_fact, _google_review_count_fact, _operational_fact):
         fact = resolver(observations)
         if fact is not None:
             facts[fact.key.value] = fact
@@ -128,13 +148,11 @@ def _claims_from_observation(
                 resolver_version=RESOLVER_VERSION,
             )
         )
-    for resolver in (
-        _quote_form_fact,
-        _contact_form_fact,
-        _google_rating_fact,
-        _google_review_count_fact,
-        _operational_fact,
-    ):
+    for resolver in (_quote_form_fact, _contact_form_fact):
+        value = resolver(business, [observation])
+        if value is not None:
+            values.append(value)
+    for resolver in (_google_rating_fact, _google_review_count_fact, _operational_fact):
         value = resolver([observation])
         if value is not None:
             values.append(value)
@@ -344,11 +362,22 @@ def _map_website_status(value: str) -> tuple[str, int] | None:
 
 
 def _quote_form_fact(
+    business: BusinessModel,
     observations: list[SourceObservationModel],
 ) -> BusinessFactValue | None:
     for observation in observations:
         enrichment = (observation.raw_payload or {}).get("website_enrichment")
-        if not isinstance(enrichment, dict) or not enrichment.get("inspected_urls"):
+        if (
+            not isinstance(enrichment, dict)
+            or not enrichment.get("inspected_urls")
+            or trusted_website_evidence(
+                source=observation.source,
+                payload=observation.raw_payload or {},
+                business_name=business.display_name,
+                business_phone=business.phone,
+            )
+            is None
+        ):
             continue
         value = bool(enrichment.get("has_quote_form") or enrichment.get("has_booking_form"))
         return BusinessFactValue(
@@ -367,11 +396,22 @@ def _quote_form_fact(
 
 
 def _contact_form_fact(
+    business: BusinessModel,
     observations: list[SourceObservationModel],
 ) -> BusinessFactValue | None:
     for observation in observations:
         enrichment = (observation.raw_payload or {}).get("website_enrichment")
-        if not isinstance(enrichment, dict) or not enrichment.get("inspected_urls"):
+        if (
+            not isinstance(enrichment, dict)
+            or not enrichment.get("inspected_urls")
+            or trusted_website_evidence(
+                source=observation.source,
+                payload=observation.raw_payload or {},
+                business_name=business.display_name,
+                business_phone=business.phone,
+            )
+            is None
+        ):
             continue
         return BusinessFactValue(
             key=BusinessFactKey.CONTACT_FORM_PRESENT,
