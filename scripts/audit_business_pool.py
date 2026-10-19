@@ -33,6 +33,14 @@ from db.models import (  # noqa: E402
     NicheModel,
     SourceObservationModel,
 )
+from business_facts.repository import (  # noqa: E402
+    BusinessFactKey,
+    BusinessFactRepository,
+    fact_value,
+)
+from business_validation.policy import publication_decision  # noqa: E402
+from business_validation.repository import ValidationRepository  # noqa: E402
+from shared.utils import utcnow  # noqa: E402
 from db.session import Database  # noqa: E402
 
 
@@ -53,8 +61,12 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         session.close()
 
-    if args.json:
-        print(json.dumps(audit, indent=2, sort_keys=True, default=str))
+    if args.json or args.output:
+        rendered = json.dumps(audit, indent=2, sort_keys=True, default=str)
+        if args.output:
+            Path(args.output).write_text(f"{rendered}\n", encoding="utf-8")
+        if args.json:
+            print(rendered)
         return
     print_audit(audit)
 
@@ -67,6 +79,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stale-days", type=int, default=90, help="Rows older than this are stale.")
     parser.add_argument("--duplicate-limit", type=int, default=10, help="Duplicate groups to display.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    parser.add_argument("--output", help="Write the machine-readable audit to this path.")
     return parser.parse_args(argv)
 
 
@@ -134,6 +147,7 @@ def build_audit(
         for business in businesses
         if _aware_datetime(business.last_seen_at) < stale_before
     }
+    quality = _quality_summary(session, businesses, memberships)
 
     return {
         "filters": {
@@ -215,6 +229,74 @@ def build_audit(
                 duplicate_limit,
             ),
         },
+        "quality": quality,
+    }
+
+
+def _quality_summary(
+    session: Session,
+    businesses: list[BusinessModel],
+    memberships: list[BusinessNicheMembershipModel],
+) -> dict[str, int]:
+    business_ids = [business.id for business in businesses]
+    facts = BusinessFactRepository(session).map_for_businesses(business_ids)
+    memberships_by_business: dict[str, list[BusinessNicheMembershipModel]] = defaultdict(list)
+    for membership in memberships:
+        memberships_by_business[membership.business_id].append(membership)
+
+    validation_repository = ValidationRepository(session)
+    statuses: Counter[str] = Counter()
+    now = utcnow()
+    for business in businesses:
+        decisions = []
+        for membership in memberships_by_business[business.id]:
+            current = validation_repository.latest_current(
+                business.id,
+                niche_id=membership.niche_id,
+                market_key=membership.market_key,
+                now=now,
+            )
+            if current:
+                decisions.append(publication_decision(current.values()))
+        if not decisions:
+            statuses["unvalidated"] += 1
+        elif any(decision.status == "publishable" for decision in decisions):
+            statuses["publishable"] += 1
+        elif any(decision.status == "needs_review" for decision in decisions):
+            statuses["needs_review"] += 1
+        else:
+            statuses["rejected"] += 1
+
+    website_contradictions = 0
+    unsupported_form_facts = 0
+    for business in businesses:
+        business_facts = facts.get(business.id, {})
+        website_status = fact_value(
+            business_facts.get(BusinessFactKey.WEBSITE_STATUS.value)
+        )
+        if (business.website_url and website_status in {"missing", "unavailable", "parked"}) or (
+            not business.website_url and website_status == "present"
+        ):
+            website_contradictions += 1
+        form_values = [
+            fact_value(business_facts.get(key.value))
+            for key in (
+                BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                BusinessFactKey.CONTACT_FORM_PRESENT,
+            )
+        ]
+        if any(value is True for value in form_values) and (
+            not business.website_url or website_status != "present"
+        ):
+            unsupported_form_facts += 1
+
+    return {
+        "publishable": statuses["publishable"],
+        "needs_review": statuses["needs_review"],
+        "rejected": statuses["rejected"],
+        "unvalidated": statuses["unvalidated"],
+        "website_contradictions": website_contradictions,
+        "unsupported_form_facts": unsupported_form_facts,
     }
 
 
@@ -224,6 +306,7 @@ def print_audit(audit: dict[str, Any]) -> None:
     sources = audit["sources"]
     taxonomy = audit["taxonomy"]
     history = audit["history"]
+    quality = audit["quality"]
     total = businesses["total"]
 
     print("Business pool audit")
@@ -237,6 +320,12 @@ def print_audit(audit: dict[str, Any]) -> None:
     _print_metric("with embedding", businesses["with_embedding"], total)
     _print_metric("with quote/estimate signal", businesses["with_quote_or_estimate_signal"], total)
     _print_metric(f"stale > {audit['filters']['stale_days']} days", businesses["stale"], total)
+    _print_metric("publishable after validation", quality["publishable"], total)
+    _print_metric("validation needs review", quality["needs_review"], total)
+    _print_metric("validation rejected", quality["rejected"], total)
+    _print_metric("not yet validated", quality["unvalidated"], total)
+    _print_metric("website contradictions", quality["website_contradictions"], total)
+    _print_metric("unsupported form facts", quality["unsupported_form_facts"], total)
     print()
     print(f"Contacts: {contacts['total']}")
     _print_metric("businesses with any contact", contacts["businesses_with_any_contact"], total)

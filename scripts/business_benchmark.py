@@ -15,15 +15,10 @@ from benchmarks.importer import import_reviewed_records  # noqa: E402
 from benchmarks.io import read_jsonl, write_jsonl  # noqa: E402
 from benchmarks.sampler import sample_businesses  # noqa: E402
 from db.session import Database  # noqa: E402
+from niches.catalog import NICHE_BY_SLUG  # noqa: E402
 
 
-DEFAULT_NICHES = [
-    "home_service_painting",
-    "home_service_hvac",
-    "home_service_roofing",
-    "home_service_plumbing",
-    "home_service_electrical",
-]
+DEFAULT_NICHES = list(NICHE_BY_SLUG)
 
 
 def main() -> int:

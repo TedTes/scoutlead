@@ -30,20 +30,11 @@ from db.models import (  # noqa: E402
     NicheModel,
     TerritoryModel,
 )
+from niches.catalog import NICHE_BY_SLUG  # noqa: E402
 
 
 TRADE_TERMS = {
-    "home_service_painting": {"paint", "painter", "painting"},
-    "home_service_hvac": {
-        "air conditioning",
-        "cooling",
-        "furnace",
-        "heating",
-        "hvac",
-    },
-    "home_service_roofing": {"roof", "roofer", "roofing"},
-    "home_service_plumbing": {"plumber", "plumbing"},
-    "home_service_electrical": {"electric", "electrical", "electrician"},
+    slug: set(spec.trade_terms) for slug, spec in NICHE_BY_SLUG.items()
 }
 
 

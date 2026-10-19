@@ -42,6 +42,14 @@ def test_business_pool_audit_reports_filtered_readiness() -> None:
     assert audit["sources"]["by_seed_batch"] == {"painting-toronto-v1": 2}
     assert audit["taxonomy"]["by_niche"] == {"home_service_painting": 2}
     assert audit["taxonomy"]["by_market"] == {"toronto gta": 2}
+    assert audit["quality"] == {
+        "publishable": 2,
+        "needs_review": 0,
+        "rejected": 0,
+        "unvalidated": 0,
+        "website_contradictions": 0,
+        "unsupported_form_facts": 0,
+    }
 
 
 def test_business_pool_audit_handles_empty_pool() -> None:
