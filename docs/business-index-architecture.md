@@ -54,7 +54,7 @@ collect -> immutable observation -> candidate screening -> identity resolution
 
 audience criteria -> published-index query -> dedupe/rank -> audience results
 
-sample -> review labels -> quality metrics -> publication policy -> revalidation
+sample -> offline benchmark evaluation
 ```
 
 ## Migration baseline
@@ -74,8 +74,8 @@ be reprocessed through the new validation and publication policy.
 
 ## Safe rollout
 
-Run these commands against a staging database first. The benchmark import and index reprocessor are
-read-only unless `--apply` is explicitly supplied.
+Run these commands against a staging database first. The index reprocessor is read-only unless
+`--apply` is explicitly supplied.
 
 1. Apply schema migrations:
 
@@ -95,7 +95,7 @@ read-only unless `--apply` is explicitly supplied.
 3. Review the JSONL records and fill `labels`, `reviewer`, `reviewed_at`, and supporting source URLs.
    Keep `unknown` when the evidence does not support a conclusion.
 
-4. Evaluate the reviewed benchmark before it can affect production policy:
+4. Evaluate the reviewed benchmark as an offline release gate:
 
    ```bash
    python scripts/business_benchmark.py evaluate \
@@ -104,18 +104,7 @@ read-only unless `--apply` is explicitly supplied.
      --require-market toronto
    ```
 
-5. Preview and then import the reviewed labels:
-
-   ```bash
-   python scripts/business_benchmark.py import \
-     --input data/benchmarks/toronto-business-accuracy-v1.jsonl
-
-   python scripts/business_benchmark.py import \
-     --input data/benchmarks/toronto-business-accuracy-v1.jsonl \
-     --apply
-   ```
-
-6. Preview the reprocessing scope, then run a small canary:
+5. Preview the reprocessing scope, then run a small canary:
 
    ```bash
    python scripts/reprocess_business_index.py --market toronto
@@ -127,10 +116,10 @@ read-only unless `--apply` is explicitly supplied.
      --apply
    ```
 
-7. Inspect `GET /quality/overview`. Expand the reprocessing scope only when validation,
-   publication, stale-evidence, dead-letter, and benchmark metrics are understood.
+6. Expand the reprocessing scope only when validation, publication, stale-evidence,
+   dead-letter, and offline benchmark metrics are understood.
 
-8. Reprocess the remaining measured scopes:
+7. Reprocess the remaining measured scopes:
 
    ```bash
    python scripts/reprocess_business_index.py --market toronto --apply
