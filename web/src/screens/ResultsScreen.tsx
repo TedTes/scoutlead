@@ -62,10 +62,24 @@ import type {
 import {
   baseExportFileName,
   defaultExportFileName,
-  exportContactEmail,
+  exportContactsCsv,
   normalizeExportFileName,
 } from "../utils/export-file";
 import { formatDate } from "../utils/format";
+import {
+  getAddress,
+  getContactName,
+  getContactUrl,
+  getPhone,
+  getPostedDate,
+  getPrice,
+  getRating,
+  getRawObjects,
+  getRawValue,
+  getReviewCount,
+  isRecord,
+  rawValueToString,
+} from "../utils/contact-fields";
 import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
 
 type DrawerTab = "overview" | "evidence";
@@ -1773,7 +1787,7 @@ function OutreachWorkspace({
                         )}
                       </section>
                     ) : (
-                      <div className="outreach-call-script outreach-call-script-legacy">
+                      <div className="outreach-call-script">
                         <label>
                           <span>Ask</span>
                           <AutoGrowTextarea ariaLabel="Call ask" compact value={draft.call.ask} onChange={(ask) => setDraft({ ...draft, call: { ...draft.call!, ask } })} />
@@ -4770,202 +4784,4 @@ function truncateText(value: string, maxLength: number) {
   const compact = value.replace(/\s+/g, " ").trim();
   if (compact.length <= maxLength) return compact;
   return `${compact.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
-}
-
-function getAddress(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "formattedAddress",
-    "formatted_address",
-    "address",
-    "streetAddress",
-    "fullAddress",
-    "location.address",
-    "location.name",
-    "data.location",
-  ]);
-}
-
-function getRating(contact: DiscoveryResult) {
-  const value = getRawNumber(contact, ["rating", "averageRating", "stars", "reviewRating", "stats.rating"]);
-  return value ? value.toFixed(1) : "";
-}
-
-function getReviewCount(contact: DiscoveryResult) {
-  const value = getRawNumber(contact, [
-    "userRatingCount",
-    "user_ratings_total",
-    "reviewCount",
-    "reviewsCount",
-    "reviews",
-    "stats.reviews",
-  ]);
-  return value ? String(value) : "";
-}
-
-function getPhone(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "normalized_contact_phone",
-    "contact_phone",
-    "nationalPhoneNumber",
-    "internationalPhoneNumber",
-    "phone",
-    "phoneNumber",
-    "phone_number",
-    "telephone",
-    "contactPhone",
-    "sellerPhone",
-    "ownerPhone",
-    "seller.phone",
-    "contact.phone",
-    "data.phone",
-  ]);
-}
-
-function getContactUrl(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "contact_url",
-    "contactUrl",
-    "contactPageUrl",
-    "contact_page_url",
-    "quote_url",
-    "quoteUrl",
-    "booking_url",
-    "bookingUrl",
-    "website_enrichment.contact_url",
-    "messagingUrl",
-    "messaging_url",
-    "seller.messagingUrl",
-    "seller.profileUrl",
-    "seller.profile_url",
-    "profileUrl",
-    "profile_url",
-    "source_url",
-    "listingUrl",
-    "adUrl",
-  ]);
-}
-
-function getContactName(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "normalized_contact_name",
-    "contact_name",
-    "contactName",
-    "sellerName",
-    "ownerName",
-    "seller.name",
-    "contact.name",
-    "data.sellerName",
-  ]);
-}
-
-function getPrice(contact: DiscoveryResult) {
-  return getRawString(contact, ["price", "priceText", "price.text", "amount", "listing.price", "data.price"]);
-}
-
-function getPostedDate(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "postedAt",
-    "posted_at",
-    "datePosted",
-    "publishedAt",
-    "createdAt",
-    "listing.postedAt",
-    "data.postedAt",
-  ]);
-}
-
-function getRawString(contact: DiscoveryResult, keys: string[]) {
-  for (const raw of getRawObjects(contact)) {
-    for (const key of keys) {
-      const text = rawValueToString(getRawValue(raw, key));
-      if (text) return text;
-    }
-  }
-  return "";
-}
-
-function getRawNumber(contact: DiscoveryResult, keys: string[]) {
-  for (const raw of getRawObjects(contact)) {
-    for (const key of keys) {
-      const value = getRawValue(raw, key);
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
-    }
-  }
-  return 0;
-}
-
-function getRawObjects(contact: DiscoveryResult) {
-  const values: Record<string, unknown>[] = [];
-  for (const source of contact.raw_sources || []) {
-    values.push(source);
-    if (isRecord(source.raw)) {
-      values.push(source.raw);
-      if (isRecord(source.raw.raw)) values.push(source.raw.raw);
-    }
-  }
-  return values;
-}
-
-function getRawValue(raw: Record<string, unknown>, key: string): unknown {
-  if (key in raw) return raw[key];
-  return key.split(".").reduce<unknown>((value, part) => {
-    if (Array.isArray(value)) {
-      const index = Number(part);
-      return Number.isInteger(index) ? value[index] : undefined;
-    }
-    if (!isRecord(value)) return undefined;
-    return value[part];
-  }, raw);
-}
-
-function rawValueToString(value: unknown): string {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (isRecord(value)) {
-    return rawValueToString(
-      value.text ?? value.name ?? value.value ?? value.formatted ?? value.display ?? value.label,
-    );
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const text = rawValueToString(item);
-      if (text) return text;
-    }
-  }
-  return "";
-}
-
-function exportContactsCsv(contacts: DiscoveryResult[], fileName: string) {
-  const rows = contacts.map((contact) => ({
-    company: contact.company_name,
-    contact_name: getContactName(contact) || contact.research?.contact_name || "",
-    email: exportContactEmail(contact.contact_email || contact.research?.contact_email),
-    phone: getPhone(contact),
-    website: contact.website_url || contact.research?.website_url || "",
-    geography: contact.geography || contact.research?.geography || "",
-  }));
-  const headers = Object.keys(rows[0] || { company: "" });
-  const csv = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => csvCell(row[header as keyof typeof row])).join(",")),
-  ].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = normalizeExportFileName(fileName);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvCell(value: string | number | undefined) {
-  const text = String(value ?? "");
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

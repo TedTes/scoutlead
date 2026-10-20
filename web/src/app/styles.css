@@ -7368,7 +7368,6 @@ body.is-resizing-navigation .rail {
 }
 
 .trace-json-panel > summary,
-.legacy-trace > summary,
 .trace-step details > summary,
 .inspector-table details > summary {
   color: var(--muted);
@@ -7539,16 +7538,6 @@ body.is-resizing-navigation .rail {
 
 .decision-row > .trace-json-panel {
   margin: 0 12px 12px 40px;
-}
-
-.legacy-trace {
-  border-top: 1px solid var(--line);
-  margin-top: 22px;
-  padding-top: 8px;
-}
-
-.legacy-trace > .trace-stack {
-  margin-top: 10px;
 }
 
 .is-spinning {
@@ -11246,10 +11235,6 @@ button.bulk-recipient-select:hover {
 .outreach-call-playbook {
   display: grid;
   gap: 22px;
-}
-
-.outreach-call-script-legacy {
-  margin-top: -10px;
 }
 
 .outreach-call-branches {

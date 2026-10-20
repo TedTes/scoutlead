@@ -35,7 +35,6 @@ import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
 import type {
-  DiscoveryResult,
   Product,
   ProductProfileInput,
   Territory,
@@ -44,7 +43,7 @@ import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navi
 import {
   baseExportFileName,
   defaultExportFileName,
-  exportContactEmail,
+  exportContactsCsv,
   normalizeExportFileName,
 } from "../utils/export-file";
 import { formatDate } from "../utils/format";
@@ -336,7 +335,7 @@ function AppShell({
       return;
     }
     const downloadName = normalizeExportFileName(exportFileName);
-    exportProductContactsCsv(productContacts, downloadName);
+    exportContactsCsv(productContacts, downloadName);
     setExportDialogOpen(false);
     showToast({
       title: "Contacts exported",
@@ -1288,43 +1287,6 @@ function writeStoredDimension(key: string, value: number) {
   }
 }
 
-function exportProductContactsCsv(contacts: DiscoveryResult[], fileName: string) {
-  const rows = contacts.map((contact) => ({
-    company: contact.company_name,
-    contact_name: contact.research?.contact_name || "",
-    email: exportContactEmail(contact.contact_email || contact.research?.contact_email),
-    phone: rawContactValue(contact, ["phone", "telephone", "contact_phone", "phoneNumber"]),
-    website: contact.website_url || contact.research?.website_url || "",
-    geography: contact.geography || contact.research?.geography || "",
-  }));
-  const headers = Object.keys(rows[0] || { company: "" });
-  const csv = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((header) => csvCell(row[header as keyof typeof row])).join(",")),
-  ].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = normalizeExportFileName(fileName);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function rawContactValue(contact: DiscoveryResult, keys: string[]) {
-  const rawSources = contact.raw_sources || [];
-  for (const source of rawSources) {
-    for (const key of keys) {
-      const value = source[key];
-      if (typeof value === "string" && value.trim()) return value.trim();
-      if (typeof value === "number" && Number.isFinite(value)) return String(value);
-    }
-  }
-  return "";
-}
-
 function getEnabledIntegrationCount(product: Product | undefined, gmailConnected: boolean) {
   return Number(gmailConnected) + Number(Boolean(product?.webhook_enabled && product.webhook_url));
 }
@@ -1332,9 +1294,4 @@ function getEnabledIntegrationCount(product: Product | undefined, gmailConnected
 function isWithinLastSevenDays(value: string) {
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) && timestamp >= Date.now() - 7 * 24 * 60 * 60 * 1000;
-}
-
-function csvCell(value: string | number | undefined) {
-  const text = String(value ?? "");
-  return `"${text.replace(/"/g, '""')}"`;
 }
