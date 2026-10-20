@@ -381,10 +381,9 @@ const PREVIEW_LEADS = [
     name: "ONCALL Heating and Cooling",
     category: "local service provider",
     location: "Scarborough, ON, Canada",
-    score: 96,
+    reviews: 4,
     status: "Verified",
     statusTone: "green",
-    fit: "Strong fit",
     body: "The business has 4 public reviews.",
     missing: "",
     detail: {
@@ -393,9 +392,6 @@ const PREVIEW_LEADS = [
       email: "No email found",
       emailStatus: "Email · unavailable",
       why: "The business has 4 public reviews, below this audience's threshold of 15.",
-      opportunityLabel: "Confirmed",
-      contactLabel: "Phone only",
-      contactTone: "tone-amber",
       phone: "Public phone found",
       website: "Website listed",
     },
@@ -404,10 +400,9 @@ const PREVIEW_LEADS = [
     name: "GTA HVAC Pros",
     category: "service contractor",
     location: "Scarborough, ON, Canada",
-    score: 92,
+    reviews: 13,
     status: "Verified",
     statusTone: "green",
-    fit: "Strong fit",
     body: "The business has 13 public reviews.",
     missing: "",
     detail: {
@@ -416,9 +411,6 @@ const PREVIEW_LEADS = [
       email: "Public email found",
       emailStatus: "Email · available",
       why: "The business has 13 public reviews, below this audience's threshold of 15.",
-      opportunityLabel: "Confirmed",
-      contactLabel: "Reachable",
-      contactTone: "",
       phone: "Public phone found",
       website: "Website listed",
     },
@@ -427,10 +419,9 @@ const PREVIEW_LEADS = [
     name: "Highland HVAC Services",
     category: "service contractor",
     location: "Etobicoke, ON, Canada",
-    score: 90,
+    reviews: 13,
     status: "Verified",
     statusTone: "green",
-    fit: "Strong fit",
     body: "The business has 13 public reviews.",
     missing: "",
     detail: {
@@ -439,9 +430,6 @@ const PREVIEW_LEADS = [
       email: "No email found",
       emailStatus: "Email · unavailable",
       why: "The business has 13 public reviews, below this audience's threshold of 15.",
-      opportunityLabel: "Confirmed",
-      contactLabel: "Phone only",
-      contactTone: "tone-amber",
       phone: "Public phone found",
       website: "Website listed",
     },
@@ -450,10 +438,9 @@ const PREVIEW_LEADS = [
     name: "Expert GTA Furnace and Air Condition Inc.",
     category: "local service provider",
     location: "East York, ON, Canada",
-    score: 88,
+    reviews: 8,
     status: "Verified",
     statusTone: "green",
-    fit: "Strong fit",
     body: "The business has 8 public reviews.",
     missing: "",
     detail: {
@@ -462,9 +449,6 @@ const PREVIEW_LEADS = [
       email: "Public email found",
       emailStatus: "Email · available",
       why: "The business has 8 public reviews, below this audience's threshold of 15.",
-      opportunityLabel: "Confirmed",
-      contactLabel: "Reachable",
-      contactTone: "",
       phone: "Public phone found",
       website: "Website listed",
     },
@@ -473,10 +457,9 @@ const PREVIEW_LEADS = [
     name: "North York Comfort Systems",
     category: "local service provider",
     location: "North York, ON, Canada",
-    score: 85,
+    reviews: 11,
     status: "Verified",
     statusTone: "green",
-    fit: "Strong fit",
     body: "The business has 11 public reviews.",
     missing: "",
     detail: {
@@ -485,9 +468,6 @@ const PREVIEW_LEADS = [
       email: "No email found",
       emailStatus: "Email · unavailable",
       why: "The business has 11 public reviews, below this audience's threshold of 15.",
-      opportunityLabel: "Confirmed",
-      contactLabel: "Phone only",
-      contactTone: "tone-amber",
       phone: "Public phone found",
       website: "Website listed",
     },
@@ -1424,11 +1404,10 @@ function PreviewLeadCard({
       className={`preview-lead-card${visible ? "" : " is-hidden"}${clicked ? " is-clicked" : ""}${selected ? " is-selected" : ""}${shortlisted ? " is-shortlisted" : ""}`}
     >
       <PreviewCursor className="preview-cursor-actor--lead-card" pressed={cursorPressed} visible={showCursor} />
-      <span className="preview-lead-score">{lead.score}</span>
       <div className="preview-lead-copy">
         <div className="preview-lead-title">
           <strong>{lead.name}</strong>
-          <em>{lead.fit}</em>
+          <em>{lead.reviews} reviews</em>
         </div>
         <span>
           {lead.category} <MapPin size={11} /> {lead.location}
@@ -1534,7 +1513,6 @@ function PreviewDetailBody({
     <>
       {showHeader ? (
         <div className="preview-detail-head">
-          <span className="preview-lead-score">{lead.score}</span>
           <div>
             <strong>{lead.name}</strong>
             <span>
@@ -1546,17 +1524,17 @@ function PreviewDetailBody({
       ) : null}
       <div className="preview-detail-chips">
         <span className={chipClass(fitActive)}>
-          <CheckCircle2 size={12} /> Fit · {lead.fit}
+          <Globe size={12} /> {lead.detail.website}
         </span>
         <span className={chipClass(evidenceActive)}>
-          <Target size={12} /> Opportunity · {lead.detail.opportunityLabel}
+          <Star size={12} /> Reviews · {lead.reviews}
         </span>
-        <span className={chipClass(evidenceActive, lead.detail.contactTone)}>
-          <Mail size={12} /> Contact · {lead.detail.contactLabel}
+        <span className={chipClass(evidenceActive)}>
+          <Mail size={12} /> {lead.detail.emailStatus}
         </span>
       </div>
       <div className="preview-detail-why">
-        <span className="preview-detail-why-label">Why this lead?</span>
+        <span className="preview-detail-why-label">Matched signal</span>
         <p className={`preview-detail-summary${fitActive ? " is-reviewed" : " is-pending"}`}>{lead.detail.why}</p>
       </div>
       <dl className="preview-detail-list">

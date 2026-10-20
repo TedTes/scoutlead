@@ -228,7 +228,6 @@
 }
 
 .drawer-row,
-.drawer-mini-grid,
 .drawer-section {
   animation: sl-fade-up var(--dur) var(--ease-out) both;
 }
@@ -247,10 +246,6 @@
 
 .drawer-row:nth-of-type(4) {
   animation-delay: 105ms;
-}
-
-.drawer-mini-grid {
-  animation-delay: 125ms;
 }
 
 .drawer-section {

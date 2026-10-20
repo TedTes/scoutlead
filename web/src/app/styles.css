@@ -10271,24 +10271,6 @@ button.bulk-recipient-select:hover {
   box-shadow: inset 3px 0 0 #6f51df;
 }
 
-.lead-opportunity-dot {
-  background: var(--faint);
-  border-radius: 50%;
-  flex: 0 0 7px;
-  height: 7px;
-  margin-top: 5px;
-  width: 7px;
-}
-
-.lead-opportunity-dot.opportunity-high,
-.lead-opportunity-dot.opportunity-moderate {
-  background: var(--green);
-}
-
-.lead-opportunity-dot.opportunity-low {
-  background: var(--amber);
-}
-
 .contact-main {
   align-items: flex-start;
   display: flex;
@@ -11812,164 +11794,46 @@ button.bulk-recipient-select:hover {
   color: var(--text);
 }
 
-.drawer-signal-summary {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+.drawer-fact-summary {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   margin: 0 28px 14px;
-  padding: 0;
+  overflow: hidden;
 }
 
-.drawer-fit-verdict {
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  display: inline-flex;
-  gap: 6px;
-  justify-content: center;
-  min-height: 28px;
-  padding: 5px 10px;
-  white-space: nowrap;
-}
-
-.drawer-fit-verdict svg {
-  flex: 0 0 auto;
-  height: 14px;
-  width: 14px;
-}
-
-.drawer-fit-verdict span,
-.drawer-fit-verdict strong {
-  line-height: 1;
-}
-
-.drawer-fit-verdict span {
-  font-size: 11.5px;
-  font-weight: 750;
-}
-
-.drawer-fit-verdict strong {
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-
-.drawer-fit-verdict strong::before {
-  content: "·";
-  font-family: var(--font);
-  margin-right: 6px;
-  opacity: 0.58;
-}
-
-.drawer-fit-verdict.fit-good {
-  background: var(--green-bg);
-  border-color: var(--green-line);
-  color: var(--green);
-}
-
-.drawer-fit-verdict.fit-maybe {
-  background: var(--amber-bg);
-  border-color: var(--amber-line);
-  color: var(--amber);
-}
-
-.drawer-fit-verdict.fit-bad {
-  background: #fff0f0;
-  border-color: #f0c8c8;
-  color: #b42318;
-}
-
-.drawer-fit-verdict.fit-neutral {
-  background: var(--panel-muted);
-  border-color: var(--line);
-  color: var(--muted);
-}
-
-.availability-pill.opportunity-high,
-.availability-pill.opportunity-moderate {
-  background: var(--green-bg);
-  border-color: var(--green-line);
-  color: var(--green);
-}
-
-.availability-pill.opportunity-low {
-  background: var(--amber-bg);
-  border-color: var(--amber-line);
-  color: var(--amber);
-}
-
-.availability-pill.opportunity-none,
-.availability-pill.opportunity-unknown {
-  background: var(--panel-muted);
-  border-color: var(--line);
-  color: var(--muted);
-}
-
-.drawer-fit-verdict.review-verdict {
-  border-style: dashed;
-}
-
-.drawer-availability-row {
-  align-items: center;
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: 7px;
+.drawer-fact-summary > div {
+  border-right: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
   min-width: 0;
+  padding: 9px 11px;
 }
 
-.availability-pill {
-  align-items: center;
-  background: var(--panel-muted);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 750;
-  gap: 6px;
-  min-height: 28px;
-  padding: 5px 10px;
+.drawer-fact-summary > div:last-child {
+  border-right: 0;
+}
+
+.drawer-fact-summary span {
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.drawer-fact-summary strong {
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.availability-pill svg {
-  flex: 0 0 auto;
-}
-
-.availability-pill.has-contact,
-.availability-pill.verification-valid,
-.availability-pill.quality-good {
-  background: var(--green-bg);
-  border-color: var(--green-line);
-  color: var(--green);
-}
-
-.availability-pill.verification-risky,
-.availability-pill.verification-unknown,
-.availability-pill.quality-warn {
-  background: var(--amber-bg);
-  border-color: var(--amber-line);
-  color: var(--amber);
-}
-
-.availability-pill.verification-invalid,
-.availability-pill.quality-bad,
-.availability-pill.policy-suppressed,
-.availability-pill.policy-unsubscribed,
-.availability-pill.policy-bounced {
-  background: #fff0f0;
-  border-color: #f0c8c8;
-  color: #b42318;
-}
-
-.availability-pill.verification-unverified,
-.availability-pill.quality-neutral,
-.availability-pill.quality-muted,
-.availability-pill.is-muted {
-  background: var(--panel-muted);
-  border-color: var(--line);
-  color: var(--muted);
+.drawer-fact-summary .is-blocked strong {
+  color: var(--red);
 }
 
 .drawer-tabs {
@@ -12032,7 +11896,6 @@ button.bulk-recipient-select:hover {
 
 .contact-drawer-panel .drawer-summary,
 .contact-drawer-panel .drawer-approach-panel,
-.contact-drawer-panel .drawer-mini-grid,
 .contact-drawer-panel .drawer-activity-panel,
 .contact-drawer-panel .drawer-outcome-panel {
   display: none;
@@ -12619,20 +12482,6 @@ button.bulk-recipient-select:hover {
   color: #b42318;
 }
 
-.drawer-mini-grid {
-  display: grid;
-  gap: 9px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 16px 0 0;
-}
-
-.drawer-mini {
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 10px 11px;
-}
-
-.drawer-mini span,
 .drawer-section h3 {
   color: var(--faint);
   display: block;
@@ -12641,14 +12490,6 @@ button.bulk-recipient-select:hover {
   letter-spacing: 1px;
   margin: 0;
   text-transform: uppercase;
-}
-
-.drawer-mini strong {
-  color: var(--text);
-  display: block;
-  font-family: var(--mono);
-  font-size: 15px;
-  margin-top: 4px;
 }
 
 .drawer-activity-panel {
@@ -14710,9 +14551,6 @@ button.bulk-recipient-select:hover {
     white-space: normal;
   }
 
-  .drawer-mini-grid {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 @media (max-width: 900px) {
@@ -14731,12 +14569,17 @@ button.bulk-recipient-select:hover {
   }
 
   body.has-contact-detail .contact-drawer-header,
-  body.has-contact-detail .drawer-signal-summary,
   body.has-contact-detail .drawer-tabs,
   body.has-contact-detail .drawer-body,
   body.has-contact-detail .drawer-footer {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  body.has-contact-detail .drawer-fact-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-left: 18px;
+    margin-right: 18px;
   }
 }
 
@@ -14915,10 +14758,6 @@ button.bulk-recipient-select:hover {
     flex-basis: 36px;
     height: 36px;
     width: 36px;
-  }
-
-  .drawer-mini-grid {
-    grid-template-columns: 1fr;
   }
 
   body.has-contact-detail .drawer-footer {

@@ -92,29 +92,6 @@ export function getContactName(contact: DiscoveryResult) {
   ]);
 }
 
-export function getPrice(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "price",
-    "priceText",
-    "price.text",
-    "amount",
-    "listing.price",
-    "data.price",
-  ]);
-}
-
-export function getPostedDate(contact: DiscoveryResult) {
-  return getRawString(contact, [
-    "postedAt",
-    "posted_at",
-    "datePosted",
-    "publishedAt",
-    "createdAt",
-    "listing.postedAt",
-    "data.postedAt",
-  ]);
-}
-
 function getRawString(contact: DiscoveryResult, keys: string[]) {
   for (const raw of getRawObjects(contact)) {
     for (const key of keys) {

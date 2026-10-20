@@ -71,8 +71,6 @@ import {
   getContactName,
   getContactUrl,
   getPhone,
-  getPostedDate,
-  getPrice,
   getRating,
   getRawObjects,
   getRawValue,
@@ -2670,7 +2668,6 @@ function ContactCard({
   onToggleShortlist: () => void;
   selected?: boolean;
 }) {
-  const opportunity = contactOpportunityAssessment(contact);
   const opportunityReason = contactListPrimarySignal(contact);
   const category = contactListCategoryLabel(contact);
   const geography = contact.geography || contact.research?.geography || "";
@@ -2697,7 +2694,6 @@ function ContactCard({
           }
         }}
       >
-        <span className={`lead-opportunity-dot opportunity-${opportunity.level}`} aria-hidden="true" />
         <div className="contact-main">
           <span className="contact-identity">
             <span className="contact-title-line">
@@ -2821,9 +2817,6 @@ function ContactDrawer({
   const address = getAddress(contact);
   const rating = getRating(contact);
   const reviewCount = getReviewCount(contact);
-  const price = getPrice(contact);
-  const posted = getPostedDate(contact);
-  const confidence = contact.research?.confidence ? `${contact.research.confidence}%` : "—";
   const evidenceNotes = [
     ...(contact.research?.pain_indicators || []),
     ...(contact.research?.disqualifiers || []),
@@ -2832,13 +2825,12 @@ function ContactDrawer({
   const drawerCategory = contactListCategoryLabel(contact);
   const drawerGeography = contact.geography || contact.research?.geography || "";
   const drawerSummary = contactDrawerSummary(contact);
-  const agentFitStatus = displayAgentFitStatus(contact);
-  const fitScore = contactFitScore(contact);
   const verification = verificationStatus(contact);
   const verificationDetails = verificationDetailChips(contact.verification_details);
   const activityItems = contactActivityItems(contact, message);
   const opportunity = contactOpportunityAssessment(contact);
   const opportunityReasons = opportunity.signals;
+  const websiteStatus = contactResolvedWebsiteStatus(contact);
   const contacted = Boolean(contact.last_contacted_at || contact.latest_outcome === "contacted");
   const evidenceCount = new Set([
     ...signals,
@@ -3090,10 +3082,12 @@ function ContactDrawer({
           <div className="drawer-title-row">
             <div className="drawer-title-copy">
               <h2>{contact.company_name}</h2>
-              <span className="drawer-ready-status">
-                <span />
-                {shortlisted ? "Shortlisted" : canShortlist ? "Ready to shortlist" : "Needs review"}
-              </span>
+              {shortlisted ? (
+                <span className="drawer-ready-status">
+                  <span />
+                  Shortlisted
+                </span>
+              ) : null}
               <p className="drawer-subtitle">
                 <span>{drawerCategory}</span>
                 {drawerGeography ? (
@@ -3156,27 +3150,37 @@ function ContactDrawer({
               ) : null}
             </section>
 
-            <section className="drawer-signal-summary" aria-label="Contact summary">
-              <div className={`drawer-fit-verdict ${agentFitStatus.className}`}>
-                <Check size={14} />
-                <span>Fit · {agentFitStatus.label}</span>
+            <section className="drawer-fact-summary" aria-label="Business facts">
+              <div>
+                <span>Website</span>
+                <strong>{websiteStatusLabel(websiteStatus)}</strong>
               </div>
-              <div className="drawer-availability-row">
-                <span className={`availability-pill opportunity-${opportunity.level}`}>
-                  <Sparkles size={13} />
-                  Opportunity · {opportunity.label}
-                </span>
-                <span className={`availability-pill verification-${verification}`}>
-                  <Mail size={13} />
-                  Contact · {contactReadinessLabel(contact)}
-                </span>
-                {blocked ? (
-                  <span className={`availability-pill policy-${policyStatus}`}>
-                    <AlertTriangle size={13} />
-                    {contactPolicyStatusLabel(policyStatus)}
-                  </span>
-                ) : null}
+              <div>
+                <span>Rating</span>
+                <strong>{rating || "Not available"}</strong>
               </div>
+              <div>
+                <span>Reviews</span>
+                <strong>{reviewCount || "Not available"}</strong>
+              </div>
+              <div>
+                <span>Email</span>
+                <strong>{email ? "Found" : "Not found"}</strong>
+              </div>
+              <div>
+                <span>Phone</span>
+                <strong>{phone ? "Found" : "Not found"}</strong>
+              </div>
+              <div>
+                <span>Contact page</span>
+                <strong>{contactUrl ? "Found" : "Not found"}</strong>
+              </div>
+              {blocked ? (
+                <div className="is-blocked">
+                  <span>Contact policy</span>
+                  <strong>{contactPolicyStatusLabel(policyStatus)}</strong>
+                </div>
+              ) : null}
             </section>
 
             <nav className="drawer-tabs" aria-label="Contact detail sections">
@@ -3202,8 +3206,7 @@ function ContactDrawer({
                 <>
                   <section className="drawer-opportunity-panel">
                     <div className="drawer-section-heading">
-                      <h3>Why this lead?</h3>
-                      <span>{opportunity.label}</span>
+                      <h3>Matched signals</h3>
                     </div>
                     {opportunity.services?.length ? <div className="drawer-matched-services">{opportunity.services.map((service) => <span key={service}>{service}</span>)}</div> : null}
                     {opportunityReasons.length ? (
@@ -3215,8 +3218,8 @@ function ContactDrawer({
                     ) : (
                       <p>
                         {opportunity.level === "unknown"
-                          ? "This business has not been audited for a digital opportunity yet."
-                          : "No specific digital opportunity was confirmed by the audit."}
+                          ? "Signal checks are still pending for this business."
+                          : "No matching signal is available from the latest checks."}
                       </p>
                     )}
                   </section>
@@ -3297,14 +3300,6 @@ function ContactDrawer({
                     </DrawerRow>
                   </dl>
                   </section>
-
-                  <div className="drawer-mini-grid">
-                    <Mini label="Rating" value={rating || "—"} />
-                    <Mini label="Reviews" value={reviewCount || "—"} />
-                    <Mini label="Price" value={price || "—"} />
-                    <Mini label="Posted" value={posted || "—"} />
-                    <Mini label="Confidence" value={confidence} />
-                  </div>
 
                   <ContactActivityTrail items={activityItems} />
 
@@ -3408,38 +3403,25 @@ function ContactDrawer({
 
                   <section className="drawer-agent-panel">
                     <div className="drawer-section-heading">
-                      <h3>Agent assessment</h3>
-                      <span>
-                        {agentAssessment
-                          ? `${agentFitStatusLabel(agentAssessment.fitStatus)} · fit ${fitScore}`
-                          : "Not assessed"}
-                      </span>
+                      <h3>Evidence review</h3>
+                      <span>{agentAssessment ? "Stored evidence" : "Not reviewed"}</span>
                     </div>
                     {agentAssessment ? (
                       <>
                         <p className="agent-rationale">{agentAssessment.rationale}</p>
                         <div className="agent-evidence-grid">
-                          <EvidenceList title="Positive signals" items={agentAssessment.positiveSignals} empty="No strong positive signals captured." />
+                          <EvidenceList title="Observed signals" items={agentAssessment.positiveSignals} empty="No positive signals recorded." />
                           <EvidenceList title="Missing evidence" items={agentAssessment.missingEvidence} empty="No missing evidence called out." />
                           <EvidenceList title="Risks" items={agentAssessment.risks} empty="No specific risks captured." />
                         </div>
                       </>
                     ) : (
-                      <p className="agent-rationale">Run an agent check to score this contact against the product criteria.</p>
+                      <p className="agent-rationale">Review the stored evidence against the product criteria.</p>
                     )}
                     <div className="review-secondary-row">
                       <button type="button" disabled={qualifying} onClick={runAgentCheck}>
-                        {qualifying ? "Checking..." : agentAssessment ? "Recheck fit" : "Run agent check"}
+                        {qualifying ? "Checking..." : agentAssessment ? "Refresh review" : "Review evidence"}
                       </button>
-                      {agentAssessment && currentReviewStatus === "unreviewed" ? (
-                        <button
-                          type="button"
-                          disabled={qualifying || savingReview}
-                          onClick={() => chooseReviewStatus(agentAssessment.fitStatus)}
-                        >
-                          Use recommendation
-                        </button>
-                      ) : null}
                     </div>
                   </section>
 
@@ -3620,15 +3602,6 @@ function DrawerRow({ icon, label, children }: { icon: ReactNode; label: string; 
         <span className="drawer-row-label">{label}</span>
       </dt>
       <dd>{children}</dd>
-    </div>
-  );
-}
-
-function Mini({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="drawer-mini">
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }
@@ -3862,15 +3835,6 @@ function isVerifiedContact(contact: DiscoveryResult) {
   return verificationStatus(contact) === "valid";
 }
 
-function agentFitStatusLabel(status: AgentFitStatus) {
-  const labels: Record<AgentFitStatus, string> = {
-    good_fit: "Good fit",
-    maybe: "Maybe",
-    not_fit: "Not fit",
-  };
-  return labels[status];
-}
-
 function getAgentAssessment(contact: DiscoveryResult) {
   const qualification = contact.qualification;
   if (!qualification) return undefined;
@@ -3880,11 +3844,9 @@ function getAgentAssessment(contact: DiscoveryResult) {
   );
   const criteriaEvidence = (qualification.criteria || []).flatMap((criterion) => criterion.evidence || []);
   const criteriaMissing = (qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || []);
-  const scoreBreakdown = getScoreBreakdown(contact);
   return {
     fitStatus,
     score: clampScore(qualification.score),
-    scoreBreakdown,
     rationale: qualification.rationale || "No rationale captured.",
     positiveSignals: [...new Set([...(qualification.positive_signals || []), ...criteriaEvidence])],
     missingEvidence: [...new Set([...(qualification.missing_evidence || []), ...criteriaMissing])],
@@ -3927,37 +3889,8 @@ function contactSearchMatch(contact: DiscoveryResult): {
   return { status: "", reason: "" };
 }
 
-function displayAgentFitStatus(contact: DiscoveryResult): { label: string; className: string } {
-  if (searchMatchStatus(contact) === "unknown") {
-    return { label: "Needs verification", className: "fit-neutral" };
-  }
-  const assessment = getAgentAssessment(contact);
-  if (assessment?.fitStatus === "good_fit") return { label: "Strong fit", className: "fit-good" };
-  if (assessment?.fitStatus === "maybe") return { label: "Possible fit", className: "fit-maybe" };
-  if (assessment?.fitStatus === "not_fit") return { label: "Low evidence", className: "fit-neutral" };
-  return { label: "Needs review", className: "fit-neutral" };
-}
-
-function getScoreBreakdown(contact: DiscoveryResult) {
-  const breakdown = contact.qualification?.score_breakdown;
-  return {
-    fitScore: clampScore(breakdown?.fit_score ?? legacyFitScore(contact)),
-    reachabilityScore: clampScore(breakdown?.reachability_score ?? derivedReachabilityScore(contact)),
-    sourceQualityScore: clampScore(breakdown?.source_quality_score ?? contact.research?.confidence ?? 0),
-    notes: breakdown?.scoring_notes || [],
-  };
-}
-
 function clampScore(value: number | null | undefined) {
   return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
-}
-
-function contactFitScore(contact: DiscoveryResult) {
-  return getScoreBreakdown(contact).fitScore;
-}
-
-function contactReachabilityScore(contact: DiscoveryResult) {
-  return getScoreBreakdown(contact).reachabilityScore;
 }
 
 function legacyFitScore(contact: DiscoveryResult) {
@@ -3988,28 +3921,6 @@ function legacyMissingProblemEvidence(contact: DiscoveryResult) {
     ...((qualification.criteria || []).flatMap((criterion) => criterion.missing_evidence || [])),
   ];
   return missing.some((item) => /quote|quoting|estimate|estimating|pricing|workflow|software usage|product\/problem|problem signal|problem fit/i.test(item || ""));
-}
-
-function derivedReachabilityScore(contact: DiscoveryResult) {
-  let score = 0;
-  if (bulkOutreachEmail(contact)) score += 40;
-  if (getPhone(contact)) score += 25;
-  const verification = verificationStatus(contact);
-  if (verification === "valid") score += 20;
-  if (verification === "risky") score -= 10;
-  if (verification === "invalid") score -= 35;
-  return score;
-}
-
-function contactReadinessLabel(contact: DiscoveryResult) {
-  const score = contactReachabilityScore(contact);
-  const email = bulkOutreachEmail(contact);
-  if (verificationStatus(contact) === "invalid") return "Contact invalid";
-  if (score >= 75 && email && isVerifiedContact(contact)) return "Email verified";
-  if (score >= 65) return "Reachable";
-  if (email) return "Email found";
-  if (getPhone(contact)) return "Phone only";
-  return "No contact";
 }
 
 function contactListCategoryLabel(contact: DiscoveryResult) {
@@ -4545,7 +4456,6 @@ function formatLeadAge(value: string) {
 }
 
 type ContactOpportunity = {
-  label: string;
   level: "high" | "moderate" | "low" | "none" | "unknown";
   score: number;
   signals: string[];
@@ -4556,7 +4466,6 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
   const searchMatch = contactSearchMatch(contact);
   if (searchMatch.status === "unknown") {
     return {
-      label: "Needs verification",
       level: "unknown",
       score: 0,
       signals: [
@@ -4592,7 +4501,7 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
       .map((signal) => (typeof signal.message === "string" ? signal.message.trim() : ""))
       .filter(Boolean);
     if (websiteStatus === "present" && noWebsiteSignals.length && !signals.length) {
-      return { label: "No clear signal", level: "none", score: 0, signals: [] };
+      return { level: "none", score: 0, signals: [] };
     }
     if (
       websiteStatus !== "present"
@@ -4600,15 +4509,14 @@ function contactOpportunityAssessment(contact: DiscoveryResult): ContactOpportun
       && noWebsiteSignals.length === signalRecords.length
     ) {
       return {
-        label: "Needs verification",
         level: "unknown",
         score: 0,
         signals: ["No website is recorded in the checked sources; verify before outreach."],
       };
     }
-    return { label: opportunityLabel(level), level, score, signals };
+    return { level, score, signals };
   }
-  return { label: "Not audited", level: "unknown", score: 0, signals: [] };
+  return { level: "unknown", score: 0, signals: [] };
 }
 
 function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpportunity | null {
@@ -4626,18 +4534,17 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
       isRecord(value) ? [[key, value] as const] : [],
     );
     if (!selectedSignals.length) {
-      return { label: "Not requested", level: "unknown", score: 0, signals: [], services };
+      return { level: "unknown", score: 0, signals: [], services };
     }
     const matchedSignals = selectedSignals.filter(([, value]) => value.matched === true);
     if (!matchedSignals.length) {
-      return { label: "No clear signal", level: "none", score: 0, signals: [], services };
+      return { level: "none", score: 0, signals: [], services };
     }
     const confirmedSignals = matchedSignals.filter(([, value]) =>
       rawValueToString(value.confidence || "confirmed") === "confirmed",
     );
     if (!confirmedSignals.length) {
       return {
-        label: "Possible",
         level: "moderate",
         score: Math.min(65, 50 + (matchedSignals.length - 1) * 5),
         signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
@@ -4645,7 +4552,6 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
       };
     }
     return {
-      label: "Confirmed",
       level: "high",
       score: Math.min(100, 70 + (matchedSignals.length - 1) * 10),
       signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
@@ -4679,8 +4585,40 @@ function profileSignalMessage(signalKey: string, evidence: Record<string, unknow
     const count = typeof value === "number" && Number.isFinite(value) ? value : 0;
     return `The business has ${count} public review${count === 1 ? "" : "s"}.`;
   }
+  if (typeof value === "boolean") {
+    const statements: Record<string, [string, string]> = {
+      uses_https: ["Website uses HTTPS.", "Website does not use HTTPS."],
+      contact_form_present: ["Contact form found.", "No contact form was found."],
+      quote_or_booking_form_present: [
+        "Quote or booking form found.",
+        "No quote or booking form was found.",
+      ],
+      primary_cta_present: [
+        "Primary call to action found.",
+        "No primary call to action was found.",
+      ],
+      click_to_call_present: [
+        "Click-to-call link found.",
+        "No click-to-call link was found.",
+      ],
+      mobile_viewport_present: [
+        "Mobile viewport configuration found.",
+        "Mobile viewport configuration was not found.",
+      ],
+      online_payment_or_financing_present: [
+        "Online payment or financing option found.",
+        "No online payment or financing option was found.",
+      ],
+      service_area_pages_present: [
+        "Service-area content found.",
+        "No service-area content was found.",
+      ],
+    };
+    const statement = statements[signalKey];
+    if (statement) return statement[value ? 0 : 1];
+  }
   const factKey = rawValueToString(evidence.fact_key) || signalKey;
-  return `${factKey}: ${rawValueToString(value) || String(value)}`;
+  return `${profileValueLabel(factKey)}: ${rawValueToString(value) || String(value)}`;
 }
 
 function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
@@ -4697,12 +4635,15 @@ function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
   return storedStatus || "unknown";
 }
 
-function opportunityLabel(level: ContactOpportunity["level"]) {
-  if (level === "high") return "High";
-  if (level === "moderate") return "Moderate";
-  if (level === "low") return "Low";
-  if (level === "none") return "No clear signal";
-  return "Not audited";
+function websiteStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    present: "Listed",
+    not_listed: "Not listed",
+    unavailable: "Unavailable",
+    parked: "Parked",
+    unknown: "Not verified",
+  };
+  return labels[status] || profileValueLabel(status);
 }
 
 function contactOpportunityReasons(contact: DiscoveryResult) {
