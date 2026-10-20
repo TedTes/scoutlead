@@ -377,6 +377,12 @@ class AudienceRunService:
             80 + max(0, int(profile_match.get("confirmed_signal_count") or 0) - 1) * 5,
         )
         contact_email = _optional_string(snapshot.get("contact_email"))
+        business = self.session.get(BusinessModel, result.business_id)
+        business_facts = (
+            raw.get("business_facts")
+            if isinstance(raw.get("business_facts"), dict)
+            else {}
+        )
         outreach_lead = (
             self.session.get(LeadModel, result.outreach_lead_id)
             if result.outreach_lead_id
@@ -399,6 +405,13 @@ class AudienceRunService:
             contact_id=outreach_lead.contact_id if outreach_lead else None,
             contact_email=(
                 outreach_lead.contact_email if outreach_lead else contact_email
+            ),
+            contact_phone=(
+                _optional_string(business.phone) if business is not None else None
+            ),
+            google_rating=_optional_float(business_facts.get("google_rating")),
+            google_review_count=_optional_int(
+                business_facts.get("google_review_count")
             ),
             geography=_optional_string(snapshot.get("geography")),
             description=_optional_string(snapshot.get("snippet")),
@@ -519,6 +532,20 @@ def _territory_niches(session: Session, territory: TerritoryModel) -> list[Niche
 def _optional_string(value) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+def _optional_float(value) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value) -> int | None:
+    number = _optional_float(value)
+    return int(number) if number is not None else None
 
 
 def _signal_reason(signal: dict) -> str:

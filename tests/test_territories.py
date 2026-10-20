@@ -774,6 +774,29 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
         offer = _offer(session, workspace_id="workspace:first")
         _niche(session, slug="home_service_hvac", label="HVAC contractors")
         _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        facts = BusinessFactRepository(session)
+        facts.upsert(
+            businesses[0].id,
+            BusinessFactValue(
+                key=BusinessFactKey.GOOGLE_RATING,
+                value=4.8,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+        )
+        facts.upsert(
+            businesses[0].id,
+            BusinessFactValue(
+                key=BusinessFactKey.GOOGLE_REVIEW_COUNT,
+                value=37,
+                observed_at=utcnow(),
+                source_observation_id=None,
+            ),
+            commit=True,
+        )
         profile = TerritoryService(
             session,
             workspace_id="workspace:first",
@@ -800,6 +823,15 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
         assert first_needs_expansion is False
         assert first.new_result_count == 2
         assert all(result.is_new for result in first_read.results)
+        leads = service.latest_leads_for_audience(profile.id)
+        assert {lead.contact_phone for lead in leads} == {
+            "4165550101",
+            "4165550102",
+        }
+        assert {(lead.google_rating, lead.google_review_count) for lead in leads} == {
+            (4.8, 37),
+            (None, None),
+        }
 
         second = service.create(profile.id)
         visible_during_refill = service.latest_leads_for_audience(profile.id)

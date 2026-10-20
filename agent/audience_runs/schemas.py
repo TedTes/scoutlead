@@ -57,6 +57,9 @@ class AudienceLeadRead(BaseModel):
     company_name: str
     website_url: str | None = None
     contact_email: str | None = None
+    contact_phone: str | None = None
+    google_rating: float | None = None
+    google_review_count: int | None = None
     geography: str | None = None
     description: str | None = None
     source: str

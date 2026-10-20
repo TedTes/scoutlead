@@ -14,7 +14,11 @@ export function getAddress(contact: DiscoveryResult) {
 }
 
 export function getRating(contact: DiscoveryResult) {
+  if (typeof contact.google_rating === "number" && Number.isFinite(contact.google_rating)) {
+    return contact.google_rating.toFixed(1);
+  }
   const value = getRawNumber(contact, [
+    "business_facts.google_rating",
     "rating",
     "averageRating",
     "stars",
@@ -25,7 +29,14 @@ export function getRating(contact: DiscoveryResult) {
 }
 
 export function getReviewCount(contact: DiscoveryResult) {
+  if (
+    typeof contact.google_review_count === "number"
+    && Number.isFinite(contact.google_review_count)
+  ) {
+    return String(contact.google_review_count);
+  }
   const value = getRawNumber(contact, [
+    "business_facts.google_review_count",
     "userRatingCount",
     "user_ratings_total",
     "reviewCount",
@@ -37,7 +48,9 @@ export function getReviewCount(contact: DiscoveryResult) {
 }
 
 export function getPhone(contact: DiscoveryResult) {
+  if (contact.contact_phone?.trim()) return contact.contact_phone.trim();
   return getRawString(contact, [
+    "website_presence.phone",
     "normalized_contact_phone",
     "contact_phone",
     "nationalPhoneNumber",
@@ -73,9 +86,6 @@ export function getContactUrl(contact: DiscoveryResult) {
     "seller.profile_url",
     "profileUrl",
     "profile_url",
-    "source_url",
-    "listingUrl",
-    "adUrl",
   ]);
 }
 

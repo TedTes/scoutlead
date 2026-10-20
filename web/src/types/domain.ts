@@ -249,6 +249,9 @@ export type DiscoveryResult = {
   company_name: string;
   website_url?: string;
   contact_email?: string;
+  contact_phone?: string | null;
+  google_rating?: number | null;
+  google_review_count?: number | null;
   geography?: string;
   description?: string;
   source: string;
