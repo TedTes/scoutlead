@@ -11794,48 +11794,6 @@ button.bulk-recipient-select:hover {
   color: var(--text);
 }
 
-.drawer-fact-summary {
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  margin: 0 28px 14px;
-  overflow: hidden;
-}
-
-.drawer-fact-summary > div {
-  border-right: 1px solid var(--line);
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 9px 11px;
-}
-
-.drawer-fact-summary > div:last-child {
-  border-right: 0;
-}
-
-.drawer-fact-summary span {
-  color: var(--faint);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.drawer-fact-summary strong {
-  color: var(--text);
-  font-size: 11.5px;
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.drawer-fact-summary .is-blocked strong {
-  color: var(--red);
-}
-
 .drawer-tabs {
   align-items: flex-end;
   border-bottom: 1px solid var(--line);
@@ -14576,11 +14534,6 @@ button.bulk-recipient-select:hover {
     padding-right: 18px;
   }
 
-  body.has-contact-detail .drawer-fact-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-left: 18px;
-    margin-right: 18px;
-  }
 }
 
 @media (max-width: 480px) {

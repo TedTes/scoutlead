@@ -2815,8 +2815,6 @@ function ContactDrawer({
   const phone = getPhone(contact);
   const contactName = getContactName(contact);
   const address = getAddress(contact);
-  const rating = getRating(contact);
-  const reviewCount = getReviewCount(contact);
   const evidenceNotes = [
     ...(contact.research?.pain_indicators || []),
     ...(contact.research?.disqualifiers || []),
@@ -2830,7 +2828,6 @@ function ContactDrawer({
   const activityItems = contactActivityItems(contact, message);
   const opportunity = contactOpportunityAssessment(contact);
   const opportunityReasons = opportunity.signals;
-  const websiteStatus = contactResolvedWebsiteStatus(contact);
   const contacted = Boolean(contact.last_contacted_at || contact.latest_outcome === "contacted");
   const evidenceCount = new Set([
     ...signals,
@@ -3147,39 +3144,6 @@ function ContactDrawer({
                 >
                   <ExternalLink size={15} />
                 </a>
-              ) : null}
-            </section>
-
-            <section className="drawer-fact-summary" aria-label="Business facts">
-              <div>
-                <span>Website</span>
-                <strong>{websiteStatusLabel(websiteStatus)}</strong>
-              </div>
-              <div>
-                <span>Rating</span>
-                <strong>{rating || "Not available"}</strong>
-              </div>
-              <div>
-                <span>Reviews</span>
-                <strong>{reviewCount || "Not available"}</strong>
-              </div>
-              <div>
-                <span>Email</span>
-                <strong>{email ? "Found" : "Not found"}</strong>
-              </div>
-              <div>
-                <span>Phone</span>
-                <strong>{phone ? "Found" : "Not found"}</strong>
-              </div>
-              <div>
-                <span>Contact page</span>
-                <strong>{contactUrl ? "Found" : "Not found"}</strong>
-              </div>
-              {blocked ? (
-                <div className="is-blocked">
-                  <span>Contact policy</span>
-                  <strong>{contactPolicyStatusLabel(policyStatus)}</strong>
-                </div>
               ) : null}
             </section>
 
@@ -4633,17 +4597,6 @@ function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
   }
   if (contact.website_url || contact.research?.website_url) return "present";
   return storedStatus || "unknown";
-}
-
-function websiteStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    present: "Listed",
-    not_listed: "Not listed",
-    unavailable: "Unavailable",
-    parked: "Parked",
-    unknown: "Not verified",
-  };
-  return labels[status] || profileValueLabel(status);
 }
 
 function contactOpportunityReasons(contact: DiscoveryResult) {
