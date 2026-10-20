@@ -533,20 +533,8 @@ a {
   border-radius: 0;
   box-shadow: none;
   gap: 12px;
-  grid-template-columns: 7px minmax(0, 1fr) 20px;
+  grid-template-columns: minmax(0, 1fr) 20px;
   min-height: 76px;
-}
-
-.landing-workspace-preview .preview-lead-card .preview-lead-score {
-  background: var(--green);
-  border: 0;
-  border-radius: 50%;
-  color: transparent;
-  flex-basis: 7px;
-  font-size: 0;
-  height: 7px;
-  margin-top: 7px;
-  width: 7px;
 }
 
 .landing-workspace-preview .preview-lead-card.is-selected {
@@ -1574,7 +1562,7 @@ a {
   box-shadow: var(--shadow-sm);
   display: grid;
   gap: 12px;
-  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  grid-template-columns: minmax(0, 1fr) 20px;
   min-height: 78px;
   min-width: 0;
   padding: 10px;
