@@ -1,6 +1,11 @@
 import importlib
 
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect
+
+from db.base import Base
+import db.models  # noqa: F401
 
 
 RETIRED_TABLES = {
@@ -35,3 +40,19 @@ def test_compatibility_migration_keeps_retired_tables() -> None:
         )
         follow_up.upgrade()
         assert RETIRED_TABLES <= set(inspect(connection).get_table_names())
+
+
+def test_drop_migration_removes_retired_tables() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    migration = importlib.import_module(
+        "db.migrations.versions.20261020_0058_drop_retired_feature_tables"
+    )
+
+    with engine.begin() as connection:
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.downgrade()
+        assert RETIRED_TABLES <= set(inspect(connection).get_table_names())
+
+        migration.upgrade()
+        assert RETIRED_TABLES.isdisjoint(inspect(connection).get_table_names())
