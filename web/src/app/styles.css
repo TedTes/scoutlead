@@ -532,9 +532,32 @@ a {
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   box-shadow: none;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 20px;
+  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
   min-height: 76px;
+}
+
+.landing-workspace-preview .preview-lead-copy {
+  grid-column: 2;
+}
+
+.landing-workspace-preview .preview-lead-actions {
+  display: contents;
+}
+
+.landing-workspace-preview .preview-lead-actions time {
+  align-self: start;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  margin-top: 2px;
+}
+
+.landing-workspace-preview .preview-lead-actions svg {
+  align-self: center;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
 }
 
 .landing-workspace-preview .preview-lead-card.is-selected {
