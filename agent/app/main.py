@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -31,8 +34,16 @@ from workspaces.routes import router as workspaces_router
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
-    app = FastAPI(title=settings.app_name, version="0.1.0")
-    app.state.services = create_app_services(settings)
+    services = create_app_services(settings)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if settings.auto_create_tables:
+            create_database(services.db.engine)
+        yield
+
+    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+    app.state.services = services
     app.add_middleware(AuthMiddleware, settings=settings)
     app.add_middleware(
         CORSMiddleware,
@@ -41,11 +52,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    @app.on_event("startup")
-    def startup() -> None:
-        if settings.auto_create_tables:
-            create_database(app.state.services.db.engine)
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -69,164 +69,7 @@ def run_once() -> bool:
             job.attempts,
         )
         try:
-            if job.type == JobType.MESSAGE_SEND.value:
-                MessageService(session=session, email=services.email).send(
-                    str(job.payload["message_id"])
-                )
-            elif job.type == JobType.AUDIENCE_RUN.value:
-                audience_run = session.get(
-                    AudienceRunModel,
-                    str(job.payload["audience_run_id"]),
-                )
-                if audience_run is None:
-                    raise ValueError(
-                        f"audience run not found: {job.payload['audience_run_id']}"
-                    )
-                run, needs_expansion = AudienceRunService(
-                    session,
-                    workspace_id=audience_run.workspace_id,
-                ).process(audience_run.id)
-                if needs_expansion:
-                    profile = session.get(TerritoryModel, run.audience_id)
-                    if profile is None:
-                        raise ValueError(f"audience not found: {run.audience_id}")
-                    enqueue_profile_source_expansion(
-                        session,
-                        profile,
-                        google_places_configured=bool(
-                            services.settings.google_places_api_key
-                        ),
-                        search_configured=services.search.is_configured,
-                        openstreetmap_enabled=services.settings.openstreetmap_enabled,
-                        apify_sources=[
-                            source
-                            for source in services.settings.apify_source_configs
-                            if source.get("api_token")
-                            and source.get("actor_id")
-                            and (
-                                source.get("input_template")
-                                or source.get("search_url_template")
-                                or source.get("input_kind")
-                            )
-                        ],
-                        source_recipes=services.settings.source_template_configs,
-                    )
-                    for request in session.query(CoverageRequestModel).filter(
-                        CoverageRequestModel.run_id == run.id,
-                        CoverageRequestModel.status == "queued",
-                    ):
-                        request.status = "processing"
-                    session.commit()
-            elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).plan_refresh(
-                    str(job.payload["segment_id"]),
-                    processing_mode=str(job.payload.get("processing_mode", "automatic")),
-                    parent_job_id=job.id,
-                )
-            elif job.type == JobType.SOURCE_FETCH.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).fetch_source(
-                    str(job.payload["segment_id"]),
-                    source_index=int(job.payload["source_index"]),
-                    task_data=dict(job.payload["task"]),
-                    job_id=job.id,
-                    processing_mode=str(job.payload.get("processing_mode", "automatic")),
-                )
-            elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).resolve_identity(str(job.payload["source_item_id"]))
-            elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
-                business_index_pipeline_service(
-                    session=session,
-                    services=services,
-                ).audit_opportunity(
-                    (
-                        str(job.payload["source_item_id"])
-                        if job.payload.get("source_item_id")
-                        else None
-                    ),
-                    business_id=str(job.payload["business_id"]),
-                    segment_id=str(job.payload["segment_id"]),
-                    job_id=job.id,
-                )
-            elif job.type == JobType.SIGNAL_COLLECTION.value:
-                summary = SignalCollectionService(
-                    session,
-                    timeout_seconds=services.settings.request_timeout_seconds,
-                    browser_render_endpoint=services.settings.browser_render_endpoint,
-                    browser_render_api_key=services.settings.browser_render_api_key,
-                    pagespeed_api_key=services.settings.pagespeed_api_key,
-                    pagespeed_api_endpoint=services.settings.pagespeed_api_endpoint,
-                ).collect(
-                    str(job.payload["signal_definition_id"]),
-                    expected_version=int(job.payload["signal_version"]),
-                    business_ids=[
-                        str(value) for value in job.payload.get("business_ids", [])
-                    ],
-                )
-                if summary["claimed"]:
-                    QueueService(session).enqueue_signal_validation(
-                        signal_definition_id=str(
-                            job.payload["signal_definition_id"]
-                        ),
-                        signal_version=int(job.payload["signal_version"]),
-                        business_ids=[
-                            str(value)
-                            for value in job.payload.get("business_ids", [])
-                        ],
-                        collection_job_id=job.id,
-                    )
-            elif job.type == JobType.SIGNAL_VALIDATION.value:
-                SignalValidationService(session).validate(
-                    str(job.payload["signal_definition_id"]),
-                    expected_version=int(job.payload["signal_version"]),
-                    business_ids=[
-                        str(value) for value in job.payload.get("business_ids", [])
-                    ],
-                )
-            elif job.type == JobType.BUSINESS_SEARCH_EVALUATE.value:
-                if job.payload.get("campaign_id"):
-                    _consolidate_legacy_search_evaluations(session, job)
-                else:
-                    SearchEvaluationService(
-                        session=session,
-                        llm=services.llm,
-                    ).evaluate(
-                        business_id=str(job.payload["business_id"]),
-                        contract_hash=str(job.payload["contract_hash"]),
-                        contract=SearchContract.from_dict(dict(job.payload["contract"])),
-                        evidence_fresh_after=(
-                            datetime.fromisoformat(str(job.payload["evidence_fresh_after"]))
-                            if job.payload.get("evidence_fresh_after")
-                            else None
-                        ),
-                    )
-            elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
-                SearchEvaluationService(
-                    session=session,
-                    llm=services.llm,
-                ).evaluate_batch(
-                    business_ids=[str(value) for value in job.payload.get("business_ids", [])],
-                    contract_hash=str(job.payload["contract_hash"]),
-                    contract=SearchContract.from_dict(dict(job.payload["contract"])),
-                    evidence_fresh_after=(
-                        datetime.fromisoformat(str(job.payload["evidence_fresh_after"]))
-                        if job.payload.get("evidence_fresh_after")
-                        else None
-                    ),
-                )
-                _source_request_service(session, services).finalize_search_evaluations(
-                    str(job.payload["campaign_id"])
-                )
-            else:
-                raise ValueError(f"unknown job type: {job.type}")
+            _execute_job(session, services, job)
         except Exception as exc:
             logger.exception("job_failed job_id=%s", job.id)
             failed_job = queue.fail(
@@ -278,6 +121,165 @@ def run_once() -> bool:
         return True
     finally:
         generator.close()
+
+
+def _execute_job(
+    session: Session,
+    services: AppServices,
+    job: QueueJobModel,
+) -> None:
+    if job.type == JobType.MESSAGE_SEND.value:
+        MessageService(session=session, email=services.email).send(
+            str(job.payload["message_id"])
+        )
+    elif job.type == JobType.AUDIENCE_RUN.value:
+        audience_run = session.get(
+            AudienceRunModel,
+            str(job.payload["audience_run_id"]),
+        )
+        if audience_run is None:
+            raise ValueError(
+                f"audience run not found: {job.payload['audience_run_id']}"
+            )
+        run, needs_expansion = AudienceRunService(
+            session,
+            workspace_id=audience_run.workspace_id,
+        ).process(audience_run.id)
+        if needs_expansion:
+            profile = session.get(TerritoryModel, run.audience_id)
+            if profile is None:
+                raise ValueError(f"audience not found: {run.audience_id}")
+            enqueue_profile_source_expansion(
+                session,
+                profile,
+                google_places_configured=bool(
+                    services.settings.google_places_api_key
+                ),
+                search_configured=services.search.is_configured,
+                openstreetmap_enabled=services.settings.openstreetmap_enabled,
+                apify_sources=[
+                    source
+                    for source in services.settings.apify_source_configs
+                    if source.get("api_token")
+                    and source.get("actor_id")
+                    and (
+                        source.get("input_template")
+                        or source.get("search_url_template")
+                        or source.get("input_kind")
+                    )
+                ],
+                source_recipes=services.settings.source_template_configs,
+            )
+            for request in session.query(CoverageRequestModel).filter(
+                CoverageRequestModel.run_id == run.id,
+                CoverageRequestModel.status == "queued",
+            ):
+                request.status = "processing"
+            session.commit()
+    elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
+        business_index_pipeline_service(
+            session=session,
+            services=services,
+        ).plan_refresh(
+            str(job.payload["segment_id"]),
+            processing_mode=str(job.payload.get("processing_mode", "automatic")),
+            parent_job_id=job.id,
+        )
+    elif job.type == JobType.SOURCE_FETCH.value:
+        business_index_pipeline_service(
+            session=session,
+            services=services,
+        ).fetch_source(
+            str(job.payload["segment_id"]),
+            source_index=int(job.payload["source_index"]),
+            task_data=dict(job.payload["task"]),
+            job_id=job.id,
+            processing_mode=str(job.payload.get("processing_mode", "automatic")),
+        )
+    elif job.type == JobType.BUSINESS_IDENTITY_RESOLVE.value:
+        business_index_pipeline_service(
+            session=session,
+            services=services,
+        ).resolve_identity(str(job.payload["source_item_id"]))
+    elif job.type == JobType.BUSINESS_OPPORTUNITY_AUDIT.value:
+        business_index_pipeline_service(
+            session=session,
+            services=services,
+        ).audit_opportunity(
+            (
+                str(job.payload["source_item_id"])
+                if job.payload.get("source_item_id")
+                else None
+            ),
+            business_id=str(job.payload["business_id"]),
+            segment_id=str(job.payload["segment_id"]),
+            job_id=job.id,
+        )
+    elif job.type == JobType.SIGNAL_COLLECTION.value:
+        summary = SignalCollectionService(
+            session,
+            timeout_seconds=services.settings.request_timeout_seconds,
+            browser_render_endpoint=services.settings.browser_render_endpoint,
+            browser_render_api_key=services.settings.browser_render_api_key,
+            pagespeed_api_key=services.settings.pagespeed_api_key,
+            pagespeed_api_endpoint=services.settings.pagespeed_api_endpoint,
+        ).collect(
+            str(job.payload["signal_definition_id"]),
+            expected_version=int(job.payload["signal_version"]),
+            business_ids=_job_business_ids(job),
+        )
+        if summary["claimed"]:
+            QueueService(session).enqueue_signal_validation(
+                signal_definition_id=str(
+                    job.payload["signal_definition_id"]
+                ),
+                signal_version=int(job.payload["signal_version"]),
+                business_ids=_job_business_ids(job),
+                collection_job_id=job.id,
+            )
+    elif job.type == JobType.SIGNAL_VALIDATION.value:
+        SignalValidationService(session).validate(
+            str(job.payload["signal_definition_id"]),
+            expected_version=int(job.payload["signal_version"]),
+            business_ids=_job_business_ids(job),
+        )
+    elif job.type == JobType.BUSINESS_SEARCH_EVALUATE.value:
+        if job.payload.get("campaign_id"):
+            _consolidate_legacy_search_evaluations(session, job)
+        else:
+            SearchEvaluationService(
+                session=session,
+                llm=services.llm,
+            ).evaluate(
+                business_id=str(job.payload["business_id"]),
+                contract_hash=str(job.payload["contract_hash"]),
+                contract=SearchContract.from_dict(dict(job.payload["contract"])),
+                evidence_fresh_after=_job_evidence_fresh_after(job),
+            )
+    elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
+        SearchEvaluationService(
+            session=session,
+            llm=services.llm,
+        ).evaluate_batch(
+            business_ids=_job_business_ids(job),
+            contract_hash=str(job.payload["contract_hash"]),
+            contract=SearchContract.from_dict(dict(job.payload["contract"])),
+            evidence_fresh_after=_job_evidence_fresh_after(job),
+        )
+        _source_request_service(session, services).finalize_search_evaluations(
+            str(job.payload["campaign_id"])
+        )
+    else:
+        raise ValueError(f"unknown job type: {job.type}")
+
+
+def _job_business_ids(job: QueueJobModel) -> list[str]:
+    return [str(value) for value in job.payload.get("business_ids", [])]
+
+
+def _job_evidence_fresh_after(job: QueueJobModel) -> datetime | None:
+    value = job.payload.get("evidence_fresh_after")
+    return datetime.fromisoformat(str(value)) if value else None
 
 
 def run() -> None:

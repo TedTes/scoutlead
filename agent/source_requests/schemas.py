@@ -13,8 +13,6 @@ from source_providers.catalog import (
     OPENSTREETMAP_PROVIDER_ID,
 )
 
-
-
 class SourceRequestAction(StrEnum):
     LIST_CONTACTS = "list_contacts"
 

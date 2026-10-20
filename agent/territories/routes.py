@@ -7,7 +7,6 @@ from audience_runs.schemas import AudienceRunState
 from audience_runs.service import AudienceRunService
 from app.dependencies import CurrentAuth, DbSession
 from db.models import (
-    AudienceResultModel,
     AudienceRunModel,
     QueueJobModel,
 )

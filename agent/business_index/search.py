@@ -12,8 +12,6 @@ from business_index.schemas import (
     BusinessIndexSearch,
     FactOperator,
     FactPredicate,
-    OpportunityType,
-    SearchContract,
 )
 from canonical.semantics import market_is_compatible
 from db.models import (

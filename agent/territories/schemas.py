@@ -6,9 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from job_queue.schemas import QueueJobRead
 from audience_runs.schemas import AudienceLeadRead
-from leads.schemas import LeadRead
+from job_queue.schemas import QueueJobRead
 
 
 class TerritoryStatus(StrEnum):
