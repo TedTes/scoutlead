@@ -65,7 +65,6 @@ from leads.schemas import (
     AgentFitStatus,
     ContactPolicyStatus,
     LeadContactPolicyUpdate,
-    QualificationResult,
     SuppressionScope,
 )
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
@@ -723,118 +722,6 @@ def test_territories_are_scoped_by_workspace() -> None:
             TerritoryService(session, workspace_id="workspace:second").get(territory.id)
 
 
-@pytest.mark.skip(reason="legacy delivery pipeline removed")
-def test_refresh_is_idempotent_and_delivery_contains_only_allowed_fit() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        territory = TerritoryService(session, workspace_id="workspace:first").create(
-            TerritoryCreate(
-                product_id=offer.id,
-                niche_id=niche.id,
-                niche_slug=niche.slug,
-                niche_label=niche.label,
-                market_key="Toronto",
-                batch_size=2,
-                confirmed=True,
-            )
-        )
-        campaigns = _FakeCampaigns(session, workspace_id="workspace:first")
-        refresh = TerritoryRefreshService(
-            session=session,
-            campaigns=campaigns,
-            workspace_id="workspace:first",
-        )
-        scheduled = datetime(2026, 9, 28, tzinfo=timezone.utc)
-
-        first = refresh.refresh(territory.id, scheduled_for=scheduled)
-        second = refresh.refresh(territory.id, scheduled_for=scheduled)
-
-        assert first.id == second.id
-        assert first.status == "ready"
-        assert first.new_contact_count == 2
-        assert campaigns.run_count == 1
-        assert all(
-            lead.territory_id == territory.id
-            for lead in refresh.contacts(first, min_fit=territory.min_fit)
-        )
-
-
-@pytest.mark.skip(reason="legacy delivery pipeline removed")
-def test_monthly_profile_schedules_next_batch_from_delivery_time() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        territory = TerritoryService(session, workspace_id="workspace:first").create(
-            TerritoryCreate(
-                product_id=offer.id,
-                niche_id=niche.id,
-                niche_slug=niche.slug,
-                niche_label=niche.label,
-                market_key="Toronto",
-                refill_policy=TerritoryRefillPolicy.MONTHLY,
-                confirmed=True,
-            )
-        )
-        scheduled = datetime(2026, 9, 28, 15, 30, tzinfo=timezone.utc)
-
-        TerritoryRefreshService(
-            session=session,
-            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
-            workspace_id="workspace:first",
-        ).refresh(territory.id, scheduled_for=scheduled)
-
-        assert territory.next_run_at == datetime(2026, 10, 28, 15, 30, tzinfo=timezone.utc)
-
-
-@pytest.mark.skip(reason="legacy delivery pipeline removed")
-def test_delivery_requires_opportunity_but_not_contact_readiness() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        territory = TerritoryService(session, workspace_id="workspace:first").create(
-            TerritoryCreate(
-                product_id=offer.id,
-                niche_id=niche.id,
-                niche_slug=niche.slug,
-                niche_label=niche.label,
-                market_key="Toronto",
-                batch_size=2,
-                confirmed=True,
-            )
-        )
-        refresh = TerritoryRefreshService(
-            session=session,
-            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
-            workspace_id="workspace:first",
-        )
-        delivery = refresh.refresh(territory.id)
-        leads = list(
-            session.scalars(
-                select(LeadModel)
-                .where(LeadModel.campaign_id == delivery.campaign_id)
-                .order_by(LeadModel.created_at)
-            )
-        )
-        leads[0].raw_sources = [
-            {"digital_opportunity": {"version": 1, "score": 15, "level": "low"}},
-            {"phone": "416-555-0101"},
-        ]
-        leads[1].contact_email = None
-        leads[1].raw_sources = [
-            {"digital_opportunity": {"version": 1, "score": 55, "level": "high"}}
-        ]
-        session.commit()
-
-        contacts = refresh.contacts(delivery, min_fit=territory.min_fit)
-        assert [contact.id for contact in contacts] == [leads[1].id]
-        assert contacts[0].contact_email is None
 
 
 def test_when_depleted_profile_enqueues_one_replacement_batch() -> None:
@@ -879,112 +766,6 @@ def test_when_depleted_profile_enqueues_one_replacement_batch() -> None:
         assert replacement.id != initial_run.id
 
 
-@pytest.mark.skip(reason="legacy delivery pipeline removed")
-def test_failed_refresh_reuses_delivery_on_retry() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        territory = TerritoryService(session, workspace_id="workspace:first").create(
-            TerritoryCreate(
-                product_id=offer.id,
-                niche_id=niche.id,
-                niche_slug=niche.slug,
-                niche_label=niche.label,
-                market_key="Toronto",
-                confirmed=True,
-            )
-        )
-        campaigns = _FakeCampaigns(
-            session,
-            workspace_id="workspace:first",
-            fail_first=True,
-        )
-        refresh = TerritoryRefreshService(
-            session=session,
-            campaigns=campaigns,
-            workspace_id="workspace:first",
-        )
-        scheduled = datetime(2026, 9, 28, tzinfo=timezone.utc)
-
-        with pytest.raises(RuntimeError):
-            refresh.refresh(territory.id, scheduled_for=scheduled)
-        failed = refresh.territories.list_deliveries(territory.id)[0]
-        assert failed.status == "failed"
-
-        retried = refresh.refresh(territory.id, scheduled_for=scheduled)
-        assert retried.id == failed.id
-        assert retried.status == "ready"
-        assert campaigns.run_count == 2
-
-
-@pytest.mark.skip(reason="legacy delivery pipeline removed")
-def test_profile_refresh_materializes_without_calling_an_llm() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        profile = TerritoryService(
-            session,
-            workspace_id="workspace:first",
-        ).create_profile(
-            ProfileCreate(
-                product_id=offer.id,
-                trades=["hvac"],
-                customer_kind="residential",
-                market={"city": "Toronto", "radius_km": 25},
-                signals=[],
-                exclude=["chains", "franchises"],
-                limit=25,
-            )
-        )
-        profile.search_prompt = "dentists in Vancouver"
-        profile.search_contract = {
-            "semantic_all_of": ["must be a dentist"],
-            "contract_hash": "legacy-contract",
-        }
-        session.commit()
-        refresh = TerritoryRefreshService(
-            session=session,
-            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
-            workspace_id="workspace:first",
-        )
-        delivery = refresh.refresh(profile.id)
-
-        assert delivery.status == "ready"
-        assert delivery.new_contact_count == 2
-        campaign = session.get(CampaignModel, delivery.campaign_id)
-        assert campaign is not None
-        assert campaign.source_input is None
-        assert campaign.source_preset_id is None
-        assert set(campaign.source_inputs) == {"profile_match"}
-        assert campaign.source_inputs["profile_match"]["trades"] == ["hvac"]
-        items = list(
-            session.scalars(
-                select(ProfileDeliveryItemModel).where(
-                    ProfileDeliveryItemModel.profile_id == profile.id
-                )
-            )
-        )
-        assert len(items) == 2
-
-        next_delivery = refresh.refresh(
-            profile.id,
-            scheduled_for=datetime(2026, 10, 6, tzinfo=timezone.utc),
-        )
-        assert next_delivery.status == "empty"
-        assert next_delivery.new_contact_count == 0
-        current = current_profile_batch(
-            profile.id,
-            session,
-            SimpleNamespace(workspace_id="workspace:first"),
-        )
-        assert current.state.value == "setup"
-        assert current.delivery is None
-        assert current.result_count == 0
-        assert current.leads == []
 
 
 def test_audience_run_returns_new_results_then_reuses_previous_results() -> None:
@@ -1951,42 +1732,6 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
         )
 
 
-@pytest.mark.skip(reason="legacy delivery pipeline removed")
-def test_profile_delivery_is_empty_when_no_selected_signal_is_confirmed() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        profile = TerritoryService(
-            session,
-            workspace_id="workspace:first",
-        ).create_profile(
-            ProfileCreate(
-                product_id=offer.id,
-                trades=["hvac"],
-                customer_kind="residential",
-                market={"city": "Toronto", "radius_km": 25},
-                signals=["no_contact_form"],
-                exclude=[],
-                limit=25,
-            )
-        )
-
-        delivery = TerritoryRefreshService(
-            session=session,
-            campaigns=_FakeCampaigns(session, workspace_id="workspace:first"),
-            workspace_id="workspace:first",
-        ).refresh(profile.id)
-
-        assert delivery.status == "empty"
-        assert delivery.new_contact_count == 0
-        assert session.scalar(
-            select(func.count())
-            .select_from(LeadModel)
-            .where(LeadModel.campaign_id == delivery.campaign_id)
-        ) == 0
-
 
 def test_profile_closed_filter_uses_canonical_business_status() -> None:
     session_factory = _session_factory()
@@ -2201,50 +1946,6 @@ def _niche(session, *, slug: str, label: str) -> NicheModel:
     session.add(niche)
     session.commit()
     return niche
-
-
-class _FakeCampaigns:
-    def __init__(self, session, *, workspace_id: str, fail_first: bool = False) -> None:
-        self.session = session
-        self.repository = CampaignRepository(session, workspace_id=workspace_id)
-        self.leads = LeadRepository(session, workspace_id=workspace_id)
-        self.fail_first = fail_first
-        self.run_count = 0
-
-    def create(self, campaign):
-        return self.repository.create(campaign)
-
-    def create_profile_delivery(self, campaign):
-        return self.repository.create(campaign)
-
-    def materialize_profile_matches(self, campaign_id: str, rows: list[dict]):
-        self.run_count += 1
-        if self.fail_first and self.run_count == 1:
-            raise RuntimeError("temporary source failure")
-        campaign = self.repository.get(campaign_id)
-        created = []
-        for index, row in enumerate(rows, start=1):
-            lead = self.leads.create_from_existing_match(
-                campaign.id,
-                campaign.product_id,
-                row,
-            )
-            self.leads.attach_qualification(
-                lead.id,
-                QualificationResult(
-                    qualified=True,
-                    fit_status=(
-                        AgentFitStatus.GOOD_FIT
-                        if index == 1
-                        else AgentFitStatus.MAYBE
-                    ),
-                    score=80,
-                    rationale="Matches the niche.",
-                    recommended_next_step="Review contact.",
-                ),
-            )
-            created.append(lead)
-        return created
 
 
 def _seed_hvac_businesses(session) -> None:
