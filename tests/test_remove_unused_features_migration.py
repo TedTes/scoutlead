@@ -42,7 +42,7 @@ def test_compatibility_migration_keeps_retired_tables() -> None:
         assert RETIRED_TABLES <= set(inspect(connection).get_table_names())
 
 
-def test_drop_migration_removes_retired_tables() -> None:
+def test_drop_migration_resumes_when_a_retired_table_is_already_missing() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     migration = importlib.import_module(
@@ -54,5 +54,6 @@ def test_drop_migration_removes_retired_tables() -> None:
         migration.downgrade()
         assert RETIRED_TABLES <= set(inspect(connection).get_table_names())
 
+        connection.exec_driver_sql("DROP TABLE demo_sites")
         migration.upgrade()
         assert RETIRED_TABLES.isdisjoint(inspect(connection).get_table_names())

@@ -16,12 +16,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_table("demo_sites")
-    op.drop_table("quality_metric_snapshots")
-    op.drop_table("quality_labels")
-    op.drop_table("campaign_insights")
-    op.drop_table("product_source_drafts")
-    op.drop_table("learning_summaries")
+    # Some environments were partially cleaned before this revision was
+    # recorded. Keep the migration safe to resume when any table is absent.
+    for table_name in (
+        "demo_sites",
+        "quality_metric_snapshots",
+        "quality_labels",
+        "campaign_insights",
+        "product_source_drafts",
+        "learning_summaries",
+    ):
+        op.execute(sa.text(f'DROP TABLE IF EXISTS "{table_name}"'))
 
 
 def downgrade() -> None:
@@ -191,4 +196,3 @@ def downgrade() -> None:
         "status",
     ):
         op.create_index(f"ix_demo_sites_{column}", "demo_sites", [column])
-
