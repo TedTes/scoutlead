@@ -85,16 +85,22 @@ class SignalCollectionService:
                 .order_by(BusinessModel.id)
             )
         )
+        # Do not retain read locks while collectors perform external HTTP work.
+        # Production sessions use expire_on_commit=False, so the loaded models
+        # remain available after this transaction is released.
+        self.session.commit()
         summary = {"requested": len(business_ids), "observed": 0, "claimed": 0, "unknown": 0}
         for business in businesses:
             observation = self._observation(definition, business)
             if observation is None:
                 summary["unknown"] += 1
+                self.session.commit()
                 continue
             summary["observed"] += 1
             value = extract_signal_value(definition, observation.raw_payload or {})
             if value is None:
                 summary["unknown"] += 1
+                self.session.commit()
                 continue
             claim = FactClaimRepository(self.session).record(
                 FactClaim(
@@ -117,7 +123,10 @@ class SignalCollectionService:
             )
             self._resolve(definition, business.id, claim)
             summary["claimed"] += 1
-        self.session.commit()
+            # Bound each business to its own transaction. A large collection
+            # batch must not block schema changes for the duration of every
+            # network request in the batch.
+            self.session.commit()
         return summary
 
     def _observation(
@@ -137,6 +146,7 @@ class SignalCollectionService:
                 definition, existing.raw_payload or {}
             ) is not None:
                 return existing
+            self.session.commit()
             enrichment = self.website.inspect(business)
             raw = _website_payload(business, definition, enrichment)
             link = CanonicalRepository(self.session).record_business_evidence(
@@ -194,6 +204,7 @@ class SignalCollectionService:
                 return existing
         if not business.website_url:
             return None
+        self.session.commit()
         params: list[tuple[str, str]] = [
             ("url", business.website_url),
             ("strategy", "mobile"),
@@ -266,6 +277,7 @@ class SignalCollectionService:
         domain = _business_domain(business)
         if not domain:
             return None
+        self.session.commit()
         try:
             response = httpx.get(
                 f"https://rdap.org/domain/{domain}",
