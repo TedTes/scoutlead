@@ -785,29 +785,6 @@ def test_sparse_source_uses_source_lookup_before_needing_context() -> None:
         assert any("Source lookup result" in snippet for snippet in inference.evidence.source_snippets)
 
 
-def test_repeated_source_inference_uses_cached_draft() -> None:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    create_database(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    llm = ChangingProductInferenceLLM()
-    browser = FakeBrowser()
-
-    with session_factory() as session:
-        service = ProductService(
-            session,
-            llm=llm,
-            browser=browser,
-        )
-        first = service.infer_product_from_source(ProductSourceCreate(source="https://quotevan.com"))
-        browser_calls = browser.calls
-        second = service.infer_product_from_source(ProductSourceCreate(source="https://www.quotevan.com/"))
-
-        assert first.confidence == 80
-        assert second.confidence == first.confidence
-        assert browser.calls == browser_calls
-        assert llm.calls == ["product_source_evidence", "product_config_from_evidence"]
-
-
 def test_context_change_triggers_new_llm_inference() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)

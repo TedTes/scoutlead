@@ -41,7 +41,6 @@ import type {
   ContactPolicyStatus,
   ContactVerificationStatus,
   DiscoveryResult,
-  DemoSite,
   LeadContactPolicyInput,
   LeadReviewStatus,
   LeadUpdateInput,
@@ -195,8 +194,6 @@ export function ResultsScreen({
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [territoryMetrics, setTerritoryMetrics] = useState<TerritoryMetrics | null>(null);
   const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
-  const [demoDraft, setDemoDraft] = useState<DemoSite | null>(null);
-  const [demoBusy, setDemoBusy] = useState(false);
   const [exportFileName, setExportFileName] = useState("");
   const [bulkPopoverStyle, setBulkPopoverStyle] = useState<CSSProperties>({});
   const runMenuRef = useRef<HTMLDivElement | null>(null);
@@ -298,28 +295,6 @@ export function ResultsScreen({
   const selectedMessage = selectedContact
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
-  const generateDemo = async () => {
-    if (!selectedContact?.id.startsWith("audience_result_") || demoBusy) return;
-    setDemoBusy(true);
-    try {
-      setDemoDraft(await territoryApi.generateDemoSite(selectedContact.id));
-    } catch (error) {
-      showToast({ title: "Demo generation failed", message: error instanceof Error ? error.message : String(error), tone: "red" });
-    } finally { setDemoBusy(false); }
-  };
-  const publishDemo = async () => {
-    if (!demoDraft || demoBusy) return;
-    setDemoBusy(true);
-    try {
-      await territoryApi.updateDemoSite(demoDraft.id, { content: demoDraft.content, outreach_message: demoDraft.outreach_message });
-      const published = await territoryApi.publishDemoSite(demoDraft.id);
-      setDemoDraft(published);
-      window.open(`/demo/${published.share_token}`, "_blank", "noopener,noreferrer");
-      showToast({ title: "Demo published", message: "The shareable concept opened in a new tab.", tone: "green" });
-    } catch (error) {
-      showToast({ title: "Publishing failed", message: error instanceof Error ? error.message : String(error), tone: "red" });
-    } finally { setDemoBusy(false); }
-  };
   useEffect(() => {
     const scopeId = selectedRunMatchesActiveProfile
       ? selectedDiscoveryRunId
@@ -1077,8 +1052,6 @@ export function ResultsScreen({
             onQualifyLead={qualifyLead}
             onMarkMessageReplied={markMessageReplied}
             onGenerateApproach={activeProfile ? generateContactApproach : undefined}
-            onGenerateDemo={generateDemo}
-            demoBusy={demoBusy}
             onRecordOutcome={recordContactOutcome}
             onSendMessage={sendMessage}
             onUpdateContactPolicy={updateLeadContactPolicy}
@@ -1100,18 +1073,6 @@ export function ResultsScreen({
           onClose={() => setPendingExport(null)}
           onExport={confirmContactsExport}
         />
-      ) : null}
-      {demoDraft ? (
-        <Modal title="Review demo website" onClose={() => setDemoDraft(null)}>
-          <div className="demo-review-dialog">
-            <span className="demo-review-label">Unofficial concept</span>
-            <label><span>Headline</span><input value={demoDraft.content.headline} onChange={(event) => setDemoDraft({ ...demoDraft, content: { ...demoDraft.content, headline: event.target.value } })} /></label>
-            <label><span>Supporting copy</span><textarea value={demoDraft.content.subheadline} onChange={(event) => setDemoDraft({ ...demoDraft, content: { ...demoDraft.content, subheadline: event.target.value } })} /></label>
-            <div className="demo-review-services">{demoDraft.content.services.map((service) => <div key={service.title}><strong>{service.title}</strong><span>{service.description}</span></div>)}</div>
-            <label><span>Suggested outreach</span><textarea value={demoDraft.outreach_message} onChange={(event) => setDemoDraft({ ...demoDraft, outreach_message: event.target.value })} /></label>
-            <div className="demo-review-actions"><button type="button" onClick={() => setDemoDraft(null)}>Keep private</button><button className="primary" disabled={demoBusy} type="button" onClick={() => void publishDemo()}>{demoBusy ? "Publishing..." : "Publish and open"}</button></div>
-          </div>
-        </Modal>
       ) : null}
       {rerunPromptOpen ? (
         <RerunSearchDialog
@@ -2747,8 +2708,6 @@ function ContactDrawer({
   onQualifyLead,
   onMarkMessageReplied,
   onGenerateApproach,
-  onGenerateDemo,
-  demoBusy,
   onRecordOutcome,
   onSendMessage,
   onUpdateContactPolicy,
@@ -2765,8 +2724,6 @@ function ContactDrawer({
   onQualifyLead: (leadId: string) => Promise<void>;
   onMarkMessageReplied: (messageId: string, body?: string) => Promise<void>;
   onGenerateApproach?: (leadId: string) => Promise<void>;
-  onGenerateDemo?: () => Promise<void>;
-  demoBusy?: boolean;
   onRecordOutcome?: (leadId: string, outcome: LeadOutcomeValue) => Promise<void>;
   onSendMessage: (messageId: string) => Promise<void>;
   onUpdateContactPolicy: (leadId: string, update: LeadContactPolicyInput) => Promise<void>;
@@ -3097,11 +3054,6 @@ function ContactDrawer({
             </div>
           </div>
           <div className="drawer-header-actions">
-            {contact.id.startsWith("audience_result_") && onGenerateDemo ? (
-              <button aria-label="Generate demo website" disabled={demoBusy} title="Generate demo website" type="button" onClick={() => void onGenerateDemo()}>
-                <Globe size={17} />
-              </button>
-            ) : null}
             {website ? (
               <a aria-label="Open website" href={website} target="_blank" rel="noreferrer" title="Open website">
                 <ExternalLink size={17} />

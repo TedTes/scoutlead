@@ -7,7 +7,6 @@ from db.models import (
     BusinessFactModel,
     BusinessModel,
     FactClaimModel,
-    QualityMetricSnapshotModel,
     SignalDefinitionModel,
     SourceObservationModel,
     ValidationResultModel,
@@ -121,31 +120,11 @@ def _collect(session, definition, business) -> BusinessFactModel:
     return fact
 
 
-def _passing_mobile_viewport_metric(session) -> None:
-    session.add(
-        QualityMetricSnapshotModel(
-            id=new_id("quality_metric"),
-            dimension="missing_mobile_viewport",
-            sample_size=50,
-            true_positive=50,
-            false_positive=0,
-            false_negative=0,
-            true_negative=0,
-            precision=1.0,
-            recall=1.0,
-            precision_lower_bound=0.9286,
-            calculated_at=utcnow(),
-        )
-    )
-    session.commit()
-
-
 def test_signal_validation_publishes_reproducible_claim() -> None:
     factory = _session_factory()
     with factory() as session:
         business = _business(session)
         definition = _definition(session)
-        _passing_mobile_viewport_metric(session)
         _observation(session, business.id, True)
         fact = _collect(session, definition, business)
         assert fact.quality_state == "staged"

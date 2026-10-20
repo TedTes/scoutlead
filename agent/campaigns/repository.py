@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from campaigns.schemas import CampaignCreate, CampaignStage, CampaignStatus, CampaignUpdate
 from campaigns.state import assert_campaign_transition
 from db.models import (
-    CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
     CampaignSourceModel,
@@ -15,7 +14,6 @@ from db.models import (
     DiscoveryCandidateModel,
     LeadModel,
     LeadOutcomeModel,
-    LearningSummaryModel,
     MessageModel,
     ProductModel,
     QueueJobModel,
@@ -90,8 +88,6 @@ class CampaignRepository:
         self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.campaign_id == campaign_id))
         self.session.execute(delete(LeadModel).where(LeadModel.campaign_id == campaign_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.campaign_id == campaign_id))
-        self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.campaign_id == campaign_id))
-        self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.campaign_id == campaign_id))
         self.session.execute(
             delete(QueueJobModel).where(QueueJobModel.payload["campaign_id"].as_string() == campaign_id)
         )

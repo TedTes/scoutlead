@@ -195,8 +195,6 @@ class ProductService:
         context = request.context.strip() if request.context else None
         source_url = self._normalized_source_url(source)
         source_fingerprint = self._source_fingerprint(source_url)
-        source_cache_fingerprint = self._source_cache_fingerprint(source, source_url)
-        context_fingerprint = self._context_fingerprint(context)
         existing = self.products.find_by_source_fingerprint(source_fingerprint)
         if existing is None and source_url and source_fingerprint:
             legacy_match = self.products.find_active_by_product_name(
@@ -210,13 +208,6 @@ class ProductService:
                 )
         if existing is not None:
             return self._existing_product_inference(source, context, ProductRead.model_validate(existing))
-
-        cached = self.products.find_source_draft(
-            source_fingerprint=source_cache_fingerprint,
-            context_fingerprint=context_fingerprint,
-        )
-        if cached is not None:
-            return ProductInferenceRead.model_validate(cached.inference)
 
         inspection = self._inspect_source(source)
         lookup_results: list[SearchResult] = []
@@ -288,15 +279,6 @@ class ProductService:
             evidence=evidence,
         )
         inference = self._build_inference(source, context, evidence, draft)
-        self._cache_source_draft(
-            source=source,
-            source_url=source_url,
-            source_cache_fingerprint=source_cache_fingerprint,
-            context=context,
-            context_fingerprint=context_fingerprint,
-            target_geography=request.target_geography,
-            inference=inference,
-        )
         return inference
 
     def list(self) -> list[ProductModel]:
@@ -555,27 +537,6 @@ class ProductService:
             existing_product=existing_product,
         )
 
-    def _cache_source_draft(
-        self,
-        *,
-        source: str,
-        source_url: str | None,
-        source_cache_fingerprint: str,
-        context: str | None,
-        context_fingerprint: str,
-        target_geography: str,
-        inference: ProductInferenceRead,
-    ) -> None:
-        self.products.upsert_source_draft(
-            source=source,
-            source_url=source_url,
-            source_fingerprint=source_cache_fingerprint,
-            context=context,
-            context_fingerprint=context_fingerprint,
-            target_geography=target_geography,
-            inference=inference.model_dump(mode="json"),
-        )
-
     @staticmethod
     def _dedupe_snippets(snippets: list[str]) -> list[str]:
         deduped: list[str] = []
@@ -726,18 +687,6 @@ class ProductService:
         if not source_url:
             return None
         return hashlib.sha256(source_url.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _source_cache_fingerprint(source: str, source_url: str | None) -> str:
-        normalized = source_url or normalize_text(source).lower()
-        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _context_fingerprint(context: str | None) -> str:
-        normalized = normalize_text(context or "").lower()
-        if not normalized:
-            return "no_context"
-        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _source_product_name_hint(source_url: str) -> str | None:

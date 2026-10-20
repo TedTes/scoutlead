@@ -460,32 +460,6 @@ export type ProfileBatch = {
   retry_at?: string | null;
 };
 
-export type DemoSiteContent = {
-  business_name: string;
-  eyebrow: string;
-  headline: string;
-  subheadline: string;
-  primary_cta: string;
-  services: Array<{ title: string; description: string }>;
-  trust_heading: string;
-  trust_body: string;
-  contact_heading: string;
-  palette: "green" | "blue" | "charcoal" | "red";
-};
-
-export type DemoSite = {
-  id: string;
-  status: "draft" | "published" | "expired";
-  share_token: string;
-  content: DemoSiteContent;
-  outreach_message: string;
-  usage: Record<string, unknown>;
-  view_count: number;
-  last_viewed_at?: string | null;
-  published_at?: string | null;
-  expires_at?: string | null;
-};
-
 export type OutreachEvidence = {
   signal_key: string;
   label: string;
@@ -564,7 +538,6 @@ export type OutreachPackageContent = {
   } | null;
   form?: { body: string } | null;
   email?: { subject: string; body: string } | null;
-  demo_path?: string | null;
   strategy?: OutreachStrategy | null;
   alternatives: OutreachDraftAlternative[];
   reply_paths: OutreachReplyPath[];

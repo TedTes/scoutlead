@@ -93,7 +93,6 @@ class OpenAIPhrasingAdapter:
                     business_name=context.business_name,
                     strategy=refined,
                     signature=context.signature,
-                    demo_path=context.demo_path,
                 )
             )
         except Exception as exc:

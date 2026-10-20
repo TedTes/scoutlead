@@ -11,7 +11,6 @@ from db.models import (
     AudienceResultModel,
     AudienceRunModel,
     BusinessModel,
-    DemoSiteModel,
     OutreachPackageModel,
     ProductModel,
     TerritoryModel,
@@ -185,14 +184,6 @@ class OutreachPackageService:
         raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
         contact_url = _find_string(raw, _CONTACT_URL_KEYS)
         email = _optional_string(snapshot.get("contact_email")) or _find_string(raw, _EMAIL_KEYS)
-        demo = self.session.scalar(
-            select(DemoSiteModel).where(
-                DemoSiteModel.workspace_id == self.workspace_id,
-                DemoSiteModel.audience_result_id == result.id,
-                DemoSiteModel.status == "published",
-            )
-        )
-        demo_path = f"/demo/{demo.share_token}" if demo is not None else None
         signature = (
             (workspace.sender_legal_name if workspace else None)
             or (workspace.sender_contact if workspace else None)
@@ -202,7 +193,6 @@ class OutreachPackageService:
             business_name=business.display_name,
             strategy=strategy,
             signature=signature,
-            demo_path=demo_path,
         )
         phrasing = (
             OpenAIPhrasingAdapter(self.llm)
@@ -230,7 +220,6 @@ class OutreachPackageService:
             trade_key=business.category_key or "default",
             business_name=business.display_name,
             signature=signature,
-            demo_path=demo_path,
         )
         return OutreachPackageContent(
             observation=observation,
@@ -239,7 +228,6 @@ class OutreachPackageService:
             call=generated.call if business.phone else None,
             form=generated.form if contact_url else None,
             email=generated.email if email else None,
-            demo_path=demo_path,
             strategy=strategy,
             alternatives=alternatives,
             reply_paths=strategy.reply_paths,
@@ -254,7 +242,6 @@ class OutreachPackageService:
         trade_key: str,
         business_name: str,
         signature: str,
-        demo_path: str | None,
     ) -> list[DraftAlternative]:
         alternatives: list[DraftAlternative] = []
         for offset, label in ((1, "Direct"), (2, "Consultative")):
@@ -269,7 +256,6 @@ class OutreachPackageService:
                     business_name=business_name,
                     strategy=strategy,
                     signature=signature,
-                    demo_path=demo_path,
                 )
             )
             OutreachPolicyValidator().validate(strategy=strategy, generation=generated)
@@ -331,7 +317,6 @@ class OutreachPackageService:
                 business_name=business.display_name,
                 strategy=content.strategy,
                 signature=signature,
-                demo_path=content.demo_path,
             ),
             phrasing=adapter,
         )

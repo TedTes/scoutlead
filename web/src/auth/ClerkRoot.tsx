@@ -33,8 +33,7 @@ import {
 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import worldMapTextureUrl from "../assets/world-map-equirectangular.svg";
-import { getApiBaseUrl, getClerkPublishableKey, isAuthDisabled } from "../config/env";
-import type { DemoSite } from "../types/domain";
+import { getClerkPublishableKey, isAuthDisabled } from "../config/env";
 import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
 const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
@@ -59,7 +58,6 @@ function RootAppContent({ authEnabled }: { authEnabled: boolean }) {
   }, []);
 
   if (path === "/app/admin") return <LegacyAdminRedirect />;
-  if (path.startsWith("/demo/")) return <PublicDemoSite token={path.slice("/demo/".length)} />;
   if (!isProtectedRoute(path)) return <LandingPage authEnabled={authEnabled} />;
 
   return (
@@ -67,32 +65,6 @@ function RootAppContent({ authEnabled }: { authEnabled: boolean }) {
       <AuthenticatedApp />
     </Suspense>
   );
-}
-
-function PublicDemoSite({ token }: { token: string }) {
-  const [demo, setDemo] = useState<DemoSite | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    document.body.classList.add("demo-site-route");
-    const robots = document.createElement("meta");
-    robots.name = "robots"; robots.content = "noindex,nofollow"; document.head.appendChild(robots);
-    void fetch(`${getApiBaseUrl()}/u/demo-sites/${encodeURIComponent(token)}`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("not found")))
-      .then(setDemo).catch(() => setFailed(true));
-    return () => { document.body.classList.remove("demo-site-route"); robots.remove(); };
-  }, [token]);
-  if (failed) return <main className="public-demo-unavailable"><h1>Concept unavailable</h1><p>This preview has expired or was unpublished.</p></main>;
-  if (!demo) return <AuthLoadingScreen />;
-  const site = demo.content;
-  return <main className={`public-demo-site is-${site.palette}`}>
-    <div className="public-demo-notice">Unofficial concept prepared for {site.business_name}</div>
-    <nav><strong>{site.business_name}</strong><a href="#contact">{site.primary_cta}</a></nav>
-    <header><div><span>{site.eyebrow}</span><h1>{site.headline}</h1><p>{site.subheadline}</p><a href="#contact">{site.primary_cta}<ArrowRight size={17} /></a></div></header>
-    <section className="public-demo-services"><div><span>Services</span><h2>How we can help</h2><div>{site.services.map((service) => <article key={service.title}><h3>{service.title}</h3><p>{service.description}</p></article>)}</div></div></section>
-    <section className="public-demo-trust"><div><span>Why choose us</span><h2>{site.trust_heading}</h2><p>{site.trust_body}</p></div></section>
-    <section className="public-demo-contact" id="contact"><div><h2>{site.contact_heading}</h2><button type="button">{site.primary_cta}</button></div></section>
-    <footer><strong>{site.business_name}</strong><span>Unofficial design concept · Not the current business website</span></footer>
-  </main>;
 }
 
 function isProtectedRoute(path: string) {

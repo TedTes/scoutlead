@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import (
-    BusinessFactModel,
-    QualityMetricSnapshotModel,
-    SourceObservationModel,
-)
+from db.models import BusinessFactModel
 
 
 FACT_DIMENSIONS = {
@@ -23,20 +19,6 @@ FACT_DIMENSIONS = {
     "service_area_pages_present": "no_service_area_pages",
 }
 FACT_KEYS_BY_DIMENSION = {value: key for key, value in FACT_DIMENSIONS.items()}
-PRECISION_THRESHOLDS = {
-    "website_unavailable": 0.95,
-    "reviews_under_15": 0.98,
-    "no_quote_flow": 0.90,
-    "no_contact_form": 0.90,
-    "missing_https": 0.98,
-    "missing_mobile_viewport": 0.95,
-    "no_primary_cta": 0.90,
-    "no_click_to_call": 0.95,
-    "no_online_payment_or_financing": 0.90,
-    "no_service_area_pages": 0.90,
-}
-MINIMUM_SAMPLE = 30
-MINIMUM_PRECISION_LOWER_BOUND = 0.80
 POLICY_VERSION = 1
 
 
@@ -55,29 +37,9 @@ class FactQualityPolicyService:
             fact.quality_state = "published"
             fact.quality_policy_version = POLICY_VERSION
             return self._finish(fact, commit)
-        if fact.resolution_state != "confirmed" or fact.confidence < 90:
-            fact.quality_state = "staged"
-            fact.quality_policy_version = POLICY_VERSION
-            return self._finish(fact, commit)
-        source = None
-        if fact.source_observation_id:
-            observation = self.session.get(
-                SourceObservationModel,
-                fact.source_observation_id,
-            )
-            source = observation.source if observation is not None else None
-        metric = self._latest_metric(dimension, source=source)
-        if metric is None or metric.sample_size < MINIMUM_SAMPLE:
-            fact.quality_state = "staged"
-        elif (
-            metric.precision is not None
-            and metric.precision >= PRECISION_THRESHOLDS[dimension]
-            and metric.precision_lower_bound is not None
-            and metric.precision_lower_bound >= MINIMUM_PRECISION_LOWER_BOUND
-        ):
-            fact.quality_state = "published"
-        else:
-            fact.quality_state = "quarantined"
+        # Opportunity claims stay staged until the explicit signal-validation
+        # workflow publishes them. Population metrics are no longer persisted.
+        fact.quality_state = "staged"
         fact.quality_policy_version = POLICY_VERSION
         return self._finish(fact, commit)
 
@@ -94,38 +56,6 @@ class FactQualityPolicyService:
             self.evaluate(fact, commit=False)
         self.session.commit()
         return len(facts)
-
-    def _latest_metric(
-        self,
-        dimension: str,
-        *,
-        source: str | None,
-    ) -> QualityMetricSnapshotModel | None:
-        metrics = list(
-            self.session.scalars(
-                select(QualityMetricSnapshotModel)
-                .where(
-                    QualityMetricSnapshotModel.dimension == dimension,
-                    or_(
-                        QualityMetricSnapshotModel.source == source,
-                        QualityMetricSnapshotModel.source.is_(None),
-                    ),
-                    QualityMetricSnapshotModel.niche_id.is_(None),
-                    QualityMetricSnapshotModel.market_key.is_(None),
-                )
-                .order_by(QualityMetricSnapshotModel.calculated_at.desc())
-            )
-        )
-        if not metrics:
-            return None
-        metrics.sort(
-            key=lambda metric: (
-                metric.source == source and source is not None,
-                metric.calculated_at,
-            ),
-            reverse=True,
-        )
-        return metrics[0]
 
     def _finish(
         self,

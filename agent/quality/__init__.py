@@ -1,1 +1,1 @@
-"""Production quality labels and calibrated metric snapshots."""
+"""Fact publication safety policy."""

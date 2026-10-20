@@ -123,26 +123,6 @@ class ProductModel(TimestampMixin, Base):
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="product")
 
 
-class ProductSourceDraftModel(TimestampMixin, Base):
-    __tablename__ = "product_source_drafts"
-    __table_args__ = (
-        UniqueConstraint(
-            "source_fingerprint",
-            "context_fingerprint",
-            name="uq_product_source_drafts_source_context",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    source_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    context: Mapped[str | None] = mapped_column(Text, nullable=True)
-    context_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    target_geography: Mapped[str] = mapped_column(String(255), nullable=False)
-    inference: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-
-
 class CampaignModel(TimestampMixin, Base):
     __tablename__ = "campaigns"
 
@@ -453,61 +433,6 @@ class ValidationResultModel(TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class QualityLabelModel(TimestampMixin, Base):
-    __tablename__ = "quality_labels"
-    __table_args__ = (
-        Index("ix_quality_labels_dimension_reviewed", "dimension", "reviewed_at"),
-        Index("ix_quality_labels_scope", "source", "niche_id", "market_key"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    idempotency_key: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, unique=True
-    )
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    dimension: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    expected: Mapped[Any] = mapped_column(JSON, nullable=False)
-    predicted: Mapped[Any | None] = mapped_column(JSON, nullable=True)
-    source: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    niche_id: Mapped[str | None] = mapped_column(
-        ForeignKey("niches.id"), nullable=True, index=True
-    )
-    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    validator_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    reviewer: Mapped[str] = mapped_column(String(255), nullable=False)
-    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class QualityMetricSnapshotModel(TimestampMixin, Base):
-    __tablename__ = "quality_metric_snapshots"
-    __table_args__ = (
-        Index("ix_quality_metrics_dimension_calculated", "dimension", "calculated_at"),
-        Index("ix_quality_metrics_scope", "source", "niche_id", "market_key"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    dimension: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    source: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    niche_id: Mapped[str | None] = mapped_column(
-        ForeignKey("niches.id"), nullable=True, index=True
-    )
-    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    validator_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
-    true_positive: Mapped[int] = mapped_column(Integer, nullable=False)
-    false_positive: Mapped[int] = mapped_column(Integer, nullable=False)
-    false_negative: Mapped[int] = mapped_column(Integer, nullable=False)
-    true_negative: Mapped[int] = mapped_column(Integer, nullable=False)
-    precision: Mapped[float | None] = mapped_column(Float, nullable=True)
-    recall: Mapped[float | None] = mapped_column(Float, nullable=True)
-    precision_lower_bound: Mapped[float | None] = mapped_column(Float, nullable=True)
-    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
 class AudienceRunModel(TimestampMixin, Base):
     __tablename__ = "audience_runs"
     __table_args__ = (
@@ -597,30 +522,6 @@ class CoverageRequestModel(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class DemoSiteModel(TimestampMixin, Base):
-    __tablename__ = "demo_sites"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "audience_result_id", name="uq_demo_sites_workspace_result"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
-    audience_result_id: Mapped[str] = mapped_column(ForeignKey("audience_results.id", ondelete="CASCADE"), nullable=False, index=True)
-    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), nullable=False, index=True)
-    share_token: Mapped[str] = mapped_column(String(96), nullable=False, unique=True, index=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
-    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    outreach_message: Mapped[str] = mapped_column(Text, nullable=False)
-    provider: Mapped[str] = mapped_column(String(64), nullable=False)
-    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class OutreachPackageModel(TimestampMixin, Base):
@@ -1257,30 +1158,6 @@ class CampaignMemoryModel(Base):
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     score_impact: Mapped[float | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class LearningSummaryModel(TimestampMixin, Base):
-    __tablename__ = "learning_summaries"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id"), nullable=True)
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-
-
-class CampaignInsightModel(TimestampMixin, Base):
-    __tablename__ = "campaign_insights"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    goal_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
-    findings: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
-    icp_verdict: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    metrics_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False)
 
 
 class QueueJobModel(TimestampMixin, Base):

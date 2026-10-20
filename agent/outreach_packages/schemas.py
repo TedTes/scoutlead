@@ -125,7 +125,6 @@ class OutreachPackageContent(BaseModel):
     call: CallDraft | None = None
     form: WrittenDraft | None = None
     email: EmailDraft | None = None
-    demo_path: str | None = None
     strategy: OutreachStrategy | None = None
     alternatives: list[DraftAlternative] = Field(default_factory=list, max_length=12)
     reply_paths: list[ReplyPath] = Field(default_factory=list, max_length=10)

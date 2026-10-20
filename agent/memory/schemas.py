@@ -29,18 +29,5 @@ class CampaignMemoryRead(CampaignMemoryCreate):
     created_at: datetime
 
 
-class LearningSummaryRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    product_id: str
-    campaign_id: str | None = None
-    summary: str
-    evidence: list[str] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
-
-
 class RelevantMemory(BaseModel):
     observations: list[CampaignMemoryRead] = Field(default_factory=list)
-    summaries: list[LearningSummaryRead] = Field(default_factory=list)

@@ -14,7 +14,6 @@ import type {
   DiscoveryRunSource,
   DiscoveryCandidate,
   DiscoveryResult,
-  DemoSite,
   OutreachPackage,
   OutreachChannel,
   OutreachDraftAlternative,
@@ -312,18 +311,6 @@ export class ApiClient {
 
   getProfileBatch(id: string) {
     return this.request<ProfileBatch>(`/profiles/${id}/current-batch`);
-  }
-
-  generateDemoSite(resultId: string) {
-    return this.request<DemoSite>(`/demo-sites/from-result/${resultId}`, { method: "POST" });
-  }
-
-  updateDemoSite(id: string, update: Partial<Pick<DemoSite, "content" | "outreach_message">>) {
-    return this.request<DemoSite>(`/demo-sites/${id}`, { method: "PATCH", body: update });
-  }
-
-  publishDemoSite(id: string) {
-    return this.request<DemoSite>(`/demo-sites/${id}/publish`, { method: "POST" });
   }
 
   getOutreachPackage(resultId: string) {

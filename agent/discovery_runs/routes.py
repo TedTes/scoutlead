@@ -17,8 +17,6 @@ from campaigns.service import CampaignService
 from discovery.repository import DiscoveryCandidateRepository
 from discovery.schemas import DiscoveryCandidateRead
 from evaluation.schemas import CampaignMetrics
-from insights.schemas import CampaignInsightRead
-from insights.service import CampaignInsightService
 from leads.repository import LeadRepository
 from leads.export import leads_csv
 from leads.selection import select_campaign_results
@@ -392,33 +390,3 @@ def send_discovery_campaign_drafts(
         email=services.email,
         workspace_id=auth.workspace_id,
     ).send_campaign_messages(run_id, send)
-
-
-@router.get("/{run_id}/insights", response_model=CampaignInsightRead)
-def get_discovery_insights(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    _service(session, services, auth).get(run_id)
-    return CampaignInsightService(
-        session=session,
-        llm=services.llm,
-        workspace_id=auth.workspace_id,
-    ).latest(run_id)
-
-
-@router.post("/{run_id}/insights", response_model=CampaignInsightRead)
-def generate_discovery_insights(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    _service(session, services, auth).get(run_id)
-    return CampaignInsightService(
-        session=session,
-        llm=services.llm,
-        workspace_id=auth.workspace_id,
-    ).generate(run_id)

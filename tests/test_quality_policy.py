@@ -1,10 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from db.models import BusinessFactModel, BusinessModel, QualityMetricSnapshotModel
+from db.models import BusinessFactModel, BusinessModel
 from db.session import create_database
 from quality.fact_policy import FactQualityPolicyService
-from quality.repository import QualityRepository, QualityScope
 from shared.utils import new_id, utcnow
 
 
@@ -31,32 +30,7 @@ def _business(session):
     return business
 
 
-def test_quality_metric_uses_wilson_lower_bound() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        business = _business(session)
-        quality = QualityRepository(session)
-        scope = QualityScope(dimension="identity")
-        for index in range(30):
-            quality.add_label(
-                business_id=business.id,
-                scope=scope,
-                expected=True,
-                predicted=index != 0,
-                reviewer="reviewer@example.com",
-                reviewed_at=utcnow(),
-            )
-
-        metric = quality.calculate(scope)
-
-        assert metric.sample_size == 30
-        assert metric.precision == 1.0
-        assert metric.recall == 29 / 30
-        assert metric.precision_lower_bound is not None
-        assert metric.precision_lower_bound < metric.precision
-
-
-def test_opportunity_fact_stays_staged_until_its_accuracy_is_measured() -> None:
+def test_opportunity_fact_stays_staged_until_explicit_validation() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         business = _business(session)
@@ -79,23 +53,3 @@ def test_opportunity_fact_stays_staged_until_its_accuracy_is_measured() -> None:
 
         FactQualityPolicyService(session).evaluate(fact)
         assert fact.quality_state == "staged"
-
-        session.add(
-            QualityMetricSnapshotModel(
-                id=new_id("quality_metric"),
-                dimension="website_unavailable",
-                sample_size=50,
-                true_positive=50,
-                false_positive=0,
-                false_negative=0,
-                true_negative=0,
-                precision=1.0,
-                recall=1.0,
-                precision_lower_bound=0.9286,
-                calculated_at=utcnow(),
-            )
-        )
-        session.commit()
-
-        FactQualityPolicyService(session).evaluate(fact)
-        assert fact.quality_state == "published"

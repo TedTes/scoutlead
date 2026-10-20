@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 
 from db.models import (
     BusinessIndexSegmentModel,
-    CampaignInsightModel,
     CampaignMemoryModel,
     CampaignModel,
     CampaignSourceModel,
@@ -15,10 +14,8 @@ from db.models import (
     DiscoveryCandidateModel,
     EmailConnectionModel,
     LeadModel,
-    LearningSummaryModel,
     MessageModel,
     ProductModel,
-    ProductSourceDraftModel,
     QueueJobModel,
     SourceItemDecisionModel,
     SourceItemModel,
@@ -135,72 +132,6 @@ class ProductRepository:
             statement = statement.where(ProductModel.id != exclude_product_id)
         return self.session.scalar(statement)
 
-    def find_source_draft(
-        self,
-        *,
-        source_fingerprint: str | None,
-        context_fingerprint: str | None,
-    ) -> ProductSourceDraftModel | None:
-        if not source_fingerprint or not context_fingerprint:
-            return None
-        return self.session.scalar(
-            select(ProductSourceDraftModel)
-            .where(ProductSourceDraftModel.source_fingerprint == source_fingerprint)
-            .where(ProductSourceDraftModel.context_fingerprint == context_fingerprint)
-        )
-
-    def find_latest_source_draft(
-        self,
-        *,
-        source_fingerprint: str | None,
-    ) -> ProductSourceDraftModel | None:
-        if not source_fingerprint:
-            return None
-        return self.session.scalar(
-            select(ProductSourceDraftModel)
-            .where(ProductSourceDraftModel.source_fingerprint == source_fingerprint)
-            .order_by(ProductSourceDraftModel.updated_at.desc())
-            .limit(1)
-        )
-
-    def upsert_source_draft(
-        self,
-        *,
-        source: str,
-        source_url: str | None,
-        source_fingerprint: str,
-        context: str | None,
-        context_fingerprint: str,
-        target_geography: str,
-        inference: dict,
-    ) -> ProductSourceDraftModel:
-        model = self.find_source_draft(
-            source_fingerprint=source_fingerprint,
-            context_fingerprint=context_fingerprint,
-        )
-        if model is None:
-            model = ProductSourceDraftModel(
-                id=new_id("product_draft"),
-                source=source,
-                source_url=source_url,
-                source_fingerprint=source_fingerprint,
-                context=context,
-                context_fingerprint=context_fingerprint,
-                target_geography=target_geography,
-                inference=inference,
-            )
-            self.session.add(model)
-        else:
-            model.source = source
-            model.source_url = source_url
-            model.context = context
-            model.target_geography = target_geography
-            model.inference = inference
-            model.updated_at = utcnow()
-        self.session.commit()
-        self.session.refresh(model)
-        return model
-
     def attach_source_metadata(
         self,
         product_id: str,
@@ -301,8 +232,6 @@ class ProductRepository:
         self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.product_id == product_id))
         self.session.execute(delete(LeadModel).where(LeadModel.product_id == product_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))
-        self.session.execute(delete(CampaignInsightModel).where(CampaignInsightModel.product_id == product_id))
-        self.session.execute(delete(LearningSummaryModel).where(LearningSummaryModel.product_id == product_id))
         if business_index_segment_ids:
             source_item_ids = select(SourceItemModel.id).where(
                 SourceItemModel.segment_id.in_(business_index_segment_ids)

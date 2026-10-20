@@ -18,7 +18,6 @@ class OutreachTemplateContext:
     business_name: str
     strategy: OutreachStrategy
     signature: str
-    demo_path: str | None = None
 
 
 class PhrasingAdapter(Protocol):
@@ -30,7 +29,6 @@ class PhrasingAdapter(Protocol):
 class TextRenderer:
     def render(self, context: OutreachTemplateContext) -> WrittenDraft:
         strategy = context.strategy
-        demo = f" I can include this example: {context.demo_path}." if context.demo_path else ""
         relevance = " ".join(
             value
             for value in [
@@ -39,7 +37,7 @@ class TextRenderer:
             ]
             if value
         )
-        close = f"{strategy.seller_positioning}{demo} {strategy.next_step}"
+        close = f"{strategy.seller_positioning} {strategy.next_step}"
         return WrittenDraft(
             body=_sentence_limit(
                 "\n\n".join(
@@ -143,7 +141,6 @@ def _email_subject(strategy: OutreachStrategy) -> str:
 
 def _long_body(context: OutreachTemplateContext, *, limit: int) -> str:
     strategy = context.strategy
-    demo = f" Here is a short example: {context.demo_path}." if context.demo_path else ""
     return _sentence_limit(
         "\n\n".join(
             value
@@ -153,7 +150,7 @@ def _long_body(context: OutreachTemplateContext, *, limit: int) -> str:
                 strategy.customer_consequence,
                 strategy.uncertainty_clause,
                 strategy.value_hypothesis,
-                f"{strategy.seller_positioning}{demo}",
+                strategy.seller_positioning,
                 strategy.next_step,
                 f"Thanks,\n{context.signature}",
             ]

@@ -17,7 +17,6 @@ from db.models import (
     SourceObservationModel,
 )
 from business_validation.repository import ValidationRepository, ValidationResult
-from quality.fact_policy import FactQualityPolicyService
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import utcnow
 from signal_collection.service import extract_signal_value
@@ -129,23 +128,6 @@ class SignalValidationService:
             decision = self._decision(definition, fact, claim)
             fact.quality_state = decision.quality_state
             fact.quality_policy_version = VALIDATOR_VERSION
-            if decision.quality_state == "published":
-                FactQualityPolicyService(self.session).evaluate(fact, commit=False)
-                if fact.quality_state != "published":
-                    decision = SignalValidationDecision(
-                        status=(
-                            "failed"
-                            if fact.quality_state == "quarantined"
-                            else "uncertain"
-                        ),
-                        quality_state=fact.quality_state,
-                        confidence=decision.confidence,
-                        reason=(
-                            f"{decision.reason} Population accuracy gate left the fact "
-                            f"{fact.quality_state}."
-                        ),
-                        evidence=decision.evidence,
-                    )
             ValidationRepository(self.session).record(
                 ValidationResult(
                     business_id=business_id,

@@ -11,7 +11,6 @@ from conversations.schemas import (
     ResponseIntent,
 )
 from db.session import create_database
-from insights.schemas import CampaignInsightDraft, Finding, IcpVerdict, IcpVerdictValue
 from leads.schemas import CriterionScore, LeadResearch, QualificationResult
 from messages.schemas import OutreachDraft
 from products.repository import ProductRepository
@@ -143,25 +142,6 @@ class FakeWorkflowLLM:
                 rationale="Response is positive.",
                 suggested_reply="Reply with next steps.",
                 follow_up_action=FollowUpAction.REPLY,
-            )
-        if response_model is CampaignInsightDraft:
-            return CampaignInsightDraft(
-                summary="Test campaign produced a qualified lead and response evidence.",
-                findings=[
-                    Finding(
-                        theme="Lead fit",
-                        summary="The seed lead matched the configured ICP.",
-                        evidence=["Seed lead matched this criterion."],
-                        count=1,
-                        confidence=80,
-                    )
-                ],
-                icp_verdict=IcpVerdict(
-                    verdict=IcpVerdictValue.MIXED,
-                    rationale="Small test sample with positive evidence.",
-                    recommended_action="Collect more responses.",
-                ),
-                evidence=["Smoke test evidence"],
             )
         raise AssertionError(f"Unhandled response model {response_model}")
 
