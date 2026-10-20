@@ -286,31 +286,31 @@ export class ApiClient {
   }
 
   getTerritories() {
-    return this.request<Territory[]>("/territories");
+    return this.request<Territory[]>("/audiences");
   }
 
   getProfileOptions() {
-    return this.request<ProfileOptions>("/profiles/options");
+    return this.request<ProfileOptions>("/audiences/options");
   }
 
   createProfile(input: ProfileCreateInput) {
-    return this.request<ProfileQueued>("/profiles", { method: "POST", body: input });
+    return this.request<ProfileQueued>("/audiences", { method: "POST", body: input });
   }
 
   updateProfile(id: string, update: Partial<Territory>) {
-    return this.request<Territory>(`/profiles/${id}`, { method: "PATCH", body: update });
+    return this.request<Territory>(`/audiences/${id}`, { method: "PATCH", body: update });
   }
 
   deleteProfile(id: string) {
-    return this.request<void>(`/profiles/${id}`, { method: "DELETE" });
+    return this.request<void>(`/audiences/${id}`, { method: "DELETE" });
   }
 
   refillProfile(id: string) {
-    return this.request<ProfileQueued>(`/profiles/${id}/refill`, { method: "POST" });
+    return this.request<ProfileQueued>(`/audiences/${id}/refill`, { method: "POST" });
   }
 
   getProfileBatch(id: string) {
-    return this.request<ProfileBatch>(`/profiles/${id}/current-batch`);
+    return this.request<ProfileBatch>(`/audiences/${id}/current-batch`);
   }
 
   getOutreachPackage(resultId: string) {
@@ -349,6 +349,10 @@ export class ApiClient {
     return this.request(`/outreach-packages/${id}/events`, { method: "POST", body: event });
   }
 
+  prepareOutreachMessage(id: string) {
+    return this.request<Message>(`/outreach-packages/${id}/message`, { method: "POST" });
+  }
+
   getOutreachAnalytics() {
     return this.request<OutreachAnalytics>("/outreach-packages/analytics/summary");
   }
@@ -372,7 +376,7 @@ export class ApiClient {
   }
 
   resolveTerritory(productId: string, request: string) {
-    return this.request<TerritoryResolution>("/territories/resolve", {
+    return this.request<TerritoryResolution>("/audiences/resolve", {
       method: "POST",
       body: { product_id: productId, request },
     });
@@ -387,22 +391,22 @@ export class ApiClient {
       >
     > = {},
   ) {
-    return this.request<Territory>("/territories", {
+    return this.request<Territory>("/audiences/from-resolution", {
       method: "POST",
       body: { ...resolution, ...settings, confirmed: true },
     });
   }
 
   updateTerritory(id: string, update: Partial<Pick<Territory, "label" | "status" | "batch_size" | "min_fit" | "refill_policy">>) {
-    return this.request<Territory>(`/territories/${id}`, { method: "PATCH", body: update });
+    return this.request<Territory>(`/audiences/${id}`, { method: "PATCH", body: update });
   }
 
   refreshTerritory(id: string) {
-    return this.request<ProfileQueued>(`/territories/${id}/refresh`, { method: "POST" });
+    return this.request<ProfileQueued>(`/audiences/${id}/refill`, { method: "POST" });
   }
 
   getTerritoryMetrics(id: string, weeks = 8) {
-    return this.request<TerritoryMetrics>(`/territories/${id}/metrics?weeks=${weeks}`);
+    return this.request<TerritoryMetrics>(`/audiences/${id}/metrics?weeks=${weeks}`);
   }
 
   async recordLeadOutcome(leadId: string, outcome: LeadOutcomeValue, channel = "other") {

@@ -34,16 +34,15 @@ from territories.schemas import (
 from territories.service import TerritoryService
 
 
-router = APIRouter(prefix="/territories", tags=["territories"])
-profiles_router = APIRouter(prefix="/profiles", tags=["profiles"])
+audience_router = APIRouter(prefix="/audiences", tags=["audiences"])
 
 
 def _service(session: DbSession, auth: CurrentAuth) -> TerritoryService:
     return TerritoryService(session, workspace_id=auth.workspace_id)
 
 
-@router.post("/resolve", response_model=TerritoryResolutionRead)
-def resolve_territory(
+@audience_router.post("/resolve", response_model=TerritoryResolutionRead)
+def resolve_audience(
     request: TerritoryResolveRequest,
     session: DbSession,
     auth: CurrentAuth,
@@ -51,40 +50,20 @@ def resolve_territory(
     return _service(session, auth).resolve(request)
 
 
-@router.post("", response_model=TerritoryRead, status_code=status.HTTP_201_CREATED)
-def create_territory(data: TerritoryCreate, session: DbSession, auth: CurrentAuth):
+@audience_router.post(
+    "/from-resolution",
+    response_model=TerritoryRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_audience_from_resolution(
+    data: TerritoryCreate, session: DbSession, auth: CurrentAuth
+):
     return _service(session, auth).create(data)
 
 
-@router.get("", response_model=list[TerritoryRead])
-def list_territories(session: DbSession, auth: CurrentAuth):
-    return _service(session, auth).list()
-
-
-@router.get("/{territory_id}", response_model=TerritoryRead)
-def get_territory(territory_id: str, session: DbSession, auth: CurrentAuth):
-    return _service(session, auth).get(territory_id)
-
-
-@router.patch("/{territory_id}", response_model=TerritoryRead)
-def update_territory(
-    territory_id: str,
-    update: TerritoryUpdate,
-    session: DbSession,
-    auth: CurrentAuth,
-):
-    return _service(session, auth).update(territory_id, update)
-
-
-@router.delete("/{territory_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_territory(territory_id: str, session: DbSession, auth: CurrentAuth):
-    _service(session, auth).delete(territory_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.get("/{territory_id}/metrics", response_model=TerritoryMetricsRead)
-def territory_metrics(
-    territory_id: str,
+@audience_router.get("/{audience_id}/metrics", response_model=TerritoryMetricsRead)
+def audience_metrics(
+    audience_id: str,
     session: DbSession,
     auth: CurrentAuth,
     weeks: int = 8,
@@ -92,12 +71,12 @@ def territory_metrics(
     return TerritoryMetricsService(
         session,
         workspace_id=auth.workspace_id or "workspace_default",
-    ).calculate(territory_id, weeks=max(1, min(52, weeks)))
+    ).calculate(audience_id, weeks=max(1, min(52, weeks)))
 
 
-@router.get("/{territory_id}/metrics.csv")
-def export_territory_metrics(
-    territory_id: str,
+@audience_router.get("/{audience_id}/metrics.csv")
+def export_audience_metrics(
+    audience_id: str,
     session: DbSession,
     auth: CurrentAuth,
     weeks: int = 8,
@@ -105,44 +84,22 @@ def export_territory_metrics(
     metrics = TerritoryMetricsService(
         session,
         workspace_id=auth.workspace_id or "workspace_default",
-    ).calculate(territory_id, weeks=max(1, min(52, weeks)))
+    ).calculate(audience_id, weeks=max(1, min(52, weeks)))
     return Response(
         content=territory_metrics_csv(metrics),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f'attachment; filename="{territory_id}-metrics.csv"'
+            "Content-Disposition": f'attachment; filename="{audience_id}-metrics.csv"'
         },
     )
 
 
-@router.post(
-    "/{territory_id}/refresh",
-    response_model=ProfileQueuedRead,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def refresh_territory(
-    territory_id: str,
-    session: DbSession,
-    auth: CurrentAuth,
-):
-    service = _service(session, auth)
-    territory = service.get(territory_id)
-    run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
-        territory.id,
-        commit=False,
-    )
-    job = QueueService(session).enqueue_audience_run(run.id, commit=False)
-    session.commit()
-    session.refresh(job)
-    return ProfileQueuedRead(profile=service.get_read(territory.id), job=job)
-
-
-@profiles_router.post(
+@audience_router.post(
     "",
     response_model=ProfileQueuedRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_profile(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
+def create_audience(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
     if not data.services and not data.signals:
         raise ValidationError(
             "at least one service is required",
@@ -157,16 +114,16 @@ def create_profile(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
     job = QueueService(session).enqueue_audience_run(run.id, commit=False)
     session.commit()
     session.refresh(job)
-    return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
+    return ProfileQueuedRead(audience=service.get_read(profile.id), job=job)
 
 
-@profiles_router.get("", response_model=list[TerritoryRead])
-def list_profiles(session: DbSession, auth: CurrentAuth):
+@audience_router.get("", response_model=list[TerritoryRead])
+def list_audiences(session: DbSession, auth: CurrentAuth):
     return _service(session, auth).list()
 
 
-@profiles_router.get("/options", response_model=ProfileOptionsRead)
-def profile_options(session: DbSession, auth: CurrentAuth):
+@audience_router.get("/options", response_model=ProfileOptionsRead)
+def audience_options(session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
     return ProfileOptionsRead(
         business_types=service.profile_options(),
@@ -175,17 +132,17 @@ def profile_options(session: DbSession, auth: CurrentAuth):
     )
 
 
-@profiles_router.get("/{profile_id}", response_model=TerritoryRead)
-def get_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
-    return _service(session, auth).get_read(profile_id)
+@audience_router.get("/{audience_id}", response_model=TerritoryRead)
+def get_audience(audience_id: str, session: DbSession, auth: CurrentAuth):
+    return _service(session, auth).get_read(audience_id)
 
 
-@profiles_router.get(
-    "/{profile_id}/changes",
+@audience_router.get(
+    "/{audience_id}/changes",
     response_model=list[ProfileFactChangeRead],
 )
-def list_profile_changes(
-    profile_id: str,
+def list_audience_changes(
+    audience_id: str,
     session: DbSession,
     auth: CurrentAuth,
     since: datetime | None = None,
@@ -194,35 +151,35 @@ def list_profile_changes(
     return ProfileChangeService(
         session,
         workspace_id=auth.workspace_id,
-    ).list(profile_id, since=since, limit=limit)
+    ).list(audience_id, since=since, limit=limit)
 
 
-@profiles_router.patch("/{profile_id}", response_model=TerritoryRead)
-def update_profile(
-    profile_id: str,
+@audience_router.patch("/{audience_id}", response_model=TerritoryRead)
+def update_audience(
+    audience_id: str,
     update: TerritoryUpdate,
     session: DbSession,
     auth: CurrentAuth,
 ):
     service = _service(session, auth)
-    service.update(profile_id, update)
-    return service.get_read(profile_id)
+    service.update(audience_id, update)
+    return service.get_read(audience_id)
 
 
-@profiles_router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
-    _service(session, auth).delete(profile_id)
+@audience_router.delete("/{audience_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_audience(audience_id: str, session: DbSession, auth: CurrentAuth):
+    _service(session, auth).delete(audience_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@profiles_router.post(
-    "/{profile_id}/refill",
+@audience_router.post(
+    "/{audience_id}/refill",
     response_model=ProfileQueuedRead,
     status_code=status.HTTP_202_ACCEPTED,
 )
-def refill_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
+def refill_audience(audience_id: str, session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
-    profile = service.get(profile_id)
+    profile = service.get(audience_id)
     run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
         profile.id,
         commit=False,
@@ -230,13 +187,13 @@ def refill_profile(profile_id: str, session: DbSession, auth: CurrentAuth):
     job = QueueService(session).enqueue_audience_run(run.id, commit=False)
     session.commit()
     session.refresh(job)
-    return ProfileQueuedRead(profile=service.get_read(profile.id), job=job)
+    return ProfileQueuedRead(audience=service.get_read(profile.id), job=job)
 
 
-@profiles_router.get("/{profile_id}/current-batch", response_model=ProfileBatchRead)
-def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth):
+@audience_router.get("/{audience_id}/current-batch", response_model=ProfileBatchRead)
+def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAuth):
     service = _service(session, auth)
-    profile = service.get(profile_id)
+    profile = service.get(audience_id)
     run_service = AudienceRunService(session, workspace_id=auth.workspace_id)
     latest_run = session.scalar(
         select(AudienceRunModel)
@@ -330,7 +287,7 @@ def current_profile_batch(profile_id: str, session: DbSession, auth: CurrentAuth
     else:
         state = ProfileBatchState.SCORING
     return ProfileBatchRead(
-        profile=service.get_read(profile.id),
+        audience=service.get_read(profile.id),
         audience_run_id=latest_run.id if latest_run is not None else None,
         outreach_campaign_id=(
             outreach_run.outreach_campaign_id if outreach_run is not None else None

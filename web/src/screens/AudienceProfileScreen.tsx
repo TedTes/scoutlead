@@ -51,7 +51,7 @@ export function AudienceProfileScreen() {
   );
 
   const activeBatch = useMemo(
-    () => profileBatch?.profile.id === selectedProfile?.id ? profileBatch : null,
+    () => profileBatch?.audience.id === selectedProfile?.id ? profileBatch : null,
     [profileBatch, selectedProfile?.id],
   );
 

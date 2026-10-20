@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from auth.context import AuthContext
 from auth.repository import AuthRepository
 from db.base import Base
-from db.models import UserModel, WorkspaceMemberModel, WorkspaceModel
+from db.models import UserModel, WorkspaceModel
 
 
 def _session_factory():
@@ -37,10 +37,12 @@ def test_sync_user_workspace_is_idempotent_and_updates_user() -> None:
         assert user.email == "updated@example.com"
         assert session.scalar(select(func.count()).select_from(UserModel)) == 1
         assert session.scalar(select(func.count()).select_from(WorkspaceModel)) == 1
-        assert session.scalar(select(func.count()).select_from(WorkspaceMemberModel)) == 1
+        workspace = session.get(WorkspaceModel, "user:user_123")
+        assert workspace is not None
+        assert workspace.owner_user_id == "user_123"
 
 
-def test_sync_user_workspace_creates_organization_membership() -> None:
+def test_sync_user_workspace_records_owner_on_legacy_organization_context() -> None:
     session_factory = _session_factory()
     context = AuthContext(
         user_id="user_123",
@@ -52,9 +54,6 @@ def test_sync_user_workspace_creates_organization_membership() -> None:
         AuthRepository(session).sync_user_workspace(context)
 
         workspace = session.get(WorkspaceModel, "org_456")
-        membership = session.scalar(select(WorkspaceMemberModel))
         assert workspace is not None
         assert workspace.clerk_organization_id == "org_456"
-        assert membership is not None
-        assert membership.workspace_id == "org_456"
-        assert membership.user_id == "user_123"
+        assert workspace.owner_user_id == "user_123"

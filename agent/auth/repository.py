@@ -6,8 +6,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from auth.context import AuthContext
-from db.models import UserModel, WorkspaceMemberModel, WorkspaceModel
-from shared.utils import new_id, utcnow
+from db.models import UserModel, WorkspaceModel
+from shared.utils import utcnow
 
 
 class AuthRepository:
@@ -43,6 +43,7 @@ class AuthRepository:
         organization_id = _organization_id(context.workspace_id, context.user_id)
         workspace_insert = insert(WorkspaceModel).values(
             id=context.workspace_id,
+            owner_user_id=context.user_id,
             name=context.email or "Personal workspace",
             clerk_organization_id=organization_id,
             created_at=now,
@@ -52,32 +53,26 @@ class AuthRepository:
             workspace_statement = workspace_insert.on_conflict_do_update(
                 index_elements=[WorkspaceModel.id],
                 set_={
+                    "owner_user_id": func.coalesce(
+                        WorkspaceModel.owner_user_id,
+                        context.user_id,
+                    ),
                     "clerk_organization_id": organization_id,
                     "updated_at": now,
                 },
             )
         else:
-            workspace_statement = workspace_insert.on_conflict_do_nothing(
-                index_elements=[WorkspaceModel.id]
+            workspace_statement = workspace_insert.on_conflict_do_update(
+                index_elements=[WorkspaceModel.id],
+                set_={
+                    "owner_user_id": func.coalesce(
+                        WorkspaceModel.owner_user_id,
+                        context.user_id,
+                    ),
+                    "updated_at": now,
+                },
             )
         self.session.execute(workspace_statement)
-
-        membership_insert = insert(WorkspaceMemberModel).values(
-            id=new_id("member"),
-            workspace_id=context.workspace_id,
-            user_id=context.user_id,
-            role="owner",
-            created_at=now,
-            updated_at=now,
-        )
-        self.session.execute(
-            membership_insert.on_conflict_do_nothing(
-                index_elements=[
-                    WorkspaceMemberModel.workspace_id,
-                    WorkspaceMemberModel.user_id,
-                ]
-            )
-        )
 
         self.session.commit()
         return context

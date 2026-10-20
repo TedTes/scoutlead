@@ -45,8 +45,8 @@ from products.schemas import ProductCreate, QualificationCriterion
 from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, utcnow
 from territories.routes import (
-    create_profile as create_profile_route,
-    current_profile_batch,
+    create_audience as create_profile_route,
+    current_audience_batch as current_profile_batch,
 )
 from territories.schemas import (
     ProfileCreate,
@@ -206,21 +206,21 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
             SimpleNamespace(workspace_id="workspace:first"),
         )
 
-        assert result.profile.product_id == offer.id
-        assert result.profile.city == "Toronto"
-        assert result.profile.trade_keys == ["painters"]
-        assert result.profile.customer_kind.value == "residential"
-        assert result.profile.signal_keys == ["website_unavailable"]
-        assert result.profile.exclusion_keys == ["franchises"]
-        assert result.profile.batch_size == 25
-        assert result.profile.refill_policy.value == "when_depleted"
-        assert result.profile.next_run_at is None
-        assert result.profile.search_prompt is None
-        assert result.profile.search_contract == {}
+        assert result.audience.product_id == offer.id
+        assert result.audience.city == "Toronto"
+        assert result.audience.trade_keys == ["painters"]
+        assert result.audience.customer_kind.value == "residential"
+        assert result.audience.signal_keys == ["website_unavailable"]
+        assert result.audience.exclusion_keys == ["franchises"]
+        assert result.audience.batch_size == 25
+        assert result.audience.refill_policy.value == "when_depleted"
+        assert result.audience.next_run_at is None
+        assert result.audience.search_prompt is None
+        assert result.audience.search_contract == {}
         assert result.job.status.value == "queued"
         run = session.get(AudienceRunModel, result.job.payload["audience_run_id"])
         assert run is not None
-        assert run.audience_id == result.profile.id
+        assert run.audience_id == result.audience.id
         assert session.scalar(select(func.count()).select_from(CampaignModel)) == 0
 
 
@@ -266,7 +266,7 @@ def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
         first = create_profile_route(data, session, auth)
         repeated = create_profile_route(data, session, auth)
 
-        assert repeated.profile.id == first.profile.id
+        assert repeated.audience.id == first.audience.id
         assert repeated.job.id == first.job.id
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 1
@@ -278,7 +278,7 @@ def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
 
         refilled = create_profile_route(data, session, auth)
 
-        assert refilled.profile.id == first.profile.id
+        assert refilled.audience.id == first.audience.id
         assert refilled.job.id != first.job.id
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 2
@@ -376,7 +376,7 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
             auth,
         )
 
-        completed = current_profile_batch(result.profile.id, session, auth)
+        completed = current_profile_batch(result.audience.id, session, auth)
         assert completed.state.value == "empty"
         assert completed.failure_class is None
 
@@ -394,7 +394,7 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
         job.status = "completed"
         session.commit()
 
-        repaired = current_profile_batch(result.profile.id, session, auth)
+        repaired = current_profile_batch(result.audience.id, session, auth)
         assert repaired.state.value == "empty"
         assert initial_run.state == "partial"
         assert job.status == "completed"
@@ -402,21 +402,21 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
         run = AudienceRunService(
             session,
             workspace_id="workspace:first",
-        ).create(result.profile.id)
+        ).create(result.audience.id)
         job = QueueService(session).enqueue_audience_run(run.id)
         job.status = "running"
         job.attempts = 2
         job.locked_at = utcnow()
         job.last_error = "HTTP 429 rate_limit_exceeded"
         session.commit()
-        retrying = current_profile_batch(result.profile.id, session, auth)
+        retrying = current_profile_batch(result.audience.id, session, auth)
         assert retrying.state.value == "retrying"
         assert retrying.failure_class == "rate_limit"
         assert retrying.retry_at == job.run_after
 
         job.status = "failed"
         session.commit()
-        failed = current_profile_batch(result.profile.id, session, auth)
+        failed = current_profile_batch(result.audience.id, session, auth)
         assert failed.state.value == "failed"
         assert failed.failure_class == "rate_limit"
 

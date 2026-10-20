@@ -28,13 +28,16 @@ class UserModel(TimestampMixin, Base):
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    memberships: Mapped[list["WorkspaceMemberModel"]] = relationship(back_populates="user")
+    workspaces: Mapped[list["WorkspaceModel"]] = relationship(back_populates="owner")
 
 
 class WorkspaceModel(TimestampMixin, Base):
     __tablename__ = "workspaces"
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     clerk_organization_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, unique=True, index=True
@@ -43,24 +46,9 @@ class WorkspaceModel(TimestampMixin, Base):
     sender_mailing_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     sender_contact: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    memberships: Mapped[list["WorkspaceMemberModel"]] = relationship(back_populates="workspace")
+    owner: Mapped[UserModel | None] = relationship(back_populates="workspaces")
     products: Mapped[list["ProductModel"]] = relationship(back_populates="workspace")
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="workspace")
-
-
-class WorkspaceMemberModel(TimestampMixin, Base):
-    __tablename__ = "workspace_members"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_members_workspace_user"),
-    )
-
-    id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    role: Mapped[str] = mapped_column(String(64), nullable=False, default="owner")
-
-    workspace: Mapped[WorkspaceModel] = relationship(back_populates="memberships")
-    user: Mapped[UserModel] = relationship(back_populates="memberships")
 
 
 class AdminAuditEventModel(TimestampMixin, Base):
@@ -1082,6 +1070,12 @@ class MessageModel(TimestampMixin, Base):
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id"), nullable=False, index=True)
+    outreach_package_id: Mapped[str | None] = mapped_column(
+        ForeignKey("outreach_packages.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     channel: Mapped[str] = mapped_column(String(64), nullable=False)
     subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)

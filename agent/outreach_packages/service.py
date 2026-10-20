@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.llm import LLMClient
+from audience_runs.outreach import AudienceOutreachService
+from campaigns.schemas import OutreachChannel
 
 from db.models import (
     AudienceResultModel,
@@ -37,6 +39,8 @@ from outreach_packages.playbooks import PlaybookRepository
 from outreach_packages.policy import OutreachPolicyValidator
 from outreach_packages.repository import OutreachEventRepository, OutreachPlaybookRepository
 from outreach_packages.templates import OutreachTemplateContext, render_outreach
+from messages.repository import MessageRepository
+from messages.schemas import MessageRead, OutreachDraft
 from shared.errors import ConfigurationError, NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
@@ -399,6 +403,47 @@ class OutreachPackageService:
             self.session,
             workspace_id=self.workspace_id,
         ).analytics()
+
+    def prepare_message(self, package_id: str) -> MessageRead:
+        """Snapshot the package email into the approval and sending workflow."""
+        package = self._owned(package_id)
+        messages = MessageRepository(self.session, workspace_id=self.workspace_id)
+        existing = messages.find_for_outreach_package(package.id)
+        if existing is not None:
+            return MessageRead.model_validate(existing)
+
+        result, audience, _, _, _ = self._context(package.audience_result_id)
+        lead = AudienceOutreachService(
+            self.session,
+            workspace_id=self.workspace_id,
+        ).promote(result.id)
+        run = self.session.get(AudienceRunModel, result.run_id)
+        if run is None or run.outreach_campaign_id is None:
+            raise WorkflowBoundaryError(
+                "The audience result could not be attached to an outreach campaign.",
+                {"package_id": package_id},
+            )
+
+        content = OutreachPackageContent.model_validate(package.content)
+        if content.email is None:
+            raise WorkflowBoundaryError(
+                "This outreach package does not contain an email draft.",
+                {"package_id": package_id},
+            )
+        message = messages.create_draft(
+            run.outreach_campaign_id,
+            audience.product_id,
+            lead.id,
+            OutreachDraft(
+                channel=OutreachChannel.EMAIL,
+                subject=content.email.subject,
+                body=content.email.body,
+                personalization_notes=[item.statement for item in content.evidence],
+                approach_tag="outreach_package",
+            ),
+            outreach_package_id=package.id,
+        )
+        return MessageRead.model_validate(message)
 
     def _owned(self, package_id: str) -> OutreachPackageModel:
         row = self.session.get(OutreachPackageModel, package_id)

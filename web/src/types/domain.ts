@@ -443,12 +443,12 @@ export type QueueJob = {
 };
 
 export type ProfileQueued = {
-  profile: Territory;
+  audience: Territory;
   job: QueueJob;
 };
 
 export type ProfileBatch = {
-  profile: Territory;
+  audience: Territory;
   audience_run_id?: string | null;
   outreach_campaign_id?: string | null;
   leads: DiscoveryResult[];
@@ -669,6 +669,7 @@ export type Message = {
   campaign_id: string;
   lead_id: string;
   product_id: string;
+  outreach_package_id?: string | null;
   channel: string;
   subject?: string;
   body: string;

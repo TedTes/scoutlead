@@ -8,6 +8,7 @@ from db.models import (
     AudienceResultModel,
     AudienceRunModel,
     BusinessModel,
+    MessageModel,
     NicheModel,
     OutreachPackageModel,
     ProductModel,
@@ -98,6 +99,23 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         analytics = service.analytics()
         assert analytics.total_events == 2
         assert analytics.by_event == {"response_classified": 1, "draft_copied": 1}
+
+
+def test_outreach_package_handoff_snapshots_one_message() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(session, workspace_id="workspace:first")
+        package = service.generate(result.id)
+
+        message = service.prepare_message(package.id)
+        repeated = service.prepare_message(package.id)
+
+        assert repeated.id == message.id
+        assert message.outreach_package_id == package.id
+        assert message.subject == package.content.email.subject
+        assert message.body == package.content.email.body
+        assert message.status.value == "pending_approval"
+        assert session.scalar(select(func.count()).select_from(MessageModel)) == 1
 
 
 def test_outreach_package_generates_grounded_ai_suggestion_on_demand() -> None:

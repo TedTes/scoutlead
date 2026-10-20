@@ -210,7 +210,7 @@ export function ResultsScreen({
     activeProfile && selectedDiscoveryRun?.territory_id === activeProfile.id,
   );
   const visibleProfileBatch =
-    profileBatch?.profile.id === selectedProfileId
+    profileBatch?.audience.id === selectedProfileId
       ? profileBatch
       : null;
   const isProfileAggregate = Boolean(visibleProfileBatch);
@@ -1039,6 +1039,7 @@ export function ResultsScreen({
             onGenerateAISuggestion={(packageId, channel) => territoryApi.generateOutreachAISuggestion(packageId, channel)}
             onClassifyResponse={(packageId, channel, responseText) => territoryApi.classifyOutreachResponse(packageId, channel, responseText)}
             onRecordEvent={(packageId, event) => territoryApi.recordOutreachEvent(packageId, event)}
+            onPrepareMessage={(packageId) => territoryApi.prepareOutreachMessage(packageId)}
           />
         ) : (
           <ContactDrawer
@@ -1193,6 +1194,7 @@ function OutreachWorkspace({
   onGenerateAISuggestion,
   onClassifyResponse,
   onRecordEvent,
+  onPrepareMessage,
   persistent = false,
 }: {
   contact: DiscoveryResult;
@@ -1204,6 +1206,7 @@ function OutreachWorkspace({
   onGenerateAISuggestion: (packageId: string, channel: Exclude<OutreachChannel, "call">) => Promise<OutreachDraftAlternative>;
   onClassifyResponse: (packageId: string, channel: OutreachChannel, responseText: string) => Promise<OutreachResponseClassification>;
   onRecordEvent: (packageId: string, event: { channel: OutreachChannel; event_type: string; variant_id?: string | null; metadata?: Record<string, unknown> }) => Promise<unknown>;
+  onPrepareMessage: (packageId: string) => Promise<Message>;
   persistent?: boolean;
 }) {
   const { showToast } = useToast();
@@ -1222,6 +1225,7 @@ function OutreachWorkspace({
   const [responseBusy, setResponseBusy] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Partial<Record<OutreachChannel, OutreachDraftAlternative>>>({});
   const [aiSuggestionBusy, setAiSuggestionBusy] = useState(false);
+  const [messagePreparing, setMessagePreparing] = useState(false);
   const [channelIndicator, setChannelIndicator] = useState({ left: 0, width: 0 });
   const failedAutoSaveFingerprintRef = useRef("");
   const recommendedContentRef = useRef<OutreachPackageContent | null>(null);
@@ -1417,6 +1421,29 @@ function OutreachWorkspace({
       }
     } catch {
       showToast({ title: "Copy failed", tone: "red" });
+    }
+  };
+
+  const prepareEmailMessage = async () => {
+    if (!outreachPackage || !draft || messagePreparing) return;
+    setMessagePreparing(true);
+    try {
+      const saved = await onSavePackage(outreachPackage.id, draft);
+      setOutreachPackage(saved);
+      const message = await onPrepareMessage(saved.id);
+      showToast({
+        title: "Email draft ready for approval",
+        message: `Draft ${message.status.replace(/_/g, " ")}.`,
+        tone: "green",
+      });
+    } catch (error) {
+      showToast({
+        title: "Could not prepare email",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
+      });
+    } finally {
+      setMessagePreparing(false);
     }
   };
 
@@ -1648,6 +1675,17 @@ function OutreachWorkspace({
                           <Copy size={15} />
                         </button>
                       </>
+                    ) : null}
+                    {activeChannel === "email" && draft.email ? (
+                      <button
+                        className="outreach-response-toggle"
+                        disabled={messagePreparing}
+                        type="button"
+                        onClick={() => void prepareEmailMessage()}
+                      >
+                        <Send size={14} />
+                        <span>{messagePreparing ? "Preparing..." : "Prepare to send"}</span>
+                      </button>
                     ) : null}
                     {activeChannel === "form" && outreachPackage.contact_url ? (
                       <a

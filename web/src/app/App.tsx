@@ -155,7 +155,7 @@ function AppShell({
   const selectedProfileRun = productDiscoveryRuns.find(
     (run) => run.territory_id === selectedProfileId,
   );
-  const selectedProfileBatch = profileBatch?.profile.id === selectedProfileId
+  const selectedProfileBatch = profileBatch?.audience.id === selectedProfileId
     ? profileBatch
     : null;
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
@@ -361,12 +361,12 @@ function AppShell({
   }, [loading, onboardingStorageKey, products.length]);
 
   useEffect(() => {
-    if (!profileBatch || profileBatch.profile.id !== selectedProfileId) return;
+    if (!profileBatch || profileBatch.audience.id !== selectedProfileId) return;
     setViewMode("auto");
   }, [
     profileBatch?.audience_run_id,
     profileBatch?.outreach_campaign_id,
-    profileBatch?.profile.id,
+    profileBatch?.audience.id,
     selectedProfileId,
   ]);
 

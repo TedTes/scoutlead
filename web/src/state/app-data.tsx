@@ -588,12 +588,12 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         setError("");
         try {
           created = await api.createProfile(input);
-          persistSelectedProfileId(created.profile.id);
+          persistSelectedProfileId(created.audience.id);
           setTerritories((current) => [
-            created!.profile,
-            ...current.filter((profile) => profile.id !== created!.profile.id),
+            created!.audience,
+            ...current.filter((profile) => profile.id !== created!.audience.id),
           ]);
-          await refreshProfileBatch(created.profile.id);
+          await refreshProfileBatch(created.audience.id);
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
           throw err;
@@ -608,8 +608,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
             profile.id === profileId ? updated : profile
           )));
           setProfileBatch((current) => (
-            current?.profile.id === profileId
-              ? { ...current, profile: updated }
+            current?.audience.id === profileId
+              ? { ...current, audience: updated }
               : current
           ));
           return updated;

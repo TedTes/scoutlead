@@ -252,12 +252,12 @@ class ProfileOptionsRead(BaseModel):
 
 
 class ProfileQueuedRead(BaseModel):
-    profile: TerritoryRead
+    audience: TerritoryRead
     job: QueueJobRead
 
 
 class ProfileBatchRead(BaseModel):
-    profile: TerritoryRead
+    audience: TerritoryRead
     audience_run_id: str | None = None
     outreach_campaign_id: str | None = None
     leads: list[AudienceLeadRead] = Field(default_factory=list)

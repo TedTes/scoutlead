@@ -72,6 +72,7 @@ class MessageRead(OutreachDraft):
     campaign_id: str
     product_id: str
     lead_id: str
+    outreach_package_id: str | None = None
     status: MessageStatus
     approval: dict | None = None
     sent_at: datetime | None = None

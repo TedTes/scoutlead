@@ -15,6 +15,7 @@ from outreach_packages.schemas import (
     OutreachResponseClassifyRequest,
 )
 from outreach_packages.service import OutreachPackageService
+from messages.schemas import MessageRead
 
 
 router = APIRouter(prefix="/outreach-packages", tags=["outreach-packages"])
@@ -99,6 +100,16 @@ def record_event(
     services: Services,
 ):
     return _service(session, auth.workspace_id, services).record_event(package_id, data)
+
+
+@router.post("/{package_id}/message", response_model=MessageRead)
+def prepare_message(
+    package_id: str,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services,
+):
+    return _service(session, auth.workspace_id, services).prepare_message(package_id)
 
 
 @router.get("/analytics/summary", response_model=OutreachAnalyticsRead)
