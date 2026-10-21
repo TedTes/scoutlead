@@ -81,7 +81,6 @@ def enqueue_profile_source_expansion(
         if not plan.tasks:
             continue
         segment = segments.resolve_or_create_segment(
-            product_id=product.id,
             niche_id=niche.id,
             business_category=spec.niche_category,
             market_label=profile.city,

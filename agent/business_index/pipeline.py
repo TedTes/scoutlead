@@ -18,6 +18,7 @@ from business_index.refresh import (
     _opportunity_policy,
     _source_external_id,
     _source_state_key,
+    shared_index_product,
 )
 from business_index.repository import BusinessIndexRepository
 from campaigns.service import CampaignService
@@ -33,8 +34,6 @@ from db.models import (
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
-from products.repository import ProductRepository
-from products.schemas import ProductRead
 from shared.utils import utcnow
 from source_items.repository import SourceItemRepository
 from source_items.schemas import (
@@ -89,9 +88,7 @@ class BusinessIndexPipelineService:
         parent_job_id: str | None = None,
     ) -> dict[str, Any]:
         segment = self._segment(segment_id)
-        product = ProductRead.model_validate(
-            ProductRepository(self.session).get(segment.product_id)
-        )
+        product = shared_index_product(segment)
         self.refresh_planner.rebuild_source_plan(segment, product)
         # Prevent the scheduler from repeatedly planning the same in-flight refresh.
         segment.last_refresh_at = utcnow()
@@ -133,9 +130,7 @@ class BusinessIndexPipelineService:
         processing_mode: str = "automatic",
     ) -> dict[str, Any]:
         segment = self._segment(segment_id)
-        product = ProductRead.model_validate(
-            ProductRepository(self.session).get(segment.product_id)
-        )
+        product = shared_index_product(segment)
         task = SourceTask.model_validate(task_data)
         state_key = _source_state_key(task, source_index)
         attempted_at = utcnow()

@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from db.models import BusinessIndexSegmentModel, NicheModel, ProductModel, QueueJobModel
+from db.models import BusinessIndexSegmentModel, NicheModel, QueueJobModel
 from db.session import create_database
 from shared.utils import utcnow
 from source_items.repository import SourceItemRepository
@@ -142,27 +142,6 @@ def _session_factory():
 def _add_segment(session) -> None:
     now = utcnow()
     session.add(
-        ProductModel(
-            id="product_test",
-            workspace_id=None,
-            product_name="Website growth",
-            product_description=None,
-            target_customer="Painters",
-            problem_being_solved=None,
-            value_proposition=None,
-            target_geography="Toronto",
-            validation_goal=None,
-            qualification_criteria=[],
-            preferred_discovery_sources=[],
-            outreach_objective=None,
-            constraints=[],
-            offer_summary=None,
-            ideal_customer_signals=[],
-            exclusions=[],
-            typical_deal_value=None,
-        )
-    )
-    session.add(
         NicheModel(
             id="niche_test",
             slug="painters",
@@ -177,7 +156,6 @@ def _add_segment(session) -> None:
         BusinessIndexSegmentModel(
             id="segment_test",
             niche_id="niche_test",
-            product_id="product_test",
             market_key="toronto",
             market_label="Toronto",
             status="active",

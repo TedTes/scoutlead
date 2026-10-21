@@ -4,7 +4,6 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from db.models import (
-    BusinessIndexSegmentModel,
     CampaignMemoryModel,
     CampaignModel,
     CampaignSourceModel,
@@ -17,8 +16,6 @@ from db.models import (
     MessageModel,
     ProductModel,
     QueueJobModel,
-    SourceItemDecisionModel,
-    SourceItemModel,
     WebhookDeliveryModel,
     WorkspaceModel,
 )
@@ -202,13 +199,6 @@ class ProductRepository:
         message_ids = list(
             self.session.scalars(select(MessageModel.id).where(MessageModel.product_id == product_id))
         )
-        business_index_segment_ids = list(
-            self.session.scalars(
-                select(BusinessIndexSegmentModel.id).where(
-                    BusinessIndexSegmentModel.product_id == product_id
-                )
-            )
-        )
 
         if conversation_ids or message_ids:
             event_conditions = []
@@ -232,32 +222,6 @@ class ProductRepository:
         self.session.execute(delete(DiscoveryCandidateModel).where(DiscoveryCandidateModel.product_id == product_id))
         self.session.execute(delete(LeadModel).where(LeadModel.product_id == product_id))
         self.session.execute(delete(CampaignMemoryModel).where(CampaignMemoryModel.product_id == product_id))
-        if business_index_segment_ids:
-            source_item_ids = select(SourceItemModel.id).where(
-                SourceItemModel.segment_id.in_(business_index_segment_ids)
-            )
-            self.session.execute(
-                delete(SourceItemDecisionModel).where(
-                    SourceItemDecisionModel.source_item_id.in_(source_item_ids)
-                )
-            )
-            self.session.execute(
-                delete(SourceItemModel).where(
-                    SourceItemModel.segment_id.in_(business_index_segment_ids)
-                )
-            )
-            self.session.execute(
-                delete(QueueJobModel).where(
-                    QueueJobModel.payload["segment_id"].as_string().in_(
-                        business_index_segment_ids
-                    )
-                )
-            )
-        self.session.execute(
-            delete(BusinessIndexSegmentModel).where(
-                BusinessIndexSegmentModel.product_id == product_id
-            )
-        )
         self.session.execute(delete(CampaignModel).where(CampaignModel.product_id == product_id))
         self.session.execute(
             delete(QueueJobModel).where(QueueJobModel.payload["product_id"].as_string() == product_id)

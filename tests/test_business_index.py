@@ -27,6 +27,7 @@ from db.models import (
 from db.session import create_database
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobType
+from job_queue.service import QueueService
 from products.repository import ProductRepository
 from leads.repository import LeadRepository
 from run_diagnostics.service import build_run_diagnostics
@@ -161,6 +162,61 @@ def test_only_structured_business_sources_set_canonical_contact_email() -> None:
     )
 
 
+def test_shared_segment_survives_product_deletion_and_keeps_first_source_plan() -> None:
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    create_database(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_factory() as session:
+        products = ProductRepository(session)
+        first_product = products.create(_product())
+        second_product = products.create(
+            _product().model_copy(update={"product_name": "Second offer"})
+        )
+        niche = NicheModel(
+            id="niche_shared_painters",
+            slug="shared_painters",
+            label="Shared painters",
+            category="painting contractor",
+            default_query="painters",
+            active=True,
+            signal_vocabulary=[],
+        )
+        session.add(niche)
+        session.commit()
+        segments = BusinessIndexRepository(session)
+
+        first = segments.resolve_or_create_segment(
+            niche_id=niche.id,
+            business_category=niche.category,
+            market_label="Toronto",
+            source_plan=[{"provider_id": "google_places", "query": "painters Toronto"}],
+            target_business_count=25,
+        )
+        second = segments.resolve_or_create_segment(
+            niche_id=niche.id,
+            business_category=niche.category,
+            market_label="Toronto",
+            source_plan=[{"provider_id": "openstreetmap", "query": "painters Toronto"}],
+            target_business_count=40,
+        )
+        QueueService(session).enqueue_business_index_refresh(
+            segment_id=first.id,
+            requested_deficit=40,
+        )
+
+        assert first.id == second.id
+        assert not hasattr(first, "product_id")
+        assert first.source_plan == [
+            {"provider_id": "google_places", "query": "painters Toronto"}
+        ]
+        assert first.target_business_count == 40
+
+        products.delete(first_product.id)
+        products.delete(second_product.id)
+
+        assert session.get(type(first), first.id) is not None
+        refresh_job = session.query(QueueJobModel).one()
+        assert refresh_job.payload["segment_id"] == first.id
 def test_google_observation_finds_website_in_nested_provider_payload() -> None:
     assert _observation_has_website(
         {

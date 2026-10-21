@@ -25,7 +25,6 @@ class BusinessIndexRepository:
     def resolve_or_create_segment(
         self,
         *,
-        product_id: str,
         business_category: str,
         market_label: str,
         source_plan: list[dict],
@@ -68,7 +67,6 @@ class BusinessIndexRepository:
             segment = BusinessIndexSegmentModel(
                 id=new_id("index_segment"),
                 niche_id=niche_id,
-                product_id=product_id,
                 market_key=market_key,
                 market_label=normalize_text(market_label) or market_key,
                 status="active",
@@ -80,7 +78,6 @@ class BusinessIndexRepository:
             )
             self.session.add(segment)
         else:
-            segment.product_id = product_id
             segment.market_label = normalize_text(market_label) or segment.market_label
             segment.status = "active"
             if record_demand:
@@ -89,7 +86,9 @@ class BusinessIndexRepository:
                 segment.target_business_count,
                 target_business_count,
             )
-            segment.source_plan = source_plan or segment.source_plan
+            # A shared segment must not inherit a different product's plan each
+            # time demand arrives. Rebuilds use the neutral segment context.
+            segment.source_plan = segment.source_plan or source_plan
             segment.next_refresh_at = segment.next_refresh_at or now
         self.session.commit()
         self.session.refresh(segment)

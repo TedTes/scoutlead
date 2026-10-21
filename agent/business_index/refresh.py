@@ -20,8 +20,7 @@ from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import SOURCE_NAME as WEBSITE_AUDIT_SOURCE
 from db.models import BusinessModel, CampaignModel, SourceObservationModel
-from products.repository import ProductRepository
-from products.schemas import ProductRead
+from products.schemas import ProductRead, QualificationCriterion
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.utils import new_id, utcnow
 from source_items.repository import SourceItemRepository
@@ -69,9 +68,7 @@ class BusinessIndexRefreshService:
         segment = self.segments.get(segment_id)
         if segment is None:
             raise ValueError(f"business index segment not found: {segment_id}")
-        product = ProductRead.model_validate(
-            ProductRepository(self.session).get(segment.product_id)
-        )
+        product = shared_index_product(segment)
         self.rebuild_source_plan(segment, product)
         campaigns = self._expanding_campaigns(segment.id)
         pipeline_events = RunPipelineEventRepository(self.session)
@@ -567,6 +564,30 @@ class BusinessIndexRefreshService:
             created_at=now,
             updated_at=now,
         )
+
+
+def shared_index_product(segment) -> ProductRead:
+    """Provide product-shaped provider context without assigning segment ownership."""
+    now = utcnow()
+    niche_label = segment.niche.label if segment.niche else "Local businesses"
+    niche_category = (
+        segment.niche.category if segment.niche and segment.niche.category else niche_label
+    )
+    return ProductRead(
+        id=f"shared-index:{segment.id}",
+        workspace_id=None,
+        product_name=f"Shared {niche_label} index",
+        target_customer=niche_category,
+        target_geography=segment.market_label,
+        qualification_criteria=[
+            QualificationCriterion(
+                label=f"Matches the {niche_label} index",
+                required=True,
+            )
+        ],
+        created_at=segment.created_at or now,
+        updated_at=segment.updated_at or now,
+    )
 
 
 def _campaign_source(

@@ -770,7 +770,6 @@ class BusinessIndexSegmentModel(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     market_label: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
@@ -785,7 +784,6 @@ class BusinessIndexSegmentModel(TimestampMixin, Base):
     )
 
     niche: Mapped[NicheModel] = relationship()
-    product: Mapped[ProductModel] = relationship()
 
 
 class ContactModel(TimestampMixin, Base):

@@ -149,7 +149,6 @@ class SourceRequestService:
         opportunity_type = _opportunity_type(search_contract)
         requires_digital_opportunity = opportunity_type != OpportunityType.ANY
         segment = BusinessIndexRepository(self.products.session).resolve_or_create_segment(
-            product_id=product.id,
             business_category=intent.business_category,
             market_label=intent.location or intent.country,
             source_plan=[task.model_dump(mode="json") for task in plan.tasks],

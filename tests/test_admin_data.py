@@ -22,7 +22,6 @@ from db.models import (
     BusinessIndexSegmentModel,
     BusinessNicheMembershipModel,
     NicheModel,
-    ProductModel,
     QueueJobModel,
     SignalDefinitionModel,
     ServiceDefinitionModel,
@@ -74,29 +73,9 @@ def _service(session):
 
 
 def _segment(session, niche):
-    product = ProductModel(
-        id=new_id("product"),
-        workspace_id=None,
-        product_name="Website growth",
-        product_description=None,
-        target_customer="Local service businesses",
-        problem_being_solved=None,
-        value_proposition=None,
-        target_geography="Toronto",
-        validation_goal=None,
-        qualification_criteria=[],
-        preferred_discovery_sources=[],
-        outreach_objective=None,
-        constraints=[],
-        offer_summary=None,
-        ideal_customer_signals=[],
-        exclusions=[],
-        typical_deal_value=None,
-    )
     segment = BusinessIndexSegmentModel(
         id=new_id("segment"),
         niche_id=niche.id,
-        product_id=product.id,
         market_key="toronto",
         market_label="Toronto",
         status="active",
@@ -106,7 +85,7 @@ def _segment(session, niche):
         source_state={},
         next_refresh_at=utcnow(),
     )
-    session.add_all([product, segment])
+    session.add(segment)
     session.commit()
     return segment
 
