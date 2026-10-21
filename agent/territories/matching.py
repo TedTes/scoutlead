@@ -28,6 +28,7 @@ from db.models import (
 )
 from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adjustment
 from shared.errors import ConflictError
+from shared.geospatial import haversine_distance_km_expression
 from shared.utils import utcnow
 from seeding.batches import active_membership_condition, observation_is_quarantined
 
@@ -159,19 +160,18 @@ class ProfileMatchService:
                 or_(*signal_conditions) if signal_conditions else literal(False)
             )
 
-        distance_sq = None
+        distance_km_expression = None
         if profile.latitude is not None and profile.longitude is not None:
-            lat_km = (BusinessModel.latitude - profile.latitude) * 111.32
-            lng_km = (
-                (BusinessModel.longitude - profile.longitude)
-                * 111.32
-                * func.cos(func.radians(profile.latitude))
+            distance_km_expression = haversine_distance_km_expression(
+                center_latitude=profile.latitude,
+                center_longitude=profile.longitude,
+                latitude=BusinessModel.latitude,
+                longitude=BusinessModel.longitude,
             )
-            distance_sq = lat_km * lat_km + lng_km * lng_km
             statement = statement.where(
                 BusinessModel.latitude.is_not(None),
                 BusinessModel.longitude.is_not(None),
-                distance_sq <= float(profile.radius_km * profile.radius_km),
+                distance_km_expression <= float(profile.radius_km),
             )
         elif profile.trade_keys:
             raise ConflictError(
@@ -202,17 +202,15 @@ class ProfileMatchService:
                 BusinessModel.is_agency,
             ]
         )
-        if distance_sq is not None:
+        if distance_km_expression is not None:
             group_columns.extend([BusinessModel.latitude, BusinessModel.longitude])
         statement = statement.add_columns(
             matched_signal_count.label("matched_signal_count"),
             confirmed_signal_count.label("confirmed_signal_count"),
             weighted_match_score.label("weighted_match_score"),
         )
-        if distance_sq is not None:
-            statement = statement.add_columns(
-                func.sqrt(distance_sq).label("distance_km")
-            )
+        if distance_km_expression is not None:
+            statement = statement.add_columns(distance_km_expression.label("distance_km"))
         else:
             statement = statement.add_columns(literal(None).label("distance_km"))
         candidate_limit = min(max(limit * 4, 100), 400) if outcome_weights else limit

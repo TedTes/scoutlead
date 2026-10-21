@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
-import math
 import re
 from urllib.parse import urlparse
 from types import SimpleNamespace
@@ -18,6 +17,7 @@ from db.models import (
 from business_validation.repository import ValidationRepository, ValidationResult
 from niches.catalog import NICHE_BY_SLUG
 from shared.utils import utcnow
+from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
 
 
@@ -258,7 +258,7 @@ class BusinessValidationService:
         center = market_center(segment.market_label)
         distance = None
         if center and business.latitude is not None and business.longitude is not None:
-            distance = _distance_km(
+            distance = haversine_distance_km(
                 center[0], center[1], business.latitude, business.longitude
             )
         address = _normalized(" ".join([business.address or "", business.geography or ""]))
@@ -353,16 +353,3 @@ def _trade_terms(niche) -> set[str]:
         if len(token) >= 4 and token not in GENERIC_TRADE_TERMS
     )
     return terms
-
-
-def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    radius = 6371.0
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    value = (
-        math.sin(delta_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-    )
-    return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))

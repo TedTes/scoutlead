@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from audience_runs.schemas import AudienceLeadRead
 from job_queue.schemas import QueueJobRead
@@ -123,6 +123,12 @@ class TerritoryCreate(BaseModel):
     criteria_hash: str = "default"
     criteria_version: int = Field(default=1, ge=1)
 
+    @model_validator(mode="after")
+    def require_complete_coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
+
 
 class TerritoryUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1)
@@ -139,6 +145,16 @@ class TerritoryUpdate(BaseModel):
     signal_keys: list[str] | None = None
     exclusion_keys: list[str] | None = None
     refill_policy: TerritoryRefillPolicy | None = None
+
+    @model_validator(mode="after")
+    def require_complete_coordinate_pair(self):
+        provided = self.model_fields_set
+        if "latitude" in provided or "longitude" in provided:
+            if "latitude" not in provided or "longitude" not in provided:
+                raise ValueError("latitude and longitude must be updated together")
+            if (self.latitude is None) != (self.longitude is None):
+                raise ValueError("latitude and longitude must be provided together")
+        return self
 
 
 class TerritoryRead(BaseModel):

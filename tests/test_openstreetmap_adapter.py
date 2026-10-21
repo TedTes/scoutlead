@@ -28,6 +28,8 @@ def test_openstreetmap_adapter_geocodes_fetches_and_normalizes(monkeypatch) -> N
                     {
                         "type": "node",
                         "id": 42,
+                        "lat": 43.66,
+                        "lon": -79.39,
                         "tags": {
                             "name": "Neighbourhood Painting",
                             "craft": "painter",
@@ -48,6 +50,8 @@ def test_openstreetmap_adapter_geocodes_fetches_and_normalizes(monkeypatch) -> N
     assert result.data[0]["title"] == "Neighbourhood Painting"
     assert result.data[0]["url"] is None
     assert result.data[0]["raw"]["external_id"] == "osm:node:42"
+    assert result.data[0]["raw"]["latitude"] == 43.66
+    assert result.data[0]["raw"]["longitude"] == -79.39
     assert result.data[0]["raw"]["website_presence_status"] == "no_website_listed"
 
 

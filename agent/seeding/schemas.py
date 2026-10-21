@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from shared.utils import normalize_text
 
@@ -23,8 +23,8 @@ class BusinessSeedInput(BaseModel):
     geography: str | None = None
     address: str | None = None
     city: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     customer_kind: CustomerKind = "unknown"
     is_chain: bool | None = None
     is_franchise: bool | None = None
@@ -38,6 +38,12 @@ class BusinessSeedInput(BaseModel):
     seed_market: str | None = None
     operator_type: OperatorType = "unknown"
     raw: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
 
     @field_validator(
         "company_name",

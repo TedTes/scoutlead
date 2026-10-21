@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -14,6 +14,7 @@ from db.models import (
     NicheModel,
 )
 from seeding.batches import active_membership_condition
+from shared.geospatial import haversine_distance_km_expression
 from territories.profile_catalog import profile_trade_spec
 from territories.repository import TerritoryRepository
 
@@ -107,17 +108,16 @@ class ProfileChangeService:
             if exclusion in exclusions:
                 statement = statement.where(or_(field.is_(False), field.is_(None)))
         if profile.latitude is not None and profile.longitude is not None:
-            lat_km = (BusinessModel.latitude - profile.latitude) * 111.32
-            lng_km = (
-                (BusinessModel.longitude - profile.longitude)
-                * 111.32
-                * func.cos(func.radians(profile.latitude))
+            distance_km = haversine_distance_km_expression(
+                center_latitude=profile.latitude,
+                center_longitude=profile.longitude,
+                latitude=BusinessModel.latitude,
+                longitude=BusinessModel.longitude,
             )
             statement = statement.where(
                 BusinessModel.latitude.is_not(None),
                 BusinessModel.longitude.is_not(None),
-                lat_km * lat_km + lng_km * lng_km
-                <= float(profile.radius_km * profile.radius_km),
+                distance_km <= float(profile.radius_km),
             )
         else:
             statement = statement.where(BusinessModel.market_key == profile.market_key)

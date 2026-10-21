@@ -22,6 +22,7 @@ from db.session import Database
 from tools.browser import DirectHttpBrowserTool
 from tools.email import EmailTool
 from tools.search import SearchTool
+from territories.geocoding import MarketGeocoder
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class AppServices:
     search: SearchTool
     browser: DirectHttpBrowserTool
     email: EmailTool
+    market_geocoder: MarketGeocoder
 
 
 def create_app_services(settings: Settings) -> AppServices:
@@ -107,6 +109,12 @@ def create_app_services(settings: Settings) -> AppServices:
             unsubscribe_signing_secret=settings.unsubscribe_signing_secret,
             public_api_base=settings.public_api_base,
             daily_send_cap=settings.daily_send_cap_per_connection,
+        ),
+        market_geocoder=MarketGeocoder(
+            google_places_api_key=settings.google_places_api_key,
+            google_places_endpoint=settings.google_places_api_endpoint,
+            openstreetmap_enabled=settings.openstreetmap_enabled,
+            timeout_seconds=settings.request_timeout_seconds,
         ),
     )
 

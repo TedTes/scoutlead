@@ -29,7 +29,7 @@ from territories.profile_catalog import (
     profile_trade_label,
     profile_trade_spec,
 )
-from territories.markets import market_center
+from territories.geocoding import MarketGeocoder
 from territories.repository import TerritoryRepository
 from territories.schemas import (
     ProfileCreate,
@@ -43,12 +43,21 @@ from territories.schemas import (
 
 
 class TerritoryService:
-    def __init__(self, session: Session, *, workspace_id: str | None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        workspace_id: str | None,
+        market_geocoder: MarketGeocoder | None = None,
+    ) -> None:
         self.session = session
         self.workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
         self.products = ProductRepository(session, workspace_id=self.workspace_id)
         self.territories = TerritoryRepository(session, workspace_id=self.workspace_id)
         self.services = ServiceDefinitionRepository(session)
+        self.market_geocoder = market_geocoder or MarketGeocoder(
+            openstreetmap_enabled=False
+        )
 
     def resolve(self, request: TerritoryResolveRequest) -> TerritoryResolutionRead:
         product = self.products.get(request.product_id)
@@ -111,6 +120,18 @@ class TerritoryService:
             raise ValidationError("territory resolution must be confirmed before creation")
         niche = self._confirmed_niche(data)
         is_profile = bool(data.trade_keys)
+        coordinates = (data.latitude, data.longitude)
+        if is_profile and (coordinates[0] is None or coordinates[1] is None):
+            resolved_market = self.market_geocoder.resolve(data.city or data.market_key)
+            if resolved_market is None:
+                raise ValidationError(
+                    "market coordinates are unavailable",
+                    {
+                        "city": data.city or data.market_key,
+                        "reason": "A radius audience requires a resolved center point.",
+                    },
+                )
+            coordinates = (resolved_market.latitude, resolved_market.longitude)
         contract_payload = (
             {}
             if is_profile
@@ -139,6 +160,8 @@ class TerritoryService:
                 "niche_label": niche.label,
                 "market_key": semantic_key(data.market_key) or "unknown",
                 "city": normalize_text(data.city or data.market_key),
+                "latitude": coordinates[0],
+                "longitude": coordinates[1],
                 "signal_keys": (
                     _clean_profile_keys(data.signal_keys)
                     if data.trade_keys
@@ -167,8 +190,8 @@ class TerritoryService:
         niches = [self._ensure_profile_niche(key, city=city) for key in trade_keys]
         trade_label = profile_trade_label(trade_keys)
         customer_kind = data.customer_kind.value
-        center = market_center(city)
-        if center is None:
+        resolved_market = self.market_geocoder.resolve(city)
+        if resolved_market is None:
             raise ValidationError(
                 "market coordinates are unavailable",
                 {
@@ -218,8 +241,8 @@ class TerritoryService:
                 niche_category=niches[0].category,
                 market_key=city,
                 city=city,
-                latitude=center[0] if center else None,
-                longitude=center[1] if center else None,
+                latitude=resolved_market.latitude,
+                longitude=resolved_market.longitude,
                 radius_km=data.market.radius_km,
                 trade_keys=trade_keys,
                 customer_kind=data.customer_kind,
@@ -338,8 +361,8 @@ class TerritoryService:
         if "city" in values:
             values["city"] = normalize_text(values["city"])
             values["market_key"] = semantic_key(values["city"]) or model.market_key
-            center = market_center(values["city"])
-            if model.trade_keys and center is None:
+            resolved_market = self.market_geocoder.resolve(values["city"])
+            if model.trade_keys and resolved_market is None:
                 raise ValidationError(
                     "market coordinates are unavailable",
                     {
@@ -347,8 +370,9 @@ class TerritoryService:
                         "reason": "A profile radius requires a stored market center.",
                     },
                 )
-            if center is not None:
-                values["latitude"], values["longitude"] = center
+            if resolved_market is not None:
+                values["latitude"] = resolved_market.latitude
+                values["longitude"] = resolved_market.longitude
         if "signal_keys" in values:
             values["signal_keys"] = (
                 _clean_profile_keys(values["signal_keys"])
@@ -383,6 +407,17 @@ class TerritoryService:
                 )
             values["service_keys"] = service_keys
             values["signal_keys"] = self.services.signal_keys(service_keys)
+        if model.trade_keys:
+            prospective_latitude = values.get("latitude", model.latitude)
+            prospective_longitude = values.get("longitude", model.longitude)
+            if prospective_latitude is None or prospective_longitude is None:
+                raise ValidationError(
+                    "market coordinates are unavailable",
+                    {
+                        "city": values.get("city", model.city),
+                        "reason": "A radius audience requires a resolved center point.",
+                    },
+                )
         criteria_fields = {
             "city",
             "radius_km",

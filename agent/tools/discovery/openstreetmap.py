@@ -9,6 +9,7 @@ from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignRead
 from canonical.normalization import normalize_business_name, normalize_phone
 from shared.errors import ConfigurationError
+from shared.geospatial import coordinates_are_valid
 from shared.utils import normalize_text, normalize_url
 from source_providers.catalog import niche_slug_for_category
 from source_providers.registry import SourceProviderRegistry
@@ -170,6 +171,14 @@ def result_from_osm_element(
     phone = normalize_text(tags.get("contact:phone") or tags.get("phone"))
     email = normalize_text(tags.get("contact:email") or tags.get("email"))
     address = _address(tags) or location
+    center = element.get("center") if isinstance(element.get("center"), dict) else {}
+    latitude = element.get("lat", center.get("lat"))
+    longitude = element.get("lon", center.get("lon"))
+    coordinates = (
+        {"latitude": float(latitude), "longitude": float(longitude)}
+        if coordinates_are_valid(latitude, longitude)
+        else {}
+    )
     source_url = f"https://www.openstreetmap.org/{element_type}/{element_id}"
     return SearchResult(
         title=name,
@@ -185,6 +194,7 @@ def result_from_osm_element(
             "source_url": source_url,
             "phone": phone or None,
             "address": address,
+            **coordinates,
             "businessStatus": "OPERATIONAL",
             "website_url": website,
             "query": f"{category} in {location}",

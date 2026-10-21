@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from math import asin, cos, radians, sin, sqrt
 import time
 from typing import Any, Iterable
 
@@ -10,6 +9,7 @@ import httpx
 
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from seeding.schemas import BusinessSeedInput
+from shared.geospatial import haversine_distance_km
 from shared.utils import normalize_text, normalize_url
 from source_providers.registry import SourceProviderRegistry
 from tools.discovery.google_places import DEFAULT_GOOGLE_PLACES_ENDPOINT
@@ -530,12 +530,9 @@ def _distance_meters(
     second_latitude: float,
     second_longitude: float,
 ) -> float:
-    lat_delta = radians(second_latitude - first_latitude)
-    lng_delta = radians(second_longitude - first_longitude)
-    first_lat = radians(first_latitude)
-    second_lat = radians(second_latitude)
-    value = (
-        sin(lat_delta / 2) ** 2
-        + cos(first_lat) * cos(second_lat) * sin(lng_delta / 2) ** 2
+    return 1000 * haversine_distance_km(
+        first_latitude,
+        first_longitude,
+        second_latitude,
+        second_longitude,
     )
-    return 2 * 6_371_000 * asin(sqrt(value))

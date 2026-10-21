@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import select
 
 from audience_runs.schemas import AudienceRunState
 from audience_runs.service import AudienceRunService
-from app.dependencies import CurrentAuth, DbSession
+from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from db.models import (
     AudienceRunModel,
     QueueJobModel,
@@ -37,8 +38,19 @@ from territories.service import TerritoryService
 audience_router = APIRouter(prefix="/audiences", tags=["audiences"])
 
 
-def _service(session: DbSession, auth: CurrentAuth) -> TerritoryService:
-    return TerritoryService(session, workspace_id=auth.workspace_id)
+Services = Annotated[AppServices, Depends(get_services)]
+
+
+def _service(
+    session: DbSession,
+    auth: CurrentAuth,
+    services: AppServices | None = None,
+) -> TerritoryService:
+    return TerritoryService(
+        session,
+        workspace_id=auth.workspace_id,
+        market_geocoder=services.market_geocoder if services is not None else None,
+    )
 
 
 @audience_router.post("/resolve", response_model=TerritoryResolutionRead)
@@ -56,9 +68,12 @@ def resolve_audience(
     status_code=status.HTTP_201_CREATED,
 )
 def create_audience_from_resolution(
-    data: TerritoryCreate, session: DbSession, auth: CurrentAuth
+    data: TerritoryCreate,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services = None,
 ):
-    return _service(session, auth).create(data)
+    return _service(session, auth, services).create(data)
 
 
 @audience_router.get("/{audience_id}/metrics", response_model=TerritoryMetricsRead)
@@ -99,13 +114,18 @@ def export_audience_metrics(
     response_model=ProfileQueuedRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_audience(data: ProfileCreate, session: DbSession, auth: CurrentAuth):
+def create_audience(
+    data: ProfileCreate,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services = None,
+):
     if not data.services and not data.signals:
         raise ValidationError(
             "at least one service is required",
             {"user_message": "Choose at least one service before creating an audience."},
         )
-    service = _service(session, auth)
+    service = _service(session, auth, services)
     profile = service.create_profile(data, commit=False)
     run = AudienceRunService(session, workspace_id=auth.workspace_id).create(
         profile.id,
@@ -160,8 +180,9 @@ def update_audience(
     update: TerritoryUpdate,
     session: DbSession,
     auth: CurrentAuth,
+    services: Services = None,
 ):
-    service = _service(session, auth)
+    service = _service(session, auth, services)
     service.update(audience_id, update)
     return service.get_read(audience_id)
 

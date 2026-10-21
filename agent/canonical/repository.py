@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -46,6 +47,7 @@ from niches.resolver import (
 )
 from seeding.batches import active_membership_condition, observation_is_quarantined
 from shared.utils import new_id, normalize_text, normalize_url, utcnow
+from shared.geospatial import haversine_distance_km
 
 
 @dataclass(frozen=True)
@@ -409,6 +411,7 @@ class CanonicalRepository:
             raw=raw,
         )
         attributes = extract_business_attributes([raw], category=profile.category_key)
+        observed_address = _address_from_raw(raw) or normalized_geography
 
         identity = self._find_business(
             source=source,
@@ -417,6 +420,9 @@ class CanonicalRepository:
             domain=domain,
             phone=phone,
             geography=normalized_geography,
+            address=observed_address,
+            latitude=attributes.latitude,
+            longitude=attributes.longitude,
         )
         business = identity.business
         if business is None:
@@ -427,7 +433,7 @@ class CanonicalRepository:
                 website_url=normalized_url,
                 domain=domain,
                 phone=phone,
-                address=_address_from_raw(raw) or normalized_geography,
+                address=observed_address,
                 geography=normalized_geography,
                 category_key=profile.category_key,
                 market_key=profile.market_key,
@@ -452,7 +458,7 @@ class CanonicalRepository:
         business.website_url = business.website_url or normalized_url
         business.domain = business.domain or domain
         business.phone = business.phone or phone
-        business.address = business.address or _address_from_raw(raw) or normalized_geography
+        business.address = business.address or observed_address
         business.geography = business.geography or normalized_geography
         business.category_key = business.category_key or profile.category_key
         business.market_key = business.market_key or profile.market_key
@@ -479,6 +485,9 @@ class CanonicalRepository:
         domain: str | None,
         phone: str | None,
         geography: str | None,
+        address: str | None,
+        latitude: float | None,
+        longitude: float | None,
     ) -> IdentityResolution:
         if external_id:
             observations = self.session.scalars(
@@ -535,6 +544,53 @@ class CanonicalRepository:
                 conflict_reason="domain and phone identify different canonical businesses",
                 candidate_ids=tuple(sorted(strong_candidates)),
             )
+
+        if normalized_name:
+            same_name = list(
+                self.session.scalars(
+                    select(BusinessModel)
+                    .where(BusinessModel.normalized_name == normalized_name)
+                    .order_by(BusinessModel.created_at)
+                    .limit(10)
+                )
+            )
+            address_key = _normalized_address(address)
+            location_matches = [
+                business
+                for business in same_name
+                if (
+                    address_key
+                    and address_key == _normalized_address(business.address)
+                )
+                or (
+                    latitude is not None
+                    and longitude is not None
+                    and business.latitude is not None
+                    and business.longitude is not None
+                    and haversine_distance_km(
+                        latitude,
+                        longitude,
+                        business.latitude,
+                        business.longitude,
+                    )
+                    <= 0.25
+                )
+            ]
+            if len(location_matches) == 1:
+                method = (
+                    "name_and_address"
+                    if address_key
+                    and address_key == _normalized_address(location_matches[0].address)
+                    else "name_and_coordinates"
+                )
+                return IdentityResolution(location_matches[0], method)
+            if len(location_matches) > 1:
+                return IdentityResolution(
+                    None,
+                    "created",
+                    conflict_reason="name and location match multiple canonical businesses",
+                    candidate_ids=tuple(sorted(item.id for item in location_matches)),
+                )
 
         if normalized_name and geography:
             business = self.session.scalar(
@@ -945,6 +1001,10 @@ def _address_from_raw(raw: dict[str, Any]) -> str | None:
             if isinstance(value, str) and value.strip():
                 return normalize_text(value)
     return None
+
+
+def _normalized_address(value: str | None) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).split())
 
 
 def _description_from_raw(raw: dict[str, Any]) -> str | None:

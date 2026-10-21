@@ -18,6 +18,7 @@ from db.models import (
 from db.session import create_database
 from seeding.schemas import BusinessSeedInput
 from seeding.service import BusinessSeedService
+from pydantic import ValidationError as PydanticValidationError
 
 
 class FakeEmbeddingClient:
@@ -515,6 +516,44 @@ def painting_seed(**overrides) -> BusinessSeedInput:
     }
     data.update(overrides)
     return BusinessSeedInput.model_validate(data)
+
+
+def test_seed_coordinates_must_be_valid_complete_pair() -> None:
+    with pytest.raises(PydanticValidationError):
+        painting_seed(latitude=43.65, longitude=None)
+
+    with pytest.raises(PydanticValidationError):
+        painting_seed(latitude=143.65, longitude=-79.38)
+
+
+def test_canonical_identity_uses_address_across_different_market_labels() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        canonical = CanonicalRepository(session)
+        first = canonical.upsert_from_discovery_result(
+            company_name="Overlap Painting",
+            geography="Toronto",
+            source="provider_one",
+            raw={
+                "address": "123 Kingston Road, Scarborough, ON M1N 1P1",
+                "latitude": 43.68,
+                "longitude": -79.29,
+            },
+        )
+        second = canonical.upsert_from_discovery_result(
+            company_name="Overlap Painting",
+            geography="Scarborough",
+            source="provider_two",
+            raw={
+                "formattedAddress": "123 Kingston Road, Scarborough, ON M1N 1P1",
+                "latitude": 43.68,
+                "longitude": -79.29,
+            },
+        )
+
+        assert first.business_id == second.business_id
+        assert second.identity_resolution == "name_and_address"
+        assert session.scalar(select(func.count()).select_from(BusinessModel)) == 1
 
 
 def _session_factory():

@@ -71,6 +71,8 @@ from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
 from territories.metrics import TerritoryMetricsService
 from territories.matching import ProfileMatchService
+from territories.coordinate_backfill import CoordinateBackfillService
+from territories.geocoding import GeocodedMarket, MarketGeocoder
 
 
 def test_resolve_existing_niche_is_read_only() -> None:
@@ -2001,6 +2003,179 @@ def test_territory_metrics_report_coverage_and_conversion() -> None:
         assert metrics.totals.meetings == 1
         assert metrics.totals.positive_reply_rate == 1.0
         assert metrics.totals.outcome_coverage == 0.5
+
+
+def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(
+            session,
+            slug="home_service_painting",
+            label="Residential painters",
+        )
+        canonical = CanonicalRepository(session)
+        located = canonical.upsert_from_discovery_result(
+            company_name="Overlap Painter",
+            geography="Scarborough, ON",
+            source="google_places",
+            raw={
+                "id": "places/overlap-painter",
+                "formattedAddress": "123 Kingston Rd, Scarborough, ON",
+                "location": {"latitude": 43.75, "longitude": -79.28},
+                "source_request_intent": {
+                    "business_category": "Residential painters",
+                    "location": "Toronto",
+                    "search_query": "Residential painters in Toronto",
+                },
+            },
+        )
+        missing_coordinates = canonical.upsert_from_discovery_result(
+            company_name="Unlocated Painter",
+            geography="Toronto, ON",
+            source="directory",
+            raw={
+                "external_id": "directory:unlocated-painter",
+                "source_request_intent": {
+                    "business_category": "Residential painters",
+                    "location": "Toronto",
+                    "search_query": "Residential painters in Toronto",
+                },
+            },
+        )
+        service = TerritoryService(session, workspace_id="workspace:first")
+        toronto = service.create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+        scarborough = service.create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Scarborough", "radius_km": 10},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+        runs = AudienceRunService(session, workspace_id="workspace:first")
+        toronto_run = runs.create(toronto.id)
+        scarborough_run = runs.create(scarborough.id)
+
+        runs.process(toronto_run.id)
+        runs.process(scarborough_run.id)
+
+        results = list(
+            session.scalars(
+                select(AudienceResultModel).order_by(AudienceResultModel.audience_id)
+            )
+        )
+        assert len(results) == 2
+        assert {result.business_id for result in results} == {located.business_id}
+        assert missing_coordinates.business_id not in {
+            result.business_id for result in results
+        }
+        distances = [
+            result.match_snapshot["raw"]["profile_match"]["distance_km"]
+            for result in results
+        ]
+        assert all(distance is not None for distance in distances)
+        assert distances[0] != distances[1]
+        assert session.scalar(select(func.count()).select_from(BusinessModel)) == 2
+
+
+def test_profile_creation_persists_geocoded_center_for_an_arbitrary_city() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_painting", label="Residential painters")
+        geocoder = SimpleNamespace(
+            resolve=lambda location: GeocodedMarket(
+                latitude=30.2672,
+                longitude=-97.7431,
+                label="Austin, Texas, United States",
+                provider="test",
+            )
+        )
+
+        audience = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+            market_geocoder=geocoder,
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Austin, TX", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=15,
+            )
+        )
+
+        assert audience.city == "Austin, TX"
+        assert audience.latitude == 30.2672
+        assert audience.longitude == -97.7431
+
+
+def test_coordinate_backfill_is_dry_run_first_and_uses_provider_evidence() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        audience = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                city="Toronto",
+                confirmed=True,
+            )
+        )
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Provider Located HVAC",
+            geography="Toronto, ON",
+            source="google_places",
+            raw={
+                "id": "places/provider-located-hvac",
+                "location": {"latitude": 43.67, "longitude": -79.4},
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        business.latitude = None
+        business.longitude = None
+        session.commit()
+
+        backfill = CoordinateBackfillService(
+            session,
+            geocoder=MarketGeocoder(openstreetmap_enabled=False),
+        )
+        dry_run = backfill.run(dry_run=True)
+
+        assert dry_run.audiences_backfilled == 1
+        assert dry_run.businesses_backfilled == 1
+        assert audience.latitude is None
+        assert business.latitude is None
+
+        applied = backfill.run(dry_run=False)
+        session.refresh(audience)
+        session.refresh(business)
+
+        assert applied.audiences_backfilled == 1
+        assert applied.businesses_backfilled == 1
+        assert (audience.latitude, audience.longitude) == (43.6532, -79.3832)
+        assert (business.latitude, business.longitude) == (43.67, -79.4)
 
 
 def _session_factory():
