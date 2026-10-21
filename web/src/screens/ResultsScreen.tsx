@@ -4234,8 +4234,8 @@ function emptyBatchCopy(
   }
   if (state === "scoring") {
     return {
-      title: "Matching this audience.",
-      detail: "ScoutLead is matching stored business signals. This normally takes only a few seconds.",
+      title: "Building this audience.",
+      detail: "ScoutLead is collecting businesses and evaluating their signals. You can leave this page while it finishes.",
     };
   }
   if (state === "setup") {

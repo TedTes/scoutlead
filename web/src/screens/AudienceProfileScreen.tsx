@@ -97,7 +97,7 @@ export function AudienceProfileScreen() {
           <strong>{activeBatch?.result_count || 0} leads in the current batch</strong>
           <p>
             {scoring
-              ? "ScoutLead is scoring indexed businesses for this audience. You can leave this page."
+              ? "ScoutLead is collecting and evaluating businesses for this audience. You can leave this page."
               : activeBatch && ["ready", "partial"].includes(activeBatch.state)
                 ? `${activeBatch.remaining_count} leads remain for review.`
                 : activeBatch?.state === "setup"
@@ -391,7 +391,7 @@ function capitalize(value: string) {
 }
 
 function batchStateLabel(state: string | undefined) {
-  if (state === "scoring") return "Scoring batch";
+  if (state === "scoring") return "Building batch";
   if (state === "retrying") return "Retrying batch";
   if (state === "ready") return "Batch ready";
   if (state === "empty") return "No matches";
