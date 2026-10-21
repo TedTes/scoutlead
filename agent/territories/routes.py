@@ -213,9 +213,13 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
             AudienceRunState.FAILED.value,
         }
         if is_initial_run and (
-            latest_job.status == JobStatus.QUEUED.value
+            (
+                latest_job.status == JobStatus.QUEUED.value
+                and latest_run.state != AudienceRunState.WAITING_VALIDATION.value
+            )
             or (
                 run_is_incomplete
+                and latest_run.state != AudienceRunState.WAITING_VALIDATION.value
                 and latest_job.status == JobStatus.COMPLETED.value
             )
             or (
@@ -363,7 +367,10 @@ def _process_profile_run(
     job.locked_at = datetime.now(timezone.utc)
     session.commit()
     try:
-        AudienceRunService(session, workspace_id=workspace_id).process(run_id)
+        _, needs_expansion = AudienceRunService(
+            session,
+            workspace_id=workspace_id,
+        ).process(run_id)
     except Exception as exc:
         session.rollback()
         run = session.get(AudienceRunModel, run_id)
@@ -382,8 +389,14 @@ def _process_profile_run(
         return
     job = session.get(QueueJobModel, job_id)
     if job is not None:
-        job.status = JobStatus.COMPLETED.value
-        job.completed_at = datetime.now(timezone.utc)
+        if needs_expansion:
+            job.status = JobStatus.QUEUED.value
+            job.attempts = max(0, job.attempts - 1)
+            job.run_after = datetime.now(timezone.utc)
+            job.completed_at = None
+        else:
+            job.status = JobStatus.COMPLETED.value
+            job.completed_at = datetime.now(timezone.utc)
         job.locked_at = None
         session.commit()
 

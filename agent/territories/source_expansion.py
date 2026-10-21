@@ -78,6 +78,8 @@ def enqueue_profile_source_expansion(
             intent=intent,
             website_policy="any",
         )
+        if not plan.tasks:
+            continue
         segment = segments.resolve_or_create_segment(
             product_id=product.id,
             niche_id=niche.id,

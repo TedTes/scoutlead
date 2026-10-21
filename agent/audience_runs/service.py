@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -157,9 +157,20 @@ class AudienceRunService:
         needs_expansion = False
         if run.result_count >= run.requested_count:
             run.state = AudienceRunState.READY.value
+            run.failure_reason = None
             run.completed_at = now
             audience.last_run_at = now
             self._complete_coverage(run.id)
+        elif _before_deadline(now, run.deadline_at):
+            self._request_coverage(run, audience, niches)
+            if self._coverage_in_progress(run.id):
+                run.state = AudienceRunState.WAITING_VALIDATION.value
+                run.completed_at = None
+                needs_expansion = self._queued_coverage_exists(run.id)
+            else:
+                run.state = AudienceRunState.PARTIAL.value
+                run.completed_at = now
+                audience.last_run_at = now
         else:
             run.state = AudienceRunState.PARTIAL.value
             run.completed_at = now
@@ -199,7 +210,11 @@ class AudienceRunService:
             .where(
                 AudienceRunModel.audience_id == audience_id,
                 AudienceRunModel.state.in_(
-                    [AudienceRunState.READY.value, AudienceRunState.PARTIAL.value]
+                    [
+                        AudienceRunState.READY.value,
+                        AudienceRunState.PARTIAL.value,
+                        AudienceRunState.WAITING_VALIDATION.value,
+                    ]
                 ),
                 select(AudienceResultModel.id)
                 .where(AudienceResultModel.run_id == AudienceRunModel.id)
@@ -329,8 +344,36 @@ class AudienceRunService:
         for request in self.session.scalars(
             select(CoverageRequestModel).where(CoverageRequestModel.run_id == run_id)
         ):
+            if request.status == "failed":
+                continue
             request.status = "completed"
             request.completed_at = utcnow()
+
+    def _coverage_in_progress(self, run_id: str) -> bool:
+        return (
+            self.session.scalar(
+                select(CoverageRequestModel.id)
+                .where(
+                    CoverageRequestModel.run_id == run_id,
+                    CoverageRequestModel.status.in_(["queued", "processing"]),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    def _queued_coverage_exists(self, run_id: str) -> bool:
+        return (
+            self.session.scalar(
+                select(CoverageRequestModel.id)
+                .where(
+                    CoverageRequestModel.run_id == run_id,
+                    CoverageRequestModel.status == "queued",
+                )
+                .limit(1)
+            )
+            is not None
+        )
 
     def _audience(self, audience_id: str) -> TerritoryModel:
         audience = self.session.get(TerritoryModel, audience_id)
@@ -513,6 +556,12 @@ class AudienceRunService:
 
 def _business_id(row: dict) -> str:
     return str(row["raw"]["canonical_business_id"])
+
+
+def _before_deadline(now: datetime, deadline: datetime) -> bool:
+    if deadline.tzinfo is None and now.tzinfo is not None:
+        deadline = deadline.replace(tzinfo=now.tzinfo)
+    return now < deadline
 
 
 def _territory_niches(session: Session, territory: TerritoryModel) -> list[NicheModel]:

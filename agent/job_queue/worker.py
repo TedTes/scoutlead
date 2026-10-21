@@ -19,6 +19,7 @@ from campaigns.service import CampaignService
 from db.session import create_database
 from db.models import (
     AudienceRunModel,
+    BusinessIndexSegmentModel,
     CampaignModel,
     CoverageRequestModel,
     QueueJobModel,
@@ -149,7 +150,7 @@ def _execute_job(
             profile = session.get(TerritoryModel, run.audience_id)
             if profile is None:
                 raise ValueError(f"audience not found: {run.audience_id}")
-            enqueue_profile_source_expansion(
+            segment_ids = enqueue_profile_source_expansion(
                 session,
                 profile,
                 google_places_configured=bool(
@@ -170,11 +171,38 @@ def _execute_job(
                 ],
                 source_recipes=services.settings.source_template_configs,
             )
+            queued_niche_ids = (
+                set(
+                    session.scalars(
+                        select(BusinessIndexSegmentModel.niche_id).where(
+                            BusinessIndexSegmentModel.id.in_(segment_ids)
+                        )
+                    )
+                )
+                if segment_ids
+                else set()
+            )
+            processing_count = 0
+            failure_reason = (
+                "No configured source provider could expand this audience."
+            )
             for request in session.query(CoverageRequestModel).filter(
                 CoverageRequestModel.run_id == run.id,
                 CoverageRequestModel.status == "queued",
             ):
-                request.status = "processing"
+                if request.niche_id in queued_niche_ids:
+                    request.status = "processing"
+                    processing_count += 1
+                else:
+                    request.status = "failed"
+                    request.failure_reason = failure_reason
+                    request.completed_at = datetime.now(timezone.utc)
+            if processing_count == 0:
+                now = datetime.now(timezone.utc)
+                run.state = "partial"
+                run.failure_reason = failure_reason
+                run.completed_at = now
+                profile.last_run_at = now
             session.commit()
     elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
         business_index_pipeline_service(

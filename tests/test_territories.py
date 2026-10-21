@@ -359,6 +359,40 @@ def test_profile_source_expansion_queues_each_trade_once() -> None:
         )
 
 
+def test_profile_source_expansion_skips_segments_without_a_provider() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                limit=25,
+            )
+        )
+
+        segment_ids = enqueue_profile_source_expansion(
+            session,
+            profile,
+            google_places_configured=False,
+            search_configured=False,
+            openstreetmap_enabled=False,
+            apify_sources=[],
+            source_recipes=[],
+        )
+
+        assert segment_ids == []
+        assert session.scalar(
+            select(func.count()).select_from(BusinessIndexSegmentModel)
+        ) == 0
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
+
+
 def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -377,12 +411,12 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
         )
 
         completed = current_profile_batch(result.audience.id, session, auth)
-        assert completed.state.value == "empty"
+        assert completed.state.value == "scoring"
         assert completed.failure_class is None
 
         job = session.get(QueueJobModel, result.job.id)
         assert job is not None
-        assert job.status == "completed"
+        assert job.status == "queued"
 
         initial_run = session.get(
             AudienceRunModel,
@@ -395,9 +429,9 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
         session.commit()
 
         repaired = current_profile_batch(result.audience.id, session, auth)
-        assert repaired.state.value == "empty"
-        assert initial_run.state == "partial"
-        assert job.status == "completed"
+        assert repaired.state.value == "scoring"
+        assert initial_run.state == "waiting_validation"
+        assert job.status == "queued"
 
         run = AudienceRunService(
             session,
@@ -852,7 +886,7 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
         assert all(not result.is_new for result in second_read.results)
 
 
-def test_audience_run_returns_partial_results_without_waiting_for_expansion() -> None:
+def test_audience_run_requests_coverage_and_waits_until_deadline() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -877,12 +911,36 @@ def test_audience_run_returns_partial_results_without_waiting_for_expansion() ->
         run = service.create(profile.id)
         run, needs_expansion = service.process(run.id)
 
-        assert run.state == "partial"
+        assert run.state == "waiting_validation"
         assert run.result_count == 2
+        assert run.completed_at is None
+        assert needs_expansion is True
+        assert len(service.latest_leads_for_audience(profile.id)) == 2
+        coverage = session.scalar(select(CoverageRequestModel))
+        assert coverage is not None
+        assert coverage.status == "queued"
+        assert coverage.requested_count == 23
+
+        run, needs_expansion = service.process(run.id)
+
+        assert run.state == "waiting_validation"
+        assert needs_expansion is True
+
+        coverage.status = "processing"
+        session.commit()
+        run, needs_expansion = service.process(run.id)
+
+        assert run.state == "waiting_validation"
+        assert needs_expansion is False
+
+        run.deadline_at = utcnow() - timedelta(seconds=1)
+        session.commit()
+        run, needs_expansion = service.process(run.id)
+
+        assert run.state == "partial"
         assert run.completed_at is not None
         assert needs_expansion is False
-        assert len(service.latest_leads_for_audience(profile.id)) == 2
-        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
+        assert coverage.status == "completed"
 
 
 def test_audience_result_creates_outreach_records_only_after_user_action() -> None:
