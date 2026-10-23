@@ -12,6 +12,10 @@ Audience execution must not create canonical businesses, resolve identities, ins
 mutate business facts. An audience may request additional index coverage, but unvalidated records
 remain staged until the Business Index publishes them.
 
+`business_index_segments` are shared acquisition scopes. They belong to a niche and market, not to
+a product or workspace. Products and audiences create demand for a segment; deleting a product must
+not delete the shared businesses, source items, decisions, or refresh jobs produced for that scope.
+
 ## Invariants
 
 - Source observations and fact claims are immutable evidence.
@@ -23,6 +27,12 @@ remain staged until the Business Index publishes them.
   that qualified it.
 - Audience runs are deterministic for a fixed index snapshot, policy version, and audience criteria.
 - Outreach state cannot affect whether a business is valid index data.
+- A canonical business is stored once even when it matches multiple overlapping audiences.
+- Audience radius membership is calculated from the audience center and canonical business
+  coordinates. The calculated distance belongs to the audience result snapshot, not the business.
+- A business with missing coordinates remains valid index data but is excluded from radius matching
+  until coordinates are available. Missing coordinates are not a quarantine reason by themselves.
+- `market_key` remains acquisition and membership metadata; it is not authoritative radius evidence.
 
 ## States
 
@@ -56,6 +66,32 @@ audience criteria -> published-index query -> dedupe/rank -> audience results
 
 sample -> offline benchmark evaluation
 ```
+
+The current radius implementation uses a portable Haversine expression. PostGIS and H3 are not
+required at the present data volume. Revisit a spatial extension only after query measurements show
+that coordinate filtering is the bottleneck.
+
+## Coordinate rollout
+
+Audience centers are resolved when a radius audience is created or its city changes. Discovery
+providers preserve business coordinates in source evidence, and canonicalization promotes usable
+coordinates to the business record. Provider failures are not negatively cached, so a transient
+geocoder outage can recover without restarting the API.
+
+Preview existing coordinate gaps before applying a backfill:
+
+```bash
+python scripts/backfill_coordinates.py
+python scripts/backfill_coordinates.py --limit 100
+```
+
+Persist provider-backed coordinates only after reviewing the dry-run counts:
+
+```bash
+python scripts/backfill_coordinates.py --apply
+```
+
+Conflicting provider coordinates are reported and left unchanged for review.
 
 ## Migration baseline
 

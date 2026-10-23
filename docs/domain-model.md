@@ -22,6 +22,11 @@ Audience (database: territories)
         └── Business
 ```
 
+The audience owns its center coordinates and radius. A canonical business owns its physical
+coordinates. `AudienceResult.match_snapshot.raw.profile_match.distance_km` records the distance for
+that particular match, allowing one business row to appear in multiple overlapping audiences at
+different distances.
+
 Canonical audience APIs are under `/audiences`; the former `/territories` and
 `/profiles` public routes have been removed.
 
@@ -84,3 +89,20 @@ User
 `workspace_id` filters remain mandatory because they prevent one account from
 reading another account's data. Shared membership and role-based permissions
 are intentionally not part of the current product.
+
+## Shared business index
+
+The acquisition index is intentionally product-independent:
+
+```text
+Niche ──→ BusinessIndexSegment ←── demand from many Products/Audiences
+              │
+              └── SourceItem ──→ canonicalization ──→ Business
+                                                        │
+                                                        └── BusinessNicheMembership
+```
+
+There is no `business_index_segments.product_id` relationship. A product supplies demand and search
+intent but does not own the resulting segment. Product deletion therefore cannot cascade into the
+shared index. Audience matching reads published businesses and memberships, then applies its own
+coordinate radius and criteria.
