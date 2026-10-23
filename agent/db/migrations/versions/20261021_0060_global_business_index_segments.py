@@ -49,7 +49,14 @@ def upgrade() -> None:
             table_name="business_index_segments",
         )
 
-    op.drop_column("business_index_segments", "product_id")
+    # SQLite cannot drop a column that is referenced by an unnamed foreign key.
+    # Alembic's batch mode recreates the table without that column/constraint,
+    # while PostgreSQL can use the normal ALTER TABLE path above.
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table("business_index_segments") as batch_op:
+            batch_op.drop_column("product_id")
+    else:
+        op.drop_column("business_index_segments", "product_id")
 
 
 def downgrade() -> None:
