@@ -597,7 +597,6 @@ function AppShell({
                     ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} />
                     : <Users className="lead-workspace-icon" size={15} />}
                   <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.place_label || profile.city} · {profile.radius_km} km</small></span>
-                  <em className={`audience-collection-state is-${audienceCollectionState(profile)}`}>{audienceCollectionState(profile)}</em>
                 </button>
                 <div className="audience-row-actions">
                   <button
@@ -671,6 +670,13 @@ function AppShell({
       >
         {activeScreen !== "results" ? (
           <header className={activeScreen === "product" ? "desktop-account-bar has-summary" : "desktop-account-bar"}>
+            {activeScreen === "overview" ? (
+              <nav aria-label="Audience context" className="results-breadcrumb desktop-audience-context">
+                <span>Audiences</span>
+                <span aria-hidden="true">/</span>
+                <strong>New audience</strong>
+              </nav>
+            ) : null}
             {activeScreen === "integrations" || activeScreen === "product" ? (
               <div className="desktop-settings-context">
                 <nav aria-label="Page context" className="results-breadcrumb">
@@ -1299,11 +1305,6 @@ function writeStoredDimension(key: string, value: number) {
 
 function getEnabledIntegrationCount(product: Product | undefined, gmailConnected: boolean) {
   return Number(gmailConnected) + Number(Boolean(product?.webhook_enabled && product.webhook_url));
-}
-
-function audienceCollectionState(profile: Territory): "building" | "ready" | "thin" {
-  if (!profile.last_run_at) return "building";
-  return profile.last_batch_count > 0 ? "ready" : "thin";
 }
 
 function isWithinLastSevenDays(value: string) {
