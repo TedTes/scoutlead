@@ -12,6 +12,7 @@ import {
   PlayCircle,
   Plug,
   Plus,
+  Search,
   Send,
   Settings,
   Star,
@@ -91,6 +92,7 @@ function AppShell({
   const [leadListRequestId, setLeadListRequestId] = useState(0);
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
+  const [audienceSearch, setAudienceSearch] = useState("");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [productMenuOpen, setProductMenuOpen] = useState(false);
   const [renameAudience, setRenameAudience] = useState<Territory | null>(null);
@@ -205,13 +207,19 @@ function AppShell({
       icon: <CircleX size={17} />,
     },
   ];
+  const matchingProfiles = useMemo(() => {
+    const query = audienceSearch.trim().toLowerCase();
+    if (!query) return productProfiles;
+    return productProfiles.filter((profile) => [profile.label, profile.niche_label, profile.place_label, profile.city]
+      .some((value) => value?.toLowerCase().includes(query)));
+  }, [audienceSearch, productProfiles]);
   const visibleProfiles = useMemo(() => {
-    if (workspaceExpanded || productProfiles.length <= 5) return productProfiles;
-    const recent = productProfiles.slice(0, 5);
-    const selected = productProfiles.find((item) => item.id === selectedProfileId);
+    if (audienceSearch.trim() || workspaceExpanded || matchingProfiles.length <= 5) return matchingProfiles;
+    const recent = matchingProfiles.slice(0, 5);
+    const selected = matchingProfiles.find((item) => item.id === selectedProfileId);
     if (!selected || recent.some((item) => item === selected)) return recent;
     return [...recent.slice(0, 4), selected];
-  }, [productProfiles, selectedProfileId, workspaceExpanded]);
+  }, [audienceSearch, matchingProfiles, selectedProfileId, workspaceExpanded]);
   const handleWorkflowCountsChange = useCallback((runId: string, counts: LeadWorkflowCounts) => {
     setWorkflowSummary((current) => {
       if (current?.runId === runId && Object.keys(counts).every((key) => current.counts[key as LeadWorkflowView] === counts[key as LeadWorkflowView])) {
@@ -564,6 +572,7 @@ function AppShell({
           <div className="lead-workspace-heading">
             <span>Audiences</span>
           </div>
+          {productProfiles.length > 5 ? <label className="audience-sidebar-search"><Search size={13} /><input aria-label="Search audiences" placeholder="Search audiences" value={audienceSearch} onChange={(event) => setAudienceSearch(event.target.value)} /></label> : null}
           <div className="lead-workspace-list">
             {visibleProfiles.map((profile) => (
               <div className="audience-list-row" key={profile.id}>
@@ -587,7 +596,8 @@ function AppShell({
                   {switchingProfileId === profile.id
                     ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} />
                     : <Users className="lead-workspace-icon" size={15} />}
-                  <span>{profile.label}</span>
+                  <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.place_label || profile.city} · {profile.radius_km} km</small></span>
+                  <em className={`audience-collection-state is-${audienceCollectionState(profile)}`}>{audienceCollectionState(profile)}</em>
                 </button>
                 <div className="audience-row-actions">
                   <button
@@ -609,7 +619,7 @@ function AppShell({
                 </div>
               </div>
             ))}
-            {productProfiles.length > 5 ? (
+            {productProfiles.length > 5 && !audienceSearch.trim() ? (
               <button
                 className="workspace-more"
                 type="button"
@@ -1289,6 +1299,11 @@ function writeStoredDimension(key: string, value: number) {
 
 function getEnabledIntegrationCount(product: Product | undefined, gmailConnected: boolean) {
   return Number(gmailConnected) + Number(Boolean(product?.webhook_enabled && product.webhook_url));
+}
+
+function audienceCollectionState(profile: Territory): "building" | "ready" | "thin" {
+  if (!profile.last_run_at) return "building";
+  return profile.last_batch_count > 0 ? "ready" : "thin";
 }
 
 function isWithinLastSevenDays(value: string) {

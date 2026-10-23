@@ -64,6 +64,7 @@ type AppDataContextValue = {
   createProductFromDescription: (input: ProductDescriptionInput) => Promise<Product | null>;
   createProductFromProfile: (input: ProductProfileInput) => Promise<Product | null>;
   createProfile: (input: ProfileCreateInput) => Promise<ProfileQueued | null>;
+  updateProfile: (profileId: string, update: Partial<Territory>) => Promise<Territory>;
   renameProfile: (profileId: string, label: string) => Promise<Territory>;
   deleteProfile: (profileId: string) => Promise<void>;
   refillProfile: (profileId?: string) => Promise<ProfileQueued | null>;
@@ -599,6 +600,25 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           throw err;
         }
         return created;
+      },
+      updateProfile: async (profileId, update) => {
+        setError("");
+        try {
+          const updated = await api.updateProfile(profileId, update);
+          setTerritories((current) => current.map((profile) => (
+            profile.id === profileId ? updated : profile
+          )));
+          setProfileBatch((current) => (
+            current?.audience.id === profileId
+              ? { ...current, audience: updated }
+              : current
+          ));
+          await refreshProfileBatch(profileId);
+          return updated;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        }
       },
       renameProfile: async (profileId, label) => {
         setError("");

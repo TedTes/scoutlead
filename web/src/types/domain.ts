@@ -329,12 +329,16 @@ export type Territory = {
   workspace_id: string;
   product_id: string;
   niche_id: string;
+  niche_label?: string | null;
   market_key: string;
   city: string;
+  place_label?: string | null;
+  place_provider?: string | null;
+  place_external_id?: string | null;
+  country_code?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   radius_km: number;
-  trade_keys: ProfileTrade[];
   customer_kind: ProfileCustomerKind;
   service_keys: string[];
   signal_keys: string[];
@@ -359,24 +363,16 @@ export type Territory = {
   updated_at: string;
 };
 
-export type ProfileTrade =
-  | "painters"
-  | "hvac"
-  | "roofers"
-  | "plumbers"
-  | "electricians"
-  | "cleaners"
-  | "landscapers"
-  | "pest_control"
-  | "garage_doors";
-export type ProfileCustomerKind = "residential" | "commercial";
+export type ProfileCustomerKind = "residential" | "commercial" | "both";
 export type ProfileSignal = string;
 export type ProfileExclusion = "closed" | "chains" | "franchises" | "directories" | "agencies";
 
 export type ProfileOptions = {
   business_types: Array<{
-    key: ProfileTrade;
+    id: string;
+    key: string;
     label: string;
+    category?: string | null;
   }>;
   services: Array<{
     key: string;
@@ -395,6 +391,21 @@ export type ProfileOptions = {
     label: string;
     category: string;
   }>;
+  radius_presets: number[];
+  radius_min: number;
+  radius_max: number;
+  batch_size_presets: number[];
+  batch_size_min: number;
+  batch_size_max: number;
+};
+
+export type PlaceOption = {
+  label: string;
+  provider: string;
+  external_id?: string | null;
+  country_code?: string | null;
+  latitude: number;
+  longitude: number;
 };
 
 export type ProfileFactChange = {
@@ -414,18 +425,24 @@ export type ProfileFactChange = {
 export type ProfileCreateInput = {
   product_id: string;
   name?: string;
-  trades: ProfileTrade[];
+  niche_id: string;
   customer_kind: ProfileCustomerKind;
   market: {
-    city: string;
-    radius_km: 10 | 25 | 50;
+    place_label: string;
+    place_provider: string;
+    place_external_id?: string | null;
+    country_code?: string | null;
+    latitude: number;
+    longitude: number;
+    radius_km: number;
   };
   services: string[];
   signals: ProfileSignal[];
   exclude: ProfileExclusion[];
-  limit: 15 | 25 | 40;
+  limit: number;
   refill_policy: Territory["refill_policy"];
   exclude_already_delivered: true;
+  clone_from_id?: string;
 };
 
 export type QueueJob = {

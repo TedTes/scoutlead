@@ -301,6 +301,10 @@ export class ApiClient {
     return this.request<Territory>(`/audiences/${id}`, { method: "PATCH", body: update });
   }
 
+  searchPlaces(query: string) {
+    return this.request<import("../types/domain").PlaceOption[]>(`/audiences/places?q=${encodeURIComponent(query)}`);
+  }
+
   deleteProfile(id: string) {
     return this.request<void>(`/audiences/${id}`, { method: "DELETE" });
   }

@@ -1998,7 +1998,6 @@ function audienceSignalStatement(
 }
 
 function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {
-  const tradeLabels = profile.trade_keys.map((key) => profileTradeLabel(key));
   const signalLabels = profile.signal_keys.map((key) => profileSignalLabel(key));
   const exclusionLabels = profile.exclusion_keys.map((key) => profileExclusionLabel(key));
   return (
@@ -2009,9 +2008,9 @@ function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClo
           <span className={`audience-profile-status is-${profile.status}`}>{profile.status}</span>
         </header>
         <dl>
-          <div><dt>Business type</dt><dd>{tradeLabels.join(", ") || "Any supported type"}</dd></div>
+          <div><dt>Business type</dt><dd>{profile.niche_label || "Supported business type"}</dd></div>
           <div><dt>Customer kind</dt><dd>{profileValueLabel(profile.customer_kind)}</dd></div>
-          <div><dt>Market</dt><dd>{profile.city} · {profile.radius_km} km</dd></div>
+          <div><dt>Market</dt><dd>{profile.place_label || profile.city} · {profile.radius_km} km</dd></div>
           <div><dt>Batch size</dt><dd>{profile.batch_size} leads</dd></div>
           <div><dt>Refill</dt><dd>{refillPolicyLabel(profile.refill_policy)}</dd></div>
         </dl>
@@ -4285,17 +4284,6 @@ function refillPolicyLabel(value: Territory["refill_policy"]) {
   if (value === "when_depleted") return "Refill when depleted";
   if (value === "biweekly") return "Every two weeks";
   return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function profileTradeLabel(value: string) {
-  const labels: Record<string, string> = {
-    painters: "Painters",
-    hvac: "HVAC",
-    roofers: "Roofers",
-    plumbers: "Plumbers",
-    electricians: "Electricians",
-  };
-  return labels[value] || profileValueLabel(value);
 }
 
 function profileSignalLabel(value: string) {
