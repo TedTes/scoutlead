@@ -1,0 +1,1083 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScoutLead ERDs</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap');
+body{margin:0;font-family:Inter,system-ui,sans-serif;color:#16181C;background:#FBFBFA;}
+header{padding:18px 24px;border-bottom:1px solid #E7E9EC;position:sticky;top:0;background:#FBFBFA;z-index:5;}
+header h1{margin:0;font-size:18px;letter-spacing:-.3px;}
+header p{margin:6px 0 0;font-size:12.5px;color:#565C64;}
+.progress{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.progress span{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#285F45;background:#ECF8F1;border:1px solid #BFE6CF;border-radius:999px;padding:3px 7px;}
+section{padding:20px 24px;border-bottom:1px solid #EEF0F2;}
+h2{font-size:15px;margin:0 0 6px;letter-spacing:-.2px;}
+.ann,.stubs{font-size:12px;color:#565C64;margin:0 0 10px;}
+.ann code,.stubs code{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#F4F5F6;border:1px solid #E7E9EC;border-radius:4px;padding:1px 5px;}
+.dq-key{font-size:12px;color:#8F1D18;background:#FFF4F2;border:1px solid #FDA29B;border-radius:7px;padding:7px 9px;margin:0 0 10px;}
+.dq-key b{color:#B42318;}
+.mermaid{overflow:auto;background:#fff;border:1px solid #E7E9EC;border-radius:10px;padding:14px;}
+table.reg{border-collapse:collapse;width:100%;font-size:12px;}
+.reg th,.reg td{border:1px solid #E7E9EC;padding:6px 9px;text-align:left;vertical-align:top;}
+.reg th{background:#F4F5F6;font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#565C64;}
+.reg code{font-family:'IBM Plex Mono',monospace;font-size:11px;}
+.reg .mono{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9AA0A8;}
+</style></head><body>
+<header><h1>ScoutLead — current domain ER diagrams</h1>
+<p>8 domain diagrams + context + cross-domain FK register. Updated to application schema head <code>20261023_0061</code> (43 application tables + <code>alembic_version</code>, 90 model FKs). Real FKs only; cardinality follows nullability and unique constraints. Physical table names are retained.</p>
+<div class="progress"><span>Audience = territories</span><span>one niche per audience</span><span>canonical place + radius</span><span>global shared index</span><span>legacy delivery removed</span><span>retired feature tables removed</span></div></header>
+<section><h2>D1 · Workspace &amp; product ownership</h2><div class="ann">A workspace remains the ownership and isolation boundary. Products belong to a workspace; products and audiences are separate concepts. The unfinished team-membership/RBAC table has been removed.</div><pre class="mermaid">
+erDiagram
+  users {
+    varchar id PK
+    varchar clerk_user_id
+    varchar email
+    timestamptz last_seen_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  workspaces {
+    varchar id PK
+    varchar name
+    varchar clerk_organization_id
+    timestamptz created_at
+    timestamptz updated_at
+    varchar sender_legal_name
+    text sender_mailing_address
+    varchar sender_contact
+    varchar owner_user_id FK
+  }
+  products {
+    varchar id PK
+    varchar product_name
+    text product_description
+    varchar target_customer
+    text problem_being_solved
+    text value_proposition
+    varchar target_geography
+    text validation_goal
+    json qualification_criteria
+    json preferred_discovery_sources
+    text outreach_objective
+    json constraints
+    timestamptz archived_at
+    timestamptz created_at
+    timestamptz updated_at
+    varchar source_url
+    varchar source_fingerprint
+    timestamptz source_last_checked_at
+    jsonb source_evidence
+    varchar webhook_url
+    bool webhook_enabled
+    varchar workspace_id FK
+    text offer_summary
+    json ideal_customer_signals
+    json exclusions
+    text typical_deal_value
+  }
+  email_connections {
+    varchar id PK
+    varchar product_id FK
+    varchar provider
+    varchar email_address
+    text encrypted_refresh_token
+    json scopes
+    timestamptz connected_at
+    timestamptz disconnected_at
+    text last_error
+    timestamptz created_at
+    timestamptz updated_at
+    varchar workspace_id FK
+  }
+  products |o--o{ email_connections : "email_connections_product_id_fkey"
+  workspaces ||--o{ email_connections : "fk_email_connections_workspace_id_workspaces"
+  workspaces |o--o{ products : "fk_products_workspace_id_workspaces"
+  users |o--o{ workspaces : "fk_workspaces_owner_user_id_users"
+</pre></section><section><h2>D2 · Audience, niche &amp; market definition</h2><div class="ann">Physical table <code>territories</code> = <b>Audience</b> in product terminology. <code>niche_id</code> is now the single authoritative business type. Exact clones are allowed; the former criteria uniqueness constraint and <code>trade_keys</code> were retired. <code>service_keys</code> and <code>signal_keys</code> are JSON selections resolved against the definition tables by application logic, not database FKs. Index segments describe shared supply by niche and market; they are no longer owned by a product.</div><div class="stubs">grey stubs (other domains): <code>businesses</code>, <code>products</code>, <code>seed_batches</code>, <code>source_observations</code>, <code>workspaces</code></div><pre class="mermaid">
+erDiagram
+  territories {
+    varchar id PK
+    varchar workspace_id FK
+    varchar product_id FK
+    varchar niche_id FK
+    varchar market_key
+    varchar label
+    varchar status
+    varchar cadence
+    int batch_size
+    varchar min_fit
+    timestamptz next_run_at
+    timestamptz last_run_at
+    timestamptz created_at
+    timestamptz updated_at
+    text search_prompt
+    json search_contract
+    int evidence_max_age_days
+    varchar criteria_hash
+    varchar city
+    varchar place_label
+    varchar place_provider
+    varchar place_external_id
+    varchar country_code
+    float8 latitude
+    float8 longitude
+    int radius_km
+    varchar customer_kind
+    json signal_keys
+    json exclusion_keys
+    varchar refill_policy
+    int criteria_version
+    json service_keys
+  }
+  niches {
+    varchar id PK
+    varchar slug
+    varchar label
+    varchar category
+    text default_query
+    bool active
+    timestamptz created_at
+    timestamptz updated_at
+    json signal_vocabulary
+    json search_config
+  }
+  service_definitions {
+    varchar id PK
+    varchar key
+    varchar label
+    text description
+    varchar status
+    int sort_order
+    int version
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  signal_definitions {
+    varchar id PK
+    varchar key
+    varchar label
+    text description
+    varchar value_type
+    varchar category
+    varchar unit
+    varchar status
+    varchar collector_key
+    varchar extractor_key
+    int freshness_days
+    varchar opportunity_direction
+    json config
+    int version
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  service_signal_mappings {
+    varchar id PK
+    varchar service_definition_id FK
+    varchar signal_definition_id FK
+    float8 weight
+    int sort_order
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  business_niche_memberships {
+    varchar id PK
+    varchar business_id FK
+    varchar niche_id FK
+    varchar market_key
+    float8 confidence
+    json evidence
+    varchar source_observation_id FK
+    varchar seed_batch_id FK
+    timestamptz first_seen_at
+    timestamptz last_seen_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  business_index_segments {
+    varchar id PK
+    varchar niche_id FK
+    varchar market_key
+    varchar market_label
+    varchar status
+    int demand_count
+    int target_business_count
+    json source_plan
+    json source_state
+    timestamptz last_refresh_at
+    timestamptz last_success_at
+    timestamptz next_refresh_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  businesses {
+    varchar id PK
+  }
+  products {
+    varchar id PK
+    varchar workspace_id FK
+  }
+  seed_batches {
+    varchar id PK
+    varchar niche_id FK
+  }
+  source_observations {
+    varchar id PK
+    varchar business_id FK
+  }
+  workspaces {
+    varchar id PK
+    varchar owner_user_id FK
+  }
+  niches ||--o{ business_index_segments : "business_index_segments_niche_id_fkey"
+  businesses ||--o{ business_niche_memberships : "business_niche_memberships_business_id_fkey"
+  niches ||--o{ business_niche_memberships : "business_niche_memberships_niche_id_fkey"
+  seed_batches |o--o{ business_niche_memberships : "business_niche_memberships_seed_batch_id_fkey"
+  source_observations |o--o{ business_niche_memberships : "business_niche_memberships_source_observation_id_fkey"
+  service_definitions ||--o{ service_signal_mappings : "service_signal_mappings_service_definition_id_fkey"
+  signal_definitions ||--o{ service_signal_mappings : "service_signal_mappings_signal_definition_id_fkey"
+  niches ||--o{ territories : "territories_niche_id_fkey"
+  products ||--o{ territories : "territories_product_id_fkey"
+  workspaces ||--o{ territories : "territories_workspace_id_fkey"
+</pre></section><section><h2>D3 · Discovery execution</h2><div class="stubs">grey stubs (other domains): <code>business_index_segments</code>, <code>businesses</code>, <code>campaigns</code>, <code>leads</code>, <code>niches</code>, <code>products</code>, <code>source_items</code>, <code>source_observations</code>, <code>territories</code>, <code>workspaces</code></div><pre class="mermaid">
+erDiagram
+  audience_runs {
+    varchar id PK
+    varchar workspace_id FK
+    varchar audience_id FK
+    int criteria_version
+    varchar state
+    int requested_count
+    int result_count
+    int new_result_count
+    timestamptz index_snapshot_at
+    timestamptz deadline_at
+    timestamptz started_at
+    timestamptz completed_at
+    text failure_reason
+    timestamptz created_at
+    timestamptz updated_at
+    varchar outreach_campaign_id FK
+  }
+  audience_results {
+    varchar id PK
+    varchar run_id FK
+    varchar audience_id FK
+    varchar business_id FK
+    int rank_position
+    bool is_new
+    json match_snapshot
+    timestamptz created_at
+    timestamptz updated_at
+    varchar review_status
+    text review_note
+    timestamptz reviewed_at
+    timestamptz shortlisted_at
+    timestamptz contacted_at
+    varchar outreach_lead_id FK
+  }
+  seed_batches {
+    varchar id PK
+    varchar niche_id FK
+    varchar market_key
+    varchar source
+    text query
+    varchar status
+    timestamptz started_at
+    timestamptz completed_at
+    int found_count
+    int inserted_count
+    int updated_count
+    int source_observation_count
+    int cost_cents
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  coverage_requests {
+    varchar id PK
+    varchar run_id FK
+    varchar audience_id FK
+    varchar niche_id FK
+    varchar market_key
+    int requested_count
+    varchar status
+    timestamptz completed_at
+    text failure_reason
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  discovery_candidates {
+    varchar id PK
+    varchar campaign_id FK
+    varchar product_id FK
+    varchar lead_id FK
+    text query
+    varchar title
+    varchar url
+    text snippet
+    varchar geography
+    varchar contact_email
+    varchar source
+    json raw
+    varchar candidate_type
+    int confidence
+    text rejection_reason
+    timestamptz promoted_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  business_search_evaluations {
+    varchar id PK
+    varchar business_id FK
+    varchar contract_hash
+    int contract_version
+    varchar evidence_fingerprint
+    varchar status
+    int confidence
+    text rationale
+    json criterion_results
+    json evidence
+    json missing_evidence
+    timestamptz evaluated_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  validation_results {
+    varchar id PK
+    varchar idempotency_key
+    varchar business_id FK
+    varchar source_item_id FK
+    varchar source_observation_id FK
+    varchar niche_id FK
+    varchar market_key
+    varchar validation_type
+    varchar status
+    int confidence
+    text reason
+    json evidence
+    varchar validator
+    int validator_version
+    timestamptz observed_at
+    timestamptz expires_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  run_pipeline_events {
+    varchar id PK
+    varchar campaign_id FK
+    varchar segment_id FK
+    varchar job_id FK
+    varchar stage
+    varchar event_type
+    varchar status
+    varchar provider_id
+    varchar business_id FK
+    varchar lead_id FK
+    varchar item_key
+    json request_payload
+    json response_payload
+    text reason
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  queue_jobs {
+    varchar id PK
+    varchar type
+    json payload
+    varchar status
+    int attempts
+    int max_attempts
+    timestamptz run_after
+    text last_error
+    timestamptz completed_at
+    timestamptz created_at
+    timestamptz updated_at
+    varchar idempotency_key
+    varchar parent_run_id
+    timestamptz locked_at
+    timestamptz dead_lettered_at
+  }
+  business_index_segments {
+    varchar id PK
+    varchar niche_id FK
+  }
+  businesses {
+    varchar id PK
+  }
+  campaigns {
+    varchar id PK
+    varchar product_id FK
+    varchar territory_id FK
+  }
+  leads {
+    varchar id PK
+    varchar campaign_id FK
+    varchar product_id FK
+    varchar business_id FK
+    varchar contact_id FK
+    varchar territory_id FK
+  }
+  niches {
+    varchar id PK
+  }
+  products {
+    varchar id PK
+    varchar workspace_id FK
+  }
+  source_items {
+    varchar id PK
+    varchar segment_id FK
+    varchar job_id FK
+    varchar business_id FK
+  }
+  source_observations {
+    varchar id PK
+    varchar business_id FK
+  }
+  territories {
+    varchar id PK
+    varchar workspace_id FK
+    varchar product_id FK
+    varchar niche_id FK
+  }
+  workspaces {
+    varchar id PK
+    varchar owner_user_id FK
+  }
+  territories ||--o{ audience_results : "audience_results_audience_id_fkey"
+  businesses ||--o{ audience_results : "audience_results_business_id_fkey"
+  leads |o--o{ audience_results : "audience_results_outreach_lead_id_fkey"
+  audience_runs ||--o{ audience_results : "audience_results_run_id_fkey"
+  territories ||--o{ audience_runs : "audience_runs_audience_id_fkey"
+  campaigns |o--o{ audience_runs : "audience_runs_outreach_campaign_id_fkey"
+  workspaces |o--o{ audience_runs : "audience_runs_workspace_id_fkey"
+  businesses ||--o{ business_search_evaluations : "business_search_evaluations_business_id_fkey"
+  territories ||--o{ coverage_requests : "coverage_requests_audience_id_fkey"
+  niches ||--o{ coverage_requests : "coverage_requests_niche_id_fkey"
+  audience_runs ||--o{ coverage_requests : "coverage_requests_run_id_fkey"
+  campaigns ||--o{ discovery_candidates : "discovery_candidates_campaign_id_fkey"
+  leads |o--o{ discovery_candidates : "discovery_candidates_lead_id_fkey"
+  products ||--o{ discovery_candidates : "discovery_candidates_product_id_fkey"
+  businesses |o--o{ run_pipeline_events : "run_pipeline_events_business_id_fkey"
+  campaigns ||--o{ run_pipeline_events : "run_pipeline_events_campaign_id_fkey"
+  queue_jobs |o--o{ run_pipeline_events : "run_pipeline_events_job_id_fkey"
+  leads |o--o{ run_pipeline_events : "run_pipeline_events_lead_id_fkey"
+  business_index_segments |o--o{ run_pipeline_events : "run_pipeline_events_segment_id_fkey"
+  niches |o--o{ seed_batches : "seed_batches_niche_id_fkey"
+  businesses ||--o{ validation_results : "validation_results_business_id_fkey"
+  niches |o--o{ validation_results : "validation_results_niche_id_fkey"
+  source_items |o--o{ validation_results : "validation_results_source_item_id_fkey"
+  source_observations |o--o{ validation_results : "validation_results_source_observation_id_fkey"
+</pre></section><section><h2>D4 · Business &amp; contact records</h2><div class="stubs">grey stubs (other domains): <code>leads</code>, <code>products</code>, <code>workspaces</code></div><pre class="mermaid">
+erDiagram
+  businesses {
+    varchar id PK
+    varchar display_name
+    varchar normalized_name
+    varchar website_url
+    varchar domain
+    varchar phone
+    text address
+    varchar geography
+    timestamptz first_seen_at
+    timestamptz last_seen_at
+    timestamptz created_at
+    timestamptz updated_at
+    varchar category_key
+    varchar market_key
+    text semantic_text
+    vector embedding
+    varchar embedding_model
+    timestamptz embedding_updated_at
+    varchar status
+    float8 latitude
+    float8 longitude
+    varchar customer_kind
+    bool is_chain
+    bool is_franchise
+    bool is_directory
+    bool is_agency
+  }
+  contacts {
+    varchar id PK
+    varchar business_id FK
+    varchar name
+    varchar role
+    varchar email
+    varchar phone
+    varchar verification_status
+    varchar verification_provider
+    timestamptz verification_checked_at
+    text verification_reason
+    int verification_score
+    json verification_details
+    timestamptz first_seen_at
+    timestamptz last_seen_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  contact_suppressions {
+    varchar id PK
+    varchar product_id FK
+    varchar lead_id FK
+    varchar scope
+    varchar kind
+    varchar value
+    varchar status
+    text reason
+    varchar source
+    timestamptz created_at
+    timestamptz updated_at
+    varchar workspace_id FK
+  }
+  leads {
+    varchar id PK
+    varchar campaign_id FK
+    varchar product_id FK
+    varchar business_id FK
+    varchar contact_id FK
+    varchar territory_id FK
+  }
+  products {
+    varchar id PK
+    varchar workspace_id FK
+  }
+  workspaces {
+    varchar id PK
+    varchar owner_user_id FK
+  }
+  leads |o--o{ contact_suppressions : "contact_suppressions_lead_id_fkey"
+  products |o--o{ contact_suppressions : "contact_suppressions_product_id_fkey"
+  workspaces |o--o{ contact_suppressions : "fk_contact_suppressions_workspace_id_workspaces"
+  businesses ||--o{ contacts : "contacts_business_id_fkey"
+</pre></section><section><h2>D5 · Evidence &amp; fact provenance</h2><div class="ann">This is a branched provenance model, not a simple linear chain: source items receive decisions; observations attach collected evidence to businesses; claims and current facts derive from observations; fact changes preserve value history. Validation results independently record whether candidate identity, trade, location, and signal data passed their checks.</div><div class="dq-key"><b>Red reliability boundary:</b> ❶ <code>source_observations</code> — is the captured evidence accurate, complete, and fresh? → ❷ <code>fact_claims</code> — was the value extracted correctly with defensible confidence? → ❸ <code>business_facts</code> — does the reconciled current fact represent the business’s actual status? → ❹ <code>validation_results</code> — what did the provenance, replay, value, freshness, and conflict checks conclude? These are the reliability tables; source-item decisions and audience results are workflow consumers, not the reliability mechanism.</div><div class="stubs">grey stubs (other domains): <code>business_index_segments</code>, <code>businesses</code>, <code>queue_jobs</code>, <code>signal_definitions</code>, <code>validation_results</code></div><pre class="mermaid">
+erDiagram
+  source_items {
+    varchar id PK
+    varchar segment_id FK
+    varchar job_id FK
+    varchar provider_id
+    varchar external_id
+    text query
+    varchar source_url
+    varchar title
+    json raw_payload
+    varchar content_hash
+    timestamptz fetched_at
+    varchar state
+    varchar business_id FK
+    text last_error
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  source_item_decisions {
+    varchar id PK
+    varchar source_item_id FK
+    varchar stage
+    varchar decision
+    text reason
+    int confidence
+    json details
+    varchar actor_type
+    varchar actor_id
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  source_observations {
+    varchar id PK
+    varchar business_id FK
+    varchar source
+    varchar external_id
+    varchar query_signature
+    varchar content_hash
+    varchar source_url
+    json raw_payload
+    timestamptz observed_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  fact_claims {
+    varchar id PK
+    varchar idempotency_key
+    varchar business_id FK
+    varchar fact_key
+    json value
+    varchar source_observation_id FK
+    int confidence
+    varchar extractor
+    int extractor_version
+    timestamptz observed_at
+    timestamptz expires_at
+    timestamptz created_at
+    timestamptz updated_at
+    varchar signal_definition_id FK
+  }
+  business_facts {
+    varchar id PK
+    varchar business_id FK
+    varchar fact_key
+    varchar value_type
+    text value_text
+    float8 value_number
+    bool value_boolean
+    int confidence
+    timestamptz observed_at
+    timestamptz expires_at
+    varchar source_observation_id FK
+    int resolver_version
+    timestamptz created_at
+    timestamptz updated_at
+    varchar resolution_state
+    json supporting_claim_ids
+    varchar quality_state
+    int quality_policy_version
+    varchar signal_definition_id FK
+  }
+  business_fact_changes {
+    varchar id PK
+    varchar business_id FK
+    varchar fact_key
+    json previous_value
+    json current_value
+    int previous_confidence
+    int current_confidence
+    varchar source_observation_id FK
+    timestamptz changed_at
+    timestamptz acknowledged_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  validation_results {
+    varchar id PK
+    varchar business_id FK
+    varchar source_item_id FK
+    varchar source_observation_id FK
+    varchar niche_id FK
+    varchar validation_type
+    varchar status
+    int confidence
+  }
+  business_index_segments {
+    varchar id PK
+    varchar niche_id FK
+  }
+  businesses {
+    varchar id PK
+  }
+  queue_jobs {
+    varchar id PK
+  }
+  signal_definitions {
+    varchar id PK
+  }
+  businesses ||--o{ business_fact_changes : "business_fact_changes_business_id_fkey"
+  source_observations |o--o{ business_fact_changes : "business_fact_changes_source_observation_id_fkey"
+  businesses ||--o{ business_facts : "business_facts_business_id_fkey"
+  source_observations |o--o{ business_facts : "business_facts_source_observation_id_fkey"
+  signal_definitions |o--o{ business_facts : "fk_business_facts_signal_definition_id"
+  businesses ||--o{ fact_claims : "fact_claims_business_id_fkey"
+  source_observations ||--o{ fact_claims : "fact_claims_source_observation_id_fkey"
+  signal_definitions |o--o{ fact_claims : "fk_fact_claims_signal_definition_id"
+  source_items ||--o{ source_item_decisions : "source_item_decisions_source_item_id_fkey"
+  source_items |o--o{ validation_results : "validation_results_source_item_id_fkey"
+  source_observations |o--o{ validation_results : "validation_results_source_observation_id_fkey"
+  businesses |o--o{ source_items : "source_items_business_id_fkey"
+  queue_jobs |o--o{ source_items : "source_items_job_id_fkey"
+  business_index_segments ||--o{ source_items : "source_items_segment_id_fkey"
+  businesses ||--o{ source_observations : "source_observations_business_id_fkey"
+</pre></section><section><h2>D6 · Campaign &amp; outreach prep</h2><div class="stubs">grey stubs (other domains): <code>audience_results</code>, <code>businesses</code>, <code>products</code>, <code>territories</code>, <code>workspaces</code></div><pre class="mermaid">
+erDiagram
+  campaigns {
+    varchar id PK
+    varchar product_id FK
+    varchar name
+    varchar status
+    varchar stage
+    int max_leads
+    json channels
+    json discovery_seeds
+    text goal_override
+    text failure_reason
+    timestamptz completed_at
+    timestamptz created_at
+    timestamptz updated_at
+    varchar goal_type
+    varchar icp_preset_id
+    varchar source_preset_id
+    varchar territory_id FK
+    text source_input
+    json source_inputs
+  }
+  campaign_sources {
+    varchar id PK
+    varchar campaign_id FK
+    varchar slot
+    varchar provider_id
+    varchar mode
+    json input
+    json config
+    int priority
+    bool enabled
+    float8 budget_limit
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  campaign_memory {
+    varchar id PK
+    varchar product_id FK
+    varchar campaign_id FK
+    varchar type
+    text content
+    json tags
+    float8 score_impact
+    timestamptz created_at
+  }
+  outreach_packages {
+    varchar id PK
+    varchar workspace_id FK
+    varchar audience_result_id FK
+    varchar business_id FK
+    json content
+    varchar provider
+    varchar model
+    json usage
+    int prompt_version
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  outreach_events {
+    varchar id PK
+    varchar workspace_id FK
+    varchar package_id FK
+    varchar channel
+    varchar event_type
+    varchar variant_id
+    json event_metadata
+    timestamptz created_at
+  }
+  outreach_playbooks {
+    varchar id PK
+    varchar service_key
+    int version
+    varchar status
+    json definition
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  audience_results {
+    varchar id PK
+    varchar run_id FK
+    varchar audience_id FK
+    varchar business_id FK
+    varchar outreach_lead_id FK
+  }
+  businesses {
+    varchar id PK
+  }
+  products {
+    varchar id PK
+    varchar workspace_id FK
+  }
+  territories {
+    varchar id PK
+    varchar workspace_id FK
+    varchar product_id FK
+    varchar niche_id FK
+  }
+  workspaces {
+    varchar id PK
+    varchar owner_user_id FK
+  }
+  campaigns ||--o{ campaign_memory : "campaign_memory_campaign_id_fkey"
+  products ||--o{ campaign_memory : "campaign_memory_product_id_fkey"
+  campaigns ||--o{ campaign_sources : "campaign_sources_campaign_id_fkey"
+  products ||--o{ campaigns : "campaigns_product_id_fkey"
+  territories |o--o{ campaigns : "fk_campaigns_territory_id_territories"
+  outreach_packages ||--o{ outreach_events : "outreach_events_package_id_fkey"
+  workspaces |o--o{ outreach_events : "outreach_events_workspace_id_fkey"
+  audience_results ||--o{ outreach_packages : "outreach_packages_audience_result_id_fkey"
+  businesses ||--o{ outreach_packages : "outreach_packages_business_id_fkey"
+  workspaces |o--o{ outreach_packages : "outreach_packages_workspace_id_fkey"
+</pre></section><section><h2>D7 · Leads, messaging &amp; outcomes</h2><div class="stubs">grey stubs (other domains): <code>businesses</code>, <code>campaigns</code>, <code>contacts</code>, <code>niches</code>, <code>outreach_packages</code>, <code>products</code>, <code>territories</code>, <code>workspaces</code></div><pre class="mermaid">
+erDiagram
+  leads {
+    varchar id PK
+    varchar campaign_id FK
+    varchar product_id FK
+    varchar company_name
+    varchar website_url
+    varchar contact_email
+    varchar geography
+    text description
+    varchar source
+    varchar status
+    json raw_sources
+    json research
+    json qualification
+    timestamptz created_at
+    timestamptz updated_at
+    varchar review_status
+    text review_note
+    timestamptz reviewed_at
+    timestamptz shortlisted_at
+    varchar verification_status
+    varchar verification_provider
+    timestamptz verification_checked_at
+    text verification_reason
+    int verification_score
+    varchar contact_policy_status
+    text contact_policy_reason
+    timestamptz contact_policy_checked_at
+    timestamptz last_contacted_at
+    json verification_details
+    varchar business_id FK
+    varchar contact_id FK
+    varchar territory_id FK
+    varchar latest_outcome
+    timestamptz latest_outcome_at
+    json approach
+    float8 outcome_adjustment
+    float8 rank_score
+  }
+  conversations {
+    varchar id PK
+    varchar campaign_id FK
+    varchar product_id FK
+    varchar lead_id FK
+    varchar status
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  conversation_events {
+    varchar id PK
+    varchar conversation_id FK
+    varchar direction
+    varchar message_id FK
+    text body
+    json classification
+    timestamptz created_at
+  }
+  messages {
+    varchar id PK
+    varchar campaign_id FK
+    varchar product_id FK
+    varchar lead_id FK
+    varchar channel
+    varchar subject
+    text body
+    json personalization_notes
+    varchar approach_tag
+    varchar status
+    json approval
+    timestamptz sent_at
+    varchar provider_message_id
+    text failure_reason
+    timestamptz created_at
+    timestamptz updated_at
+    varchar outreach_package_id FK
+  }
+  lead_outcomes {
+    varchar id PK
+    varchar workspace_id FK
+    varchar product_id FK
+    varchar lead_id FK
+    varchar business_id FK
+    varchar territory_id FK
+    varchar niche_id FK
+    varchar market_key
+    varchar outcome
+    varchar channel
+    varchar source
+    text note
+    timestamptz occurred_at
+    varchar recorded_by
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  outcome_models {
+    varchar id PK
+    varchar workspace_id FK
+    varchar product_id FK
+    varchar niche_id FK
+    timestamptz computed_at
+    int n_contacted
+    int n_positive
+    json weights
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  businesses {
+    varchar id PK
+  }
+  campaigns {
+    varchar id PK
+    varchar product_id FK
+    varchar territory_id FK
+  }
+  contacts {
+    varchar id PK
+    varchar business_id FK
+  }
+  niches {
+    varchar id PK
+  }
+  outreach_packages {
+    varchar id PK
+    varchar workspace_id FK
+    varchar audience_result_id FK
+    varchar business_id FK
+  }
+  products {
+    varchar id PK
+    varchar workspace_id FK
+  }
+  territories {
+    varchar id PK
+    varchar workspace_id FK
+    varchar product_id FK
+    varchar niche_id FK
+  }
+  workspaces {
+    varchar id PK
+    varchar owner_user_id FK
+  }
+  conversations ||--o{ conversation_events : "conversation_events_conversation_id_fkey"
+  messages |o--o{ conversation_events : "conversation_events_message_id_fkey"
+  campaigns ||--o{ conversations : "conversations_campaign_id_fkey"
+  leads ||--o{ conversations : "conversations_lead_id_fkey"
+  products ||--o{ conversations : "conversations_product_id_fkey"
+  businesses |o--o{ lead_outcomes : "lead_outcomes_business_id_fkey"
+  leads ||--o{ lead_outcomes : "lead_outcomes_lead_id_fkey"
+  niches |o--o{ lead_outcomes : "lead_outcomes_niche_id_fkey"
+  products ||--o{ lead_outcomes : "lead_outcomes_product_id_fkey"
+  territories |o--o{ lead_outcomes : "lead_outcomes_territory_id_fkey"
+  workspaces ||--o{ lead_outcomes : "lead_outcomes_workspace_id_fkey"
+  territories |o--o{ leads : "fk_leads_territory_id_territories"
+  businesses |o--o{ leads : "leads_business_id_fkey"
+  campaigns ||--o{ leads : "leads_campaign_id_fkey"
+  contacts |o--o{ leads : "leads_contact_id_fkey"
+  products ||--o{ leads : "leads_product_id_fkey"
+  outreach_packages |o--o{ messages : "fk_messages_outreach_package_id_outreach_packages"
+  campaigns ||--o{ messages : "messages_campaign_id_fkey"
+  leads ||--o{ messages : "messages_lead_id_fkey"
+  products ||--o{ messages : "messages_product_id_fkey"
+  niches ||--o{ outcome_models : "outcome_models_niche_id_fkey"
+  products ||--o{ outcome_models : "outcome_models_product_id_fkey"
+  workspaces ||--o{ outcome_models : "outcome_models_workspace_id_fkey"
+</pre></section><section><h2>D8 · Platform operations</h2><div class="stubs">grey stubs (other domains): <code>campaigns</code>, <code>products</code></div><pre class="mermaid">
+erDiagram
+  admin_audit_events {
+    varchar id PK
+    varchar actor_id
+    varchar actor_email
+    varchar action
+    varchar entity_type
+    varchar entity_id
+    text reason
+    json before
+    json after
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  webhook_deliveries {
+    varchar id PK
+    varchar product_id FK
+    varchar campaign_id FK
+    varchar event
+    varchar url
+    varchar status
+    json request_payload
+    int response_status
+    text response_body
+    text error
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  alembic_version {
+    varchar version_num PK
+  }
+  campaigns {
+    varchar id PK
+    varchar product_id FK
+    varchar territory_id FK
+  }
+  products {
+    varchar id PK
+    varchar workspace_id FK
+  }
+  campaigns ||--o{ webhook_deliveries : "webhook_deliveries_campaign_id_fkey"
+  products ||--o{ webhook_deliveries : "webhook_deliveries_product_id_fkey"
+</pre></section><section><h2>Domain context</h2><div class="stubs">Each box is a domain; arrow = at least one cross-domain FK (child domain → parent domain).</div><pre class="mermaid">
+flowchart LR
+  D1["D1<br/>Workspace & product ownership"]
+  D2["D2<br/>Audience, niche & market definition"]
+  D3["D3<br/>Discovery execution"]
+  D4["D4<br/>Business & contact records"]
+  D5["D5<br/>Evidence & fact provenance"]
+  D6["D6<br/>Campaign & outreach prep"]
+  D7["D7<br/>Leads, messaging & outcomes"]
+  D8["D8<br/>Platform operations"]
+  D2 --> D1
+  D2 --> D3
+  D2 --> D4
+  D2 --> D5
+  D3 --> D1
+  D3 --> D2
+  D3 --> D4
+  D3 --> D5
+  D3 --> D6
+  D3 --> D7
+  D4 --> D1
+  D4 --> D7
+  D5 --> D2
+  D5 --> D3
+  D5 --> D4
+  D6 --> D1
+  D6 --> D2
+  D6 --> D3
+  D6 --> D4
+  D7 --> D1
+  D7 --> D2
+  D7 --> D4
+  D7 --> D6
+  D8 --> D1
+  D8 --> D6
+</pre></section><section><h2>Cross-domain FK register (65)</h2><table class="reg"><thead><tr><th>Src domain</th><th>Source</th><th>Tgt domain</th><th>Target</th><th>Constraint</th></tr></thead><tbody><tr><td>D2</td><td><code>business_niche_memberships.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">business_niche_memberships_business_id_fkey</td></tr><tr><td>D2</td><td><code>business_niche_memberships.seed_batch_id</code></td><td>D3</td><td><code>seed_batches.id</code></td><td class="mono">business_niche_memberships_seed_batch_id_fkey</td></tr><tr><td>D2</td><td><code>business_niche_memberships.source_observation_id</code></td><td>D5</td><td><code>source_observations.id</code></td><td class="mono">business_niche_memberships_source_observation_id_fkey</td></tr><tr><td>D2</td><td><code>territories.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">territories_product_id_fkey</td></tr><tr><td>D2</td><td><code>territories.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">territories_workspace_id_fkey</td></tr><tr><td>D3</td><td><code>audience_results.audience_id</code></td><td>D2</td><td><code>territories.id</code></td><td class="mono">audience_results_audience_id_fkey</td></tr><tr><td>D3</td><td><code>audience_results.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">audience_results_business_id_fkey</td></tr><tr><td>D3</td><td><code>audience_results.outreach_lead_id</code></td><td>D7</td><td><code>leads.id</code></td><td class="mono">audience_results_outreach_lead_id_fkey</td></tr><tr><td>D3</td><td><code>audience_runs.audience_id</code></td><td>D2</td><td><code>territories.id</code></td><td class="mono">audience_runs_audience_id_fkey</td></tr><tr><td>D3</td><td><code>audience_runs.outreach_campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">audience_runs_outreach_campaign_id_fkey</td></tr><tr><td>D3</td><td><code>audience_runs.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">audience_runs_workspace_id_fkey</td></tr><tr><td>D3</td><td><code>business_search_evaluations.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">business_search_evaluations_business_id_fkey</td></tr><tr><td>D3</td><td><code>coverage_requests.audience_id</code></td><td>D2</td><td><code>territories.id</code></td><td class="mono">coverage_requests_audience_id_fkey</td></tr><tr><td>D3</td><td><code>coverage_requests.niche_id</code></td><td>D2</td><td><code>niches.id</code></td><td class="mono">coverage_requests_niche_id_fkey</td></tr><tr><td>D3</td><td><code>discovery_candidates.campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">discovery_candidates_campaign_id_fkey</td></tr><tr><td>D3</td><td><code>discovery_candidates.lead_id</code></td><td>D7</td><td><code>leads.id</code></td><td class="mono">discovery_candidates_lead_id_fkey</td></tr><tr><td>D3</td><td><code>discovery_candidates.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">discovery_candidates_product_id_fkey</td></tr><tr><td>D3</td><td><code>run_pipeline_events.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">run_pipeline_events_business_id_fkey</td></tr><tr><td>D3</td><td><code>run_pipeline_events.campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">run_pipeline_events_campaign_id_fkey</td></tr><tr><td>D3</td><td><code>run_pipeline_events.lead_id</code></td><td>D7</td><td><code>leads.id</code></td><td class="mono">run_pipeline_events_lead_id_fkey</td></tr><tr><td>D3</td><td><code>run_pipeline_events.segment_id</code></td><td>D2</td><td><code>business_index_segments.id</code></td><td class="mono">run_pipeline_events_segment_id_fkey</td></tr><tr><td>D3</td><td><code>seed_batches.niche_id</code></td><td>D2</td><td><code>niches.id</code></td><td class="mono">seed_batches_niche_id_fkey</td></tr><tr><td>D3</td><td><code>validation_results.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">validation_results_business_id_fkey</td></tr><tr><td>D3</td><td><code>validation_results.niche_id</code></td><td>D2</td><td><code>niches.id</code></td><td class="mono">validation_results_niche_id_fkey</td></tr><tr><td>D3</td><td><code>validation_results.source_item_id</code></td><td>D5</td><td><code>source_items.id</code></td><td class="mono">validation_results_source_item_id_fkey</td></tr><tr><td>D3</td><td><code>validation_results.source_observation_id</code></td><td>D5</td><td><code>source_observations.id</code></td><td class="mono">validation_results_source_observation_id_fkey</td></tr><tr><td>D4</td><td><code>contact_suppressions.lead_id</code></td><td>D7</td><td><code>leads.id</code></td><td class="mono">contact_suppressions_lead_id_fkey</td></tr><tr><td>D4</td><td><code>contact_suppressions.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">contact_suppressions_product_id_fkey</td></tr><tr><td>D4</td><td><code>contact_suppressions.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">fk_contact_suppressions_workspace_id_workspaces</td></tr><tr><td>D5</td><td><code>business_fact_changes.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">business_fact_changes_business_id_fkey</td></tr><tr><td>D5</td><td><code>business_facts.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">business_facts_business_id_fkey</td></tr><tr><td>D5</td><td><code>business_facts.signal_definition_id</code></td><td>D2</td><td><code>signal_definitions.id</code></td><td class="mono">fk_business_facts_signal_definition_id</td></tr><tr><td>D5</td><td><code>fact_claims.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">fact_claims_business_id_fkey</td></tr><tr><td>D5</td><td><code>fact_claims.signal_definition_id</code></td><td>D2</td><td><code>signal_definitions.id</code></td><td class="mono">fk_fact_claims_signal_definition_id</td></tr><tr><td>D5</td><td><code>source_items.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">source_items_business_id_fkey</td></tr><tr><td>D5</td><td><code>source_items.job_id</code></td><td>D3</td><td><code>queue_jobs.id</code></td><td class="mono">source_items_job_id_fkey</td></tr><tr><td>D5</td><td><code>source_items.segment_id</code></td><td>D2</td><td><code>business_index_segments.id</code></td><td class="mono">source_items_segment_id_fkey</td></tr><tr><td>D5</td><td><code>source_observations.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">source_observations_business_id_fkey</td></tr><tr><td>D6</td><td><code>campaign_memory.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">campaign_memory_product_id_fkey</td></tr><tr><td>D6</td><td><code>campaigns.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">campaigns_product_id_fkey</td></tr><tr><td>D6</td><td><code>campaigns.territory_id</code></td><td>D2</td><td><code>territories.id</code></td><td class="mono">fk_campaigns_territory_id_territories</td></tr><tr><td>D6</td><td><code>outreach_events.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">outreach_events_workspace_id_fkey</td></tr><tr><td>D6</td><td><code>outreach_packages.audience_result_id</code></td><td>D3</td><td><code>audience_results.id</code></td><td class="mono">outreach_packages_audience_result_id_fkey</td></tr><tr><td>D6</td><td><code>outreach_packages.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">outreach_packages_business_id_fkey</td></tr><tr><td>D6</td><td><code>outreach_packages.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">outreach_packages_workspace_id_fkey</td></tr><tr><td>D7</td><td><code>conversations.campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">conversations_campaign_id_fkey</td></tr><tr><td>D7</td><td><code>conversations.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">conversations_product_id_fkey</td></tr><tr><td>D7</td><td><code>lead_outcomes.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">lead_outcomes_business_id_fkey</td></tr><tr><td>D7</td><td><code>lead_outcomes.niche_id</code></td><td>D2</td><td><code>niches.id</code></td><td class="mono">lead_outcomes_niche_id_fkey</td></tr><tr><td>D7</td><td><code>lead_outcomes.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">lead_outcomes_product_id_fkey</td></tr><tr><td>D7</td><td><code>lead_outcomes.territory_id</code></td><td>D2</td><td><code>territories.id</code></td><td class="mono">lead_outcomes_territory_id_fkey</td></tr><tr><td>D7</td><td><code>lead_outcomes.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">lead_outcomes_workspace_id_fkey</td></tr><tr><td>D7</td><td><code>leads.territory_id</code></td><td>D2</td><td><code>territories.id</code></td><td class="mono">fk_leads_territory_id_territories</td></tr><tr><td>D7</td><td><code>leads.business_id</code></td><td>D4</td><td><code>businesses.id</code></td><td class="mono">leads_business_id_fkey</td></tr><tr><td>D7</td><td><code>leads.campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">leads_campaign_id_fkey</td></tr><tr><td>D7</td><td><code>leads.contact_id</code></td><td>D4</td><td><code>contacts.id</code></td><td class="mono">leads_contact_id_fkey</td></tr><tr><td>D7</td><td><code>leads.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">leads_product_id_fkey</td></tr><tr><td>D7</td><td><code>messages.outreach_package_id</code></td><td>D6</td><td><code>outreach_packages.id</code></td><td class="mono">fk_messages_outreach_package_id_outreach_packages</td></tr><tr><td>D7</td><td><code>messages.campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">messages_campaign_id_fkey</td></tr><tr><td>D7</td><td><code>messages.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">messages_product_id_fkey</td></tr><tr><td>D7</td><td><code>outcome_models.niche_id</code></td><td>D2</td><td><code>niches.id</code></td><td class="mono">outcome_models_niche_id_fkey</td></tr><tr><td>D7</td><td><code>outcome_models.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">outcome_models_product_id_fkey</td></tr><tr><td>D7</td><td><code>outcome_models.workspace_id</code></td><td>D1</td><td><code>workspaces.id</code></td><td class="mono">outcome_models_workspace_id_fkey</td></tr><tr><td>D8</td><td><code>webhook_deliveries.campaign_id</code></td><td>D6</td><td><code>campaigns.id</code></td><td class="mono">webhook_deliveries_campaign_id_fkey</td></tr><tr><td>D8</td><td><code>webhook_deliveries.product_id</code></td><td>D1</td><td><code>products.id</code></td><td class="mono">webhook_deliveries_product_id_fkey</td></tr></tbody></table></section>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+const dqFlowByDomain={
+  "D5":{
+    source_observations:"❶",
+    fact_claims:"❷",
+    business_facts:"❸",
+    validation_results:"❹",
+  }
+};
+
+function markDataQualityFlow(){
+  document.querySelectorAll("section").forEach(section=>{
+    const heading=section.querySelector("h2")?.textContent.trim()||"";
+    const domain=Object.keys(dqFlowByDomain).find(key=>heading.startsWith(key));
+    if(!domain)return;
+    const svg=section.querySelector("pre.mermaid svg");
+    if(!svg)return;
+
+    Object.entries(dqFlowByDomain[domain]).forEach(([entity,step])=>{
+      const title=[...svg.querySelectorAll("text")].find(node=>node.textContent.trim()===entity);
+      if(!title)return;
+      title.textContent=`${step} ${entity}`;
+      title.style.fill="#B42318";
+      title.style.fontWeight="800";
+
+      const entityGroup=title.closest('g[id^="entity-"]');
+      if(entityGroup){
+        entityGroup.querySelectorAll("rect").forEach(rect=>{
+          rect.style.stroke="#D92D20";
+          rect.style.strokeWidth="2.5px";
+        });
+      }
+    });
+  });
+}
+
+mermaid.initialize({startOnLoad:false,theme:"neutral",er:{entityPadding:10,useMaxWidth:false},flowchart:{useMaxWidth:false,curve:"basis"},securityLevel:"loose"});
+mermaid.run().then(markDataQualityFlow);
+</script>
+</body></html>
