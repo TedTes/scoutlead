@@ -44,7 +44,7 @@ class MarketGeocoder:
         self.openstreetmap_enabled = openstreetmap_enabled
         self.nominatim_endpoint = nominatim_endpoint or DEFAULT_NOMINATIM_ENDPOINT
         self.timeout_seconds = timeout_seconds
-        self._cache: dict[str, GeocodedMarket | None] = {}
+        self._cache: dict[str, GeocodedMarket] = {}
 
     def resolve(self, location: str) -> GeocodedMarket | None:
         query = normalize_text(location)
@@ -65,7 +65,10 @@ class MarketGeocoder:
             result = self._resolve_google(query)
         if result is None and self.openstreetmap_enabled:
             result = self._resolve_nominatim(query)
-        self._cache[cache_key] = result
+        # Provider failures are often transient. Cache only successful lookups so
+        # one timeout does not make a city unresolvable until the process restarts.
+        if result is not None:
+            self._cache[cache_key] = result
         return result
 
     def _resolve_google(self, query: str) -> GeocodedMarket | None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from sqlalchemy import func, literal
+from sqlalchemy import case, func, literal
 
 
 EARTH_RADIUS_KM = 6371.0088
@@ -67,8 +67,13 @@ def haversine_distance_km_expression(
         * longitude_sine
         * longitude_sine
     )
+    bounded_haversine = case(
+        (haversine < 0.0, 0.0),
+        (haversine > 1.0, 1.0),
+        else_=haversine,
+    )
     # atan2 avoids the precision problems of acos for very short distances.
     return literal(2.0 * EARTH_RADIUS_KM) * func.atan2(
-        func.sqrt(haversine),
-        func.sqrt(1.0 - haversine),
+        func.sqrt(bounded_haversine),
+        func.sqrt(1.0 - bounded_haversine),
     )

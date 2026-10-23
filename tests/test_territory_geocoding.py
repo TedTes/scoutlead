@@ -1,3 +1,5 @@
+import httpx
+
 from territories.geocoding import MarketGeocoder
 
 
@@ -44,3 +46,30 @@ def test_market_geocoder_rejects_invalid_provider_coordinates(monkeypatch) -> No
     )
 
     assert MarketGeocoder(timeout_seconds=1).resolve("Invalid City") is None
+
+
+def test_market_geocoder_retries_after_transient_provider_failure(monkeypatch) -> None:
+    calls = 0
+
+    def get(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("temporary outage")
+        return FakeResponse(
+            [
+                {
+                    "place_id": 456,
+                    "lat": "45.5019",
+                    "lon": "-73.5674",
+                    "display_name": "Montreal, Quebec, Canada",
+                }
+            ]
+        )
+
+    monkeypatch.setattr("territories.geocoding.httpx.get", get)
+    geocoder = MarketGeocoder(timeout_seconds=1)
+
+    assert geocoder.resolve("Montreal, QC") is None
+    assert geocoder.resolve("Montreal, QC") is not None
+    assert calls == 2
