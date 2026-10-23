@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
@@ -196,7 +197,7 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
         offer = _offer(session, workspace_id="workspace:first")
 
         result = create_profile_route(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -210,7 +211,7 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
 
         assert result.audience.product_id == offer.id
         assert result.audience.city == "Toronto"
-        assert result.audience.trade_keys == ["painters"]
+        assert result.audience.niche_label == "Painting contractors"
         assert result.audience.customer_kind.value == "residential"
         assert result.audience.signal_keys == ["website_unavailable"]
         assert result.audience.exclusion_keys == ["franchises"]
@@ -235,7 +236,7 @@ def test_profile_creation_can_schedule_recurring_runs() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -256,7 +257,7 @@ def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
         auth = SimpleNamespace(workspace_id="workspace:first")
-        data = ProfileCreate(
+        data = _profile_create(session,
             product_id=offer.id,
             trades=["painters"],
             customer_kind="residential",
@@ -294,7 +295,7 @@ def test_profile_route_requires_a_service_or_explicit_signal() -> None:
 
         with pytest.raises(ValidationError, match="at least one service"):
             create_profile_route(
-                ProfileCreate(
+                _profile_create(session,
                     product_id=offer.id,
                     trades=["painters"],
                     customer_kind="residential",
@@ -305,7 +306,7 @@ def test_profile_route_requires_a_service_or_explicit_signal() -> None:
             )
 
 
-def test_profile_source_expansion_queues_each_trade_once() -> None:
+def test_profile_source_expansion_queues_the_selected_niche_once() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -313,9 +314,9 @@ def test_profile_source_expansion_queues_each_trade_once() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
-                trades=["painters", "roofers"],
+                trades=["painters"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
                 limit=25,
@@ -350,9 +351,9 @@ def test_profile_source_expansion_queues_each_trade_once() -> None:
             )
         )
         assert repeated == first
-        assert len(first) == 2
-        assert len(segments) == 2
-        assert len(jobs) == 2
+        assert len(first) == 1
+        assert len(segments) == 1
+        assert len(jobs) == 1
         assert all(segment.target_business_count == 100 for segment in segments)
         assert all(segment.demand_count == 1 for segment in segments)
         assert all(
@@ -369,7 +370,7 @@ def test_profile_source_expansion_skips_segments_without_a_provider() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -401,7 +402,7 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
         offer = _offer(session, workspace_id="workspace:first")
         auth = SimpleNamespace(workspace_id="workspace:first")
         result = create_profile_route(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -457,59 +458,54 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
         assert failed.failure_class == "rate_limit"
 
 
-def test_profile_contract_rejects_missing_or_unsupported_batch_fields() -> None:
+def test_profile_contract_accepts_dynamic_niches_and_bounded_custom_sizes() -> None:
     valid = {
         "product_id": "product_1",
-        "trades": ["painters"],
-        "customer_kind": "residential",
-        "market": {"city": "Toronto", "radius_km": 25},
+        "niche_id": "niche_1",
+        "customer_kind": "both",
+        "market": {
+            "place_label": "Toronto, Ontario, Canada",
+            "place_provider": "test",
+            "latitude": 43.6532,
+            "longitude": -79.3832,
+            "radius_km": 100,
+        },
+        "limit": 10,
     }
 
+    parsed = ProfileCreate.model_validate(valid)
+    assert parsed.niche_id == "niche_1"
+    assert parsed.customer_kind.value == "both"
+    assert parsed.market.radius_km == 100
+    assert parsed.limit == 10
+
     with pytest.raises(ValueError):
-        ProfileCreate.model_validate({**valid, "trades": []})
-    with pytest.raises(ValueError):
-        ProfileCreate.model_validate({**valid, "trades": ["dentists"]})
+        ProfileCreate.model_validate({key: value for key, value in valid.items() if key != "niche_id"})
     with pytest.raises(ValueError):
         ProfileCreate.model_validate(
-            {**valid, "market": {"city": "Toronto", "radius_km": 100}}
+            {**valid, "market": {**valid["market"], "place_label": "United States, Canada"}}
         )
     with pytest.raises(ValueError):
-        ProfileCreate.model_validate(
-            {**valid, "market": {"city": "United States, Canada", "radius_km": 25}}
-        )
+        ProfileCreate.model_validate({**valid, "market": {**valid["market"], "radius_km": 251}})
     with pytest.raises(ValueError):
-        ProfileCreate.model_validate({**valid, "limit": 10})
+        ProfileCreate.model_validate({**valid, "limit": 101})
 
 
 def test_profile_options_come_from_backend_capabilities_and_hide_disabled_niches() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
-        service = TerritoryService(session, workspace_id="workspace:first")
-        initial = service.profile_options()
-
-        assert [option["key"] for option in initial] == [
-            "painters",
-            "hvac",
-            "roofers",
-            "plumbers",
-            "electricians",
-            "cleaners",
-            "landscapers",
-            "pest_control",
-            "garage_doors",
-        ]
-
-        disabled = _niche(
-            session,
-            slug="home_service_plumbing",
-            label="Plumbing contractors",
-        )
+        painting = _niche(session, slug="home_service_painting", label="Painting contractors")
+        disabled = _niche(session, slug="home_service_plumbing", label="Plumbing contractors")
         disabled.active = False
         session.commit()
+        service = TerritoryService(session, workspace_id="workspace:first")
 
-        assert "plumbers" not in {
-            option["key"] for option in service.profile_options()
-        }
+        assert service.profile_options() == [{
+            "id": painting.id,
+            "key": "home_service_painting",
+            "label": "Painting contractors",
+            "category": "Painting contractors",
+        }]
 
 
 def test_profile_service_options_include_disabled_draft_services() -> None:
@@ -583,35 +579,28 @@ def test_profile_service_options_include_disabled_draft_services() -> None:
         ]
 
 
-def test_profile_persists_multiple_mapped_trades_and_default_policy() -> None:
+def test_profile_persists_one_niche_and_supports_both_customer_kinds() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
         profile = TerritoryService(
             session, workspace_id="workspace:first"
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
-                trades=["painters", "hvac"],
-                customer_kind="commercial",
+                trades=["painters"],
+                customer_kind="both",
                 market={"city": "Toronto", "radius_km": 50},
                 limit=40,
             )
         )
 
-        assert profile.trade_keys == ["painters", "hvac"]
-        assert profile.customer_kind == "commercial"
+        assert profile.niche.slug == "home_service_painting"
+        assert profile.customer_kind == "both"
         assert profile.radius_km == 50
         assert profile.batch_size == 40
         assert profile.refill_policy == "when_depleted"
-        assert profile.label == "Painters + HVAC · Toronto"
-        assert set(
-            session.scalars(
-                select(NicheModel.slug).where(
-                    NicheModel.slug.in_(["home_service_painting", "home_service_hvac"])
-                )
-            )
-        ) == {"home_service_painting", "home_service_hvac"}
+        assert profile.label == "Painting contractors near Toronto"
 
 
 def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
@@ -620,7 +609,7 @@ def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
         offer = _offer(session, workspace_id="workspace:first")
         service = TerritoryService(session, workspace_id="workspace:first")
         profile = service.create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -652,6 +641,101 @@ def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
             TerritoryUpdate(refill_policy=TerritoryRefillPolicy.MANUAL),
         )
         assert manual.next_run_at is None
+
+
+def test_profile_edit_can_change_niche_customer_kind_and_canonical_place() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        painters = _niche(
+            session,
+            slug="home_service_painting",
+            label="Painting contractors",
+        )
+        hvac = _niche(
+            session,
+            slug="home_service_hvac",
+            label="HVAC contractors",
+        )
+        geocoder = SimpleNamespace(
+            resolve=lambda location: GeocodedMarket(
+                latitude=30.2672,
+                longitude=-97.7431,
+                label="Austin, Travis County, Texas, United States",
+                provider="test",
+                external_id="place:austin",
+                country_code="us",
+            )
+        )
+        service = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+            market_geocoder=geocoder,
+        )
+        profile = service.create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=painters.id,
+                niche_slug=painters.slug,
+                niche_label=painters.label,
+                market_key="Toronto",
+                city="Toronto",
+                latitude=43.6532,
+                longitude=-79.3832,
+                service_keys=["website_modernization"],
+                confirmed=True,
+            )
+        )
+
+        updated = service.update(
+            profile.id,
+            TerritoryUpdate(
+                niche_id=hvac.id,
+                customer_kind="both",
+                place_label="Austin, Texas, United States",
+                radius_km=50,
+            ),
+        )
+
+        assert updated.niche_id == hvac.id
+        assert updated.customer_kind == "both"
+        assert updated.city == "Austin"
+        assert updated.place_external_id == "place:austin"
+        assert updated.country_code == "us"
+        assert (updated.latitude, updated.longitude) == (30.2672, -97.7431)
+        assert updated.radius_km == 50
+
+
+def test_profile_clone_creates_a_distinct_audience_with_the_same_criteria() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        service = TerritoryService(session, workspace_id="workspace:first")
+        original_input = _profile_create(
+            session,
+            product_id=offer.id,
+            trades=["painters"],
+            customer_kind="both",
+            market={"city": "Toronto", "radius_km": 25},
+            name="Toronto painters",
+        )
+
+        original = service.create_profile(original_input)
+        clone = service.create_profile(
+            original_input.model_copy(
+                update={
+                    "name": "Toronto painters copy",
+                    "clone_from_id": original.id,
+                }
+            )
+        )
+
+        assert clone.id != original.id
+        assert clone.niche_id == original.niche_id
+        assert clone.customer_kind == original.customer_kind
+        assert clone.place_label == original.place_label
+        assert clone.radius_km == original.radius_km
+        assert clone.label == "Toronto painters copy"
 
 
 def test_territory_preserves_the_saved_semantic_search_contract() -> None:
@@ -686,11 +770,11 @@ def test_territory_preserves_the_saved_semantic_search_contract() -> None:
         assert territory.criteria_hash == "saved-contract-hash"
 
 
-def test_profile_trade_keys_are_authoritative_over_legacy_primary_niche() -> None:
+def test_profile_niche_id_is_authoritative() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
-        hvac = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
         painters = _niche(
             session,
             slug="home_service_painting",
@@ -699,7 +783,7 @@ def test_profile_trade_keys_are_authoritative_over_legacy_primary_niche() -> Non
         profile = TerritoryService(
             session, workspace_id="workspace:first"
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -709,7 +793,7 @@ def test_profile_trade_keys_are_authoritative_over_legacy_primary_niche() -> Non
         profile.niche_id = painters.id
         session.commit()
 
-        assert [niche.id for niche in _territory_niches(session, profile)] == [hvac.id]
+        assert [niche.id for niche in _territory_niches(session, profile)] == [painters.id]
 
 
 def test_territory_creation_requires_confirmation_and_rejects_duplicates() -> None:
@@ -837,7 +921,7 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -898,7 +982,7 @@ def test_audience_run_requests_coverage_and_waits_until_deadline() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -955,7 +1039,7 @@ def test_audience_result_creates_outreach_records_only_after_user_action() -> No
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1018,7 +1102,7 @@ def test_audience_result_suppression_blocks_shortlisting_without_creating_a_lead
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1066,7 +1150,7 @@ def test_profile_match_excludes_only_explicit_true_classifications() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1115,7 +1199,7 @@ def test_profile_match_ignores_quarantined_seed_membership() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1158,7 +1242,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1229,7 +1313,7 @@ def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1298,7 +1382,7 @@ def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1370,7 +1454,7 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
         session.commit()
 
         profile = TerritoryService(session, workspace_id="workspace:first").create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1435,7 +1519,7 @@ def test_profile_learning_reorders_only_already_eligible_matches() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1500,7 +1584,7 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1534,7 +1618,7 @@ def test_profile_change_feed_reports_entering_and_exiting_selected_signal() -> N
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1597,7 +1681,7 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1685,7 +1769,7 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1735,7 +1819,7 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1786,7 +1870,7 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -1849,7 +1933,7 @@ def test_profile_closed_filter_uses_canonical_business_status() -> None:
             session,
             workspace_id="workspace:first",
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["hvac"],
                 customer_kind="residential",
@@ -2045,7 +2129,7 @@ def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances
         )
         service = TerritoryService(session, workspace_id="workspace:first")
         toronto = service.create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -2056,7 +2140,7 @@ def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances
             )
         )
         scarborough = service.create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -2111,7 +2195,7 @@ def test_profile_creation_persists_geocoded_center_for_an_arbitrary_city() -> No
             workspace_id="workspace:first",
             market_geocoder=geocoder,
         ).create_profile(
-            ProfileCreate(
+            _profile_create(session,
                 product_id=offer.id,
                 trades=["painters"],
                 customer_kind="residential",
@@ -2122,7 +2206,8 @@ def test_profile_creation_persists_geocoded_center_for_an_arbitrary_city() -> No
             )
         )
 
-        assert audience.city == "Austin, TX"
+        assert audience.city == "Austin"
+        assert audience.place_label == "Austin, Texas, United States"
         assert audience.latitude == 30.2672
         assert audience.longitude == -97.7431
 
@@ -2211,6 +2296,46 @@ def _niche(session, *, slug: str, label: str) -> NicheModel:
     session.add(niche)
     session.commit()
     return niche
+
+
+def _profile_create(
+    session,
+    *,
+    product_id: str,
+    trades: list[str],
+    customer_kind: str,
+    market: dict[str, Any],
+    **values: Any,
+) -> ProfileCreate:
+    trade = trades[0]
+    definitions = {
+        "painters": ("home_service_painting", "Painting contractors"),
+        "hvac": ("home_service_hvac", "HVAC contractors"),
+        "roofers": ("home_service_roofing", "Roofing contractors"),
+    }
+    slug, label = definitions[trade]
+    niche = session.scalar(select(NicheModel).where(NicheModel.slug == slug))
+    if niche is None:
+        niche = _niche(session, slug=slug, label=label)
+    place_label = str(market["city"])
+    coordinates = {
+        "Toronto": (43.6532, -79.3832),
+        "Scarborough": (43.7764, -79.2318),
+        "Austin, TX": (30.2672, -97.7431),
+    }.get(place_label, (43.6532, -79.3832))
+    return ProfileCreate(
+        product_id=product_id,
+        niche_id=niche.id,
+        customer_kind=customer_kind,
+        market={
+            "place_label": place_label,
+            "place_provider": "market_cache",
+            "latitude": coordinates[0],
+            "longitude": coordinates[1],
+            "radius_km": market["radius_km"],
+        },
+        **values,
+    )
 
 
 def _seed_hvac_businesses(session) -> None:

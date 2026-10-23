@@ -6,6 +6,7 @@ def test_audience_routes_are_registered_when_scheduler_is_disabled() -> None:
 
     assert "/territories" not in paths
     assert "/audiences/options" in paths
+    assert "/audiences/places" in paths
     assert "/audiences" in paths
     assert "/audiences/from-resolution" in paths
     assert "delete" in paths["/audiences/{audience_id}"]

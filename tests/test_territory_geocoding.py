@@ -73,3 +73,41 @@ def test_market_geocoder_retries_after_transient_provider_failure(monkeypatch) -
     assert geocoder.resolve("Montreal, QC") is None
     assert geocoder.resolve("Montreal, QC") is not None
     assert calls == 2
+
+
+def test_market_geocoder_search_returns_canonical_choices_and_caches_selection(
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def get(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FakeResponse(
+            [
+                {
+                    "place_id": 123,
+                    "lat": "30.2672",
+                    "lon": "-97.7431",
+                    "display_name": "Austin, Travis County, Texas, United States",
+                    "address": {"country_code": "us"},
+                },
+                {
+                    "place_id": 456,
+                    "lat": "45.5019",
+                    "lon": "-73.5674",
+                    "display_name": "Montreal, Quebec, Canada",
+                    "address": {"country_code": "ca"},
+                },
+            ]
+        )
+
+    monkeypatch.setattr("territories.geocoding.httpx.get", get)
+    geocoder = MarketGeocoder(timeout_seconds=1)
+
+    results = geocoder.search("Austin", limit=2)
+    selected = geocoder.resolve(results[0].label)
+
+    assert [result.country_code for result in results] == ["us", "ca"]
+    assert selected == results[0]
+    assert calls == 1

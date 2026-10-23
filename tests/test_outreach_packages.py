@@ -361,7 +361,6 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
         niche_id=niche.id,
         market_key="toronto",
         city="Toronto",
-        trade_keys=["painters"],
         signal_keys=["no_quote_flow"] if confirmed else [],
         label="Painters · Toronto",
         criteria_hash="test",
