@@ -14,8 +14,8 @@ from db.models import (
     SourceItemModel,
     SourceObservationModel,
 )
+from niches.catalog import search_config_for_slug
 from business_validation.repository import ValidationRepository, ValidationResult
-from niches.catalog import NICHE_BY_SLUG
 from shared.utils import utcnow
 from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
@@ -58,11 +58,6 @@ GENERIC_TRADE_TERMS = {
     "service",
     "services",
 }
-TRADE_TERMS = {
-    slug: set(spec.trade_terms) for slug, spec in NICHE_BY_SLUG.items()
-}
-
-
 class BusinessValidationService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -204,9 +199,10 @@ class BusinessValidationService:
         }
         text = _normalized(json.dumps(independent_fields, default=str))
         matched = sorted(term for term in terms if term in text)
-        spec = NICHE_BY_SLUG.get(slug)
+        config = getattr(segment.niche, "search_config", {}) or search_config_for_slug(slug)
+        excluded_terms = set(config.get("exclude_terms") or [])
         excluded = sorted(
-            term for term in (spec.excluded_terms if spec else ()) if term in text
+            term for term in excluded_terms if term in text
         )
         decisive_text = _normalized(
             " ".join(
@@ -220,7 +216,7 @@ class BusinessValidationService:
         )
         decisive_exclusions = sorted(
             term
-            for term in (spec.excluded_terms if spec else ())
+            for term in excluded_terms
             if term in decisive_text
         )
         status = (
@@ -343,10 +339,8 @@ def _trade_terms(niche) -> set[str]:
     descriptor = _normalized(
         " ".join([niche.slug or "", niche.label or "", niche.category or ""])
     )
-    terms = set(TRADE_TERMS.get(niche.slug, set()))
-    for aliases in TRADE_TERMS.values():
-        if any(alias in descriptor for alias in aliases):
-            terms.update(aliases)
+    config = getattr(niche, "search_config", {}) or search_config_for_slug(niche.slug)
+    terms = set(config.get("include_terms") or [])
     terms.update(
         token
         for token in descriptor.split()

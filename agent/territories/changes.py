@@ -11,11 +11,9 @@ from db.models import (
     BusinessFactChangeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
-    NicheModel,
 )
 from seeding.batches import active_membership_condition
 from shared.geospatial import haversine_distance_km_expression
-from territories.profile_catalog import profile_trade_spec
 from territories.repository import TerritoryRepository
 
 
@@ -67,12 +65,7 @@ class ProfileChangeService:
         limit: int = 100,
     ) -> list[ProfileFactChangeRead]:
         profile = self.territories.get(profile_id)
-        slugs = [profile_trade_spec(key).niche_slug for key in profile.trade_keys or []]
-        if not slugs:
-            slugs = [profile.niche.slug]
-        niche_ids = list(
-            self.session.scalars(select(NicheModel.id).where(NicheModel.slug.in_(slugs)))
-        )
+        niche_ids = [profile.niche_id]
         selected = {
             SIGNAL_FACTS[signal]: signal
             for signal in profile.signal_keys or []
@@ -94,13 +87,14 @@ class ProfileChangeService:
             )
             .order_by(BusinessFactChangeModel.changed_at.desc())
         )
-        statement = statement.where(
-            or_(
-                BusinessModel.customer_kind == profile.customer_kind,
-                BusinessModel.customer_kind == "unknown",
-                BusinessModel.customer_kind.is_(None),
+        if profile.customer_kind != "both":
+            statement = statement.where(
+                or_(
+                    BusinessModel.customer_kind == profile.customer_kind,
+                    BusinessModel.customer_kind == "unknown",
+                    BusinessModel.customer_kind.is_(None),
+                )
             )
-        )
         exclusions = set(profile.exclusion_keys or [])
         if "closed" in exclusions:
             statement = statement.where(BusinessModel.status != "closed")

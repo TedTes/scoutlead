@@ -117,5 +117,15 @@ NICHE_CATALOG: dict[str, NicheSpec] = {
 NICHE_BY_SLUG = {spec.slug: spec for spec in NICHE_CATALOG.values()}
 
 
+def search_config_for_slug(slug: str | None) -> dict[str, list[str]]:
+    spec = NICHE_BY_SLUG.get(slug or "")
+    if spec is None:
+        return {}
+    return {
+        "include_terms": sorted(spec.trade_terms),
+        "exclude_terms": sorted(spec.excluded_terms),
+    }
+
+
 def niche_spec_for_slug(slug: str | None) -> NicheSpec | None:
     return NICHE_BY_SLUG.get(slug or "")

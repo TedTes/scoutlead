@@ -18,6 +18,7 @@ from db.models import (
     SeedBatchModel,
     SourceObservationModel,
 )
+from niches.catalog import search_config_for_slug
 from seeding.schemas import BusinessSeedInput
 from shared.utils import normalize_text, new_id, utcnow
 
@@ -110,6 +111,7 @@ class BusinessSeedRepository:
                 category=normalize_text(seed.seed_niche),
                 default_query=seed.query,
                 active=True,
+                search_config=search_config_for_slug(slug),
             )
             self.session.add(niche)
             self.session.flush()
@@ -118,6 +120,8 @@ class BusinessSeedRepository:
         niche.category = niche.category or normalize_text(seed.seed_niche)
         niche.default_query = niche.default_query or seed.query
         niche.active = True
+        if not niche.search_config:
+            niche.search_config = search_config_for_slug(slug)
         self.session.flush()
         return niche
 

@@ -253,6 +253,14 @@ class BusinessIndexRepository:
             default_query=f"{category} in {normalize_text(market_label)}",
             active=True,
             signal_vocabulary=[],
+            search_config={
+                "include_terms": sorted(
+                    token
+                    for token in category.lower().replace("-", " ").split()
+                    if len(token) >= 4
+                ),
+                "exclude_terms": [],
+            },
         )
         self.session.add(niche)
         self.session.flush()

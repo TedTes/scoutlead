@@ -43,21 +43,10 @@ class ProfileBatchState(StrEnum):
     FAILED = "failed"
 
 
-class ProfileTrade(StrEnum):
-    PAINTERS = "painters"
-    HVAC = "hvac"
-    ROOFERS = "roofers"
-    PLUMBERS = "plumbers"
-    ELECTRICIANS = "electricians"
-    CLEANERS = "cleaners"
-    LANDSCAPERS = "landscapers"
-    PEST_CONTROL = "pest_control"
-    GARAGE_DOORS = "garage_doors"
-
-
 class ProfileCustomerKind(StrEnum):
     RESIDENTIAL = "residential"
     COMMERCIAL = "commercial"
+    BOTH = "both"
 
 
 class ProfileSignal(StrEnum):
@@ -102,10 +91,13 @@ class TerritoryCreate(BaseModel):
     niche_category: str | None = None
     market_key: str = Field(min_length=1)
     city: str | None = None
+    place_label: str | None = Field(default=None, max_length=500)
+    place_provider: str | None = Field(default=None, max_length=64)
+    place_external_id: str | None = Field(default=None, max_length=255)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int = Field(default=25, ge=1, le=250)
-    trade_keys: list[str] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     service_keys: list[str] = Field(default_factory=list)
     signal_keys: list[str] = Field(default_factory=list)
@@ -135,11 +127,15 @@ class TerritoryUpdate(BaseModel):
     status: TerritoryStatus | None = None
     batch_size: int | None = Field(default=None, ge=1, le=100)
     min_fit: TerritoryMinFit | None = None
+    niche_id: str | None = Field(default=None, min_length=1)
     city: str | None = Field(default=None, min_length=1)
+    place_label: str | None = Field(default=None, min_length=1, max_length=500)
+    place_provider: str | None = Field(default=None, min_length=1, max_length=64)
+    place_external_id: str | None = Field(default=None, min_length=1, max_length=255)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int | None = Field(default=None, ge=1, le=250)
-    trade_keys: list[ProfileTrade] | None = Field(default=None, min_length=1)
     customer_kind: ProfileCustomerKind | None = None
     service_keys: list[str] | None = None
     signal_keys: list[str] | None = None
@@ -164,12 +160,16 @@ class TerritoryRead(BaseModel):
     workspace_id: str
     product_id: str
     niche_id: str
+    niche_label: str | None = None
     market_key: str
     city: str
+    place_label: str | None = None
+    place_provider: str | None = None
+    place_external_id: str | None = None
+    country_code: str | None = None
     latitude: float | None = None
     longitude: float | None = None
     radius_km: int
-    trade_keys: list[str] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     service_keys: list[str] = Field(default_factory=list)
     signal_keys: list[str] = Field(default_factory=list)
@@ -195,10 +195,15 @@ class TerritoryRead(BaseModel):
 
 
 class ProfileMarket(BaseModel):
-    city: str = Field(min_length=2, max_length=255)
-    radius_km: Literal[10, 25, 50] = 25
+    place_label: str = Field(min_length=2, max_length=500)
+    place_provider: str = Field(min_length=1, max_length=64)
+    place_external_id: str | None = Field(default=None, max_length=255)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    radius_km: int = Field(default=25, ge=1, le=250)
 
-    @field_validator("city")
+    @field_validator("place_label")
     @classmethod
     def require_one_city(cls, value: str) -> str:
         city = " ".join(value.split())
@@ -222,7 +227,7 @@ class ProfileMarket(BaseModel):
 class ProfileCreate(BaseModel):
     product_id: str = Field(min_length=1)
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    trades: list[ProfileTrade] = Field(min_length=1, max_length=9)
+    niche_id: str = Field(min_length=1)
     customer_kind: ProfileCustomerKind
     market: ProfileMarket
     services: list[str] = Field(default_factory=list, max_length=20)
@@ -230,14 +235,17 @@ class ProfileCreate(BaseModel):
     exclude: list[ProfileExclusion] = Field(
         default_factory=lambda: list(ProfileExclusion)
     )
-    limit: Literal[15, 25, 40] = 25
+    limit: int = Field(default=25, ge=1, le=100)
     refill_policy: TerritoryRefillPolicy = TerritoryRefillPolicy.WHEN_DEPLETED
     exclude_already_delivered: Literal[True] = True
+    clone_from_id: str | None = Field(default=None, min_length=1)
 
 
 class ProfileBusinessTypeOptionRead(BaseModel):
-    key: ProfileTrade
+    id: str
+    key: str
     label: str
+    category: str | None = None
 
 
 class ProfileSignalOptionRead(BaseModel):
@@ -265,6 +273,21 @@ class ProfileOptionsRead(BaseModel):
     business_types: list[ProfileBusinessTypeOptionRead]
     services: list[ProfileServiceOptionRead] = Field(default_factory=list)
     opportunity_signals: list[ProfileSignalOptionRead] = Field(default_factory=list)
+    radius_presets: list[int] = Field(default_factory=lambda: [10, 25, 50])
+    radius_min: int = 1
+    radius_max: int = 250
+    batch_size_presets: list[int] = Field(default_factory=lambda: [15, 25, 40])
+    batch_size_min: int = 1
+    batch_size_max: int = 100
+
+
+class PlaceRead(BaseModel):
+    label: str
+    provider: str
+    external_id: str | None = None
+    country_code: str | None = None
+    latitude: float
+    longitude: float
 
 
 class ProfileQueuedRead(BaseModel):

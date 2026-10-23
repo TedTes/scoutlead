@@ -24,16 +24,10 @@ from products.repository import DEFAULT_WORKSPACE_ID, ProductRepository
 from service_definitions.repository import ServiceDefinitionRepository
 from shared.errors import NotFoundError, ValidationError
 from shared.utils import new_id, normalize_text, utcnow
-from territories.profile_catalog import (
-    PROFILE_TRADE_CATALOG,
-    profile_trade_label,
-    profile_trade_spec,
-)
 from territories.geocoding import MarketGeocoder
 from territories.repository import TerritoryRepository
 from territories.schemas import (
     ProfileCreate,
-    ProfileSignal,
     TerritoryCreate,
     TerritoryResolveRequest,
     TerritoryResolutionRead,
@@ -114,12 +108,13 @@ class TerritoryService:
         data: TerritoryCreate,
         *,
         reuse_existing: bool = False,
+        allow_duplicate: bool = False,
         commit: bool = True,
     ):
         if not data.confirmed:
             raise ValidationError("territory resolution must be confirmed before creation")
         niche = self._confirmed_niche(data)
-        is_profile = bool(data.trade_keys)
+        is_profile = bool(data.service_keys or data.signal_keys)
         coordinates = (data.latitude, data.longitude)
         if is_profile and (coordinates[0] is None or coordinates[1] is None):
             resolved_market = self.market_geocoder.resolve(data.city or data.market_key)
@@ -160,19 +155,12 @@ class TerritoryService:
                 "niche_label": niche.label,
                 "market_key": semantic_key(data.market_key) or "unknown",
                 "city": normalize_text(data.city or data.market_key),
+                "place_label": normalize_text(data.place_label or data.city or data.market_key),
                 "latitude": coordinates[0],
                 "longitude": coordinates[1],
-                "signal_keys": (
-                    _clean_profile_keys(data.signal_keys)
-                    if data.trade_keys
-                    else _clean_keys(data.signal_keys)
-                ),
+                "signal_keys": _clean_profile_keys(data.signal_keys),
                 "service_keys": _clean_profile_keys(data.service_keys),
-                "exclusion_keys": (
-                    _clean_profile_keys(data.exclusion_keys)
-                    if data.trade_keys
-                    else _clean_keys(data.exclusion_keys)
-                ),
+                "exclusion_keys": _clean_profile_keys(data.exclusion_keys),
                 "search_contract": contract_payload,
                 "criteria_hash": criteria_hash,
             }
@@ -181,23 +169,41 @@ class TerritoryService:
             normalized,
             niche_id=niche.id,
             reuse_existing=reuse_existing,
+            allow_duplicate=allow_duplicate,
             commit=commit,
         )
 
     def create_profile(self, data: ProfileCreate, *, commit: bool = True):
-        trade_keys = list(dict.fromkeys(trade.value for trade in data.trades))
-        city = normalize_text(data.market.city)
-        niches = [self._ensure_profile_niche(key, city=city) for key in trade_keys]
-        trade_label = profile_trade_label(trade_keys)
+        niche = self.session.get(NicheModel, data.niche_id)
+        if niche is None or not niche.active:
+            raise ValidationError(
+                "selected business type is not available",
+                {"niche_id": data.niche_id},
+            )
+        if data.clone_from_id:
+            source_profile = self.territories.get(data.clone_from_id)
+            if source_profile.product_id != data.product_id:
+                raise ValidationError(
+                    "cloned audience must belong to the same product",
+                    {"audience_id": data.clone_from_id},
+                )
+        place_label = normalize_text(data.market.place_label)
+        city = place_label.split(",", 1)[0].strip() or place_label
         customer_kind = data.customer_kind.value
-        resolved_market = self.market_geocoder.resolve(city)
+        resolved_market = self.market_geocoder.resolve(place_label)
         if resolved_market is None:
             raise ValidationError(
                 "market coordinates are unavailable",
                 {
-                    "city": city,
+                    "place": place_label,
                     "reason": "A profile radius requires a stored market center.",
                 },
+            )
+        country_code = (resolved_market.country_code or data.market.country_code or "").lower() or None
+        if country_code and country_code not in {"ca", "us", "mx"}:
+            raise ValidationError(
+                "selected place is outside the supported market",
+                {"country_code": country_code, "supported": ["ca", "us", "mx"]},
             )
         service_keys = list(dict.fromkeys(data.services))
         active_service_keys = {
@@ -211,9 +217,7 @@ class TerritoryService:
             )
         mapped_signals = self.services.signal_keys(service_keys)
         signals = list(dict.fromkeys([*mapped_signals, *data.signals]))
-        allowed_signals = {
-            option["key"] for option in self.profile_signal_options()
-        } | {signal.value for signal in ProfileSignal}
+        allowed_signals = {option["key"] for option in self.profile_signal_options()}
         unknown_signals = sorted(set(signals) - allowed_signals)
         if unknown_signals:
             raise ValidationError(
@@ -222,7 +226,7 @@ class TerritoryService:
             )
         exclusions = [exclusion.value for exclusion in data.exclude]
         criteria = {
-            "trades": trade_keys,
+            "niche_id": niche.id,
             "customer_kind": customer_kind,
             "city": semantic_key(city),
             "radius_km": data.market.radius_km,
@@ -235,27 +239,31 @@ class TerritoryService:
         profile = self.create(
             TerritoryCreate(
                 product_id=data.product_id,
-                niche_id=niches[0].id,
-                niche_slug=niches[0].slug,
-                niche_label=niches[0].label,
-                niche_category=niches[0].category,
-                market_key=city,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                niche_category=niche.category,
+                market_key=place_label,
                 city=city,
+                place_label=resolved_market.label,
+                place_provider=resolved_market.provider,
+                place_external_id=resolved_market.external_id,
+                country_code=country_code,
                 latitude=resolved_market.latitude,
                 longitude=resolved_market.longitude,
                 radius_km=data.market.radius_km,
-                trade_keys=trade_keys,
                 customer_kind=data.customer_kind,
                 service_keys=service_keys,
                 signal_keys=signals,
                 exclusion_keys=exclusions,
-                label=data.name or f"{trade_label} · {city}",
+                label=data.name or f"{niche.label} near {city}",
                 refill_policy=data.refill_policy,
                 batch_size=data.limit,
                 criteria_hash=_criteria_hash(criteria),
                 confirmed=True,
             ),
             reuse_existing=True,
+            allow_duplicate=bool(data.clone_from_id),
             commit=commit,
         )
         interval_days = {
@@ -276,17 +284,19 @@ class TerritoryService:
         return profile
 
     def profile_options(self) -> list[dict[str, str]]:
-        slugs = [spec.niche_slug for spec in PROFILE_TRADE_CATALOG.values()]
-        stored = {
-            niche.slug: niche
-            for niche in self.session.scalars(
-                select(NicheModel).where(NicheModel.slug.in_(slugs))
-            )
-        }
+        niches = self.session.scalars(
+            select(NicheModel)
+            .where(NicheModel.active.is_(True))
+            .order_by(NicheModel.label)
+        )
         return [
-            {"key": spec.key, "label": spec.label}
-            for spec in PROFILE_TRADE_CATALOG.values()
-            if spec.niche_slug not in stored or stored[spec.niche_slug].active
+            {
+                "id": niche.id,
+                "key": niche.slug,
+                "label": niche.label,
+                "category": niche.category,
+            }
+            for niche in niches
         ]
 
     def profile_signal_options(self) -> list[dict[str, str]]:
@@ -316,8 +326,8 @@ class TerritoryService:
             "reviews_under_15": "Reviews under 15",
         }
         return [
-            {"key": signal.value, "label": labels[signal.value], "category": "legacy"}
-            for signal in ProfileSignal
+            {"key": key, "label": label, "category": "legacy"}
+            for key, label in labels.items()
         ]
 
     def profile_service_options(self) -> list[dict]:
@@ -358,40 +368,46 @@ class TerritoryService:
     def update(self, territory_id: str, update: TerritoryUpdate):
         model = self.territories.get(territory_id)
         values = update.model_dump(mode="python", exclude_unset=True)
-        if "city" in values:
-            values["city"] = normalize_text(values["city"])
-            values["market_key"] = semantic_key(values["city"]) or model.market_key
-            resolved_market = self.market_geocoder.resolve(values["city"])
-            if model.trade_keys and resolved_market is None:
+        if "niche_id" in values:
+            niche = self.session.get(NicheModel, values["niche_id"])
+            if niche is None or not niche.active:
+                raise ValidationError(
+                    "selected business type is not available",
+                    {"niche_id": values["niche_id"]},
+                )
+        if "place_label" in values or "city" in values:
+            requested_place = normalize_text(
+                values.get("place_label") or values.get("city") or model.place_label or model.city
+            )
+            resolved_market = self.market_geocoder.resolve(requested_place)
+            if resolved_market is None:
                 raise ValidationError(
                     "market coordinates are unavailable",
                     {
-                        "city": values["city"],
+                        "place": requested_place,
                         "reason": "A profile radius requires a stored market center.",
                     },
                 )
-            if resolved_market is not None:
-                values["latitude"] = resolved_market.latitude
-                values["longitude"] = resolved_market.longitude
-        if "signal_keys" in values:
-            values["signal_keys"] = (
-                _clean_profile_keys(values["signal_keys"])
-                if model.trade_keys
-                else _clean_keys(values["signal_keys"])
-            )
-        if "exclusion_keys" in values:
-            values["exclusion_keys"] = (
-                _clean_profile_keys(values["exclusion_keys"])
-                if model.trade_keys
-                else _clean_keys(values["exclusion_keys"])
-            )
-        if "trade_keys" in values:
-            values["trade_keys"] = list(
-                dict.fromkeys(
-                    value.value if hasattr(value, "value") else str(value)
-                    for value in values["trade_keys"]
+            country_code = (resolved_market.country_code or values.get("country_code") or "").lower() or None
+            if country_code and country_code not in {"ca", "us", "mx"}:
+                raise ValidationError(
+                    "selected place is outside the supported market",
+                    {"country_code": country_code, "supported": ["ca", "us", "mx"]},
                 )
-            )
+            values.update({
+                "city": requested_place.split(",", 1)[0].strip() or requested_place,
+                "place_label": resolved_market.label,
+                "place_provider": resolved_market.provider,
+                "place_external_id": resolved_market.external_id,
+                "country_code": country_code,
+                "latitude": resolved_market.latitude,
+                "longitude": resolved_market.longitude,
+                "market_key": semantic_key(resolved_market.label) or model.market_key,
+            })
+        if "signal_keys" in values:
+            values["signal_keys"] = _clean_profile_keys(values["signal_keys"])
+        if "exclusion_keys" in values:
+            values["exclusion_keys"] = _clean_profile_keys(values["exclusion_keys"])
         if "customer_kind" in values and hasattr(values["customer_kind"], "value"):
             values["customer_kind"] = values["customer_kind"].value
         if "service_keys" in values:
@@ -407,21 +423,22 @@ class TerritoryService:
                 )
             values["service_keys"] = service_keys
             values["signal_keys"] = self.services.signal_keys(service_keys)
-        if model.trade_keys:
-            prospective_latitude = values.get("latitude", model.latitude)
-            prospective_longitude = values.get("longitude", model.longitude)
-            if prospective_latitude is None or prospective_longitude is None:
-                raise ValidationError(
-                    "market coordinates are unavailable",
-                    {
-                        "city": values.get("city", model.city),
-                        "reason": "A radius audience requires a resolved center point.",
-                    },
-                )
+        prospective_latitude = values.get("latitude", model.latitude)
+        prospective_longitude = values.get("longitude", model.longitude)
+        location_changed = bool({"city", "place_label", "radius_km"} & values.keys())
+        if location_changed and (prospective_latitude is None or prospective_longitude is None):
+            raise ValidationError(
+                "market coordinates are unavailable",
+                {
+                    "city": values.get("city", model.city),
+                    "reason": "A radius audience requires a resolved center point.",
+                },
+            )
         criteria_fields = {
+            "niche_id",
             "city",
+            "place_label",
             "radius_km",
-            "trade_keys",
             "customer_kind",
             "service_keys",
             "signal_keys",
@@ -439,9 +456,9 @@ class TerritoryService:
         if criteria_changed:
             model.criteria_version += 1
             criteria = {
+                "niche_id": model.niche_id,
                 "city": model.city,
                 "radius_km": model.radius_km,
-                "trade_keys": model.trade_keys,
                 "customer_kind": model.customer_kind,
                 "service_keys": model.service_keys,
                 "signal_keys": model.signal_keys,
@@ -449,8 +466,6 @@ class TerritoryService:
                 "batch_size": model.batch_size,
                 "min_fit": model.min_fit,
             }
-            if not model.trade_keys:
-                criteria["niche_id"] = model.niche_id
             model.criteria_hash = _criteria_hash(criteria)
         if "refill_policy" in values:
             policy = (
@@ -512,6 +527,7 @@ class TerritoryService:
         }
         return TerritoryRead.model_validate(model).model_copy(
             update={
+                "niche_label": model.niche.label if model.niche else None,
                 "last_batch_count": len(batch_results),
                 "unreviewed_batch_count": sum(
                     result.review_status == "unreviewed"
@@ -524,30 +540,6 @@ class TerritoryService:
                 ),
             }
         )
-
-    def _ensure_profile_niche(self, trade_key: str, *, city: str) -> NicheModel:
-        spec = profile_trade_spec(trade_key)
-        niche = self.session.scalar(
-            select(NicheModel).where(NicheModel.slug == spec.niche_slug).limit(1)
-        )
-        if niche is not None:
-            if not niche.active:
-                raise ValidationError(
-                    "selected business type is not available",
-                    {"trade": trade_key},
-                )
-            return niche
-        niche = NicheModel(
-            id=new_id("niche"),
-            slug=spec.niche_slug,
-            label=spec.niche_label,
-            category=spec.niche_category,
-            default_query=f"{spec.niche_label} in {city}",
-            active=True,
-        )
-        self.session.add(niche)
-        self.session.flush()
-        return niche
 
     def _confirmed_niche(self, data: TerritoryCreate) -> NicheModel:
         if data.niche_id:
@@ -608,7 +600,7 @@ def _criteria_hash(value: dict) -> str:
 
 def _structured_profile_criteria(data: TerritoryCreate) -> dict:
     return {
-        "trades": list(data.trade_keys),
+        "niche_id": data.niche_id,
         "customer_kind": data.customer_kind.value,
         "city": semantic_key(data.city or data.market_key),
         "radius_km": data.radius_km,

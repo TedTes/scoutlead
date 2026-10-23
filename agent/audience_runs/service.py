@@ -27,7 +27,6 @@ from canonical.normalization import normalize_domain, normalize_email, normalize
 from leads.schemas import LeadContactPolicyUpdate, ContactPolicyStatus
 from suppressions.repository import ContactSuppressionRepository
 from territories.matching import ProfileMatchService
-from territories.profile_catalog import profile_trade_spec
 
 
 class AudienceRunService:
@@ -565,15 +564,6 @@ def _before_deadline(now: datetime, deadline: datetime) -> bool:
 
 
 def _territory_niches(session: Session, territory: TerritoryModel) -> list[NicheModel]:
-    keys = list(territory.trade_keys or [])
-    if keys:
-        slugs = [profile_trade_spec(key).niche_slug for key in keys]
-        niches = list(
-            session.scalars(select(NicheModel).where(NicheModel.slug.in_(slugs)))
-        )
-        by_slug = {niche.slug: niche for niche in niches if niche.active}
-        return [by_slug[slug] for slug in slugs if slug in by_slug]
-
     primary = session.get(NicheModel, territory.niche_id)
     return [primary] if primary is not None and primary.active else []
 

@@ -23,6 +23,7 @@ class GeocodedMarket:
     label: str
     provider: str
     external_id: str | None = None
+    country_code: str | None = None
 
 
 class MarketGeocoder:
@@ -56,7 +57,7 @@ class MarketGeocoder:
         # configured providers handle every location outside the original launch area.
         known = market_center(query)
         if known is not None:
-            result = GeocodedMarket(known[0], known[1], query, "market_cache")
+            result = GeocodedMarket(known[0], known[1], query, "market_cache", country_code="ca")
             self._cache[cache_key] = result
             return result
 
@@ -71,7 +72,31 @@ class MarketGeocoder:
             self._cache[cache_key] = result
         return result
 
+    def search(self, location: str, *, limit: int = 5) -> list[GeocodedMarket]:
+        query = normalize_text(location)
+        if len(query) < 2:
+            return []
+        known = market_center(query)
+        if known is not None:
+            return [GeocodedMarket(known[0], known[1], query, "market_cache", country_code="ca")]
+        results: list[GeocodedMarket] = []
+        if self.google_places_api_key:
+            results = self._search_google(query, limit=limit)
+        if not results and self.openstreetmap_enabled:
+            results = self._search_nominatim(query, limit=limit)
+        results = results[:limit]
+        for result in results:
+            # A subsequent create/update request submits the canonical label shown
+            # by autocomplete. Retaining it prevents a second provider search from
+            # selecting a different similarly named place.
+            self._cache[result.label.casefold()] = result
+        return results
+
     def _resolve_google(self, query: str) -> GeocodedMarket | None:
+        results = self._search_google(query, limit=1)
+        return results[0] if results else None
+
+    def _search_google(self, query: str, *, limit: int) -> list[GeocodedMarket]:
         try:
             response = httpx.post(
                 self.google_places_endpoint,
@@ -79,45 +104,57 @@ class MarketGeocoder:
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": self.google_places_api_key or "",
                     "X-Goog-FieldMask": (
-                        "places.id,places.displayName,places.formattedAddress,places.location"
+                        "places.id,places.displayName,places.formattedAddress,"
+                        "places.location,places.addressComponents"
                     ),
                 },
-                json={"textQuery": query, "pageSize": 1},
+                json={"textQuery": query, "pageSize": max(1, min(limit, 10))},
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
             places = response.json().get("places") or []
-            if not places:
-                return None
-            place = places[0]
-            coordinates = place.get("location") or {}
-            latitude = coordinates.get("latitude")
-            longitude = coordinates.get("longitude")
-            if not coordinates_are_valid(latitude, longitude):
-                return None
-            display_name = place.get("displayName") or {}
-            label = normalize_text(
-                place.get("formattedAddress") or display_name.get("text") or query
-            )
-            return GeocodedMarket(
-                float(latitude),
-                float(longitude),
-                label,
-                "google_places",
-                normalize_text(str(place.get("id") or "")) or None,
-            )
+            results = []
+            for place in places:
+                coordinates = place.get("location") or {}
+                latitude = coordinates.get("latitude")
+                longitude = coordinates.get("longitude")
+                if not coordinates_are_valid(latitude, longitude):
+                    continue
+                display_name = place.get("displayName") or {}
+                components = place.get("addressComponents") or []
+                country_code = next(
+                    (
+                        str(component.get("shortText") or "").lower()
+                        for component in components
+                        if "country" in (component.get("types") or [])
+                    ),
+                    None,
+                )
+                results.append(GeocodedMarket(
+                    float(latitude),
+                    float(longitude),
+                    normalize_text(place.get("formattedAddress") or display_name.get("text") or query),
+                    "google_places",
+                    normalize_text(str(place.get("id") or "")) or None,
+                    country_code,
+                ))
+            return results
         except (httpx.HTTPError, TypeError, ValueError) as exc:
             logger.warning("Google market geocoding failed for %r: %s", query, exc)
-            return None
+            return []
 
     def _resolve_nominatim(self, query: str) -> GeocodedMarket | None:
+        results = self._search_nominatim(query, limit=1)
+        return results[0] if results else None
+
+    def _search_nominatim(self, query: str, *, limit: int) -> list[GeocodedMarket]:
         try:
             response = httpx.get(
                 self.nominatim_endpoint,
                 params={
                     "q": query,
                     "format": "jsonv2",
-                    "limit": 1,
+                    "limit": max(1, min(limit, 10)),
                     "addressdetails": 1,
                 },
                 headers={"User-Agent": "ScoutLead audience-geocoder/1.0"},
@@ -125,23 +162,27 @@ class MarketGeocoder:
             )
             response.raise_for_status()
             rows = response.json()
-            if not isinstance(rows, list) or not rows:
-                return None
-            row = rows[0]
-            latitude = _float(row.get("lat"))
-            longitude = _float(row.get("lon"))
-            if not coordinates_are_valid(latitude, longitude):
-                return None
-            return GeocodedMarket(
-                float(latitude),
-                float(longitude),
-                normalize_text(row.get("display_name") or query),
-                "openstreetmap_nominatim",
-                normalize_text(str(row.get("place_id") or "")) or None,
-            )
+            if not isinstance(rows, list):
+                return []
+            results = []
+            for row in rows:
+                latitude = _float(row.get("lat"))
+                longitude = _float(row.get("lon"))
+                if not coordinates_are_valid(latitude, longitude):
+                    continue
+                address = row.get("address") or {}
+                results.append(GeocodedMarket(
+                    float(latitude),
+                    float(longitude),
+                    normalize_text(row.get("display_name") or query),
+                    "openstreetmap_nominatim",
+                    normalize_text(str(row.get("place_id") or "")) or None,
+                    normalize_text(str(address.get("country_code") or "")).lower() or None,
+                ))
+            return results
         except (httpx.HTTPError, TypeError, ValueError) as exc:
             logger.warning("Nominatim market geocoding failed for %r: %s", query, exc)
-            return None
+            return []
 
 
 def _float(value: object) -> float | None:

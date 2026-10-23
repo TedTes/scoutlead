@@ -619,6 +619,7 @@ class NicheModel(TimestampMixin, Base):
     default_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     signal_vocabulary: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    search_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
         back_populates="niche"
@@ -629,16 +630,6 @@ class NicheModel(TimestampMixin, Base):
 
 class TerritoryModel(TimestampMixin, Base):
     __tablename__ = "territories"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "product_id",
-            "niche_id",
-            "market_key",
-            "criteria_hash",
-            name="uq_territories_workspace_offer_niche_market_criteria",
-        ),
-    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(
@@ -648,10 +639,13 @@ class TerritoryModel(TimestampMixin, Base):
     niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
     market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     city: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    place_label: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    place_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    place_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     radius_km: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
-    trade_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     customer_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="residential", index=True
     )

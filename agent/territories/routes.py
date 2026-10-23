@@ -25,6 +25,7 @@ from territories.schemas import (
     ProfileBatchState,
     ProfileCreate,
     ProfileOptionsRead,
+    PlaceRead,
     ProfileQueuedRead,
     TerritoryCreate,
     TerritoryRead,
@@ -150,6 +151,31 @@ def audience_options(session: DbSession, auth: CurrentAuth):
         services=service.profile_service_options(),
         opportunity_signals=service.profile_signal_options(),
     )
+
+
+@audience_router.get("/places", response_model=list[PlaceRead])
+def search_places(
+    q: str,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services = None,
+):
+    query = " ".join(q.split())
+    if len(query) < 2:
+        return []
+    results = _service(session, auth, services).market_geocoder.search(query, limit=5)
+    return [
+        PlaceRead(
+            label=result.label,
+            provider=result.provider,
+            external_id=result.external_id,
+            country_code=result.country_code,
+            latitude=result.latitude,
+            longitude=result.longitude,
+        )
+        for result in results
+        if not result.country_code or result.country_code in {"ca", "us", "mx"}
+    ]
 
 
 @audience_router.get("/{audience_id}", response_model=TerritoryRead)

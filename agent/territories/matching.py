@@ -103,7 +103,7 @@ class ProfileMatchService:
             .where(active_membership_condition())
             .where(*searchable_business_conditions())
         )
-        if profile.trade_keys:
+        if profile.customer_kind != "both":
             statement = statement.where(
                 or_(
                     BusinessModel.customer_kind == profile.customer_kind,
@@ -173,7 +173,7 @@ class ProfileMatchService:
                 BusinessModel.longitude.is_not(None),
                 distance_km_expression <= float(profile.radius_km),
             )
-        elif profile.trade_keys:
+        elif profile.service_keys or profile.signal_keys:
             raise ConflictError(
                 "profile market coordinates are unavailable",
                 {"profile_id": profile.id, "city": profile.city},

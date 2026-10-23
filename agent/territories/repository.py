@@ -20,25 +20,31 @@ class TerritoryRepository:
         *,
         niche_id: str,
         reuse_existing: bool = False,
+        allow_duplicate: bool = False,
         commit: bool = True,
     ) -> TerritoryModel:
-        existing = self.session.scalar(
-            self._scope(
-                select(TerritoryModel).where(
-                    TerritoryModel.product_id == data.product_id,
-                    TerritoryModel.niche_id == niche_id,
-                    TerritoryModel.market_key == data.market_key,
-                    TerritoryModel.criteria_hash == data.criteria_hash,
-                )
-            ).limit(1)
-        )
+        existing = None
+        if not allow_duplicate:
+            existing = self.session.scalar(
+                self._scope(
+                    select(TerritoryModel).where(
+                        TerritoryModel.product_id == data.product_id,
+                        TerritoryModel.niche_id == niche_id,
+                        TerritoryModel.market_key == data.market_key,
+                        TerritoryModel.criteria_hash == data.criteria_hash,
+                    )
+                ).limit(1)
+            )
         if existing is not None:
             if existing.status == "archived":
                 existing.city = data.city or data.market_key
+                existing.place_label = data.place_label
+                existing.place_provider = data.place_provider
+                existing.place_external_id = data.place_external_id
+                existing.country_code = data.country_code
                 existing.latitude = data.latitude
                 existing.longitude = data.longitude
                 existing.radius_km = data.radius_km
-                existing.trade_keys = data.trade_keys
                 existing.customer_kind = data.customer_kind.value
                 existing.service_keys = data.service_keys
                 existing.signal_keys = data.signal_keys
@@ -74,10 +80,13 @@ class TerritoryRepository:
             niche_id=niche_id,
             market_key=data.market_key,
             city=data.city or data.market_key,
+            place_label=data.place_label,
+            place_provider=data.place_provider,
+            place_external_id=data.place_external_id,
+            country_code=data.country_code,
             latitude=data.latitude,
             longitude=data.longitude,
             radius_km=data.radius_km,
-            trade_keys=data.trade_keys,
             customer_kind=data.customer_kind.value,
             service_keys=data.service_keys,
             signal_keys=data.signal_keys,
