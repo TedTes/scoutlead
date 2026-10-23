@@ -538,11 +538,6 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
         _last_business_index_scheduler_tick = now
     if now - _last_evidence_expiry_tick >= 3600:
         _last_evidence_expiry_tick = now
-    if not services.settings.territory_scheduler_enabled:
-        return
-    if now - _last_territory_scheduler_tick < 60:
-        return
-    enqueue_due_territories(session)
     today = datetime.now(timezone.utc).date()
     if _last_outcome_maintenance_date != today:
         run_outcome_maintenance(
@@ -550,6 +545,11 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
             no_response_days=services.settings.no_response_days,
         )
         _last_outcome_maintenance_date = today
+    if not services.settings.territory_scheduler_enabled:
+        return
+    if now - _last_territory_scheduler_tick < 60:
+        return
+    enqueue_due_territories(session)
     _last_territory_scheduler_tick = now
 
 
