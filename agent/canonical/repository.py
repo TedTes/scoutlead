@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import re
 from typing import Any
@@ -705,9 +706,12 @@ class CanonicalRepository:
         append: bool = True,
     ) -> SourceObservationModel:
         now = utcnow()
-        external_id = external_id_from_raw(raw)
+        # An observation is an immutable evidence snapshot. Keep it independent
+        # from caller-owned dictionaries that may be enriched after this method.
+        snapshot = deepcopy(raw)
+        external_id = external_id_from_raw(snapshot)
         signature = query_signature(source=source, query=query)
-        content_hash = stable_content_hash(raw)
+        content_hash = stable_content_hash(snapshot)
 
         if not append:
             existing = self.session.scalar(
@@ -729,8 +733,8 @@ class CanonicalRepository:
             external_id=external_id,
             query_signature=signature,
             content_hash=content_hash,
-            source_url=source_url_from_raw(raw),
-            raw_payload=raw,
+            source_url=source_url_from_raw(snapshot),
+            raw_payload=snapshot,
             observed_at=now,
         )
         self.session.add(observation)

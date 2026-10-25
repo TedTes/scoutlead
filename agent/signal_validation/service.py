@@ -20,9 +20,10 @@ from business_validation.repository import ValidationRepository, ValidationResul
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import utcnow
 from signal_collection.service import extract_signal_value
+from source_observations.integrity import evaluate_observation_integrity
 
 
-VALIDATOR_VERSION = 2
+VALIDATOR_VERSION = 3
 GOOGLE_SOURCES = {"google_places", "google_places_seed"}
 COLLECTOR_SOURCES = {
     "website_http": {"company_website_signal"},
@@ -174,27 +175,17 @@ class SignalValidationService:
             if not passed:
                 failures.append(detail)
 
-        check(
-            "observation_present",
-            observation is not None,
-            "The source observation linked to the claim is missing.",
+        expected_sources = COLLECTOR_SOURCES.get(definition.collector_key or "")
+        integrity = evaluate_observation_integrity(
+            observation,
+            expected_business_id=claim.business_id,
+            expected_sources=expected_sources,
+            now=utcnow(),
         )
+        evidence.extend(integrity.evidence)
+        failures.extend(integrity.failures)
+        review_reasons.extend(integrity.warnings)
         if observation is not None:
-            expected_sources = COLLECTOR_SOURCES.get(definition.collector_key or "")
-            source_valid = expected_sources is None or observation.source in expected_sources
-            check(
-                "source_provenance",
-                source_valid,
-                (
-                    f"Observation source {observation.source!r} is valid for "
-                    f"collector {definition.collector_key!r}."
-                    if source_valid
-                    else (
-                        f"Observation source {observation.source!r} is not valid for "
-                        f"collector {definition.collector_key!r}."
-                    )
-                ),
-            )
             extracted = extract_signal_value(definition, observation.raw_payload or {})
             reproducible = extracted is not None and _values_equal(extracted, claim.value)
             check(
@@ -255,14 +246,14 @@ class SignalValidationService:
             return SignalValidationDecision(
                 status="uncertain",
                 quality_state="staged",
-                confidence=claim.confidence,
+                confidence=min(claim.confidence, integrity.confidence),
                 reason=" ".join(dict.fromkeys(review_reasons)),
                 evidence=evidence,
             )
         return SignalValidationDecision(
             status="passed",
             quality_state="published",
-            confidence=claim.confidence,
+            confidence=min(claim.confidence, integrity.confidence),
             reason="Claim passed source, extraction, value, freshness, and conflict checks.",
             evidence=evidence,
         )

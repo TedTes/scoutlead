@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from db.models import BusinessModel, ContactModel, SeedBatchModel, SourceObservationModel
 from db.session import create_database
+from canonical.normalization import stable_content_hash
 from canonical.website_enrichment import (
     SOURCE_NAME,
     BusinessTarget,
@@ -635,6 +636,7 @@ def test_cleanup_placeholder_emails_removes_existing_bad_values() -> None:
                     contact_email="your@email.com",
                     contact_name=None,
                     website_url="https://placeholder.testsite.ca",
+                    source=SOURCE_NAME,
                 )
             ],
             batch_id="painting-toronto-v1",
@@ -644,6 +646,11 @@ def test_cleanup_placeholder_emails_removes_existing_bad_values() -> None:
 
         assert summary["contacts_changed"] == 1
         assert session.scalar(select(ContactModel).where(ContactModel.email == "your@email.com")) is None
+        observation = session.scalar(
+            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+        )
+        assert observation is not None
+        assert observation.content_hash == stable_content_hash(observation.raw_payload)
 
 
 def test_javascript_shell_uses_configured_renderer_for_booking_evidence(monkeypatch) -> None:

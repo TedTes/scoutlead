@@ -29,7 +29,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from canonical.normalization import normalize_domain
+from canonical.normalization import normalize_domain, stable_content_hash
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessModel,
@@ -1744,6 +1744,7 @@ def cleanup_placeholder_emails(session: Session, *, dry_run: bool = False) -> di
         observations_changed += 1
         if not dry_run:
             observation.raw_payload = cleaned_payload
+            observation.content_hash = stable_content_hash(cleaned_payload)
             flag_modified(observation, "raw_payload")
 
     contacts_changed = 0

@@ -12,6 +12,7 @@ from db.models import (
     ValidationResultModel,
 )
 from db.session import create_database
+from canonical.normalization import stable_content_hash
 from shared.utils import new_id, utcnow
 from signal_collection.service import SignalCollectionService
 from signal_validation.service import SignalValidationService
@@ -65,38 +66,39 @@ def _definition(session, *, config: dict | None = None) -> SignalDefinitionModel
 
 def _observation(session, business_id: str, value: bool, *, offset_minutes: int = 0):
     observed_at = utcnow() + timedelta(minutes=offset_minutes)
+    raw_payload = {
+        "website_enrichment": {
+            "has_mobile_viewport": value,
+            "inspection": {
+                "complete": True,
+                "pages": [
+                    {
+                        "url": "https://example.test",
+                        "status_code": 200,
+                        "dom_complete": True,
+                    }
+                ],
+            },
+            "signal_evidence": {
+                "mobile_viewport_present": (
+                    [
+                        {
+                            "url": "https://example.test",
+                            "match": "viewport meta declaration",
+                        }
+                    ]
+                    if value
+                    else []
+                )
+            },
+        }
+    }
     observation = SourceObservationModel(
         id=new_id("observation"),
         business_id=business_id,
         source="company_website_signal",
-        content_hash=new_id("content"),
-        raw_payload={
-            "website_enrichment": {
-                "has_mobile_viewport": value,
-                "inspection": {
-                    "complete": True,
-                    "pages": [
-                        {
-                            "url": "https://example.test",
-                            "status_code": 200,
-                            "dom_complete": True,
-                        }
-                    ],
-                },
-                "signal_evidence": {
-                    "mobile_viewport_present": (
-                        [
-                            {
-                                "url": "https://example.test",
-                                "match": "viewport meta declaration",
-                            }
-                        ]
-                        if value
-                        else []
-                    )
-                },
-            }
-        },
+        content_hash=stable_content_hash(raw_payload),
+        raw_payload=raw_payload,
         observed_at=observed_at,
     )
     session.add(observation)
@@ -212,6 +214,32 @@ def test_signal_validation_rejects_claim_that_cannot_be_reproduced() -> None:
         result = session.scalar(select(ValidationResultModel))
         assert result is not None
         assert result.status == "failed"
+
+
+def test_signal_validation_rejects_observation_with_changed_payload() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business = _business(session)
+        definition = _definition(session)
+        observation = _observation(session, business.id, True)
+        fact = _collect(session, definition, business)
+        observation.raw_payload = {
+            **observation.raw_payload,
+            "changed_after_collection": True,
+        }
+        session.commit()
+
+        summary = SignalValidationService(session).validate(
+            definition.id,
+            expected_version=1,
+            business_ids=[business.id],
+        )
+
+        assert summary["rejected"] == 1
+        assert fact.quality_state == "rejected"
+        result = session.scalar(select(ValidationResultModel))
+        assert result is not None
+        assert "content hash" in result.reason.lower()
 
 
 def test_signal_validation_respects_manual_validation_mode() -> None:
