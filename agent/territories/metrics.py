@@ -7,7 +7,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import AudienceResultModel, AudienceRunModel, LeadOutcomeModel
+from db.models import (
+    AudienceResultModel,
+    AudienceRunModel,
+    LeadOutcomeModel,
+    NicheModel,
+    TerritoryModel,
+)
 from outcomes.schemas import LeadOutcome
 from territories.repository import TerritoryRepository
 
@@ -15,6 +21,7 @@ from territories.repository import TerritoryRepository
 class TerritoryWeekMetrics(BaseModel):
     week_start: date
     delivered: int
+    shortlisted: int
     contacted: int
     replied: int
     positive_reply_rate: float
@@ -30,6 +37,22 @@ class TerritoryMetricsRead(BaseModel):
     weeks: int
     totals: TerritoryWeekMetrics
     by_week: list[TerritoryWeekMetrics]
+
+
+class AudiencePerformanceRead(BaseModel):
+    audience_id: str
+    product_id: str
+    label: str
+    niche_label: str | None = None
+    place_label: str
+    radius_km: int
+    state: str
+    lead_count: int
+    shortlisted_count: int
+    contacted_count: int
+    shortlist_rate: float
+    contact_rate: float
+    latest_run_at: datetime | None = None
 
 
 class TerritoryMetricsService:
@@ -93,6 +116,86 @@ class TerritoryMetricsService:
             by_week=rows,
         )
 
+    def audience_performance(self, *, product_id: str) -> list[AudiencePerformanceRead]:
+        audience_rows = list(
+            self.session.execute(
+                select(TerritoryModel, NicheModel.label)
+                .join(NicheModel, NicheModel.id == TerritoryModel.niche_id)
+                .where(
+                    TerritoryModel.workspace_id == self.workspace_id,
+                    TerritoryModel.product_id == product_id,
+                    TerritoryModel.status != "archived",
+                )
+                .order_by(TerritoryModel.created_at.desc())
+            )
+        )
+        audiences = [row[0] for row in audience_rows]
+        niche_labels = {row[0].id: row[1] for row in audience_rows}
+        if not audiences:
+            return []
+        audience_ids = [audience.id for audience in audiences]
+        runs = list(
+            self.session.scalars(
+                select(AudienceRunModel)
+                .where(
+                    AudienceRunModel.workspace_id == self.workspace_id,
+                    AudienceRunModel.audience_id.in_(audience_ids),
+                )
+                .order_by(
+                    AudienceRunModel.audience_id,
+                    AudienceRunModel.created_at.desc(),
+                )
+            )
+        )
+        latest_runs: dict[str, AudienceRunModel] = {}
+        for run in runs:
+            latest_runs.setdefault(run.audience_id, run)
+        run_ids = [run.id for run in runs]
+        results = (
+            list(
+                self.session.scalars(
+                    select(AudienceResultModel).where(
+                        AudienceResultModel.run_id.in_(run_ids)
+                    )
+                )
+            )
+            if run_ids
+            else []
+        )
+        by_run: dict[str, list[AudienceResultModel]] = defaultdict(list)
+        for result in results:
+            by_run[result.run_id].append(result)
+        latest_result_runs: dict[str, AudienceRunModel] = {}
+        for run in runs:
+            if run.id in by_run:
+                latest_result_runs.setdefault(run.audience_id, run)
+        rows: list[AudiencePerformanceRead] = []
+        for audience in audiences:
+            run = latest_runs.get(audience.id)
+            result_run = latest_result_runs.get(audience.id)
+            batch = by_run.get(result_run.id, []) if result_run else []
+            lead_count = len(batch)
+            shortlisted_count = sum(result.shortlisted_at is not None for result in batch)
+            contacted_count = sum(result.contacted_at is not None for result in batch)
+            rows.append(
+                AudiencePerformanceRead(
+                    audience_id=audience.id,
+                    product_id=audience.product_id,
+                    label=audience.label,
+                    niche_label=niche_labels.get(audience.id),
+                    place_label=audience.place_label or audience.city,
+                    radius_km=audience.radius_km,
+                    state=run.state if run else "setup",
+                    lead_count=lead_count,
+                    shortlisted_count=shortlisted_count,
+                    contacted_count=contacted_count,
+                    shortlist_rate=_rate(shortlisted_count, lead_count),
+                    contact_rate=_rate(contacted_count, lead_count),
+                    latest_run_at=(run.completed_at or run.created_at) if run else None,
+                )
+            )
+        return rows
+
 
 def _metrics_row(
     *,
@@ -101,13 +204,17 @@ def _metrics_row(
     events: dict[str, set[LeadOutcome]],
 ) -> TerritoryWeekMetrics:
     delivered = len(results)
+    shortlisted = sum(result.shortlisted_at is not None for result in results)
     event_sets = [
         events.get(result.outreach_lead_id, set())
         if result.outreach_lead_id
         else set()
         for result in results
     ]
-    contacted = sum(LeadOutcome.CONTACTED in values for values in event_sets)
+    contacted = sum(
+        result.contacted_at is not None or LeadOutcome.CONTACTED in values
+        for result, values in zip(results, event_sets, strict=True)
+    )
     replied = sum(
         bool(values & {LeadOutcome.REPLIED_POSITIVE, LeadOutcome.REPLIED_NEGATIVE})
         for values in event_sets
@@ -127,6 +234,7 @@ def _metrics_row(
     return TerritoryWeekMetrics(
         week_start=week_start.date(),
         delivered=delivered,
+        shortlisted=shortlisted,
         contacted=contacted,
         replied=replied,
         positive_reply_rate=_rate(positive, contacted),

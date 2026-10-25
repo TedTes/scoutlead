@@ -213,7 +213,10 @@ class ProfileMatchService:
             statement = statement.add_columns(distance_km_expression.label("distance_km"))
         else:
             statement = statement.add_columns(literal(None).label("distance_km"))
-        candidate_limit = min(max(limit * 4, 100), 400) if outcome_weights else limit
+        # Fetch a bounded candidate pool before applying the evidence score in
+        # Python. Freshness is intentionally evaluated against the stored fact
+        # timestamps, rather than approximated in database-specific SQL.
+        candidate_limit = min(max(limit * 4, 100), 400)
         statement = statement.group_by(*group_columns).order_by(
             confirmed_signal_count.desc(),
             weighted_match_score.desc(),
@@ -256,7 +259,7 @@ class ProfileMatchService:
                     ],
                     outcome_weights,
                 )
-            results.sort(key=_learned_result_sort_key)
+        results.sort(key=_evidence_result_sort_key)
         final = [result for result, _ in results[:limit]]
         for rank_position, result in enumerate(final, start=1):
             result["raw"]["profile_match"]["rank_position"] = rank_position
@@ -486,6 +489,27 @@ class ProfileMatchService:
             "is_directory": business.is_directory,
             "is_agency": business.is_agency,
         }
+        opportunity_score, score_breakdown = _opportunity_score(
+            {
+                spec.key: {
+                    "matched": signal_evidence[spec.key]["matched"],
+                    "confidence_score": (
+                        facts[spec.fact_key].confidence
+                        if spec.fact_key in facts
+                        else None
+                    ),
+                    "observed_at": (
+                        facts[spec.fact_key].observed_at.isoformat()
+                        if spec.fact_key in facts
+                        else None
+                    ),
+                    "severity": _signal_severity(spec, service_specs),
+                }
+                for spec in signal_specs
+            },
+            now=utcnow(),
+            max_age_days=profile.evidence_max_age_days,
+        )
         raw = {
             **(observation.raw_payload if observation else {}),
             "match_origin": "profile_sql",
@@ -498,6 +522,8 @@ class ProfileMatchService:
                 "status": "matched",
                 "score": matched_signal_count,
                 "service_score": round(weighted_match_score, 2),
+                "opportunity_score": opportunity_score,
+                "score_breakdown": score_breakdown,
                 "selected_signal_count": len(signal_evidence),
                 "matched_signal_count": matched_signal_count,
                 "confirmed_signal_count": confirmed_signal_count,
@@ -514,7 +540,10 @@ class ProfileMatchService:
             },
             "search_match": {
                 "status": "matched",
-                "reason": "Matched persisted audience fields and business facts.",
+                "reason": (
+                    "Matched the audience using published facts scored by "
+                    "opportunity severity, confidence, and freshness."
+                ),
             },
         }
         return {
@@ -687,11 +716,12 @@ def _contact_has_active_support(
     )
 
 
-def _learned_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
+def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
     result, row = item
     profile_match = result["raw"]["profile_match"]
     distance = profile_match.get("distance_km")
     return (
+        -float(profile_match.get("opportunity_score") or 0.0),
         -int(profile_match.get("confirmed_signal_count") or 0),
         -int(profile_match.get("matched_signal_count") or 0),
         -float(profile_match.get("outcome_adjustment") or 0.0),
@@ -699,6 +729,60 @@ def _learned_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
         -float(row.get("membership_confidence") or 0.0),
         str(row["id"]),
     )
+
+
+def _signal_severity(
+    spec: SignalMatchSpec,
+    service_specs: list[ServiceMatchSpec],
+) -> float:
+    configured = spec.config.get("opportunity_severity")
+    if isinstance(configured, (int, float)):
+        return round(max(1.0, min(5.0, float(configured))), 2)
+    weights = [
+        weight
+        for service in service_specs
+        for signal_key, weight in service.signals
+        if signal_key == spec.key
+    ]
+    if not weights:
+        return 3.0
+    # Service mappings already express relative importance. Keep the public
+    # severity scale stable even if an administrator supplies a large weight.
+    return round(max(1.0, min(5.0, 2.0 + max(weights))), 2)
+
+
+def _opportunity_score(
+    signal_evidence: dict[str, dict[str, Any]],
+    *,
+    now: datetime,
+    max_age_days: int,
+) -> tuple[float, dict[str, float]]:
+    matched = [evidence for evidence in signal_evidence.values() if evidence["matched"]]
+    if not matched:
+        return 0.0, {"severity": 0.0, "confidence": 0.0, "freshness": 0.0}
+    severity = sum(float(item["severity"]) / 5.0 for item in matched) / len(matched)
+    confidence = sum(
+        max(0.0, min(100.0, float(item["confidence_score"] or 0.0))) / 100.0
+        for item in matched
+    ) / len(matched)
+    freshness_values: list[float] = []
+    for item in matched:
+        observed_at = item.get("observed_at")
+        if not observed_at:
+            freshness_values.append(0.0)
+            continue
+        observed = datetime.fromisoformat(str(observed_at))
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=now.tzinfo)
+        age_days = max(0.0, (now - observed).total_seconds() / 86400)
+        freshness_values.append(max(0.0, 1.0 - age_days / max(1, max_age_days)))
+    freshness = sum(freshness_values) / len(freshness_values)
+    breakdown = {
+        "severity": round(severity * 40.0 + min(10.0, (len(matched) - 1) * 5.0), 1),
+        "confidence": round(confidence * 30.0, 1),
+        "freshness": round(freshness * 20.0, 1),
+    }
+    return round(sum(breakdown.values()), 1), breakdown
 
 
 def literal_column_nulls_last(name: str):

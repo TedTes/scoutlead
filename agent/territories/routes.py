@@ -15,6 +15,7 @@ from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from shared.errors import ValidationError
 from territories.metrics import (
+    AudiencePerformanceRead,
     TerritoryMetricsRead,
     TerritoryMetricsService,
     territory_metrics_csv,
@@ -141,6 +142,18 @@ def create_audience(
 @audience_router.get("", response_model=list[TerritoryRead])
 def list_audiences(session: DbSession, auth: CurrentAuth):
     return _service(session, auth).list()
+
+
+@audience_router.get("/summary", response_model=list[AudiencePerformanceRead])
+def audience_performance_summary(
+    product_id: str,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    return TerritoryMetricsService(
+        session,
+        workspace_id=auth.workspace_id or "workspace_default",
+    ).audience_performance(product_id=product_id)
 
 
 @audience_router.get("/options", response_model=ProfileOptionsRead)

@@ -1923,6 +1923,13 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
         assert [
             row["raw"]["profile_match"]["matched_signal_count"] for row in rows
         ] == [2, 1]
+        scores = [row["raw"]["profile_match"]["opportunity_score"] for row in rows]
+        assert scores[0] > scores[1]
+        assert set(rows[0]["raw"]["profile_match"]["score_breakdown"]) == {
+            "severity",
+            "confidence",
+            "freshness",
+        }
 
 
 def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
@@ -2181,6 +2188,10 @@ def test_territory_metrics_report_coverage_and_conversion() -> None:
             )
         )
         assert len(results) == 2
+        run_service.update_result(
+            results[0].id,
+            AudienceResultUpdate(shortlisted=True),
+        )
         lead = AudienceOutreachService(
             session,
             workspace_id="workspace:first",
@@ -2213,10 +2224,21 @@ def test_territory_metrics_report_coverage_and_conversion() -> None:
             workspace_id="workspace:first",
         ).calculate(territory.id, weeks=1)
         assert metrics.totals.delivered == 2
+        assert metrics.totals.shortlisted == 1
         assert metrics.totals.contacted == 1
         assert metrics.totals.meetings == 1
         assert metrics.totals.positive_reply_rate == 1.0
         assert metrics.totals.outcome_coverage == 0.5
+        summary = TerritoryMetricsService(
+            session,
+            workspace_id="workspace:first",
+        ).audience_performance(product_id=offer.id)
+        assert len(summary) == 1
+        assert summary[0].lead_count == 2
+        assert summary[0].shortlisted_count == 1
+        assert summary[0].contacted_count == 1
+        assert summary[0].shortlist_rate == 0.5
+        assert summary[0].contact_rate == 0.5
 
 
 def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances() -> None:
