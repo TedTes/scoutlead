@@ -4,9 +4,17 @@ ScoutLead keeps source observations separate from publishable conclusions. New
 source items follow this path:
 
 ```text
-source fetch -> canonical identity -> business validation -> opportunity audit
-             -> fact reconciliation -> searchable inventory
+source fetch -> canonical identity + source observation -> observation integrity
+             -> business validation -> opportunity audit -> claims -> fact reconciliation
+             -> signal validation -> searchable inventory
 ```
+
+Observation integrity verifies that the raw payload is present, its stored hash
+still matches, the source and business association are correct, and the
+timestamp is plausible. It does not claim the payload is true. Extraction replay,
+fact reconciliation, conflict checks, freshness, and signal validation decide
+whether a conclusion can be published. Any intentional payload cleanup must
+update its content hash in the same transaction.
 
 The required business validations are identity, business identity, trade, and
 location. A failed dimension rejects the source item. Missing or uncertain
@@ -45,9 +53,29 @@ same provider and template records without changing source compilers or adapters
 Run a read-only audit first:
 
 ```bash
+PYTHONPATH=agent python scripts/audit_source_observations.py --details
 PYTHONPATH=agent python scripts/audit_business_pool.py --json
 PYTHONPATH=agent python scripts/repair_business_quality.py --limit 500 --details
 ```
+
+The source-observation audit always prints JSON and never changes the database.
+It reports payload/hash failures, missing source locators, stale evidence,
+repeated identical snapshots, and provider external IDs attached to more than
+one canonical business. Repeated snapshots are storage/collection noise, not by
+themselves proof of bad data. Cross-business provider-ID collisions require an
+identity review before either business is merged or removed.
+
+If the audit reports published facts backed by invalid observations, preview the
+targeted remediation. It does not rewrite or legitimize the bad payload:
+
+```bash
+PYTHONPATH=agent python scripts/stage_invalid_observation_facts.py
+```
+
+After reviewing the JSON details, rerun with `--apply` to move only those facts
+from `published` to `staged` and record a failed observation-integrity result.
+Recollect the source and rerun normal fact/signal validation before publishing
+them again.
 
 To retain complete aggregate reports without changing data:
 
@@ -89,4 +117,7 @@ PYTHONPATH=agent python scripts/business_benchmark.py sample \
 ```
 
 Do not bulk-import or deploy a niche that fails the benchmark precision and
-coverage gate.
+coverage gate. Observation-integrity failures must be zero for newly collected
+records. Do not repair a content hash until the payload's origin and any
+intentional mutation have been verified; blindly replacing a hash would hide
+corruption instead of fixing it.
