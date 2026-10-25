@@ -28,7 +28,7 @@ export function renderScreen(
     view: "this_week",
     onViewChange: () => undefined,
   },
-  audienceNavigation: { onOpenAudience: (id: string) => void } = {
+  audienceNavigation: { defaultFolderId?: string; onOpenAudience: (id: string) => void } = {
     onOpenAudience: () => undefined,
   },
 ) {
@@ -51,6 +51,6 @@ export function renderScreen(
         />
       );
     default:
-      return <AudienceProfileScreen />;
+      return <AudienceProfileScreen defaultFolderId={audienceNavigation.defaultFolderId} />;
   }
 }

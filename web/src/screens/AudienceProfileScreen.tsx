@@ -8,8 +8,8 @@ import type { PlaceOption, ProfileCreateInput, ProfileExclusion, ProfileOptions,
 const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
 type FormMode = "create" | "edit" | "clone";
 
-export function AudienceProfileScreen() {
-  const { createProfile, updateProfile, profileBatch, selectedProduct, selectedProductId, selectedProfile, territoryApi } = useAppData();
+export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderId?: string }) {
+  const { audienceFolders, createProfile, updateProfile, profileBatch, selectedProduct, selectedProductId, selectedProfile, territoryApi } = useAppData();
   const { showToast } = useToast();
   const [profileOptions, setProfileOptions] = useState<ProfileOptions | null>(null);
   const [optionsError, setOptionsError] = useState(false);
@@ -26,6 +26,7 @@ export function AudienceProfileScreen() {
   const [radiusKm, setRadiusKm] = useState(25);
   const [batchSize, setBatchSize] = useState(25);
   const [refillPolicy, setRefillPolicy] = useState<Territory["refill_policy"]>("when_depleted");
+  const [folderId, setFolderId] = useState(defaultFolderId);
   const [services, setServices] = useState<string[]>([]);
   const [hoveredService, setHoveredService] = useState<string | null>(null);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
@@ -42,6 +43,10 @@ export function AudienceProfileScreen() {
     );
     return () => { active = false; };
   }, [territoryApi]);
+
+  useEffect(() => {
+    if (mode === "create" && !editing) setFolderId(defaultFolderId);
+  }, [defaultFolderId, editing, mode]);
 
   useEffect(() => {
     if (!placeOpen || selectedPlace?.label === placeQuery || placeQuery.trim().length < 2) {
@@ -88,6 +93,7 @@ export function AudienceProfileScreen() {
     setRadiusKm(selectedProfile.radius_km);
     setBatchSize(selectedProfile.batch_size);
     setRefillPolicy(selectedProfile.refill_policy);
+    setFolderId(selectedProfile.folder_id || "");
     setServices(selectedProfile.service_keys);
   };
 
@@ -107,11 +113,11 @@ export function AudienceProfileScreen() {
     const market = { place_label: selectedPlace.label, place_provider: selectedPlace.provider, place_external_id: selectedPlace.external_id, country_code: selectedPlace.country_code, latitude: selectedPlace.latitude, longitude: selectedPlace.longitude, radius_km: radiusKm };
     try {
       if (mode === "edit" && selectedProfile) {
-        await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, customer_kind: customerKind, ...market, service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
+        await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), folder_id: folderId || null, niche_id: nicheId, customer_kind: customerKind, ...market, service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
         setEditing(false);
         showToast({ title: "Audience updated", message: "New criteria will apply to the next batch.", tone: "green" });
       } else {
-        const input: ProfileCreateInput = { product_id: selectedProductId, name: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, customer_kind: customerKind, market, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
+        const input: ProfileCreateInput = { product_id: selectedProductId, folder_id: folderId || null, name: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, customer_kind: customerKind, market, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
         await createProfile(input);
         setEditing(false);
         setMode("create");
@@ -177,8 +183,8 @@ export function AudienceProfileScreen() {
         </section>
 
         <section className="audience-advanced-section audience-compact-advanced">
-          <button aria-expanded={advancedOpen} className="audience-advanced-toggle" type="button" onClick={() => setAdvancedOpen((open) => !open)}><span><strong>Advanced</strong><small>Batch size, automatic refill, and exclusions</small></span><ChevronDown className={advancedOpen ? "is-open" : ""} size={17} /></button>
-          {advancedOpen ? <div className="audience-advanced-fields audience-compact-advanced-fields"><label className="audience-field"><span>First batch</span><select className="audience-input" value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))}>{(profileOptions?.batch_size_presets || [15, 25, 40]).map((value) => <option key={value} value={value}>{value} leads</option>)}</select></label><label className="audience-field"><span>Refill</span><select className="audience-input" value={refillPolicy} onChange={(event) => setRefillPolicy(event.target.value as Territory["refill_policy"])}><option value="when_depleted">When depleted</option><option value="manual">Manual</option><option value="weekly">Weekly</option><option value="biweekly">Every two weeks</option><option value="monthly">Monthly</option></select></label><p>Always excludes closed businesses and directories.</p></div> : null}
+          <button aria-expanded={advancedOpen} className="audience-advanced-toggle" type="button" onClick={() => setAdvancedOpen((open) => !open)}><span><strong>Advanced</strong><small>Folder, batch size, automatic refill, and exclusions</small></span><ChevronDown className={advancedOpen ? "is-open" : ""} size={17} /></button>
+          {advancedOpen ? <div className="audience-advanced-fields audience-compact-advanced-fields"><label className="audience-field"><span>Folder</span><select className="audience-input" value={folderId} onChange={(event) => setFolderId(event.target.value)}><option value="">No folder</option>{audienceFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label><label className="audience-field"><span>First batch</span><select className="audience-input" value={batchSize} onChange={(event) => setBatchSize(Number(event.target.value))}>{(profileOptions?.batch_size_presets || [15, 25, 40]).map((value) => <option key={value} value={value}>{value} leads</option>)}</select></label><label className="audience-field"><span>Refill</span><select className="audience-input" value={refillPolicy} onChange={(event) => setRefillPolicy(event.target.value as Territory["refill_policy"])}><option value="when_depleted">When depleted</option><option value="manual">Manual</option><option value="weekly">Weekly</option><option value="biweekly">Every two weeks</option><option value="monthly">Monthly</option></select></label><p>Always excludes closed businesses and directories.</p></div> : null}
         </section>
       </div>
 

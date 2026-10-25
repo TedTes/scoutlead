@@ -289,6 +289,30 @@ export class ApiClient {
     return this.request<Territory[]>("/audiences");
   }
 
+  getAudienceFolders(productId: string) {
+    return this.request<import("../types/domain").AudienceFolder[]>(
+      `/audience-folders?product_id=${encodeURIComponent(productId)}`,
+    );
+  }
+
+  createAudienceFolder(productId: string, name: string) {
+    return this.request<import("../types/domain").AudienceFolder>("/audience-folders", {
+      method: "POST",
+      body: { product_id: productId, name },
+    });
+  }
+
+  renameAudienceFolder(folderId: string, name: string) {
+    return this.request<import("../types/domain").AudienceFolder>(`/audience-folders/${folderId}`, {
+      method: "PATCH",
+      body: { name },
+    });
+  }
+
+  deleteAudienceFolder(folderId: string) {
+    return this.request<void>(`/audience-folders/${folderId}`, { method: "DELETE" });
+  }
+
   getAudiencePerformance(productId: string) {
     return this.request<import("../types/domain").AudiencePerformance[]>(
       `/audiences/summary?product_id=${encodeURIComponent(productId)}`,

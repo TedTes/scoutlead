@@ -328,6 +328,7 @@ export type Territory = {
   id: string;
   workspace_id: string;
   product_id: string;
+  folder_id?: string | null;
   niche_id: string;
   niche_label?: string | null;
   market_key: string;
@@ -440,6 +441,7 @@ export type ProfileFactChange = {
 
 export type ProfileCreateInput = {
   product_id: string;
+  folder_id?: string | null;
   name?: string;
   niche_id: string;
   customer_kind: ProfileCustomerKind;
@@ -459,6 +461,17 @@ export type ProfileCreateInput = {
   refill_policy: Territory["refill_policy"];
   exclude_already_delivered: true;
   clone_from_id?: string;
+};
+
+export type AudienceFolder = {
+  id: string;
+  workspace_id: string;
+  product_id: string;
+  name: string;
+  sort_order: number;
+  audience_count: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type QueueJob = {

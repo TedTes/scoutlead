@@ -6120,6 +6120,18 @@ a {
   text-transform: uppercase;
 }
 
+.lead-workspace-heading button {
+  align-items: center;
+  border: 0;
+  color: var(--faint);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px;
+}
+
+.lead-workspace-heading button:hover { color: var(--text); }
+
 .lead-workspace-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -6168,7 +6180,7 @@ a {
 .audience-list-row {
   align-items: center;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-columns: minmax(0, 1fr) 78px;
   position: relative;
 }
 
@@ -6180,8 +6192,20 @@ a {
   grid-row: 1;
   grid-template-columns: 15px minmax(0, 1fr) auto;
   min-height: 52px;
-  padding-right: 60px;
+  padding-right: 84px;
 }
+
+.audience-folder { border-bottom: 1px solid rgba(225, 228, 232, .65); }
+.audience-folder-row { align-items: center; display: grid; grid-template-columns: minmax(0, 1fr) 78px; position: relative; }
+.lead-workspace-list .audience-folder-main { align-items: center; display: grid; gap: 7px; grid-column: 1 / -1; grid-row: 1; grid-template-columns: 16px minmax(0, 1fr) auto; padding: 5px 88px 5px 10px; width: 100%; }
+.audience-folder-main span { font-weight: 650; text-align: left; }
+.audience-folder-main em { color: var(--faint); font-family: var(--mono); font-size: 10px; font-style: normal; }
+.audience-folder-actions { display: flex; grid-column: 2; grid-row: 1; opacity: 0; pointer-events: none; z-index: 2; }
+.audience-folder-row:hover .audience-folder-actions,
+.audience-folder-row:focus-within .audience-folder-actions { opacity: 1; pointer-events: auto; }
+.lead-workspace-list .audience-folder-actions button { align-items: center; color: var(--faint); display: inline-flex; height: 25px; justify-content: center; min-height: 25px; padding: 0; width: 25px; }
+.audience-folder-children { padding-left: 10px; }
+.audience-folder-empty { color: var(--faint); display: block; padding: 5px 12px 10px 33px; }
 
 .audience-list-copy {
   display: grid;
@@ -6277,6 +6301,11 @@ a {
 .audience-dialog-form .field {
   margin: 0;
 }
+
+.audience-dialog-form > label { display: grid; gap: 6px; }
+.audience-dialog-form > label > span { color: var(--muted); font-size: 11px; font-weight: 650; }
+.audience-dialog-form > label > input,
+.audience-dialog-form > label > select { border: 1px solid var(--line-strong); border-radius: 6px; min-height: 38px; padding: 8px 10px; }
 
 .audience-delete-dialog p {
   margin: 0;

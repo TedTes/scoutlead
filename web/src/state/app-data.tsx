@@ -8,6 +8,7 @@ import type {
   DiscoverySnapshot,
   CampaignMessageBatchResult,
   CampaignOutreachDraftInput,
+  AudienceFolder,
   GmailAuthorizationUrl,
   GmailConnectionStatus,
   LeadContactPolicyInput,
@@ -45,6 +46,7 @@ type AppDataContextValue = {
   productDiscoveryRuns: DiscoveryRun[];
   productContacts: DiscoveryResult[];
   territories: Territory[];
+  audienceFolders: AudienceFolder[];
   snapshot: DiscoverySnapshot;
   sourceProviders: SourceProvider[];
   gmailConnectionStatus: GmailConnectionStatus | null;
@@ -67,6 +69,9 @@ type AppDataContextValue = {
   updateProfile: (profileId: string, update: Partial<Territory>) => Promise<Territory>;
   renameProfile: (profileId: string, label: string) => Promise<Territory>;
   deleteProfile: (profileId: string) => Promise<void>;
+  createAudienceFolder: (name: string) => Promise<AudienceFolder>;
+  renameAudienceFolder: (folderId: string, name: string) => Promise<AudienceFolder>;
+  deleteAudienceFolder: (folderId: string) => Promise<void>;
   refillProfile: (profileId?: string) => Promise<ProfileQueued | null>;
   deleteProduct: (productId?: string) => Promise<void>;
   runSourceRequest: (input: SourceRequestInput) => Promise<SourceRequestRun | null>;
@@ -157,6 +162,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
+  const [audienceFolders, setAudienceFolders] = useState<AudienceFolder[]>([]);
   const [profileBatch, setProfileBatch] = useState<ProfileBatch | null>(null);
   const [switchingProfileId, setSwitchingProfileId] = useState("");
   const [sourceProviders, setSourceProviders] = useState<SourceProvider[]>([]);
@@ -513,6 +519,19 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     void refreshGmailConnection(selectedProductIdState);
   }, [refreshGmailConnection, selectedProductIdState]);
 
+  useEffect(() => {
+    if (!selectedProductIdState) {
+      setAudienceFolders([]);
+      return;
+    }
+    let active = true;
+    void api.getAudienceFolders(selectedProductIdState).then(
+      (folders) => { if (active) setAudienceFolders(folders); },
+      () => { if (active) setAudienceFolders([]); },
+    );
+    return () => { active = false; };
+  }, [api, selectedProductIdState]);
+
   const value = useMemo<AppDataContextValue>(
     () => ({
       territoryApi: api,
@@ -532,6 +551,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       productDiscoveryRuns,
       productContacts,
       territories,
+      audienceFolders,
       snapshot,
       activeSourceIds,
       sourceProviders,
@@ -619,6 +639,24 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           setError(err instanceof Error ? err.message : String(err));
           throw err;
         }
+      },
+      createAudienceFolder: async (name) => {
+        if (!selectedProductIdState) throw new Error("Select a product first.");
+        const folder = await api.createAudienceFolder(selectedProductIdState, name);
+        setAudienceFolders((current) => [...current, folder]);
+        return folder;
+      },
+      renameAudienceFolder: async (folderId, name) => {
+        const folder = await api.renameAudienceFolder(folderId, name);
+        setAudienceFolders((current) => current.map((item) => item.id === folder.id ? folder : item));
+        return folder;
+      },
+      deleteAudienceFolder: async (folderId) => {
+        await api.deleteAudienceFolder(folderId);
+        setAudienceFolders((current) => current.filter((item) => item.id !== folderId));
+        setTerritories((current) => current.map((profile) => (
+          profile.folder_id === folderId ? { ...profile, folder_id: null } : profile
+        )));
       },
       renameProfile: async (profileId, label) => {
         setError("");
@@ -915,6 +953,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       productDiscoveryRuns,
       productContacts,
       territories,
+      audienceFolders,
       products,
       refreshAll,
       refreshGmailConnection,

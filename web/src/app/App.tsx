@@ -4,6 +4,9 @@ import {
   ChevronDown,
   CircleX,
   Download,
+  Folder,
+  FolderOpen,
+  FolderPlus,
   List,
   LoaderCircle,
   Menu,
@@ -36,6 +39,7 @@ import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, useAppData } from "../state/app-data";
 import type {
+  AudienceFolder,
   Product,
   ProductProfileInput,
   Territory,
@@ -96,6 +100,11 @@ function AppShell({
   const [productMenuOpen, setProductMenuOpen] = useState(false);
   const [renameAudience, setRenameAudience] = useState<Territory | null>(null);
   const [deleteAudience, setDeleteAudience] = useState<Territory | null>(null);
+  const [editFolder, setEditFolder] = useState<AudienceFolder | "new" | null>(null);
+  const [deleteFolder, setDeleteFolder] = useState<AudienceFolder | null>(null);
+  const [moveAudience, setMoveAudience] = useState<Territory | null>(null);
+  const [newAudienceFolderId, setNewAudienceFolderId] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -134,10 +143,15 @@ function AppShell({
     productDiscoveryRuns,
     productContacts,
     territories,
+    audienceFolders,
     gmailConnectionStatus,
     createProductFromProfile,
     renameProfile,
     deleteProfile,
+    createAudienceFolder,
+    renameAudienceFolder,
+    deleteAudienceFolder,
+    updateProfile,
     deleteProduct,
     refreshSnapshot,
   } = useAppData();
@@ -219,6 +233,14 @@ function AppShell({
     if (!selected || recent.some((item) => item === selected)) return recent;
     return [...recent.slice(0, 4), selected];
   }, [audienceSearch, matchingProfiles, selectedProfileId]);
+  const unfiledProfiles = useMemo(() => {
+    const profiles = productProfiles.filter((profile) => !profile.folder_id);
+    if (audienceSearch.trim() || profiles.length <= 5) return profiles;
+    const recent = profiles.slice(0, 5);
+    const selected = profiles.find((profile) => profile.id === selectedProfileId);
+    if (!selected || recent.some((profile) => profile.id === selected.id)) return recent;
+    return [...recent.slice(0, 4), selected];
+  }, [audienceSearch, productProfiles, selectedProfileId]);
   const handleWorkflowCountsChange = useCallback((runId: string, counts: LeadWorkflowCounts) => {
     setWorkflowSummary((current) => {
       if (current?.runId === runId && Object.keys(counts).every((key) => current.counts[key as LeadWorkflowView] === counts[key as LeadWorkflowView])) {
@@ -248,12 +270,24 @@ function AppShell({
     setMobileRailOpen(false);
   };
 
+  const openAudienceProfile = (profile: Territory) => {
+    setLeadWorkflowView("inbox");
+    setMobileRailOpen(false);
+    void selectProfile(profile.id)
+      .then(() => setViewMode("auto"))
+      .catch((cause) => showToast({
+        title: "Audience could not be opened",
+        message: cause instanceof Error ? cause.message : String(cause),
+        tone: "red",
+      }));
+  };
+
   const returnToApp = () => {
     window.history.pushState(null, "", "/app");
     setRoutePath("/app");
   };
 
-  const startNewAudience = () => {
+  const startNewAudience = (folderId = "") => {
     if (isTraceRoute) returnToApp();
     setMobileRailOpen(false);
     setIsCreatingProduct(false);
@@ -261,6 +295,7 @@ function AppShell({
     setSelectedProfileId("");
     setSelectedDiscoveryRunId("");
     setWorkflowSummary(null);
+    setNewAudienceFolderId(folderId);
   };
 
   const selectScreen = (screen: Screen) => {
@@ -569,53 +604,30 @@ function AppShell({
           />
           <div className="lead-workspace-heading">
             <span>Audiences</span>
+            <button aria-label="New folder" title="New folder" type="button" onClick={() => setEditFolder("new")}><FolderPlus size={14} /></button>
           </div>
           {productProfiles.length > 5 ? <label className="audience-sidebar-search"><Search size={13} /><input aria-label="Search audiences" placeholder="Search audiences" value={audienceSearch} onChange={(event) => setAudienceSearch(event.target.value)} /></label> : null}
           <div className="lead-workspace-list">
-            {visibleProfiles.map((profile) => (
-              <div className="audience-list-row" key={profile.id}>
-                <button
-                  className={`audience-list-main ${profile.id === selectedProfileId ? "active" : ""}`}
-                  aria-label={profile.label}
-                  title={profile.label}
-                  type="button"
-                  onClick={() => {
-                    setLeadWorkflowView("inbox");
-                    setMobileRailOpen(false);
-                    void selectProfile(profile.id)
-                      .then(() => setViewMode("auto"))
-                      .catch((cause) => showToast({
-                        title: "Audience could not be opened",
-                        message: cause instanceof Error ? cause.message : String(cause),
-                        tone: "red",
-                      }));
-                  }}
-                >
-                  {switchingProfileId === profile.id
-                    ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} />
-                    : <Users className="lead-workspace-icon" size={15} />}
-                  <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.place_label || profile.city} · {profile.radius_km} km</small></span>
-                </button>
-                <div className="audience-row-actions">
-                  <button
-                    aria-label={`Rename ${profile.label}`}
-                    title="Rename audience"
-                    type="button"
-                    onClick={() => setRenameAudience(profile)}
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    aria-label={`Delete ${profile.label}`}
-                    title="Delete audience"
-                    type="button"
-                    onClick={() => setDeleteAudience(profile)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
+            {audienceSearch.trim() ? visibleProfiles.map((profile) => (
+              <AudienceSidebarRow key={profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => setDeleteAudience(profile)} onMove={() => setMoveAudience(profile)} onOpen={() => openAudienceProfile(profile)} onRename={() => setRenameAudience(profile)} />
+            )) : (
+              <>
+                {audienceFolders.map((folder) => {
+                  const profiles = productProfiles.filter((profile) => profile.folder_id === folder.id);
+                  const open = expandedFolders[folder.id] || profiles.some((profile) => profile.id === selectedProfileId);
+                  return <section className="audience-folder" key={folder.id}>
+                    <div className="audience-folder-row">
+                      <button aria-expanded={open} className="audience-folder-main" type="button" onClick={() => setExpandedFolders((current) => ({ ...current, [folder.id]: !open }))}>
+                        {open ? <FolderOpen size={15} /> : <Folder size={15} />}<span>{folder.name}</span><em>{profiles.length}</em>
+                      </button>
+                      <div className="audience-folder-actions"><button aria-label={`Create audience in ${folder.name}`} title="New audience in folder" type="button" onClick={() => startNewAudience(folder.id)}><Plus size={12} /></button><button aria-label={`Rename ${folder.name}`} title="Rename folder" type="button" onClick={() => setEditFolder(folder)}><Pencil size={12} /></button><button aria-label={`Delete ${folder.name}`} title="Delete folder" type="button" onClick={() => setDeleteFolder(folder)}><Trash2 size={12} /></button></div>
+                    </div>
+                    {open ? <div className="audience-folder-children">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => setDeleteAudience(profile)} onMove={() => setMoveAudience(profile)} onOpen={() => openAudienceProfile(profile)} onRename={() => setRenameAudience(profile)} />) : <small className="audience-folder-empty">No audiences</small>}</div> : null}
+                  </section>;
+                })}
+                {unfiledProfiles.map((profile) => <AudienceSidebarRow key={profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => setDeleteAudience(profile)} onMove={() => setMoveAudience(profile)} onOpen={() => openAudienceProfile(profile)} onRename={() => setRenameAudience(profile)} />)}
+              </>
+            )}
             {productProfiles.length > 5 && !audienceSearch.trim() ? (
               <button
                 className="workspace-more"
@@ -742,6 +754,7 @@ function AppShell({
                 ),
               },
               {
+                defaultFolderId: newAudienceFolderId,
                 onOpenAudience: (audienceId) => {
                   setLeadWorkflowView("inbox");
                   void selectProfile(audienceId)
@@ -806,8 +819,76 @@ function AppShell({
           onDelete={handleDeleteAudience}
         />
       ) : null}
+      {editFolder ? (
+        <FolderEditorDialog
+          folder={editFolder === "new" ? null : editFolder}
+          onClose={() => setEditFolder(null)}
+          onSave={async (name) => {
+            if (editFolder === "new") {
+              const created = await createAudienceFolder(name);
+              setExpandedFolders((current) => ({ ...current, [created.id]: true }));
+            } else {
+              await renameAudienceFolder(editFolder.id, name);
+            }
+            setEditFolder(null);
+          }}
+        />
+      ) : null}
+      {deleteFolder ? (
+        <DeleteFolderDialog
+          folder={deleteFolder}
+          onClose={() => setDeleteFolder(null)}
+          onDelete={async () => {
+            await deleteAudienceFolder(deleteFolder.id);
+            setDeleteFolder(null);
+            showToast({ title: "Folder deleted", message: "Its audiences are now unfiled.", tone: "green" });
+          }}
+        />
+      ) : null}
+      {moveAudience ? (
+        <MoveAudienceDialog
+          audience={moveAudience}
+          folders={audienceFolders}
+          onClose={() => setMoveAudience(null)}
+          onMove={async (folderId) => {
+            await updateProfile(moveAudience.id, { folder_id: folderId || null });
+            setMoveAudience(null);
+            showToast({ title: folderId ? "Audience moved" : "Audience removed from folder", tone: "green" });
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+function AudienceSidebarRow({
+  onDelete,
+  onMove,
+  onOpen,
+  onRename,
+  profile,
+  selected,
+  switching,
+}: {
+  onDelete: () => void;
+  onMove: () => void;
+  onOpen: () => void;
+  onRename: () => void;
+  profile: Territory;
+  selected: boolean;
+  switching: boolean;
+}) {
+  return <div className="audience-list-row">
+    <button className={`audience-list-main ${selected ? "active" : ""}`} aria-label={profile.label} title={profile.label} type="button" onClick={onOpen}>
+      {switching ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} /> : <Users className="lead-workspace-icon" size={15} />}
+      <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.place_label || profile.city} · {profile.radius_km} km</small></span>
+    </button>
+    <div className="audience-row-actions">
+      <button aria-label={`Move ${profile.label}`} title="Move to folder" type="button" onClick={onMove}><Folder size={13} /></button>
+      <button aria-label={`Rename ${profile.label}`} title="Rename audience" type="button" onClick={onRename}><Pencil size={13} /></button>
+      <button aria-label={`Delete ${profile.label}`} title="Delete audience" type="button" onClick={onDelete}><Trash2 size={13} /></button>
+    </div>
+  </div>;
 }
 
 function FirstRunWorkspace({
@@ -1019,6 +1100,45 @@ function resolveActiveScreen(
   if (viewMode === "product" || viewMode === "integrations") return viewMode;
   if (viewMode !== "auto") return viewMode;
   return hasSelectedRun ? "results" : "overview";
+}
+
+function FolderEditorDialog({
+  folder,
+  onClose,
+  onSave,
+}: {
+  folder: AudienceFolder | null;
+  onClose: () => void;
+  onSave: (name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(folder?.name || "");
+  const [saving, setSaving] = useState(false);
+  const cleaned = name.trim();
+  return <Modal title={folder ? "Rename folder" : "New folder"} onClose={onClose}>
+    <form className="audience-dialog-form" onSubmit={async (event) => { event.preventDefault(); if (!cleaned || saving) return; setSaving(true); try { await onSave(cleaned); } finally { setSaving(false); } }}>
+      <label><span>Folder name</span><input autoFocus maxLength={100} placeholder="For example, Roofers" value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <div className="modal-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={!cleaned || saving} type="submit">{saving ? "Saving…" : folder ? "Save" : "Create folder"}</button></div>
+    </form>
+  </Modal>;
+}
+
+function DeleteFolderDialog({ folder, onClose, onDelete }: { folder: AudienceFolder; onClose: () => void; onDelete: () => Promise<void> }) {
+  const [deleting, setDeleting] = useState(false);
+  return <Modal title="Delete folder" onClose={onClose}>
+    <div className="audience-delete-dialog"><p>Delete <strong>{folder.name}</strong>? Its audiences will remain available outside folders.</p><div className="modal-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="danger" disabled={deleting} type="button" onClick={async () => { setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}>{deleting ? "Deleting…" : "Delete folder"}</button></div></div>
+  </Modal>;
+}
+
+function MoveAudienceDialog({ audience, folders, onClose, onMove }: { audience: Territory; folders: AudienceFolder[]; onClose: () => void; onMove: (folderId: string) => Promise<void> }) {
+  const [folderId, setFolderId] = useState(audience.folder_id || "");
+  const [saving, setSaving] = useState(false);
+  return <Modal title="Move audience" onClose={onClose}>
+    <form className="audience-dialog-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { await onMove(folderId); } finally { setSaving(false); } }}>
+      <p>Choose where <strong>{audience.label}</strong> appears in the sidebar.</p>
+      <label><span>Folder</span><select value={folderId} onChange={(event) => setFolderId(event.target.value)}><option value="">No folder</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
+      <div className="modal-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={saving || folderId === (audience.folder_id || "")} type="submit">{saving ? "Moving…" : "Move"}</button></div>
+    </form>
+  </Modal>;
 }
 
 function RenameAudienceDialog({
