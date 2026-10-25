@@ -289,6 +289,12 @@ export class ApiClient {
     return this.request<Territory[]>("/audiences");
   }
 
+  getAudiencePerformance(productId: string) {
+    return this.request<import("../types/domain").AudiencePerformance[]>(
+      `/audiences/summary?product_id=${encodeURIComponent(productId)}`,
+    );
+  }
+
   getProfileOptions() {
     return this.request<ProfileOptions>("/audiences/options");
   }

@@ -1,4 +1,5 @@
 export type Screen =
+  | "audiences"
   | "overview"
   | "integrations"
   | "product"

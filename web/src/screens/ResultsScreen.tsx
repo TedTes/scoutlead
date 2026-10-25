@@ -4484,17 +4484,21 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
     const confirmedSignals = matchedSignals.filter(([, value]) =>
       rawValueToString(value.confidence || "confirmed") === "confirmed",
     );
+    const publishedScore = typeof profileMatch.opportunity_score === "number"
+      && Number.isFinite(profileMatch.opportunity_score)
+      ? profileMatch.opportunity_score
+      : null;
     if (!confirmedSignals.length) {
       return {
         level: "moderate",
-        score: Math.min(65, 50 + (matchedSignals.length - 1) * 5),
+        score: publishedScore ?? Math.min(65, 50 + (matchedSignals.length - 1) * 5),
         signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
         services,
       };
     }
     return {
-      level: "high",
-      score: Math.min(100, 70 + (matchedSignals.length - 1) * 10),
+      level: publishedScore === null || publishedScore >= 70 ? "high" : "moderate",
+      score: publishedScore ?? Math.min(100, 70 + (matchedSignals.length - 1) * 10),
       signals: matchedSignals.map(([key, value]) => profileSignalMessage(key, value)),
       services,
     };

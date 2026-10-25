@@ -91,7 +91,6 @@ function AppShell({
   const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
   const [leadListRequestId, setLeadListRequestId] = useState(0);
   const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
-  const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const [audienceSearch, setAudienceSearch] = useState("");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [productMenuOpen, setProductMenuOpen] = useState(false);
@@ -214,12 +213,12 @@ function AppShell({
       .some((value) => value?.toLowerCase().includes(query)));
   }, [audienceSearch, productProfiles]);
   const visibleProfiles = useMemo(() => {
-    if (audienceSearch.trim() || workspaceExpanded || matchingProfiles.length <= 5) return matchingProfiles;
+    if (audienceSearch.trim() || matchingProfiles.length <= 5) return matchingProfiles;
     const recent = matchingProfiles.slice(0, 5);
     const selected = matchingProfiles.find((item) => item.id === selectedProfileId);
     if (!selected || recent.some((item) => item === selected)) return recent;
     return [...recent.slice(0, 4), selected];
-  }, [audienceSearch, matchingProfiles, selectedProfileId, workspaceExpanded]);
+  }, [audienceSearch, matchingProfiles, selectedProfileId]);
   const handleWorkflowCountsChange = useCallback((runId: string, counts: LeadWorkflowCounts) => {
     setWorkflowSummary((current) => {
       if (current?.runId === runId && Object.keys(counts).every((key) => current.counts[key as LeadWorkflowView] === counts[key as LeadWorkflowView])) {
@@ -281,7 +280,6 @@ function AppShell({
     setSelectedDiscoveryRunId("");
     setLeadWorkflowView("inbox");
     setWorkflowSummary(null);
-    setWorkspaceExpanded(false);
     setViewMode("overview");
   };
 
@@ -622,9 +620,9 @@ function AppShell({
               <button
                 className="workspace-more"
                 type="button"
-                onClick={() => setWorkspaceExpanded((expanded) => !expanded)}
+                onClick={() => selectScreen("audiences")}
               >
-                <span>{workspaceExpanded ? "Show recent" : `View all (${productProfiles.length})`}</span>
+                <span>{`View all (${productProfiles.length})`}</span>
               </button>
             ) : null}
             {!productProfiles.length ? (
@@ -670,11 +668,10 @@ function AppShell({
       >
         {activeScreen !== "results" ? (
           <header className={activeScreen === "product" ? "desktop-account-bar has-summary" : "desktop-account-bar"}>
-            {activeScreen === "overview" ? (
+            {activeScreen === "overview" || activeScreen === "audiences" ? (
               <nav aria-label="Audience context" className="results-breadcrumb desktop-audience-context">
                 <span>Audiences</span>
-                <span aria-hidden="true">/</span>
-                <strong>New audience</strong>
+                {activeScreen === "overview" ? <><span aria-hidden="true">/</span><strong>New audience</strong></> : null}
               </nav>
             ) : null}
             {activeScreen === "integrations" || activeScreen === "product" ? (
@@ -743,6 +740,18 @@ function AppShell({
                     <AccountControl accountSlot={accountSlot} placement="desktop" />
                   </div>
                 ),
+              },
+              {
+                onOpenAudience: (audienceId) => {
+                  setLeadWorkflowView("inbox");
+                  void selectProfile(audienceId)
+                    .then(() => setViewMode("auto"))
+                    .catch((cause) => showToast({
+                      title: "Audience could not be opened",
+                      message: cause instanceof Error ? cause.message : String(cause),
+                      tone: "red",
+                    }));
+                },
               },
             )
           )}

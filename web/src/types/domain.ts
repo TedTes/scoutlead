@@ -363,6 +363,22 @@ export type Territory = {
   updated_at: string;
 };
 
+export type AudiencePerformance = {
+  audience_id: string;
+  product_id: string;
+  label: string;
+  niche_label?: string | null;
+  place_label: string;
+  radius_km: number;
+  state: string;
+  lead_count: number;
+  shortlisted_count: number;
+  contacted_count: number;
+  shortlist_rate: number;
+  contact_rate: number;
+  latest_run_at?: string | null;
+};
+
 export type ProfileCustomerKind = "residential" | "commercial" | "both";
 export type ProfileSignal = string;
 export type ProfileExclusion = "closed" | "chains" | "franchises" | "directories" | "agencies";
