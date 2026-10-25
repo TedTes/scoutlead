@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScoutLead — Data Quality Process Flow</title>
+  <style>
+    :root {
+      --ink: #20242b;
+      --muted: #697386;
+      --line: #dfe3e8;
+      --panel: #ffffff;
+      --canvas: #f5f6f7;
+      --green: #159a62;
+      --green-soft: #eaf8f1;
+      --blue: #2463a9;
+      --blue-soft: #edf5ff;
+      --purple: #6941c6;
+      --purple-soft: #f2edff;
+      --amber: #a15c00;
+      --amber-soft: #fff6e5;
+      --red: #c4322b;
+      --red-soft: #fff0ee;
+      --navy: #17202b;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 72px;
+      padding: 14px 28px;
+      color: white;
+      background: var(--navy);
+      border-top: 4px solid #2463a9;
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 9px;
+      color: white;
+      background: #11161d;
+      border: 1px solid #3a4552;
+      font-weight: 800;
+    }
+    .brand h1 { margin: 0; font-size: 16px; letter-spacing: -.2px; }
+    .brand p { margin: 3px 0 0; color: #aeb9c6; font-size: 10px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase; }
+    header .scope { max-width: 580px; color: #c8d0da; font-size: 12px; line-height: 1.45; text-align: right; }
+
+    main { width: min(1500px, 100%); margin: 0 auto; padding: 24px; }
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .intro h2 { margin: 0 0 7px; font-size: 25px; letter-spacing: -.65px; }
+    .intro p { max-width: 850px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+    .legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .pill { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; background: white; font-size: 10px; font-weight: 750; }
+    .pill.api { color: var(--blue); background: var(--blue-soft); border-color: #bdd7f5; }
+    .pill.worker { color: var(--purple); background: var(--purple-soft); border-color: #d6c8fb; }
+    .pill.db { color: var(--green); background: var(--green-soft); border-color: #bde4cf; }
+    .pill.gap { color: var(--red); background: var(--red-soft); border-color: #f1b8b3; }
+
+    .panel {
+      margin-bottom: 18px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      box-shadow: 0 2px 9px rgba(20, 31, 44, .045);
+    }
+    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 16px 18px 13px; border-bottom: 1px solid #edf0f2; }
+    .panel-head h3 { margin: 0; font-size: 15px; letter-spacing: -.2px; }
+    .panel-head p { margin: 5px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+    .step { color: var(--green); font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .8px; }
+    .diagram { overflow-x: auto; padding: 18px; background: linear-gradient(180deg, #fff 0%, #fbfcfc 100%); }
+    .mermaid { min-width: 1040px; margin: 0; text-align: center; }
+
+    .alert {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: start;
+      margin: 0 18px 18px;
+      padding: 12px 14px;
+      color: #7a271f;
+      background: var(--red-soft);
+      border: 1px solid #f0b8b3;
+      border-radius: 9px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .alert b { display: block; margin-bottom: 2px; }
+    .alert .number { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 50%; color: white; background: var(--red); font-weight: 800; }
+
+    .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr); gap: 18px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    th, td { padding: 9px 11px; border-bottom: 1px solid #e9ecef; text-align: left; vertical-align: top; }
+    th { color: #566170; background: #f7f8f9; font-size: 9.5px; letter-spacing: .7px; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    code { color: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+    .state { display: inline-block; padding: 2px 6px; border-radius: 5px; font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .state.write { color: var(--green); background: var(--green-soft); }
+    .state.read { color: var(--blue); background: var(--blue-soft); }
+    .state.gate { color: var(--red); background: var(--red-soft); }
+
+    .notes { padding: 15px 17px 17px; }
+    .notes ol { margin: 8px 0 0; padding-left: 20px; }
+    .notes li { margin: 0 0 9px; color: #4e5867; font-size: 11.5px; line-height: 1.5; }
+    .notes strong { color: var(--ink); }
+
+    footer { padding: 3px 2px 18px; color: #7a8492; font-size: 10.5px; }
+
+    @media (max-width: 900px) {
+      header { align-items: flex-start; flex-direction: column; }
+      header .scope { text-align: left; }
+      .intro, .grid { grid-template-columns: 1fr; }
+      .legend { justify-content: flex-start; }
+      main { padding: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="mark">S</div>
+      <div><h1>ScoutLead</h1><p>Data quality process map</p></div>
+    </div>
+    <div class="scope">Process-level interaction between the browser, API, Railway worker, and the database tables that determine whether collected evidence becomes a usable lead.</div>
+  </header>
+
+  <main>
+    <div class="intro">
+      <div>
+        <h2>Audience request → trusted lead</h2>
+        <p>A fact may exist in <code>business_facts</code> before it is trusted. The fact becomes matchable only after signal validation records its decision in <code>validation_results</code> and changes <code>quality_state</code> to <code>published</code>.</p>
+      </div>
+      <div class="legend">
+        <span class="pill api">API</span>
+        <span class="pill worker">Worker</span>
+        <span class="pill db">Database</span>
+        <span class="pill worker">Automated validation handoff</span>
+      </div>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><span class="step">FLOW 01</span><h3>Runtime interaction</h3><p>The asynchronous request lifecycle, including collection, quality gates, and final audience matching.</p></div>
+      </div>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor Browser
+    participant API as API service
+    participant DB as PostgreSQL
+    participant Worker as Railway worker
+    participant Provider as Source providers
+
+    Browser->>API: Create audience
+    API->>DB: INSERT territories
+    API->>DB: INSERT audience_runs + queue_jobs(audience.run)
+    API-->>Browser: Audience accepted / Building
+
+    Worker->>DB: Claim audience.run
+    Worker->>DB: Read memberships + published business_facts
+    Worker->>DB: Find relevant staged facts inside audience radius
+    Worker->>DB: Queue requested signal.collection jobs for staged candidates
+    DB-->>Worker: Fewer than requested leads
+    Worker->>DB: INSERT coverage_requests
+    Worker->>DB: INSERT/UPDATE business_index_segments
+    Worker->>DB: Queue business_index.refresh
+
+    Worker->>Provider: Fetch niche + city supply
+    Provider-->>Worker: Provider results
+    Worker->>DB: INSERT source_items
+    Worker->>DB: Queue identity jobs
+
+    Worker->>DB: Resolve canonical business
+    Worker->>DB: INSERT businesses + source_observations
+    Worker->>DB: INSERT business_niche_memberships
+    Worker->>DB: INSERT source_item_decisions
+    Worker->>DB: INSERT validation_results (identity/trade/location)
+
+    Worker->>DB: Run opportunity audit
+    Worker->>DB: INSERT fact_claims
+    Worker->>DB: UPSERT business_facts (staged)
+
+    rect rgb(234, 248, 241)
+      Note over Worker,DB: AUTOMATED QUALITY HANDOFF
+      Worker->>DB: Read waiting audience signal_keys for this segment
+      Worker->>DB: Queue only required signal.collection jobs
+      Worker->>DB: Read signal_definitions + source_observations
+      Worker->>Provider: Collect missing signal evidence
+      Worker->>DB: Append observations and claims, keep facts staged
+      Worker->>DB: Queue signal.validation jobs
+      Worker->>DB: Validate hash, provenance, replay, value, freshness, conflicts
+      Worker->>DB: INSERT validation_results (signal:key)
+      Worker->>DB: UPDATE business_facts → published / staged / rejected
+      Worker->>DB: Waiting-run scheduler queues audience.run again
+    end
+
+    Worker->>DB: Match radius + niche + published opportunity facts
+    Worker->>DB: INSERT audience_results
+    Worker->>DB: Complete coverage_requests + audience_runs
+    Browser->>API: Poll latest audience run
+    API->>DB: Read audience_results
+    API-->>Browser: Ready / Partial + leads
+      </pre></div>
+      <div class="alert"><span class="number">✓</span><div><b>Garage-door failure path addressed</b>After opportunity auditing, the worker now resolves the signals requested by waiting audiences for that segment and queues their collection. Collection queues validation, and the waiting-run scheduler rematches facts after they become <code>published</code>.</div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><span class="step">FLOW 02</span><h3>Data-quality state machine</h3><p>What each table represents and which transitions are allowed to affect search results.</p></div>
+      </div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+    SI["source_items<br/><small>provider response waiting for processing</small>"]
+    SD["source_item_decisions<br/><small>identity / relevance / audit workflow</small>"]
+    SO["source_observations<br/><small>immutable raw evidence snapshot + hash</small>"]
+    FC["fact_claims<br/><small>one extracted assertion from one observation</small>"]
+    BF1["business_facts<br/><small>canonical value · quality_state=staged</small>"]
+    VR["validation_results<br/><small>passed / uncertain / failed decision</small>"]
+    BFP["business_facts<br/><small>quality_state=published</small>"]
+    BFS["business_facts<br/><small>quality_state=staged</small>"]
+    BFR["business_facts<br/><small>quality_state=rejected</small>"]
+    AR["audience_results<br/><small>lead is visible to the user</small>"]
+
+    SI --> SD
+    SD -->|identity resolved| SO
+    SO -->|extractor| FC
+    FC -->|reconcile competing claims| BF1
+    SO -. evidence .-> VR
+    FC -. claim .-> VR
+    BF1 -. resolved value .-> VR
+    VR -->|passed + sufficient confidence| BFP
+    VR -->|uncertain / stale / incomplete| BFS
+    VR -->|failed / corrupt / invalid| BFR
+    BFP -->|niche + radius + opportunity match| AR
+    BFS -.-x|not searchable| AR
+    BFR -.-x|not searchable| AR
+
+    classDef source fill:#edf5ff,stroke:#2463a9,color:#17395f,stroke-width:1.5px;
+    classDef evidence fill:#f2edff,stroke:#6941c6,color:#3f2780,stroke-width:1.5px;
+    classDef staged fill:#fff6e5,stroke:#b36b00,color:#6d4300,stroke-width:1.5px;
+    classDef passed fill:#eaf8f1,stroke:#159a62,color:#0d6240,stroke-width:2px;
+    classDef failed fill:#fff0ee,stroke:#c4322b,color:#7a271f,stroke-width:1.5px;
+    class SI,SD source;
+    class SO,FC,VR evidence;
+    class BF1,BFS staged;
+    class BFP,AR passed;
+    class BFR failed;
+      </pre></div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head"><div><span class="step">REFERENCE</span><h3>Table responsibilities</h3><p>Only the tables directly involved in collection quality and audience publication.</p></div></div>
+        <table>
+          <thead><tr><th>Table</th><th>Owned by</th><th>Responsibility</th><th>Interaction</th></tr></thead>
+          <tbody>
+            <tr><td><code>territories</code></td><td>API</td><td>Audience criteria: niche, place, radius, opportunity signals.</td><td><span class="state write">WRITE</span></td></tr>
+            <tr><td><code>audience_runs</code></td><td>API + worker</td><td>Tracks queued, matching, waiting-validation, ready, partial, or failed state.</td><td><span class="state write">READ/WRITE</span></td></tr>
+            <tr><td><code>coverage_requests</code></td><td>Worker</td><td>Records unmet demand while supply is collected and validated.</td><td><span class="state write">WRITE</span></td></tr>
+            <tr><td><code>queue_jobs</code></td><td>API + worker</td><td>Durable orchestration for audience, source, audit, collection, and validation work.</td><td><span class="state write">READ/WRITE</span></td></tr>
+            <tr><td><code>business_index_segments</code></td><td>Worker</td><td>Reusable niche + market collection plan and provider progress.</td><td><span class="state write">READ/WRITE</span></td></tr>
+            <tr><td><code>source_items</code></td><td>Worker</td><td>Landing records for raw provider responses and processing state.</td><td><span class="state write">WRITE</span></td></tr>
+            <tr><td><code>source_item_decisions</code></td><td>Worker</td><td>Append-only workflow decisions for identity, relevance, and opportunity audit.</td><td><span class="state write">WRITE</span></td></tr>
+            <tr><td><code>source_observations</code></td><td>Worker</td><td>Attributed evidence snapshot; payload hash protects integrity.</td><td><span class="state gate">QUALITY INPUT</span></td></tr>
+            <tr><td><code>business_niche_memberships</code></td><td>Worker</td><td>Prepared niche/market membership with its supporting observation.</td><td><span class="state read">FILTER</span></td></tr>
+            <tr><td><code>fact_claims</code></td><td>Worker</td><td>Extracted value from one observation, with confidence and expiry.</td><td><span class="state gate">QUALITY INPUT</span></td></tr>
+            <tr><td><code>business_facts</code></td><td>Worker</td><td>Resolved canonical value plus <code>quality_state</code>; staged is not searchable.</td><td><span class="state gate">PUBLICATION GATE</span></td></tr>
+            <tr><td><code>validation_results</code></td><td>Worker</td><td>Records business-level and signal-level validation decisions; it does not store the fact.</td><td><span class="state gate">DECISION</span></td></tr>
+            <tr><td><code>audience_results</code></td><td>Worker + API</td><td>Businesses delivered to the user after all matching gates pass.</td><td><span class="state read">OUTPUT</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-head"><div><span class="step">RULES</span><h3>Reliability invariants</h3><p>These conditions must remain true across every niche and city.</p></div></div>
+        <div class="notes">
+          <ol>
+            <li><strong>Raw evidence is immutable.</strong> If a payload is intentionally cleaned, its content hash must be updated in the same transaction.</li>
+            <li><strong>A claim belongs to one observation and business.</strong> Cross-business links are integrity failures.</li>
+            <li><strong>A staged fact is allowed.</strong> It represents the current resolved value before approval; it must not enter audience results.</li>
+            <li><strong>Validation results are decisions, not processors.</strong> The worker must explicitly run validation and update the fact state.</li>
+            <li><strong>Uncertain evidence stays staged.</strong> Failed evidence becomes rejected; only passed evidence becomes published.</li>
+            <li><strong>Audience retries follow real dependencies.</strong> A run should retry after required signal jobs finish, then terminate as ready or partial.</li>
+            <li><strong>No niche-specific repair.</strong> The same orchestration must work for garage doors, painters, HVAC, and future database-driven niches.</li>
+          </ol>
+        </div>
+      </aside>
+    </div>
+
+    <footer>ScoutLead data-quality process diagram · Automated audience validation handoff · 2026-10-25</footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: "loose",
+      theme: "base",
+      themeVariables: {
+        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+        fontSize: "12px",
+        primaryColor: "#edf5ff",
+        primaryTextColor: "#20242b",
+        primaryBorderColor: "#2463a9",
+        lineColor: "#778291",
+        actorBkg: "#ffffff",
+        actorBorder: "#8d99a8",
+        actorTextColor: "#20242b",
+        signalColor: "#566170",
+        signalTextColor: "#20242b",
+        noteBkgColor: "#fff6e5",
+        noteBorderColor: "#c98b2c",
+        noteTextColor: "#5b3a08",
+        labelBoxBkgColor: "#ffffff",
+        labelBoxBorderColor: "#dfe3e8"
+      },
+      sequence: { useMaxWidth: false, diagramMarginX: 30, actorMargin: 70 },
+      flowchart: { useMaxWidth: false, curve: "basis", nodeSpacing: 38, rankSpacing: 55 }
+    });
+  </script>
+</body>
+</html>
