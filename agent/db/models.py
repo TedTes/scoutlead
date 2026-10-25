@@ -49,6 +49,9 @@ class WorkspaceModel(TimestampMixin, Base):
     owner: Mapped[UserModel | None] = relationship(back_populates="workspaces")
     products: Mapped[list["ProductModel"]] = relationship(back_populates="workspace")
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="workspace")
+    audience_folders: Mapped[list["AudienceFolderModel"]] = relationship(
+        back_populates="workspace"
+    )
 
 
 class AdminAuditEventModel(TimestampMixin, Base):
@@ -109,6 +112,9 @@ class ProductModel(TimestampMixin, Base):
 
     workspace: Mapped[WorkspaceModel | None] = relationship(back_populates="products")
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="product")
+    audience_folders: Mapped[list["AudienceFolderModel"]] = relationship(
+        back_populates="product"
+    )
 
 
 class CampaignModel(TimestampMixin, Base):
@@ -628,6 +634,32 @@ class NicheModel(TimestampMixin, Base):
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="niche")
 
 
+class AudienceFolderModel(TimestampMixin, Base):
+    __tablename__ = "audience_folders"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "product_id",
+            "name",
+            name="uq_audience_folders_workspace_product_name",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    workspace: Mapped[WorkspaceModel] = relationship(back_populates="audience_folders")
+    product: Mapped[ProductModel] = relationship(back_populates="audience_folders")
+    audiences: Mapped[list["TerritoryModel"]] = relationship(back_populates="folder")
+
+
 class TerritoryModel(TimestampMixin, Base):
     __tablename__ = "territories"
 
@@ -636,6 +668,9 @@ class TerritoryModel(TimestampMixin, Base):
         ForeignKey("workspaces.id"), nullable=False, index=True
     )
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("audience_folders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
     market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     city: Mapped[str] = mapped_column(String(255), nullable=False, default="")
@@ -670,6 +705,7 @@ class TerritoryModel(TimestampMixin, Base):
 
     workspace: Mapped[WorkspaceModel] = relationship(back_populates="territories")
     product: Mapped[ProductModel] = relationship(back_populates="territories")
+    folder: Mapped[AudienceFolderModel | None] = relationship(back_populates="audiences")
     niche: Mapped[NicheModel] = relationship(back_populates="territories")
     campaigns: Mapped[list[CampaignModel]] = relationship(back_populates="territory")
 class SeedBatchModel(TimestampMixin, Base):

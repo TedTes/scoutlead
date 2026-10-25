@@ -113,6 +113,18 @@ class TerritoryService:
     ):
         if not data.confirmed:
             raise ValidationError("territory resolution must be confirmed before creation")
+        if data.folder_id:
+            from territories.folders import AudienceFolderService
+
+            folder = AudienceFolderService(
+                self.session,
+                workspace_id=self.workspace_id,
+            ).get(data.folder_id)
+            if folder.product_id != data.product_id:
+                raise ValidationError(
+                    "audience folder belongs to another product",
+                    {"folder_id": folder.id},
+                )
         niche = self._confirmed_niche(data)
         is_profile = bool(data.service_keys or data.signal_keys)
         coordinates = (data.latitude, data.longitude)
@@ -239,6 +251,7 @@ class TerritoryService:
         profile = self.create(
             TerritoryCreate(
                 product_id=data.product_id,
+                folder_id=data.folder_id,
                 niche_id=niche.id,
                 niche_slug=niche.slug,
                 niche_label=niche.label,
@@ -276,6 +289,7 @@ class TerritoryService:
             if interval_days is not None
             else None
         )
+        profile.folder_id = data.folder_id
         if commit:
             self.session.commit()
             self.session.refresh(profile)
@@ -374,6 +388,18 @@ class TerritoryService:
                 raise ValidationError(
                     "selected business type is not available",
                     {"niche_id": values["niche_id"]},
+                )
+        if "folder_id" in values and values["folder_id"] is not None:
+            from territories.folders import AudienceFolderService
+
+            folder = AudienceFolderService(
+                self.session,
+                workspace_id=self.workspace_id,
+            ).get(values["folder_id"])
+            if folder.product_id != model.product_id:
+                raise ValidationError(
+                    "audience folder belongs to another product",
+                    {"folder_id": folder.id},
                 )
         if "place_label" in values or "city" in values:
             requested_place = normalize_text(

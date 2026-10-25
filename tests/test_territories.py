@@ -74,6 +74,8 @@ from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
 from territories.metrics import TerritoryMetricsService
 from territories.matching import ProfileMatchService
+from territories.folders import AudienceFolderService
+from territories.schemas import AudienceFolderCreate
 from territories.coordinate_backfill import CoordinateBackfillService
 from territories.geocoding import GeocodedMarket, MarketGeocoder
 
@@ -96,6 +98,38 @@ def test_resolve_existing_niche_is_read_only() -> None:
         assert resolution.niche_id == niche.id
         assert resolution.market_key == "toronto"
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 0
+
+
+def test_audience_folders_are_optional_and_deletion_preserves_audiences() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        folders = AudienceFolderService(session, workspace_id="workspace:first")
+        folder = folders.create(
+            AudienceFolderCreate(product_id=offer.id, name=" Priority trades ")
+        )
+        territory_service = TerritoryService(session, workspace_id="workspace:first")
+        territory = territory_service.create(
+            TerritoryCreate(
+                product_id=offer.id,
+                folder_id=folder.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                confirmed=True,
+            )
+        )
+
+        listed = folders.list(product_id=offer.id)
+        assert listed[0].name == "Priority trades"
+        assert listed[0].audience_count == 1
+        assert territory_service.get_read(territory.id).folder_id == folder.id
+
+        folders.delete(folder.id)
+
+        assert territory_service.get_read(territory.id).folder_id is None
 
 
 def test_audience_can_be_renamed_and_archived_from_the_visible_list() -> None:

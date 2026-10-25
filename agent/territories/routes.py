@@ -22,6 +22,9 @@ from territories.metrics import (
 )
 from territories.changes import ProfileChangeService, ProfileFactChangeRead
 from territories.schemas import (
+    AudienceFolderCreate,
+    AudienceFolderRead,
+    AudienceFolderUpdate,
     ProfileBatchRead,
     ProfileBatchState,
     ProfileCreate,
@@ -35,12 +38,60 @@ from territories.schemas import (
     TerritoryUpdate,
 )
 from territories.service import TerritoryService
+from territories.folders import AudienceFolderService
 
 
 audience_router = APIRouter(prefix="/audiences", tags=["audiences"])
+audience_folder_router = APIRouter(prefix="/audience-folders", tags=["audience-folders"])
 
 
 Services = Annotated[AppServices, Depends(get_services)]
+
+
+@audience_folder_router.get("", response_model=list[AudienceFolderRead])
+def list_audience_folders(product_id: str, session: DbSession, auth: CurrentAuth):
+    return AudienceFolderService(
+        session,
+        workspace_id=auth.workspace_id or "workspace_default",
+    ).list(product_id=product_id)
+
+
+@audience_folder_router.post(
+    "",
+    response_model=AudienceFolderRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_audience_folder(
+    data: AudienceFolderCreate,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    return AudienceFolderService(
+        session,
+        workspace_id=auth.workspace_id or "workspace_default",
+    ).create(data)
+
+
+@audience_folder_router.patch("/{folder_id}", response_model=AudienceFolderRead)
+def rename_audience_folder(
+    folder_id: str,
+    data: AudienceFolderUpdate,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    return AudienceFolderService(
+        session,
+        workspace_id=auth.workspace_id or "workspace_default",
+    ).rename(folder_id, data.name)
+
+
+@audience_folder_router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_audience_folder(folder_id: str, session: DbSession, auth: CurrentAuth):
+    AudienceFolderService(
+        session,
+        workspace_id=auth.workspace_id or "workspace_default",
+    ).delete(folder_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _service(

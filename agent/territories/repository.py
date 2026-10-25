@@ -77,6 +77,7 @@ class TerritoryRepository:
             id=new_id("territory"),
             workspace_id=self.workspace_id,
             product_id=data.product_id,
+            folder_id=data.folder_id,
             niche_id=niche_id,
             market_key=data.market_key,
             city=data.city or data.market_key,

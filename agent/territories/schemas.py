@@ -85,6 +85,7 @@ class TerritoryResolutionRead(BaseModel):
 
 class TerritoryCreate(BaseModel):
     product_id: str = Field(min_length=1)
+    folder_id: str | None = Field(default=None, min_length=1)
     niche_id: str | None = None
     niche_slug: str = Field(min_length=1)
     niche_label: str = Field(min_length=1)
@@ -124,6 +125,7 @@ class TerritoryCreate(BaseModel):
 
 class TerritoryUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1)
+    folder_id: str | None = Field(default=None, min_length=1)
     status: TerritoryStatus | None = None
     batch_size: int | None = Field(default=None, ge=1, le=100)
     min_fit: TerritoryMinFit | None = None
@@ -159,6 +161,7 @@ class TerritoryRead(BaseModel):
     id: str
     workspace_id: str
     product_id: str
+    folder_id: str | None = None
     niche_id: str
     niche_label: str | None = None
     market_key: str
@@ -226,6 +229,7 @@ class ProfileMarket(BaseModel):
 
 class ProfileCreate(BaseModel):
     product_id: str = Field(min_length=1)
+    folder_id: str | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, min_length=1, max_length=255)
     niche_id: str = Field(min_length=1)
     customer_kind: ProfileCustomerKind
@@ -239,6 +243,28 @@ class ProfileCreate(BaseModel):
     refill_policy: TerritoryRefillPolicy = TerritoryRefillPolicy.WHEN_DEPLETED
     exclude_already_delivered: Literal[True] = True
     clone_from_id: str | None = Field(default=None, min_length=1)
+
+
+class AudienceFolderCreate(BaseModel):
+    product_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=100)
+
+
+class AudienceFolderUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class AudienceFolderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    product_id: str
+    name: str
+    sort_order: int
+    audience_count: int = 0
+    created_at: datetime
+    updated_at: datetime
 
 
 class ProfileBusinessTypeOptionRead(BaseModel):
