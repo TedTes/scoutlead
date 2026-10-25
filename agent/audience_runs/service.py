@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from business_index.eligibility import searchable_business_conditions
 from audience_runs.schemas import (
     AudienceLeadRead,
     AudienceResultRead,
@@ -15,12 +16,18 @@ from audience_runs.schemas import (
 from db.models import (
     AudienceResultModel,
     AudienceRunModel,
+    BusinessFactModel,
     BusinessModel,
+    BusinessNicheMembershipModel,
     CoverageRequestModel,
     LeadModel,
     NicheModel,
+    SignalDefinitionModel,
     TerritoryModel,
 )
+from job_queue.service import QueueService
+from seeding.batches import active_membership_condition
+from shared.geospatial import haversine_distance_km_expression
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 from canonical.normalization import normalize_domain, normalize_email, normalize_phone
@@ -97,6 +104,7 @@ class AudienceRunService:
         run.index_snapshot_at = now
         self.session.commit()
         niches = _territory_niches(self.session, audience)
+        self._enqueue_staged_signal_collection(audience, niches)
         rows = ProfileMatchService(self.session).match(
             profile=audience,
             niche_ids=[niche.id for niche in niches],
@@ -178,6 +186,86 @@ class AudienceRunService:
         self.session.commit()
         self.session.refresh(run)
         return run, needs_expansion
+
+    def _enqueue_staged_signal_collection(
+        self,
+        audience: TerritoryModel,
+        niches: list[NicheModel],
+    ) -> int:
+        """Validate relevant staged facts already present when a run starts."""
+        signal_keys = list(dict.fromkeys(audience.signal_keys or []))
+        if (
+            not signal_keys
+            or not niches
+            or audience.latitude is None
+            or audience.longitude is None
+        ):
+            return 0
+        distance_km = haversine_distance_km_expression(
+            center_latitude=audience.latitude,
+            center_longitude=audience.longitude,
+            latitude=BusinessModel.latitude,
+            longitude=BusinessModel.longitude,
+        )
+        statement = (
+            select(SignalDefinitionModel, BusinessModel.id)
+            .join(
+                BusinessFactModel,
+                BusinessFactModel.signal_definition_id == SignalDefinitionModel.id,
+            )
+            .join(BusinessModel, BusinessModel.id == BusinessFactModel.business_id)
+            .join(
+                BusinessNicheMembershipModel,
+                BusinessNicheMembershipModel.business_id == BusinessModel.id,
+            )
+            .where(
+                SignalDefinitionModel.key.in_(signal_keys),
+                SignalDefinitionModel.status == "active",
+                SignalDefinitionModel.collector_key.is_not(None),
+                SignalDefinitionModel.opportunity_direction != "none",
+                BusinessFactModel.quality_state == "staged",
+                BusinessNicheMembershipModel.niche_id.in_(
+                    [niche.id for niche in niches]
+                ),
+                active_membership_condition(),
+                *searchable_business_conditions(),
+                BusinessModel.latitude.is_not(None),
+                BusinessModel.longitude.is_not(None),
+                distance_km <= float(audience.radius_km),
+            )
+        )
+        if audience.customer_kind != "both":
+            statement = statement.where(
+                or_(
+                    BusinessModel.customer_kind == audience.customer_kind,
+                    BusinessModel.customer_kind == "unknown",
+                    BusinessModel.customer_kind.is_(None),
+                )
+            )
+        by_definition: dict[str, tuple[SignalDefinitionModel, list[str]]] = {}
+        for definition, business_id in self.session.execute(statement).unique():
+            _, business_ids = by_definition.setdefault(
+                definition.id,
+                (definition, []),
+            )
+            if business_id not in business_ids:
+                business_ids.append(business_id)
+
+        queued = 0
+        queue = QueueService(self.session)
+        for definition, business_ids in by_definition.values():
+            for batch_number, business_id in enumerate(business_ids, start=1):
+                queue.enqueue_signal_collection(
+                    signal_definition_id=definition.id,
+                    signal_version=definition.version,
+                    business_ids=[business_id],
+                    requested_by=None,
+                    reason="audience_staged_fact_validation",
+                    batch_number=batch_number,
+                    commit=False,
+                )
+                queued += 1
+        return queued
 
     def get_read(self, run_id: str) -> AudienceRunRead:
         run = self._run(run_id)

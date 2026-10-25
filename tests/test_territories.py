@@ -17,6 +17,7 @@ from business_facts.repository import (
     BusinessFactValue,
 )
 from business_index.schemas import SearchContract
+from business_index.pipeline import BusinessIndexPipelineService
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import (
@@ -40,6 +41,7 @@ from db.models import (
     ValidationResultModel,
 )
 from db.session import create_database
+from job_queue.schemas import JobType
 from job_queue.service import QueueService
 from products.repository import ProductRepository
 from products.schemas import ProductCreate, QualificationCriterion
@@ -1331,6 +1333,134 @@ def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
         )
 
         assert rows == []
+        run = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).create(profile.id)
+        processed, _ = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).process(run.id)
+        collection_jobs = list(
+            session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type == JobType.SIGNAL_COLLECTION.value
+                )
+            )
+        )
+        assert processed.state == "waiting_validation"
+        assert len(collection_jobs) == 1
+        assert collection_jobs[0].payload["signal_definition_id"] == definition.id
+        assert collection_jobs[0].payload["business_ids"] == [businesses[0].id]
+        assert collection_jobs[0].payload["reason"] == (
+            "audience_staged_fact_validation"
+        )
+
+
+def test_opportunity_audit_handoff_queues_only_waiting_audience_signals() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(
+            session,
+            slug="home_service_hvac",
+            label="HVAC contractors",
+        )
+        requested = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="contact_form_present",
+            label="Contact form present",
+            value_type="boolean",
+            category="conversion",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="payload_path",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"payload_path": "website_enrichment.has_contact_form"},
+            version=1,
+        )
+        unrelated = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="mobile_viewport_present",
+            label="Mobile viewport present",
+            value_type="boolean",
+            category="performance",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="payload_path",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"payload_path": "website_enrichment.has_mobile_viewport"},
+            version=1,
+        )
+        session.add_all([requested, unrelated])
+        session.commit()
+        audience = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[requested.key],
+                exclude=[],
+                limit=25,
+            )
+        )
+        run = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).create(audience.id)
+        run.state = "waiting_validation"
+        segment = BusinessIndexSegmentModel(
+            id=new_id("index_segment"),
+            niche_id=niche.id,
+            market_key=audience.market_key,
+            market_label=audience.city,
+            status="active",
+            demand_count=1,
+            target_business_count=25,
+            source_plan=[],
+            source_state={},
+        )
+        session.add(segment)
+        session.add(
+            CoverageRequestModel(
+                id=new_id("coverage"),
+                run_id=run.id,
+                audience_id=audience.id,
+                niche_id=niche.id,
+                market_key=audience.market_key,
+                requested_count=25,
+                status="processing",
+            )
+        )
+        session.commit()
+
+        pipeline = object.__new__(BusinessIndexPipelineService)
+        pipeline.session = session
+        pipeline.queue = QueueService(session)
+        count = pipeline._enqueue_requested_signal_collection(
+            segment,
+            business_id="business:target",
+        )
+
+        jobs = list(
+            session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type == JobType.SIGNAL_COLLECTION.value
+                )
+            )
+        )
+        assert count == 1
+        assert len(jobs) == 1
+        assert jobs[0].payload["signal_definition_id"] == requested.id
+        assert jobs[0].payload["business_ids"] == ["business:target"]
+        assert jobs[0].payload["reason"] == "audience_coverage_validation"
 
 
 def test_profile_does_not_rank_staged_probable_website_evidence() -> None:

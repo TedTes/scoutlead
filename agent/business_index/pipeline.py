@@ -24,12 +24,17 @@ from business_index.repository import BusinessIndexRepository
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from db.models import (
+    AudienceRunModel,
     BusinessFactModel,
+    BusinessIndexSegmentModel,
     BusinessModel,
+    CoverageRequestModel,
     QueueJobModel,
+    SignalDefinitionModel,
     SourceItemDecisionModel,
     SourceItemModel,
     SourceObservationModel,
+    TerritoryModel,
 )
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from job_queue.schemas import JobStatus, JobType
@@ -417,6 +422,10 @@ class BusinessIndexPipelineService:
             market=segment.market_label,
             opportunity_policy=_opportunity_policy(segment.source_plan),
         )
+        validation_job_count = self._enqueue_requested_signal_collection(
+            segment,
+            business_id=business_id,
+        )
         opportunity_evidence = None
         observations = self.session.scalars(
             select(SourceObservationModel)
@@ -453,7 +462,73 @@ class BusinessIndexPipelineService:
             )
         if job_id:
             self._maybe_complete(segment, current_job_id=job_id)
-        return {"business_id": business_id, "state": "audited"}
+        return {
+            "business_id": business_id,
+            "state": "audited",
+            "signal_collection_job_count": validation_job_count,
+        }
+
+    def _enqueue_requested_signal_collection(
+        self,
+        segment: BusinessIndexSegmentModel,
+        *,
+        business_id: str,
+    ) -> int:
+        """Queue only signals requested by audiences waiting on this segment.
+
+        Discovery and the opportunity audit establish the canonical business and
+        preliminary evidence. This handoff asks the configured signal collectors
+        to turn that evidence into validated, publishable facts for the audiences
+        that caused the segment expansion.
+        """
+        signal_keys: set[str] = set()
+        rows = self.session.scalars(
+            select(TerritoryModel)
+            .join(
+                AudienceRunModel,
+                AudienceRunModel.audience_id == TerritoryModel.id,
+            )
+            .join(
+                CoverageRequestModel,
+                CoverageRequestModel.run_id == AudienceRunModel.id,
+            )
+            .where(
+                AudienceRunModel.state == "waiting_validation",
+                CoverageRequestModel.status.in_(["queued", "processing"]),
+                CoverageRequestModel.niche_id == segment.niche_id,
+                CoverageRequestModel.market_key == segment.market_key,
+            )
+        ).unique()
+        for audience in rows:
+            signal_keys.update(str(key) for key in (audience.signal_keys or []) if key)
+        if not signal_keys:
+            return 0
+
+        definitions = list(
+            self.session.scalars(
+                select(SignalDefinitionModel)
+                .where(
+                    SignalDefinitionModel.key.in_(signal_keys),
+                    SignalDefinitionModel.status == "active",
+                    SignalDefinitionModel.collector_key.is_not(None),
+                    SignalDefinitionModel.opportunity_direction != "none",
+                )
+                .order_by(SignalDefinitionModel.id)
+            )
+        )
+        for definition in definitions:
+            self.queue.enqueue_signal_collection(
+                signal_definition_id=definition.id,
+                signal_version=definition.version,
+                business_ids=[business_id],
+                requested_by=None,
+                reason="audience_coverage_validation",
+                batch_number=1,
+                commit=False,
+            )
+        if definitions:
+            self.session.commit()
+        return len(definitions)
 
     def _businesses_needing_fact_audit(self, segment) -> list[str]:
         business_ids = self.segments.business_ids(segment)
