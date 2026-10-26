@@ -732,7 +732,7 @@ export function ResultsScreen({
               className="secondary results-new-audience-button"
               title="New audience"
               type="button"
-              onClick={onCreateAudience}
+              onClick={() => onCreateAudience()}
             >
               <Plus size={14} />
               <span>New audience</span>
