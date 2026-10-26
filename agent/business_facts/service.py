@@ -17,13 +17,18 @@ from business_facts.freshness import fact_expires_at
 from canonical.normalization import normalize_domain
 from canonical.website_evidence import (
     best_trusted_website_evidence,
-    trusted_website_evidence,
 )
-from db.models import BusinessModel, LeadModel, SourceObservationModel
+from business_validation.validation import BusinessValidationService
+from db.models import (
+    BusinessModel,
+    LeadModel,
+    SourceObservationModel,
+    ValidationResultModel,
+)
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from quality.fact_policy import FactQualityPolicyService
 from seeding.batches import observation_is_quarantined
-from shared.utils import utcnow
+from shared.utils import normalize_url, utcnow
 
 
 RESOLVER_VERSION = 3
@@ -42,21 +47,65 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
         )
         if not observation_is_quarantined(session, observation)
     ]
+    validator = BusinessValidationService(session)
+    for observation in observations:
+        validator.record_website_ownership(
+            business=business,
+            observation=observation,
+            commit=False,
+        )
+    now = utcnow()
+    ownership_validations = list(
+        session.scalars(
+            select(ValidationResultModel).where(
+                ValidationResultModel.business_id == business.id,
+                ValidationResultModel.validation_type == "website_ownership",
+                ValidationResultModel.status == "passed",
+                ValidationResultModel.confidence >= 90,
+                ValidationResultModel.expires_at >= now,
+                ValidationResultModel.source_observation_id.is_not(None),
+            )
+        )
+    )
+    ownership_confidence_by_observation = {
+        validation.source_observation_id: validation.confidence
+        for validation in ownership_validations
+        if validation.source_observation_id is not None
+    }
+    trusted_observation_ids = set(ownership_confidence_by_observation)
     trusted = best_trusted_website_evidence(
-        observations,
+        [
+            observation
+            for observation in observations
+            if observation.id in trusted_observation_ids
+        ],
         business_name=business.display_name,
         business_phone=business.phone,
     )
-    website_promoted = business.website_url is None and trusted is not None
-    if website_promoted:
-        business.website_url = trusted[0].url
-        business.domain = normalize_domain(trusted[0].url)
+    trusted_url = trusted[0].url if trusted is not None else None
+    website_reconciled = bool(
+        trusted_url
+        and normalize_url(business.website_url) != normalize_url(trusted_url)
+    )
+    if website_reconciled:
+        business.website_url = trusted_url
+        business.domain = normalize_domain(trusted_url)
     claim_repository = FactClaimRepository(session)
     for observation in observations:
-        for claim in _claims_from_observation(business, observation):
+        for claim in _claims_from_observation(
+            business,
+            observation,
+            website_ownership_confidence=ownership_confidence_by_observation.get(
+                observation.id
+            ),
+        ):
             claim_repository.record(claim)
     claims = claim_repository.current_for_business(business.id, now=utcnow())
-    resolved = _resolve_facts(business, observations)
+    resolved = _resolve_facts(
+        business,
+        observations,
+        ownership_confidence_by_observation=ownership_confidence_by_observation,
+    )
     resolved = {
         key: _attach_claim_resolution(fact, claims)
         for key, fact in resolved.items()
@@ -91,7 +140,7 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
         if fact.key == BusinessFactKey.WEBSITE_STATUS:
             website_fact_changed = value_changed
     website_fact = resolved.get(BusinessFactKey.WEBSITE_STATUS.value)
-    if website_fact is not None and (website_promoted or website_fact_changed):
+    if website_fact is not None and (website_reconciled or website_fact_changed):
         _synchronize_lead_website_state(
             session,
             business=business,
@@ -103,13 +152,23 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
 def _resolve_facts(
     business: BusinessModel,
     observations: list[SourceObservationModel],
+    *,
+    ownership_confidence_by_observation: dict[str, int],
 ) -> dict[str, BusinessFactValue]:
     facts: dict[str, BusinessFactValue] = {}
-    website = _website_status_fact(business, observations)
+    website = _website_status_fact(
+        business,
+        observations,
+        ownership_confidence_by_observation=ownership_confidence_by_observation,
+    )
     if website is not None:
         facts[website.key.value] = website
     for resolver in (_quote_form_fact, _contact_form_fact):
-        fact = resolver(business, observations)
+        fact = resolver(
+            business,
+            observations,
+            ownership_confidence_by_observation=ownership_confidence_by_observation,
+        )
         if fact is not None:
             facts[fact.key.value] = fact
     for resolver in (_google_rating_fact, _google_review_count_fact, _operational_fact):
@@ -122,17 +181,17 @@ def _resolve_facts(
 def _claims_from_observation(
     business: BusinessModel,
     observation: SourceObservationModel,
+    *,
+    website_ownership_confidence: int | None,
 ) -> list[FactClaim]:
     payload = observation.raw_payload or {}
     values: list[BusinessFactValue] = []
     status, confidence = _website_status_from_payload(payload)
-    if status == "present" and trusted_website_evidence(
-        source=observation.source,
-        payload=payload,
-        business_name=business.display_name,
-        business_phone=business.phone,
-    ) is None:
-        status = None
+    if status == "present":
+        if website_ownership_confidence is None:
+            status = None
+        else:
+            confidence = min(confidence, website_ownership_confidence)
     if status is not None:
         values.append(
             BusinessFactValue(
@@ -149,7 +208,15 @@ def _claims_from_observation(
             )
         )
     for resolver in (_quote_form_fact, _contact_form_fact):
-        value = resolver(business, [observation])
+        value = resolver(
+            business,
+            [observation],
+            ownership_confidence_by_observation=(
+                {observation.id: website_ownership_confidence}
+                if website_ownership_confidence is not None
+                else {}
+            ),
+        )
         if value is not None:
             values.append(value)
     for resolver in (_google_rating_fact, _google_review_count_fact, _operational_fact):
@@ -218,18 +285,18 @@ def _attach_claim_resolution(
 def _website_status_fact(
     business: BusinessModel,
     observations: list[SourceObservationModel],
+    *,
+    ownership_confidence_by_observation: dict[str, int],
 ) -> BusinessFactValue | None:
     candidates: list[BusinessFactValue] = []
     for observation in observations:
         payload = observation.raw_payload or {}
         status, confidence = _website_status_from_payload(payload)
-        if status == "present" and trusted_website_evidence(
-            source=observation.source,
-            payload=payload,
-            business_name=business.display_name,
-            business_phone=business.phone,
-        ) is None:
-            continue
+        if status == "present":
+            ownership_confidence = ownership_confidence_by_observation.get(observation.id)
+            if ownership_confidence is None:
+                continue
+            confidence = min(confidence, ownership_confidence)
         if status is not None:
             candidates.append(
                 BusinessFactValue(
@@ -250,40 +317,45 @@ def _website_status_fact(
             (
                 observation
                 for observation in observations
-                if _payload_has_website(observation.raw_payload or {})
+                if observation.id in ownership_confidence_by_observation
+                and _payload_has_website(observation.raw_payload or {})
             ),
             None,
         )
-        present = BusinessFactValue(
-            key=BusinessFactKey.WEBSITE_STATUS,
-            value="present",
-            observed_at=(evidence.observed_at if evidence else business.updated_at),
-            source_observation_id=evidence.id if evidence else None,
-            confidence=100,
-            expires_at=fact_expires_at(
-                BusinessFactKey.WEBSITE_STATUS.value,
-                evidence.observed_at if evidence else business.updated_at,
-            ),
-            resolver_version=RESOLVER_VERSION,
-        )
-        # A provider omitting websiteUri does not invalidate a URL already attached to
-        # the canonical business. Only a direct availability check can supersede it.
-        direct_failure = next(
-            (
-                candidate
-                for candidate in candidates
-                if candidate.value in {"unavailable", "parked"}
-                and candidate.source_observation_id
-                and any(
-                    observation.id == candidate.source_observation_id
-                    and observation.source == "website_presence_check"
-                    for observation in observations
-                )
-                and _aware(candidate.observed_at) > _aware(present.observed_at)
-            ),
-            None,
-        )
-        return direct_failure or present
+        if evidence is None:
+            business.website_url = None
+            business.domain = None
+        else:
+            present = BusinessFactValue(
+                key=BusinessFactKey.WEBSITE_STATUS,
+                value="present",
+                observed_at=evidence.observed_at,
+                source_observation_id=evidence.id,
+                confidence=ownership_confidence_by_observation[evidence.id],
+                expires_at=fact_expires_at(
+                    BusinessFactKey.WEBSITE_STATUS.value,
+                    evidence.observed_at,
+                ),
+                resolver_version=RESOLVER_VERSION,
+            )
+            # A provider omitting websiteUri does not invalidate a URL already attached to
+            # the canonical business. Only a direct availability check can supersede it.
+            direct_failure = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if candidate.value in {"unavailable", "parked"}
+                    and candidate.source_observation_id
+                    and any(
+                        observation.id == candidate.source_observation_id
+                        and observation.source == "website_presence_check"
+                        for observation in observations
+                    )
+                    and _aware(candidate.observed_at) > _aware(present.observed_at)
+                ),
+                None,
+            )
+            return direct_failure or present
     if not candidates:
         latest_observation = observations[0] if observations else None
         return BusinessFactValue(
@@ -364,19 +436,15 @@ def _map_website_status(value: str) -> tuple[str, int] | None:
 def _quote_form_fact(
     business: BusinessModel,
     observations: list[SourceObservationModel],
+    *,
+    ownership_confidence_by_observation: dict[str, int],
 ) -> BusinessFactValue | None:
     for observation in observations:
         enrichment = (observation.raw_payload or {}).get("website_enrichment")
         if (
             not isinstance(enrichment, dict)
             or not enrichment.get("inspected_urls")
-            or trusted_website_evidence(
-                source=observation.source,
-                payload=observation.raw_payload or {},
-                business_name=business.display_name,
-                business_phone=business.phone,
-            )
-            is None
+            or observation.id not in ownership_confidence_by_observation
         ):
             continue
         quote = enrichment.get("has_quote_form")
@@ -392,7 +460,7 @@ def _quote_form_fact(
             value=value,
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
-            confidence=100,
+            confidence=ownership_confidence_by_observation[observation.id],
             expires_at=fact_expires_at(
                 BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
                 observation.observed_at,
@@ -405,19 +473,15 @@ def _quote_form_fact(
 def _contact_form_fact(
     business: BusinessModel,
     observations: list[SourceObservationModel],
+    *,
+    ownership_confidence_by_observation: dict[str, int],
 ) -> BusinessFactValue | None:
     for observation in observations:
         enrichment = (observation.raw_payload or {}).get("website_enrichment")
         if (
             not isinstance(enrichment, dict)
             or not enrichment.get("inspected_urls")
-            or trusted_website_evidence(
-                source=observation.source,
-                payload=observation.raw_payload or {},
-                business_name=business.display_name,
-                business_phone=business.phone,
-            )
-            is None
+            or observation.id not in ownership_confidence_by_observation
         ):
             continue
         value = enrichment.get("has_contact_form")
@@ -428,7 +492,7 @@ def _contact_form_fact(
             value=value,
             observed_at=observation.observed_at,
             source_observation_id=observation.id,
-            confidence=100,
+            confidence=ownership_confidence_by_observation[observation.id],
             expires_at=fact_expires_at(
                 BusinessFactKey.CONTACT_FORM_PRESENT.value,
                 observation.observed_at,

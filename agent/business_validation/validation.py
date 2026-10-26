@@ -8,6 +8,10 @@ from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
+from canonical.website_evidence import (
+    BLOCKED_WEBSITE_HOSTS,
+    assess_website_ownership,
+)
 from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
@@ -21,22 +25,8 @@ from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
 
 
-VALIDATOR_VERSION = 2
-BLOCKED_HOSTS = {
-    "angi.com",
-    "bbb.org",
-    "kijiji.ca",
-    "craigslist.org",
-    "facebook.com",
-    "homestars.com",
-    "houzz.com",
-    "mapquest.com",
-    "thumbtack.com",
-    "trustedpros.ca",
-    "yelp.ca",
-    "yelp.com",
-    "yellowpages.ca",
-}
+VALIDATOR_VERSION = 3
+BLOCKED_HOSTS = BLOCKED_WEBSITE_HOSTS
 GENERIC_TITLES = {
     "renovation",
     "professional painter for hire",
@@ -99,12 +89,22 @@ class BusinessValidationService:
     ) -> list[ValidationResult]:
         now = utcnow()
         expires_at = now + timedelta(days=30)
-        return [
+        results = [
             self._identity(business, source_item, now, expires_at),
             self._business_type(business, source_item, now, expires_at),
             self._trade(business, source_item, segment, now, expires_at),
             self._location(business, source_item, segment, now, expires_at),
         ]
+        website_ownership = self._website_ownership(
+            business,
+            source_item,
+            segment,
+            now,
+            expires_at,
+        )
+        if website_ownership is not None:
+            results.append(website_ownership)
+        return results
 
     def validate_observation(
         self,
@@ -131,6 +131,7 @@ class BusinessValidationService:
         item = SimpleNamespace(
             id=None,
             source_observation_id=observation.id,
+            provider_id=observation.source,
             external_id=observation.external_id,
             source_url=observation.source_url,
             title=payload.get("title") or payload.get("displayName") or business.display_name,
@@ -140,6 +141,67 @@ class BusinessValidationService:
             business=business,
             source_item=item,
             segment=segment,
+        )
+
+    def record_website_ownership(
+        self,
+        *,
+        business: BusinessModel,
+        observation: SourceObservationModel,
+        commit: bool = False,
+    ):
+        now = observation.observed_at or utcnow()
+        item = SimpleNamespace(
+            id=None,
+            source_observation_id=observation.id,
+            provider_id=observation.source,
+            raw_payload=observation.raw_payload or {},
+        )
+        candidate = self._website_ownership(
+            business,
+            item,
+            None,
+            now,
+            now + timedelta(days=30),
+        )
+        if candidate is None:
+            return None
+        return self.record([candidate], commit=commit)[0]
+
+    def _website_ownership(
+        self,
+        business,
+        item,
+        segment,
+        observed_at,
+        expires_at,
+    ) -> ValidationResult | None:
+        payload = item.raw_payload or {}
+        source = str(
+            getattr(item, "provider_id", None)
+            or payload.get("provider_id")
+            or payload.get("source")
+            or ""
+        )
+        assessment = assess_website_ownership(
+            source=source,
+            payload=payload,
+            business_name=business.display_name,
+            business_phone=business.phone,
+        )
+        if assessment is None:
+            return None
+        return _result(
+            business,
+            item,
+            segment,
+            "website_ownership",
+            assessment.status,
+            assessment.confidence,
+            assessment.reason,
+            observed_at,
+            expires_at,
+            evidence=[assessment.evidence],
         )
 
     def _identity(self, business, item, observed_at, expires_at) -> ValidationResult:

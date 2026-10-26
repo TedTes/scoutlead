@@ -35,6 +35,7 @@ from canonical.semantics import (
 from canonical.website_evidence import trusted_website_evidence
 from business_facts.service import reconcile_business_facts
 from business_validation.policy import business_is_publishable
+from business_validation.validation import BusinessValidationService
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
@@ -99,11 +100,19 @@ class CanonicalRepository:
         allow_raw_contact_email: bool = True,
         append_observation: bool = True,
     ) -> CanonicalLeadLink:
-        raw_payload = raw or {}
+        raw_payload = deepcopy(raw or {})
+        if website_url:
+            raw_payload.setdefault("website_url", website_url)
         source_name = normalize_text(source) or "unknown"
+        trusted_website = trusted_website_evidence(
+            source=source_name,
+            payload=raw_payload,
+            business_name=company_name,
+            business_phone=phone_from_raw(raw_payload),
+        )
         business, identity = self._upsert_business(
             company_name=company_name,
-            website_url=website_url,
+            website_url=trusted_website.url if trusted_website is not None else None,
             geography=geography,
             description=description,
             source=source_name,
@@ -135,6 +144,11 @@ class CanonicalRepository:
             observation=observation,
             source=source_name,
             raw=raw_payload,
+        )
+        BusinessValidationService(self.session).record_website_ownership(
+            business=business,
+            observation=observation,
+            commit=False,
         )
         reconcile_business_facts(self.session, business.id)
         self.session.flush()
@@ -180,6 +194,11 @@ class CanonicalRepository:
             source=source,
             query=_query_from_raw(raw),
             raw=raw,
+        )
+        BusinessValidationService(self.session).record_website_ownership(
+            business=business,
+            observation=observation,
+            commit=False,
         )
         reconcile_business_facts(self.session, business.id)
         self.session.flush()

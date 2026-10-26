@@ -10,6 +10,7 @@ from business_index.schemas import BusinessIndexSearch, OpportunityType
 from business_index.search import BusinessIndexSearchService
 from canonical.repository import CanonicalRepository
 from db.models import (
+    BusinessModel,
     BusinessFactChangeModel,
     BusinessNicheMembershipModel,
     NicheModel,
@@ -212,6 +213,45 @@ def test_verified_website_enrichment_promotes_canonical_url() -> None:
         assert business.website_url == "https://lukekushspainting.example"
         facts = BusinessFactRepository(session).map_for_businesses([business.id])
         assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
+
+
+def test_verified_website_replaces_stale_canonical_url() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="North Star Painting",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("no_website_listed", phone="416-555-0101"),
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+        business.website_url = "https://wrong-company.example"
+        business.domain = "wrong-company.example"
+        session.flush()
+
+        evidence = canonical.record_business_evidence(
+            business=business,
+            source="company_website_seed",
+            raw={
+                "website_url": "https://northstarpainting.example",
+                "website_enrichment": {
+                    "availability_status": "active",
+                    "inspected_urls": ["https://northstarpainting.example"],
+                    "phones": ["416-555-0101"],
+                },
+            },
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses([business.id])
+        website_fact = facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]
+        assert business.website_url == "https://northstarpainting.example"
+        assert business.domain == "northstarpainting.example"
+        assert website_fact.source_observation_id == evidence.source_observation_id
+        assert website_fact.confidence == 95
+        assert website_fact.resolution_state == "confirmed"
 
 
 def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:
