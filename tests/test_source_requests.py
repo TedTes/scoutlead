@@ -696,8 +696,8 @@ def test_source_request_accepts_multiple_apify_sources() -> None:
             llm=FakeWorkflowLLM(),
             apify_sources=[
                 {
-                    "id": "kijiji",
-                    "label": "Kijiji",
+                    "id": "classifieds",
+                    "label": "Classifieds",
                     "input_template": {"query": "{{query}}", "maxResults": "{{limit}}"},
                 },
                 {
@@ -863,8 +863,8 @@ def test_source_request_compiles_url_actor_input_from_source_template() -> None:
             llm=FakeWorkflowLLM(),
             apify_sources=[
                 {
-                    "id": "kijiji",
-                    "label": "Kijiji",
+                    "id": "classifieds",
+                    "label": "Classifieds",
                     "input_kind": "classified_search_url",
                     "search_url_template": (
                         "https://example.test/{{location_slug}}/{{business_slug}}"
@@ -879,7 +879,7 @@ def test_source_request_compiles_url_actor_input_from_source_template() -> None:
         ).create(
             SourceRequestCreate(
                 product_id=product.id,
-                source="kijiji",
+                source="classifieds",
                 prompt="List painting service contacts in Toronto ON",
                 max_results=9,
                 run_immediately=False,

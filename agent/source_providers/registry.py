@@ -12,6 +12,7 @@ from source_providers.catalog import (
     SourceProviderSpec,
     SourceTemplateSpec,
     niche_slug_for_category,
+    source_provider_is_retired,
 )
 
 
@@ -30,16 +31,34 @@ class SourceProviderRegistry:
         provider_configs: Iterable[dict[str, Any]] = (),
         template_configs: Iterable[dict[str, Any]] = (),
     ) -> None:
-        provider_rows = list(providers or SOURCE_PROVIDERS.values())
+        provider_rows = [
+            provider
+            for provider in (providers or SOURCE_PROVIDERS.values())
+            if not source_provider_is_retired(provider.id)
+        ]
         self._providers = {provider.id: provider for provider in provider_rows}
         self._provider_configs: dict[str, dict[str, Any]] = {
             provider.id: {} for provider in provider_rows
         }
         for config in provider_configs:
+            if source_provider_is_retired(
+                config.get("id")
+                or config.get("provider_id")
+                or config.get("source_provider_id")
+            ):
+                continue
             self._merge_provider_config(config)
 
-        template_rows = list(templates or SOURCE_TEMPLATES)
-        template_rows.extend(self._template_from_config(config) for config in template_configs)
+        template_rows = [
+            template
+            for template in (templates or SOURCE_TEMPLATES)
+            if not source_provider_is_retired(template.provider_id)
+        ]
+        template_rows.extend(
+            self._template_from_config(config)
+            for config in template_configs
+            if not source_provider_is_retired(config.get("provider_id"))
+        )
         unknown_providers = sorted(
             {template.provider_id for template in template_rows} - set(self._providers)
         )
@@ -63,6 +82,12 @@ class SourceProviderRegistry:
     ) -> "SourceProviderRegistry":
         configured_apify_sources = []
         for source in apify_sources:
+            if source_provider_is_retired(
+                source.get("id")
+                or source.get("provider_id")
+                or source.get("source_provider_id")
+            ):
+                continue
             source_config = dict(source)
             source_config["enabled"] = bool(
                 source_config.get("enabled", True)

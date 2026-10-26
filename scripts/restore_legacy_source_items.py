@@ -55,7 +55,6 @@ SOURCE_PRIORITY = {
     "openstreetmap_seed": 3,
     "configured_search": 4,
     "website_presence_check": 5,
-    "kijiji": 6,
 }
 
 

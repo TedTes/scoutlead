@@ -146,7 +146,7 @@ def test_apify_actor_adapter_normalizes_nested_contact_fields(monkeypatch) -> No
         id="campaign_source_1",
         campaign_id="campaign_1",
         slot=CampaignSourceSlot.DISCOVERY,
-        provider_id="kijiji",
+        provider_id="classifieds",
         mode=CampaignSourceMode.ACCUMULATE,
         input={"query": "painting service Toronto ON"},
         config={"limit": 5, "actor_input": {"urls": [{"url": "{{query}}"}]}},
@@ -156,9 +156,9 @@ def test_apify_actor_adapter_normalizes_nested_contact_fields(monkeypatch) -> No
         updated_at="2026-08-20T00:00:00Z",
     )
     adapter = ApifyActorDiscoveryAdapter(
-        provider_id="kijiji",
+        provider_id="classifieds",
         api_token="secret-token",
-        actor_id="owner/kijiji",
+        actor_id="owner/classifieds",
     )
 
     result = adapter.run(
@@ -197,13 +197,15 @@ def test_source_registry_registers_multiple_apify_sources() -> None:
         apify_api_token="global-token",
         apify_sources=[
             {"id": "kijiji", "actor_id": "owner/kijiji"},
+            {"id": "local_directory", "actor_id": "owner/local-directory"},
             {"id": "homestars", "actor_id": None},
         ],
     )
 
-    assert "kijiji" in registry.adapters
+    assert "kijiji" not in registry.adapters
+    assert "local_directory" in registry.adapters
     assert "homestars" in registry.adapters
-    assert registry.missing_configuration(["kijiji", "homestars"]) == ["homestars"]
+    assert registry.missing_configuration(["local_directory", "homestars"]) == ["homestars"]
 
 
 def test_apify_actor_adapter_wraps_provider_http_errors(monkeypatch) -> None:
@@ -223,7 +225,7 @@ def test_apify_actor_adapter_wraps_provider_http_errors(monkeypatch) -> None:
         id="campaign_source_1",
         campaign_id="campaign_1",
         slot=CampaignSourceSlot.DISCOVERY,
-        provider_id="kijiji",
+        provider_id="classifieds",
         mode=CampaignSourceMode.ACCUMULATE,
         input={"query": "painting service Toronto ON"},
         config={"limit": 5, "actor_input": {"query": "{{query}}", "maxResults": "{{limit}}"}},
@@ -233,7 +235,7 @@ def test_apify_actor_adapter_wraps_provider_http_errors(monkeypatch) -> None:
         updated_at="2026-08-20T00:00:00Z",
     )
     adapter = ApifyActorDiscoveryAdapter(
-        provider_id="kijiji",
+        provider_id="classifieds",
         api_token="secret-token",
         actor_id="owner/missing-actor",
     )
@@ -263,7 +265,7 @@ def test_apify_actor_adapter_wraps_provider_http_errors(monkeypatch) -> None:
         )
 
     assert exc_info.value.message == "Apify actor request failed"
-    assert exc_info.value.details["provider_id"] == "kijiji"
+    assert exc_info.value.details["provider_id"] == "classifieds"
     assert exc_info.value.details["actor_id"] == "owner~missing-actor"
     assert exc_info.value.details["status_code"] == 404
     assert "Actor was not found" in exc_info.value.details["response_body"]

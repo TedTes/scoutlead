@@ -22,6 +22,7 @@ from products.schemas import ProductRead
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.errors import ValidationError
 from shared.utils import utcnow
+from source_providers.catalog import source_provider_is_retired
 from source_providers.registry import SourceProviderRegistry
 from source_requests.compiler import SourceRequestCompiler
 from source_requests.intent import (
@@ -48,7 +49,7 @@ class SourceRequestService:
         campaigns: CampaignService,
         llm: Any | None = None,
         apify_source_provider_id: str = "apify_actor",
-        apify_source_label: str = "Kijiji",
+        apify_source_label: str = "Configured source",
         apify_sources: list[dict[str, Any]] | None = None,
         google_places_configured: bool | None = None,
         search_configured: bool | None = None,
@@ -588,7 +589,7 @@ class SourceRequestService:
                 or source_config.get("source_provider_id")
                 or ""
             ).strip()
-            if source_id:
+            if source_id and not source_provider_is_retired(source_id):
                 mapped[source_id] = source_config
         return mapped
 

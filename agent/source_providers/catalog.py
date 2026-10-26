@@ -11,6 +11,13 @@ AUTO_PROVIDER_ID = "auto"
 OPENSTREETMAP_PROVIDER_ID = "openstreetmap"
 CONFIGURED_SEARCH_PROVIDER_ID = "configured_search"
 SEED_PROVIDER_ID = "seed"
+RETIRED_SOURCE_PROVIDER_IDS = frozenset({"kijiji"})
+
+
+def source_provider_is_retired(provider_id: str | None) -> bool:
+    normalized = str(provider_id or "").strip().lower().replace("-", "_")
+    leaf = normalized.replace(":", "/").rsplit("/", 1)[-1]
+    return normalized in RETIRED_SOURCE_PROVIDER_IDS or leaf in RETIRED_SOURCE_PROVIDER_IDS
 
 
 @dataclass(frozen=True)

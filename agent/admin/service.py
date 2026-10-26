@@ -63,7 +63,6 @@ SOURCE_PRIORITY = {
     "configured_search": 4,
     "website_presence_check": 5,
     "admin_manual": 6,
-    "kijiji": 7,
 }
 
 

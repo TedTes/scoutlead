@@ -43,7 +43,7 @@ def test_settings_accepts_gmail_email_provider(monkeypatch) -> None:
     ]
 
 
-def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
+def test_settings_ignores_retired_kijiji_and_accepts_active_apify_sources(monkeypatch) -> None:
     monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
     monkeypatch.setenv(
         "APIFY_SOURCE_KIJIJI",
@@ -65,8 +65,8 @@ def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
     sources = settings.apify_source_configs
     sources_by_id = {source["id"]: source for source in sources}
 
-    assert sorted(source["id"] for source in sources) == ["homestars", "kijiji"]
-    assert sources_by_id["kijiji"]["api_token"] == "global-token"
+    assert sorted(source["id"] for source in sources) == ["homestars"]
+    assert "kijiji" not in sources_by_id
     assert sources_by_id["homestars"]["label"] == "HomeStars"
     assert sources_by_id["homestars"]["input_kind"] == "text_query"
     assert (
@@ -82,15 +82,15 @@ def test_settings_accepts_multiple_apify_sources(monkeypatch) -> None:
 def test_settings_derives_apify_source_id_from_env_name(monkeypatch) -> None:
     monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
     monkeypatch.setenv(
-        "APIFY_SOURCE_KIJIJI",
-        '{"label":"Kijiji","actor_id":"owner/kijiji","input_template":{"query":"{{query}}"}}',
+        "APIFY_SOURCE_LOCAL_DIRECTORY",
+        '{"label":"Local directory","actor_id":"owner/local-directory","input_template":{"query":"{{query}}"}}',
     )
 
     sources = Settings().apify_source_configs
 
     assert len(sources) == 1
-    assert sources[0]["id"] == "kijiji"
-    assert sources[0]["label"] == "Kijiji"
+    assert sources[0]["id"] == "local_directory"
+    assert sources[0]["label"] == "Local directory"
 
 
 def test_settings_rejects_apify_source_id_that_does_not_match_env_name(monkeypatch) -> None:
@@ -106,7 +106,7 @@ def test_settings_skips_disabled_apify_source_env(monkeypatch) -> None:
     assert Settings().apify_source_configs == []
 
 
-def test_settings_keeps_legacy_apify_sources_when_no_per_source_env_exists(monkeypatch) -> None:
+def test_settings_removes_kijiji_from_legacy_apify_sources(monkeypatch) -> None:
     monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
     monkeypatch.setenv(
         "APIFY_SOURCES",
@@ -118,7 +118,7 @@ def test_settings_keeps_legacy_apify_sources_when_no_per_source_env_exists(monke
 
     sources = Settings().apify_source_configs
 
-    assert [source["id"] for source in sources] == ["kijiji"]
+    assert sources == []
 
 
 def test_settings_accepts_discovery_source_recipes(monkeypatch) -> None:

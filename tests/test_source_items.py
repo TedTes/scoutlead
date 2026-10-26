@@ -59,9 +59,9 @@ def test_source_item_decisions_are_append_only_and_update_current_state() -> Non
         item = repository.ingest(
             SourceItemCreate(
                 segment_id="segment_test",
-                provider_id="apify/kijiji",
+                provider_id="apify/local_directory",
                 query="house painters Toronto",
-                source_url="https://kijiji.example/item/1",
+                source_url="https://directory.example/item/1",
                 title="Home Painting Services",
                 raw_payload={"seller": {"name": "Pro Paints"}},
                 fetched_at=utcnow(),

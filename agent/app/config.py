@@ -8,6 +8,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from source_providers.catalog import source_provider_is_retired
+
 
 class ApifySourceSettings(BaseModel):
     id: str = Field(min_length=1)
@@ -65,7 +67,7 @@ class Settings(BaseSettings):
     apify_api_base_url: str = "https://api.apify.com/v2"
     apify_sources: str | None = None
     apify_source_provider_id: str = "apify_actor"
-    apify_source_label: str = "Kijiji"
+    apify_source_label: str = "Configured source"
     apify_actor_id: str | None = None
     apify_actor_input_template: str | None = None
     apify_actor_result_mapping: str | None = None
@@ -141,27 +143,26 @@ class Settings(BaseSettings):
             return [
                 source
                 for source in (self._normalize_apify_source(source) for source in parsed_sources)
-                if source["enabled"]
+                if source["enabled"] and not source_provider_is_retired(source["id"])
             ]
 
         if not self.apify_source_provider_id:
             return []
 
-        return [
-            self._normalize_apify_source(
-                {
-                    "id": self.apify_source_provider_id,
-                    "label": self.apify_source_label,
-                    "actor_id": self.apify_actor_id,
-                    "api_token": self.apify_api_token,
-                    "api_base_url": self.apify_api_base_url,
-                    "input_template": self.apify_actor_input_template,
-                    "result_mapping": self.apify_actor_result_mapping,
-                    "max_charge_usd": self.apify_actor_max_charge_usd,
-                    "detail": f"{self.apify_source_label} listings",
-                }
-            )
-        ]
+        source = self._normalize_apify_source(
+            {
+                "id": self.apify_source_provider_id,
+                "label": self.apify_source_label,
+                "actor_id": self.apify_actor_id,
+                "api_token": self.apify_api_token,
+                "api_base_url": self.apify_api_base_url,
+                "input_template": self.apify_actor_input_template,
+                "result_mapping": self.apify_actor_result_mapping,
+                "max_charge_usd": self.apify_actor_max_charge_usd,
+                "detail": f"{self.apify_source_label} listings",
+            }
+        )
+        return [] if source_provider_is_retired(source["id"]) else [source]
 
     @property
     def source_template_configs(self) -> list[dict[str, Any]]:
