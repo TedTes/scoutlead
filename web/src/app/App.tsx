@@ -88,8 +88,12 @@ function AppShell({
   accountName?: string;
   accountSlot?: ReactNode;
 }) {
-  const [viewMode, setViewMode] = useState<AppViewMode>("auto");
-  const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
+  const navigationStorageKey = `scoutlead:last-view:${accountId || "local"}`;
+  const workflowStorageKey = `scoutlead:last-workflow:${accountId || "local"}`;
+  const [viewMode, setViewMode] = useState<AppViewMode>(() => readStoredAppView(navigationStorageKey));
+  const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>(() =>
+    readStoredWorkflowView(workflowStorageKey),
+  );
   const [leadListRequestId, setLeadListRequestId] = useState(0);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [renameAudience, setRenameAudience] = useState<Territory | null>(null);
@@ -270,13 +274,12 @@ function AppShell({
   };
 
   const handleDeleteAudience = async (profile: Territory) => {
-    const nextProfile = productProfiles.find((item) => item.id !== profile.id);
     await deleteProfile(profile.id);
     setDeleteAudience(null);
     if (selectedProfileId === profile.id) {
-      setSelectedProfileId(nextProfile?.id || "");
+      setSelectedProfileId("");
       setSelectedDiscoveryRunId("");
-      setViewMode("overview");
+      setViewMode("audiences");
     }
     showToast({
       title: "Audience deleted",
@@ -347,6 +350,14 @@ function AppShell({
     profileBatch?.audience.id,
     selectedProfileId,
   ]);
+
+  useEffect(() => {
+    writeStoredValue(navigationStorageKey, viewMode === "overview" ? "audiences" : viewMode);
+  }, [navigationStorageKey, viewMode]);
+
+  useEffect(() => {
+    writeStoredValue(workflowStorageKey, leadWorkflowView);
+  }, [leadWorkflowView, workflowStorageKey]);
 
   useEffect(() => {
     writeStoredDimension("scoutlead:rail-width", railWidth);
@@ -952,7 +963,7 @@ function resolveActiveScreen(
 ): Screen {
   if (viewMode === "product" || viewMode === "integrations") return viewMode;
   if (viewMode !== "auto") return viewMode;
-  return hasSelectedRun ? "results" : "overview";
+  return hasSelectedRun ? "results" : "audiences";
 }
 
 function FolderEditorDialog({
@@ -1274,6 +1285,47 @@ function readStoredDimension(key: string, fallback: number, min: number, max: nu
     return Number.isFinite(stored) ? Math.min(max, Math.max(min, stored)) : fallback;
   } catch {
     return fallback;
+  }
+}
+
+function readStoredAppView(key: string): AppViewMode {
+  try {
+    const value = localStorage.getItem(key);
+    return value === "auto"
+      || value === "audiences"
+      || value === "integrations"
+      || value === "product"
+      || value === "results"
+      ? value
+      : localStorage.getItem("selectedProfileId")
+        ? "auto"
+        : "audiences";
+  } catch {
+    return "audiences";
+  }
+}
+
+function readStoredWorkflowView(key: string): LeadWorkflowView {
+  try {
+    const value = localStorage.getItem(key);
+    return value === "inbox"
+      || value === "this_week"
+      || value === "shortlisted"
+      || value === "contacted"
+      || value === "dismissed"
+      || value === "all"
+      ? value
+      : "inbox";
+  } catch {
+    return "inbox";
+  }
+}
+
+function writeStoredValue(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Navigation remains usable when browser storage is disabled.
   }
 }
 

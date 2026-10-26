@@ -426,7 +426,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       );
       const nextProfileId = productProfiles.some((profile) => profile.id === storedProfileId)
         ? storedProfileId
-        : productProfiles[0]?.id || "";
+        : "";
       setSelectedProfileIdState(nextProfileId);
       selectedProfileIdRef.current = nextProfileId;
       localStorage.setItem("selectedProfileId", nextProfileId);
@@ -683,10 +683,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           const remaining = territories.filter((profile) => profile.id !== profileId);
           setTerritories(remaining);
           if (profileId === selectedProfileIdState) {
-            const nextProfile = remaining.find(
-              (profile) => profile.product_id === selectedProductIdState,
-            );
-            persistSelectedProfileId(nextProfile?.id || "");
+            persistSelectedProfileId("");
             persistSelectedDiscoveryRunId("");
             setProfileBatch(null);
           }
