@@ -36,10 +36,6 @@
   padding: 24px 28px 64px;
 }
 
-.audiences-overview-mobile-heading {
-  display: none;
-}
-
 .audiences-overview-metrics {
   display: grid;
   gap: 10px;
@@ -259,14 +255,15 @@
 
 @media (max-width: 900px) {
   .audiences-overview { padding: 24px 16px 48px; }
-  .audiences-overview-mobile-heading { display: grid; gap: 4px; margin-bottom: 18px; }
-  .audiences-overview-mobile-heading span { color: var(--green); font-size: 9px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
-  .audiences-overview-mobile-heading h1 { font-size: 24px; margin: 0; }
   .audiences-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .audiences-overview-breakdown { grid-template-columns: 1fr; }
-  .audiences-overview-columns { display: none; }
-  .audiences-overview-row { grid-template-columns: minmax(190px, 1fr) repeat(3, 58px) 18px; gap: 10px; }
-  .audiences-overview-state { display: none !important; }
+  .audiences-overview-list {
+    -webkit-overflow-scrolling: touch;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+  .audiences-overview-columns,
+  .audiences-overview-row { min-width: 800px; }
 }
 
 /* Outreach variants, response handling, and playbook administration. */
@@ -6330,6 +6327,16 @@ a {
 .audience-dialog-form > label > input,
 .audience-dialog-form > label > select { border: 1px solid var(--line-strong); border-radius: 6px; min-height: 38px; padding: 8px 10px; }
 
+.audience-dialog-actions {
+  margin-top: 2px;
+}
+
+.audience-dialog-actions .secondary,
+.audience-dialog-actions .runbtn,
+.audience-dialog-actions .danger {
+  min-width: 92px;
+}
+
 .audience-delete-dialog p {
   margin: 0;
 }
@@ -11452,6 +11459,31 @@ button.bulk-recipient-select:hover {
   margin: 0;
 }
 
+.result-refresh-button {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--text);
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 8px 12px;
+}
+
+.result-refresh-button:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.result-refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .results-body {
   min-width: 0;
 }
@@ -13452,9 +13484,9 @@ button.bulk-recipient-select:hover {
   }
 
   .drawer-action-footer .drawer-footer-secondary button.active {
-    background: #6f51df;
-    border-color: #6f51df;
-    color: #ffffff;
+    background: var(--red-bg);
+    border-color: var(--red-line);
+    color: var(--red);
   }
 
   .drawer-action-footer .drawer-primary-action:hover,
@@ -13537,6 +13569,31 @@ button.bulk-recipient-select:hover {
 .drawer-primary-action:hover {
   background: var(--black-hover);
   border-color: var(--black-hover);
+}
+
+.drawer-restore-action {
+  align-items: center;
+  background: var(--green);
+  border: 1px solid var(--green);
+  border-radius: 9px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 7px;
+  height: 39px;
+  justify-content: center;
+  width: 100%;
+}
+
+.drawer-restore-action:hover {
+  background: #10834d;
+  border-color: #10834d;
+}
+
+.drawer-restore-action:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .modal-backdrop {

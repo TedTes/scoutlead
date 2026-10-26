@@ -172,6 +172,7 @@ export function ResultsScreen({
     territoryApi,
     refillProfile,
     refreshAll,
+    refreshProfileBatch,
   } = useAppData();
   const { showToast } = useToast();
   const [selectedContactId, setSelectedContactId] = useState("");
@@ -186,6 +187,7 @@ export function ResultsScreen({
   const [running, setRunning] = useState(false);
   const [draftingShortlist, setDraftingShortlist] = useState(false);
   const [sendingWebhook, setSendingWebhook] = useState(false);
+  const [refreshingBatch, setRefreshingBatch] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
@@ -1010,6 +1012,30 @@ export function ResultsScreen({
             <section className="result-empty-card">
               <strong>{isGlobalView ? "No leads in this view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).title}</strong>
               <p>{isGlobalView ? "Create an audience or choose another workflow view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
+              {!isGlobalView && visibleProfileBatch && ["scoring", "retrying"].includes(visibleProfileBatch.state) ? (
+                <button
+                  className="result-refresh-button"
+                  disabled={refreshingBatch}
+                  type="button"
+                  onClick={async () => {
+                    setRefreshingBatch(true);
+                    try {
+                      await refreshProfileBatch(visibleProfileBatch.audience.id);
+                    } catch (err) {
+                      showToast({
+                        title: "Refresh failed",
+                        message: err instanceof Error ? err.message : String(err),
+                        tone: "red",
+                      });
+                    } finally {
+                      setRefreshingBatch(false);
+                    }
+                  }}
+                >
+                  <RotateCw size={14} className={refreshingBatch ? "sl-spin-icon" : ""} />
+                  {refreshingBatch ? "Refreshing…" : "Refresh results"}
+                </button>
+              ) : null}
             </section>
           )}
         </section>
@@ -1031,6 +1057,7 @@ export function ResultsScreen({
         ) : (
           <ContactDrawer
             contact={detailContact}
+            dismissedView={workflowView === "dismissed"}
             persistent={desktopSplitView}
             message={selectedMessage}
             gmailConnected={gmailConnected}
@@ -2730,6 +2757,7 @@ function ContactCard({
 
 function ContactDrawer({
   contact,
+  dismissedView = false,
   gmailConnected,
   message,
   onClose,
@@ -2746,6 +2774,7 @@ function ContactDrawer({
   onUpdateMessage,
 }: {
   contact: DiscoveryResult;
+  dismissedView?: boolean;
   gmailConnected: boolean;
   message: Message | undefined;
   onClose: () => void;
@@ -2928,6 +2957,34 @@ function ContactDrawer({
       },
       "Review saved",
     );
+  };
+
+  const restoreLead = async () => {
+    if (savingReview) return;
+    setSavingReview(true);
+    try {
+      if (blocked) {
+        await onUpdateContactPolicy(contact.id, {
+          status: "allowed",
+          reason: "Restored by user",
+        });
+      }
+      if (currentReviewStatus === "not_fit") {
+        await onUpdateLead(contact.id, {
+          review_status: "unreviewed",
+          shortlisted: false,
+        });
+      }
+      showToast({ title: "Restored to Leads", tone: "green" });
+    } catch (err) {
+      showToast({
+        title: "Restore failed",
+        message: err instanceof Error ? err.message : String(err),
+        tone: "red",
+      });
+    } finally {
+      setSavingReview(false);
+    }
   };
 
   const toggleShortlist = () => {
@@ -3427,34 +3484,48 @@ function ContactDrawer({
             </div>
 
             <footer className="drawer-footer drawer-action-footer">
-              <div className="drawer-footer-secondary">
-                {shortlisted ? (
-                  <button
-                    type="button"
-                    disabled={savingReview || !canShortlist}
-                    onClick={toggleShortlist}
-                  >
-                    Remove shortlist
-                  </button>
-                ) : null}
+              {dismissedView ? (
                 <button
-                  className={currentReviewStatus === "not_fit" ? "active" : ""}
+                  className="drawer-restore-action"
                   type="button"
-                  disabled={savingReview || blocked}
-                  onClick={() => chooseReviewStatus("not_fit")}
+                  disabled={savingReview}
+                  onClick={() => void restoreLead()}
                 >
-                  Dismiss
+                  <RotateCw size={14} />
+                  Restore to Leads
                 </button>
-              </div>
-              <button
-                className="drawer-primary-action"
-                type="button"
-                disabled={shortlisted ? savingOutcome || contacted : savingReview || !canShortlist}
-                onClick={shortlisted ? () => void markContacted() : toggleShortlist}
-              >
-                {shortlisted ? <Check size={14} /> : <Star size={14} />}
-                {shortlisted ? (contacted ? "Contacted" : "Mark contacted") : "Shortlist"}
-              </button>
+              ) : (
+                <>
+                  <div className="drawer-footer-secondary">
+                    {shortlisted ? (
+                      <button
+                        type="button"
+                        disabled={savingReview || !canShortlist}
+                        onClick={toggleShortlist}
+                      >
+                        Remove shortlist
+                      </button>
+                    ) : null}
+                  <button
+                    className={currentReviewStatus === "not_fit" ? "active" : ""}
+                    type="button"
+                    disabled={savingReview || blocked}
+                    onClick={() => chooseReviewStatus("not_fit")}
+                  >
+                    Dismiss
+                  </button>
+                  </div>
+                  <button
+                    className="drawer-primary-action"
+                    type="button"
+                    disabled={shortlisted ? savingOutcome || contacted : savingReview || !canShortlist}
+                    onClick={shortlisted ? () => void markContacted() : toggleShortlist}
+                  >
+                    {shortlisted ? <Check size={14} /> : <Star size={14} />}
+                    {shortlisted ? (contacted ? "Contacted" : "Mark contacted") : "Shortlist"}
+                  </button>
+                </>
+              )}
             </footer>
       </aside>
 
@@ -4310,7 +4381,13 @@ function matchesWorkflowView(
   view: LeadWorkflowView,
   context: { includeAllLeads: boolean; thisWeekCutoffMs: number },
 ) {
-  if (view === "inbox") return context.includeAllLeads || reviewStatus(contact) === "unreviewed";
+  const dismissed = reviewStatus(contact) === "not_fit" || isContactBlocked(contact);
+  if (view === "dismissed") return dismissed;
+  if (dismissed) return false;
+
+  if (view === "inbox") {
+    return context.includeAllLeads || reviewStatus(contact) === "unreviewed";
+  }
   if (view === "this_week") {
     if (context.includeAllLeads) return true;
     const createdAt = new Date(contact.created_at).getTime();
@@ -4318,7 +4395,6 @@ function matchesWorkflowView(
   }
   if (view === "shortlisted") return Boolean(contact.shortlisted_at);
   if (view === "contacted") return Boolean(contact.last_contacted_at || contact.latest_outcome);
-  if (view === "dismissed") return reviewStatus(contact) === "not_fit" || isContactBlocked(contact);
   return true;
 }
 

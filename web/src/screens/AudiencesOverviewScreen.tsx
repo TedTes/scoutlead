@@ -28,10 +28,6 @@ export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (i
 
   return (
     <section className="audiences-overview">
-      <header className="audiences-overview-mobile-heading">
-        <span>Account-wide performance</span>
-        <h1>Overview</h1>
-      </header>
       {loading ? <div className="audiences-overview-empty"><LoaderCircle className="sl-spin-icon" size={18} /> Loading audiences</div> : null}
       {!loading && error ? <div className="audiences-overview-empty error">{error}</div> : null}
       {!loading && !error && !rows.length ? <div className="audiences-overview-empty">No audiences yet.</div> : null}

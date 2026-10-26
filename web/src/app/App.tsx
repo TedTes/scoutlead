@@ -166,8 +166,12 @@ function AppShell({
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
   const recentProductContacts = productContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
+  const activeProductContacts = productContacts.filter(
+    (contact) => contact.review_status !== "not_fit"
+      && (!contact.contact_policy_status || contact.contact_policy_status === "allowed"),
+  );
   const workflowCounts: LeadWorkflowCounts = {
-    inbox: productContacts.length,
+    inbox: activeProductContacts.length,
     this_week: recentProductContacts.length,
     shortlisted: productContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
     contacted: productContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
@@ -750,7 +754,7 @@ function AudienceSidebarRow({
     </button>
     <div className="audience-row-actions">
       <button aria-expanded={menuOpen} aria-label={`Actions for ${profile.label}`} type="button" onClick={onMenuToggle}><MoreVertical size={15} /></button>
-      {menuOpen ? <div className="audience-sidebar-menu"><button type="button" onClick={onMove}><Folder size={13} />Move to folder</button><button type="button" onClick={onRename}><Pencil size={13} />Rename audience</button><button className="is-danger" type="button" onClick={onDelete}><Trash2 size={13} />Delete audience</button></div> : null}
+      {menuOpen ? <div className="audience-sidebar-menu"><button aria-label={`Move ${profile.label}`} type="button" onClick={onMove}><Folder size={13} />Move</button><button aria-label={`Rename ${profile.label}`} type="button" onClick={onRename}><Pencil size={13} />Rename</button><button aria-label={`Delete ${profile.label}`} className="is-danger" type="button" onClick={onDelete}><Trash2 size={13} />Delete</button></div> : null}
     </div>
   </div>;
 }
@@ -981,7 +985,7 @@ function FolderEditorDialog({
   return <Modal title={folder ? "Rename folder" : "New folder"} onClose={onClose}>
     <form className="audience-dialog-form" onSubmit={async (event) => { event.preventDefault(); if (!cleaned || saving) return; setSaving(true); try { await onSave(cleaned); } finally { setSaving(false); } }}>
       <label><span>Folder name</span><input autoFocus maxLength={100} placeholder="For example, Roofers" value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <div className="modal-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={!cleaned || saving} type="submit">{saving ? "Saving…" : folder ? "Save" : "Create folder"}</button></div>
+      <div className="dialog-actions audience-dialog-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="runbtn" disabled={!cleaned || saving} type="submit">{saving ? "Saving…" : folder ? "Save" : <><Plus size={14} />Create folder</>}</button></div>
     </form>
   </Modal>;
 }
@@ -989,7 +993,7 @@ function FolderEditorDialog({
 function DeleteFolderDialog({ folder, onClose, onDelete }: { folder: AudienceFolder; onClose: () => void; onDelete: () => Promise<void> }) {
   const [deleting, setDeleting] = useState(false);
   return <Modal title="Delete folder" onClose={onClose}>
-    <div className="audience-delete-dialog"><p>Delete <strong>{folder.name}</strong>? Its audiences will remain available outside folders.</p><div className="modal-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="danger" disabled={deleting} type="button" onClick={async () => { setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}>{deleting ? "Deleting…" : "Delete folder"}</button></div></div>
+    <div className="audience-delete-dialog"><p>Delete <strong>{folder.name}</strong>? Its audiences will remain available outside folders.</p><div className="dialog-actions audience-dialog-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="danger" disabled={deleting} type="button" onClick={async () => { setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}>{deleting ? "Deleting…" : "Delete folder"}</button></div></div>
   </Modal>;
 }
 
@@ -1000,7 +1004,7 @@ function MoveAudienceDialog({ audience, folders, onClose, onMove }: { audience: 
     <form className="audience-dialog-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { await onMove(folderId); } finally { setSaving(false); } }}>
       <p>Choose where <strong>{audience.label}</strong> appears in the sidebar.</p>
       <label><span>Folder</span><select value={folderId} onChange={(event) => setFolderId(event.target.value)}><option value="">No folder</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
-      <div className="modal-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={saving || folderId === (audience.folder_id || "")} type="submit">{saving ? "Moving…" : "Move"}</button></div>
+      <div className="dialog-actions audience-dialog-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="runbtn" disabled={saving || folderId === (audience.folder_id || "")} type="submit">{saving ? "Moving…" : "Move"}</button></div>
     </form>
   </Modal>;
 }

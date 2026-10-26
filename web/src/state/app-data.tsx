@@ -159,6 +159,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   const selectedDiscoveryRunIdRef = useRef(selectedDiscoveryRunIdState);
   const profileSelectionRequestRef = useRef(0);
   const leadMutationVersionRef = useRef(new Map<string, number>());
+  const leadMutationEpochRef = useRef(0);
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
@@ -231,20 +232,27 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   );
 
   const refreshProductContacts = useCallback(
-    async (productId: string, runs: DiscoveryRun[]) => {
+    async (productId: string, runs: DiscoveryRun[], profiles: Territory[]) => {
+      const mutationEpoch = leadMutationEpochRef.current;
       if (!productId) {
         setProductContacts([]);
         return;
       }
       const productRuns = runs.filter((run) => run.product_id === productId);
-      if (!productRuns.length) {
+      const productProfiles = profiles.filter((profile) => profile.product_id === productId);
+      if (!productRuns.length && !productProfiles.length) {
         setProductContacts([]);
         return;
       }
-      const resultGroups = await Promise.all(
-        productRuns.map((run) => api.getResults(run.id).catch(() => [])),
-      );
-      setProductContacts(dedupeContacts(resultGroups.flat()));
+      const [resultGroups, profileBatches] = await Promise.all([
+        Promise.all(productRuns.map((run) => api.getResults(run.id).catch(() => []))),
+        Promise.all(productProfiles.map((profile) => api.getProfileBatch(profile.id).catch(() => null))),
+      ]);
+      if (mutationEpoch !== leadMutationEpochRef.current) return;
+      setProductContacts(dedupeContacts([
+        ...resultGroups.flat(),
+        ...profileBatches.flatMap((batch) => batch?.leads || []),
+      ]));
     },
     [api],
   );
@@ -334,12 +342,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
 
   const refreshProfileBatch = useCallback(
     async (profileId?: string) => {
+      const mutationEpoch = leadMutationEpochRef.current;
       const targetProfileId = profileId ?? selectedProfileIdRef.current;
       if (!targetProfileId) {
         setProfileBatch(null);
         return null;
       }
       const batch = await api.getProfileBatch(targetProfileId);
+      if (mutationEpoch !== leadMutationEpochRef.current) return batch;
       if (targetProfileId === selectedProfileIdRef.current) {
         setProfileBatch(batch);
         if (!batch.outreach_campaign_id) {
@@ -390,6 +400,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   );
 
   const refreshAll = useCallback(async ({ showLoading = true }: RefreshAllOptions = {}) => {
+    const mutationEpoch = leadMutationEpochRef.current;
     if (showLoading) setLoading(true);
     setError("");
     try {
@@ -443,11 +454,13 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectedDiscoveryRunIdRef.current = nextRunId;
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
-      await refreshProductContacts(nextProductId, nextRuns);
+      await refreshProductContacts(nextProductId, nextRuns, nextTerritories);
       const nextBatch = nextProfileId
         ? await api.getProfileBatch(nextProfileId).catch(() => null)
         : null;
-      setProfileBatch(nextBatch);
+      if (mutationEpoch === leadMutationEpochRef.current) {
+        setProfileBatch(nextBatch);
+      }
       const effectiveRunId = nextBatch
         ? nextBatch.outreach_campaign_id || ""
         : nextRunId;
@@ -456,9 +469,9 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         selectedDiscoveryRunIdRef.current = effectiveRunId;
         localStorage.setItem("selectedDiscoveryRunId", effectiveRunId);
       }
-      if (effectiveRunId) {
+      if (effectiveRunId && mutationEpoch === leadMutationEpochRef.current) {
         await refreshSnapshot(effectiveRunId, nextBatch?.leads);
-      } else {
+      } else if (mutationEpoch === leadMutationEpochRef.current) {
         setSnapshot({ ...emptySnapshot, results: nextBatch?.leads || [] });
       }
       await refreshGmailConnection(nextProductId);
@@ -487,33 +500,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   }, [refreshAll]);
 
   useEffect(() => {
-    if (selectedDiscoveryRun?.status !== "expanding") return;
-    const timer = window.setInterval(() => {
-      void refreshSnapshot(selectedDiscoveryRun.id);
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [refreshSnapshot, selectedDiscoveryRun?.id, selectedDiscoveryRun?.status]);
-
-  useEffect(() => {
-    if (
-      !profileBatch
-      || !["scoring", "retrying"].includes(profileBatch.state)
-      || !selectedProfileIdState
-    ) return;
-    const delay = profileBatch.state === "retrying" ? 15_000 : 2_500;
-    const timer = window.setInterval(() => {
-      void refreshProfileBatch(selectedProfileIdState);
-    }, delay);
-    return () => window.clearInterval(timer);
-  }, [
-    profileBatch?.state,
-    refreshProfileBatch,
-    selectedProfileIdState,
-  ]);
-
-  useEffect(() => {
-    void refreshProductContacts(selectedProductIdState, discoveryRuns);
-  }, [discoveryRuns, refreshProductContacts, selectedProductIdState]);
+    void refreshProductContacts(selectedProductIdState, discoveryRuns, territories);
+  }, [discoveryRuns, refreshProductContacts, selectedProductIdState, territories]);
 
   useEffect(() => {
     void refreshGmailConnection(selectedProductIdState);
@@ -816,6 +804,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       updateLead: (leadId, update) =>
         (async () => {
           setError("");
+          leadMutationEpochRef.current += 1;
           const mutationVersion = (leadMutationVersionRef.current.get(leadId) || 0) + 1;
           leadMutationVersionRef.current.set(leadId, mutationVersion);
           const optimisticTimestamp = new Date().toISOString();
@@ -830,9 +819,11 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
           }), setProductContacts, setSnapshot, setProfileBatch);
           try {
             const saved = await api.updateLead(leadId, update);
+            leadMutationEpochRef.current += 1;
             if (leadMutationVersionRef.current.get(leadId) !== mutationVersion) return;
             updateLeadInState(leadId, () => saved, setProductContacts, setSnapshot, setProfileBatch);
           } catch (err) {
+            leadMutationEpochRef.current += 1;
             if (leadMutationVersionRef.current.get(leadId) !== mutationVersion) return;
             setError(err instanceof Error ? err.message : String(err));
             await refreshAll({ showLoading: false });
