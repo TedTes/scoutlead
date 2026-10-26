@@ -110,6 +110,18 @@ class AudienceRunService:
             niche_ids=[niche.id for niche in niches],
             limit=min(max(run.requested_count * 8, 100), 500),
         )
+        dismissed_business_ids = set(
+            self.session.scalars(
+                select(AudienceResultModel.business_id).where(
+                    AudienceResultModel.audience_id == audience.id,
+                    AudienceResultModel.review_status == "not_fit",
+                )
+            )
+        )
+        rows = [
+            row for row in rows
+            if _business_id(row) not in dismissed_business_ids
+        ]
         previously_delivered = set(
             self.session.scalars(
                 select(AudienceResultModel.business_id)
@@ -300,6 +312,8 @@ class AudienceRunService:
                     [
                         AudienceRunState.READY.value,
                         AudienceRunState.PARTIAL.value,
+                        AudienceRunState.MATCHING.value,
+                        AudienceRunState.EXPANDING.value,
                         AudienceRunState.WAITING_VALIDATION.value,
                     ]
                 ),
@@ -312,14 +326,38 @@ class AudienceRunService:
         )
         if run is None:
             return []
-        return [
-            self._lead_read(result)
-            for result in self.session.scalars(
+        current_results = list(
+            self.session.scalars(
                 select(AudienceResultModel)
                 .where(AudienceResultModel.run_id == run.id)
                 .order_by(AudienceResultModel.rank_position)
             )
-        ]
+        )
+        current_business_ids = {result.business_id for result in current_results}
+        managed_history: list[AudienceResultModel] = []
+        managed_business_ids: set[str] = set()
+        for result in self.session.scalars(
+            select(AudienceResultModel)
+            .where(
+                AudienceResultModel.audience_id == audience_id,
+                AudienceResultModel.run_id != run.id,
+                or_(
+                    AudienceResultModel.reviewed_at.is_not(None),
+                    AudienceResultModel.shortlisted_at.is_not(None),
+                    AudienceResultModel.contacted_at.is_not(None),
+                    AudienceResultModel.outreach_lead_id.is_not(None),
+                ),
+            )
+            .order_by(AudienceResultModel.updated_at.desc())
+        ):
+            if (
+                result.business_id in current_business_ids
+                or result.business_id in managed_business_ids
+            ):
+                continue
+            managed_business_ids.add(result.business_id)
+            managed_history.append(result)
+        return [self._lead_read(result) for result in [*current_results, *managed_history]]
 
     def update_result(
         self,
@@ -331,12 +369,22 @@ class AudienceRunService:
         values = update.model_dump(exclude_unset=True)
         if "review_status" in values:
             review_status = values["review_status"]
-            result.review_status = str(
+            normalized_review_status = str(
                 review_status.value if hasattr(review_status, "value") else review_status
             )
-            result.reviewed_at = now
-            if result.review_status == "not_fit":
-                result.shortlisted_at = None
+            related_results = list(
+                self.session.scalars(
+                    select(AudienceResultModel).where(
+                        AudienceResultModel.audience_id == result.audience_id,
+                        AudienceResultModel.business_id == result.business_id,
+                    )
+                )
+            )
+            for related_result in related_results:
+                related_result.review_status = normalized_review_status
+                related_result.reviewed_at = now
+                if normalized_review_status == "not_fit":
+                    related_result.shortlisted_at = None
         if "review_note" in values:
             result.review_note = values["review_note"]
         if "shortlisted" in values:

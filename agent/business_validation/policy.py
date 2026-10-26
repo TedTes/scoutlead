@@ -71,7 +71,7 @@ def business_is_publishable(
     business_id: str,
     niche_id: str,
     market_key: str,
-    allow_unvalidated: bool = True,
+    allow_unvalidated: bool = False,
 ) -> bool:
     current = ValidationRepository(session).latest_current(
         business_id,

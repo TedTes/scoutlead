@@ -1008,6 +1008,65 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
         assert all(not result.is_new for result in second_read.results)
 
 
+def test_dismissed_business_stays_out_of_refills_and_can_be_restored() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=1,
+            )
+        )
+        profile.batch_size = 1
+        session.commit()
+        service = AudienceRunService(session, workspace_id="workspace:first")
+
+        first_run = service.create(profile.id)
+        service.process(first_run.id)
+        dismissed = service.get_read(first_run.id).results[0]
+        service.update_result(
+            dismissed.id,
+            AudienceResultUpdate(review_status="not_fit"),
+        )
+
+        replacement_run = service.create(profile.id)
+        service.process(replacement_run.id)
+        replacement = service.get_read(replacement_run.id).results
+
+        assert len(replacement) == 1
+        assert replacement[0].business_id != dismissed.business_id
+        visible = service.latest_leads_for_audience(profile.id)
+        assert {lead.business_id for lead in visible} == {
+            replacement[0].business_id,
+            dismissed.business_id,
+        }
+        assert next(
+            lead for lead in visible if lead.business_id == dismissed.business_id
+        ).review_status.value == "not_fit"
+
+        service.update_result(
+            dismissed.id,
+            AudienceResultUpdate(review_status="unreviewed"),
+        )
+
+        restored = service.latest_leads_for_audience(profile.id)
+        assert next(
+            lead for lead in restored if lead.business_id == dismissed.business_id
+        ).review_status.value == "unreviewed"
+
+
 def test_audience_run_requests_coverage_and_waits_until_deadline() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -1042,6 +1101,19 @@ def test_audience_run_requests_coverage_and_waits_until_deadline() -> None:
         assert coverage is not None
         assert coverage.status == "queued"
         assert coverage.requested_count == 23
+
+        # A background retry moves the run through matching again. Results
+        # already accepted for this run must remain visible while it does so.
+        run.state = "matching"
+        session.commit()
+        assert len(service.latest_leads_for_audience(profile.id)) == 2
+
+        run.state = "expanding"
+        session.commit()
+        assert len(service.latest_leads_for_audience(profile.id)) == 2
+
+        run.state = "waiting_validation"
+        session.commit()
 
         run, needs_expansion = service.process(run.id)
 
@@ -2313,6 +2385,7 @@ def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances
                 },
             },
         )
+        _validate_business_memberships(session)
         service = TerritoryService(session, workspace_id="workspace:first")
         toronto = service.create_profile(
             _profile_create(session,
@@ -2549,6 +2622,11 @@ def _seed_hvac_businesses(session) -> None:
                 },
             },
         )
+
+    _validate_business_memberships(session)
+
+
+def _validate_business_memberships(session) -> None:
     now = utcnow()
     for membership in session.scalars(select(BusinessNicheMembershipModel)):
         for dimension, confidence in {

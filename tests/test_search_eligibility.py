@@ -69,10 +69,47 @@ def _searchable_ids(session) -> list[str]:
     )
 
 
-def test_active_business_membership_is_searchable_without_validations() -> None:
+def _add_passed_validations(session, business, niche, observed_at) -> None:
+    for validation_type, confidence in {
+        "identity": 90,
+        "business_identity": 85,
+        "trade": 90,
+        "location": 85,
+    }.items():
+        session.add(
+            ValidationResultModel(
+                id=new_id("validation"),
+                idempotency_key=f"{business.id}:{validation_type}:passed",
+                business_id=business.id,
+                niche_id=niche.id,
+                market_key="toronto",
+                validation_type=validation_type,
+                status="passed",
+                confidence=confidence,
+                reason="Current validation passed.",
+                evidence=[],
+                validator="test",
+                validator_version=1,
+                observed_at=observed_at,
+                expires_at=observed_at + timedelta(days=30),
+            )
+        )
+    session.commit()
+
+
+def test_active_business_membership_is_not_searchable_without_validations() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, _, _ = _eligible_scope(session)
+        _eligible_scope(session)
+
+        assert _searchable_ids(session) == []
+
+
+def test_active_business_membership_is_searchable_with_current_validations() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, niche, observed_at = _eligible_scope(session)
+        _add_passed_validations(session, business, niche, observed_at)
 
         assert _searchable_ids(session) == [business.id]
 
@@ -81,6 +118,7 @@ def test_failed_quality_validation_does_not_remove_membership_from_search() -> N
     factory = _session_factory()
     with factory() as session:
         business, niche, observed_at = _eligible_scope(session)
+        _add_passed_validations(session, business, niche, observed_at)
         session.add(
             ValidationResultModel(
                 id=new_id("validation"),
@@ -101,13 +139,14 @@ def test_failed_quality_validation_does_not_remove_membership_from_search() -> N
         )
         session.commit()
 
-        assert _searchable_ids(session) == [business.id]
+        assert _searchable_ids(session) == []
 
 
 def test_closed_business_is_not_searchable() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, _, _ = _eligible_scope(session)
+        business, niche, observed_at = _eligible_scope(session)
+        _add_passed_validations(session, business, niche, observed_at)
         business.status = "closed"
         session.commit()
 
