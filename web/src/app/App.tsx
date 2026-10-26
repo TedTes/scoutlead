@@ -1,21 +1,19 @@
 import {
   ArrowRight,
-  Check,
   ChevronDown,
   CircleX,
   Download,
   Folder,
   FolderOpen,
-  FolderPlus,
+  ChartPie,
   List,
   LoaderCircle,
   Menu,
-  Package,
+  MoreVertical,
   Pencil,
   PlayCircle,
   Plug,
   Plus,
-  Search,
   Send,
   Settings,
   Star,
@@ -24,7 +22,6 @@ import {
   Users,
 } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -65,9 +62,9 @@ type AppViewMode = "auto" | Screen;
 const RAIL_WIDTH_DEFAULT = 244;
 const RAIL_WIDTH_MIN = 220;
 const RAIL_WIDTH_MAX = 420;
-const WORKFLOW_HEIGHT_DEFAULT = 190;
-const WORKFLOW_HEIGHT_MIN = 190;
-const WORKFLOW_HEIGHT_MAX = 220;
+const WORKFLOW_HEIGHT_DEFAULT = 230;
+const WORKFLOW_HEIGHT_MIN = 220;
+const WORKFLOW_HEIGHT_MAX = 260;
 const MANAGE_HEIGHT_DEFAULT = 151;
 const MANAGE_HEIGHT_MIN = 112;
 const RAIL_FIXED_HEIGHT_BUDGET = 330;
@@ -94,10 +91,7 @@ function AppShell({
   const [viewMode, setViewMode] = useState<AppViewMode>("auto");
   const [leadWorkflowView, setLeadWorkflowView] = useState<LeadWorkflowView>("inbox");
   const [leadListRequestId, setLeadListRequestId] = useState(0);
-  const [workflowSummary, setWorkflowSummary] = useState<{ runId: string; counts: LeadWorkflowCounts } | null>(null);
-  const [audienceSearch, setAudienceSearch] = useState("");
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
-  const [productMenuOpen, setProductMenuOpen] = useState(false);
   const [renameAudience, setRenameAudience] = useState<Territory | null>(null);
   const [deleteAudience, setDeleteAudience] = useState<Territory | null>(null);
   const [editFolder, setEditFolder] = useState<AudienceFolder | "new" | null>(null);
@@ -105,6 +99,8 @@ function AppShell({
   const [moveAudience, setMoveAudience] = useState<Territory | null>(null);
   const [newAudienceFolderId, setNewAudienceFolderId] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [audienceMenuId, setAudienceMenuId] = useState("");
+  const [folderMenuId, setFolderMenuId] = useState("");
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -123,7 +119,6 @@ function AppShell({
   const [manageSectionHeight, setManageSectionHeight] = useState(() =>
     readStoredDimension("scoutlead:manage-height", MANAGE_HEIGHT_DEFAULT, MANAGE_HEIGHT_MIN, 280),
   );
-  const productMenuRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLElement | null>(null);
   const { showToast } = useToast();
   const onboardingStorageKey = `scoutlead:product-onboarding:${accountId || "local"}`;
@@ -152,8 +147,6 @@ function AppShell({
     renameAudienceFolder,
     deleteAudienceFolder,
     updateProfile,
-    deleteProduct,
-    refreshSnapshot,
   } = useAppData();
   const selectedProduct = products.find((product) => product.id === selectedProductId);
   const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
@@ -167,33 +160,16 @@ function AppShell({
   const selectedRunExists = Boolean(
     selectedProfileId && selectedRun?.territory_id === selectedProfileId,
   );
-  const selectedProfileRun = productDiscoveryRuns.find(
-    (run) => run.territory_id === selectedProfileId,
-  );
-  const selectedProfileBatch = profileBatch?.audience.id === selectedProfileId
-    ? profileBatch
-    : null;
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
-  const currentRunContacts = selectedRunExists
-    ? productContacts.filter((contact) => contact.campaign_id === selectedDiscoveryRunId)
-    : selectedProfileBatch
-      ? selectedProfileBatch.leads
-      : [];
-  const recentRunContacts = currentRunContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
-  const fallbackWorkflowCounts: LeadWorkflowCounts = {
-    inbox: currentRunContacts.filter((contact) => (contact.review_status || "unreviewed") === "unreviewed").length,
-    this_week: recentRunContacts.length,
-    shortlisted: currentRunContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
-    contacted: currentRunContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
-    dismissed: currentRunContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
-    all: currentRunContacts.length,
+  const recentProductContacts = productContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
+  const workflowCounts: LeadWorkflowCounts = {
+    inbox: productContacts.length,
+    this_week: recentProductContacts.length,
+    shortlisted: productContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
+    contacted: productContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
+    dismissed: productContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
+    all: productContacts.length,
   };
-  const workflowScopeId = selectedRunExists
-    ? selectedDiscoveryRunId
-    : selectedProfileBatch?.audience_run_id || selectedProfileId;
-  const workflowCounts = selectedProfileId && workflowSummary?.runId === workflowScopeId
-    ? workflowSummary.counts
-    : fallbackWorkflowCounts;
   const leadWorkflowItems: Array<{ id: LeadWorkflowView; label: string; count: number; icon: ReactNode }> = [
     {
       id: "inbox",
@@ -220,36 +196,14 @@ function AppShell({
       icon: <CircleX size={17} />,
     },
   ];
-  const matchingProfiles = useMemo(() => {
-    const query = audienceSearch.trim().toLowerCase();
-    if (!query) return productProfiles;
-    return productProfiles.filter((profile) => [profile.label, profile.niche_label, profile.place_label, profile.city]
-      .some((value) => value?.toLowerCase().includes(query)));
-  }, [audienceSearch, productProfiles]);
-  const visibleProfiles = useMemo(() => {
-    if (audienceSearch.trim() || matchingProfiles.length <= 5) return matchingProfiles;
-    const recent = matchingProfiles.slice(0, 5);
-    const selected = matchingProfiles.find((item) => item.id === selectedProfileId);
-    if (!selected || recent.some((item) => item === selected)) return recent;
-    return [...recent.slice(0, 4), selected];
-  }, [audienceSearch, matchingProfiles, selectedProfileId]);
   const unfiledProfiles = useMemo(() => {
     const profiles = productProfiles.filter((profile) => !profile.folder_id);
-    if (audienceSearch.trim() || profiles.length <= 5) return profiles;
+    if (profiles.length <= 5) return profiles;
     const recent = profiles.slice(0, 5);
     const selected = profiles.find((profile) => profile.id === selectedProfileId);
     if (!selected || recent.some((profile) => profile.id === selected.id)) return recent;
     return [...recent.slice(0, 4), selected];
-  }, [audienceSearch, productProfiles, selectedProfileId]);
-  const handleWorkflowCountsChange = useCallback((runId: string, counts: LeadWorkflowCounts) => {
-    setWorkflowSummary((current) => {
-      if (current?.runId === runId && Object.keys(counts).every((key) => current.counts[key as LeadWorkflowView] === counts[key as LeadWorkflowView])) {
-        return current;
-      }
-      return { runId, counts };
-    });
-  }, []);
-
+  }, [productProfiles, selectedProfileId]);
   const availableResizableHeight = () =>
     Math.max(
       WORKFLOW_HEIGHT_MIN + MANAGE_HEIGHT_MIN,
@@ -259,18 +213,22 @@ function AppShell({
   const openWorkflowView = (nextView: LeadWorkflowView) => {
     setLeadWorkflowView(nextView);
     setLeadListRequestId((requestId) => requestId + 1);
-    const targetRunId = selectedRunExists
-      ? selectedDiscoveryRunId
-      : selectedProfileRun?.id;
-    if (targetRunId) {
-      setSelectedDiscoveryRunId(targetRunId);
-      void refreshSnapshot(targetRunId);
-    }
+    setSelectedProfileId("");
+    setSelectedDiscoveryRunId("");
     selectScreen("results");
     setMobileRailOpen(false);
   };
 
+  const openAudienceOverview = () => {
+    setSelectedProfileId("");
+    setSelectedDiscoveryRunId("");
+    setViewMode("audiences");
+    setMobileRailOpen(false);
+  };
+
   const openAudienceProfile = (profile: Territory) => {
+    setAudienceMenuId("");
+    setFolderMenuId("");
     setLeadWorkflowView("inbox");
     setMobileRailOpen(false);
     void selectProfile(profile.id)
@@ -294,7 +252,8 @@ function AppShell({
     setViewMode("overview");
     setSelectedProfileId("");
     setSelectedDiscoveryRunId("");
-    setWorkflowSummary(null);
+    setAudienceMenuId("");
+    setFolderMenuId("");
     setNewAudienceFolderId(folderId);
   };
 
@@ -302,28 +261,6 @@ function AppShell({
     if (isTraceRoute) returnToApp();
     setViewMode(screen);
     setMobileRailOpen(false);
-  };
-
-  const selectProduct = (productId: string) => {
-    setProductMenuOpen(false);
-    setMobileRailOpen(false);
-    if (productId === selectedProductId) return;
-
-    setSelectedProductId(productId);
-    const firstProfile = territories.find((profile) => profile.product_id === productId);
-    setSelectedProfileId(firstProfile?.id || "");
-    setSelectedDiscoveryRunId("");
-    setLeadWorkflowView("inbox");
-    setWorkflowSummary(null);
-    setViewMode("overview");
-  };
-
-  const handleDeleteSelectedProduct = async () => {
-    if (!selectedProduct) return;
-    await deleteProduct(selectedProduct.id);
-    setSelectedDiscoveryRunId("");
-    setViewMode("overview");
-    showToast({ title: "Product deleted", message: `${selectedProductName} was removed.`, tone: "green" });
   };
 
   const handleRenameAudience = async (profile: Territory, label: string) => {
@@ -343,7 +280,7 @@ function AppShell({
     }
     showToast({
       title: "Audience deleted",
-      message: `${profile.label} was removed from this product.`,
+      message: `${profile.label} was removed.`,
       tone: "green",
     });
   };
@@ -352,7 +289,7 @@ function AppShell({
     if (!productContacts.length) {
       showToast({
         title: "No contacts to export",
-        message: "Run a search before exporting contacts for this product.",
+        message: "Run a search before exporting contacts.",
         tone: "amber",
       });
       return;
@@ -366,7 +303,7 @@ function AppShell({
       setExportDialogOpen(false);
       showToast({
         title: "No contacts to export",
-        message: "Run a search before exporting contacts for this product.",
+        message: "Run a search before exporting contacts.",
         tone: "amber",
       });
       return;
@@ -410,24 +347,6 @@ function AppShell({
     profileBatch?.audience.id,
     selectedProfileId,
   ]);
-
-  useEffect(() => {
-    if (!productMenuOpen) return;
-
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!productMenuRef.current?.contains(event.target as Node)) setProductMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProductMenuOpen(false);
-    };
-
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [productMenuOpen]);
 
   useEffect(() => {
     writeStoredDimension("scoutlead:rail-width", railWidth);
@@ -498,81 +417,24 @@ function AppShell({
           </div>
         </div>
 
-        <div
-          className={productMenuOpen ? "rail-product-switcher is-open" : "rail-product-switcher"}
-          ref={productMenuRef}
-        >
-          <button
-            aria-expanded={productMenuOpen}
-            aria-haspopup="menu"
-            aria-label={`Current product: ${selectedProductName}`}
-            className="rail-product-trigger"
-            title={`Product: ${selectedProductName}`}
-            type="button"
-            onClick={() => setProductMenuOpen((open) => !open)}
-          >
-            <Package className="rail-product-icon" size={15} />
-            <span className="rail-product-copy">
-              <small>Product</small>
-              <strong>{selectedProductName}</strong>
-            </span>
-            <ChevronDown className="rail-product-caret" size={14} />
-          </button>
-
-          {productMenuOpen ? (
-            <div className="rail-product-menu" role="menu">
-              <div className="rail-product-options">
-                {products.map((product) => {
-                  const active = product.id === selectedProductId;
-                  return (
-                    <button
-                      aria-checked={active}
-                      className={active ? "active" : ""}
-                      key={product.id}
-                      role="menuitemradio"
-                      title={displayProductName(product)}
-                      type="button"
-                      onClick={() => selectProduct(product.id)}
-                    >
-                      <span>{displayProductName(product)}</span>
-                      {active ? <Check size={13} /> : null}
-                    </button>
-                  );
-                })}
-                {!products.length ? <p>No products yet</p> : null}
-              </div>
-              <div className="rail-product-menu-actions">
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setProductMenuOpen(false);
-                    setMobileRailOpen(false);
-                    setIsCreatingProduct(true);
-                  }}
-                >
-                  <Plus size={14} />
-                  <span>New product</span>
-                </button>
-                <button
-                  disabled={!selectedProduct}
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setProductMenuOpen(false);
-                    selectScreen("product");
-                  }}
-                >
-                  <Settings size={14} />
-                  <span>Product settings</span>
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <button className="rail-new-audience" type="button" onClick={() => startNewAudience()}>
+          <Plus size={16} />
+          <span>New audience</span>
+        </button>
 
         <nav className="lead-workflow-nav" aria-label="Lead workflow">
           <div className="lead-workflow-links">
+            <button
+              className={activeScreen === "audiences" ? "active" : ""}
+              aria-label={`Overview, ${productProfiles.length} audiences`}
+              title={`Overview (${productProfiles.length} audiences)`}
+              type="button"
+              onClick={openAudienceOverview}
+            >
+              <ChartPie size={17} />
+              <span>Overview</span>
+              <em>{productProfiles.length}</em>
+            </button>
             {leadWorkflowItems.map((item) => (
               <button
                 className={activeScreen === "results" && leadWorkflowView === item.id ? "active" : ""}
@@ -604,14 +466,10 @@ function AppShell({
           />
           <div className="lead-workspace-heading">
             <span>Audiences</span>
-            <button aria-label="New folder" title="New folder" type="button" onClick={() => setEditFolder("new")}><FolderPlus size={14} /></button>
+            <button className="audience-new-folder" aria-label="New folder" title="New folder" type="button" onClick={() => setEditFolder("new")}><Plus size={15} /></button>
           </div>
-          {productProfiles.length > 5 ? <label className="audience-sidebar-search"><Search size={13} /><input aria-label="Search audiences" placeholder="Search audiences" value={audienceSearch} onChange={(event) => setAudienceSearch(event.target.value)} /></label> : null}
           <div className="lead-workspace-list">
-            {audienceSearch.trim() ? visibleProfiles.map((profile) => (
-              <AudienceSidebarRow key={profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => setDeleteAudience(profile)} onMove={() => setMoveAudience(profile)} onOpen={() => openAudienceProfile(profile)} onRename={() => setRenameAudience(profile)} />
-            )) : (
-              <>
+            <>
                 {audienceFolders.map((folder) => {
                   const profiles = productProfiles.filter((profile) => profile.folder_id === folder.id);
                   const open = expandedFolders[folder.id] || profiles.some((profile) => profile.id === selectedProfileId);
@@ -620,19 +478,19 @@ function AppShell({
                       <button aria-expanded={open} className="audience-folder-main" type="button" onClick={() => setExpandedFolders((current) => ({ ...current, [folder.id]: !open }))}>
                         {open ? <FolderOpen size={15} /> : <Folder size={15} />}<span>{folder.name}</span><em>{profiles.length}</em>
                       </button>
-                      <div className="audience-folder-actions"><button aria-label={`Create audience in ${folder.name}`} title="New audience in folder" type="button" onClick={() => startNewAudience(folder.id)}><Plus size={12} /></button><button aria-label={`Rename ${folder.name}`} title="Rename folder" type="button" onClick={() => setEditFolder(folder)}><Pencil size={12} /></button><button aria-label={`Delete ${folder.name}`} title="Delete folder" type="button" onClick={() => setDeleteFolder(folder)}><Trash2 size={12} /></button></div>
+                      <div className="audience-folder-actions"><button aria-expanded={folderMenuId === folder.id} aria-label={`Actions for ${folder.name}`} type="button" onClick={() => { setAudienceMenuId(""); setFolderMenuId((current) => current === folder.id ? "" : folder.id); }}><MoreVertical size={15} /></button>{folderMenuId === folder.id ? <div className="audience-sidebar-menu"><button type="button" onClick={() => { setFolderMenuId(""); startNewAudience(folder.id); }}><Plus size={13} />New</button><button type="button" onClick={() => { setFolderMenuId(""); setEditFolder(folder); }}><Pencil size={13} />Rename</button><button className="is-danger" type="button" onClick={() => { setFolderMenuId(""); setDeleteFolder(folder); }}><Trash2 size={13} />Delete</button></div> : null}</div>
                     </div>
-                    {open ? <div className="audience-folder-children">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => setDeleteAudience(profile)} onMove={() => setMoveAudience(profile)} onOpen={() => openAudienceProfile(profile)} onRename={() => setRenameAudience(profile)} />) : <small className="audience-folder-empty">No audiences</small>}</div> : null}
+                    {open ? <div className="audience-folder-children">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />) : <small className="audience-folder-empty">No audiences</small>}</div> : null}
                   </section>;
                 })}
-                {unfiledProfiles.map((profile) => <AudienceSidebarRow key={profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => setDeleteAudience(profile)} onMove={() => setMoveAudience(profile)} onOpen={() => openAudienceProfile(profile)} onRename={() => setRenameAudience(profile)} />)}
-              </>
-            )}
-            {productProfiles.length > 5 && !audienceSearch.trim() ? (
+                {productProfiles.some((profile) => !profile.folder_id) ? <div className="audience-recents-heading"><span>Recents</span><em>{productProfiles.filter((profile) => !profile.folder_id).length}</em></div> : null}
+                {unfiledProfiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />)}
+            </>
+            {productProfiles.length > 5 ? (
               <button
                 className="workspace-more"
                 type="button"
-                onClick={() => selectScreen("audiences")}
+                onClick={openAudienceOverview}
               >
                 <span>{`View all (${productProfiles.length})`}</span>
               </button>
@@ -681,36 +539,34 @@ function AppShell({
         {activeScreen !== "results" ? (
           <header className={activeScreen === "product" ? "desktop-account-bar has-summary" : "desktop-account-bar"}>
             {activeScreen === "overview" || activeScreen === "audiences" ? (
-              <nav aria-label="Audience context" className="results-breadcrumb desktop-audience-context">
-                <span>Audiences</span>
-                {activeScreen === "overview" ? <><span aria-hidden="true">/</span><strong>New audience</strong></> : null}
-              </nav>
+              activeScreen === "audiences" ? (
+                <div className="desktop-overview-context">
+                  <span>Account-wide performance</span>
+                  <strong>Overview</strong>
+                </div>
+              ) : (
+                <nav aria-label="Audience context" className="results-breadcrumb desktop-audience-context">
+                  <span>Audiences</span>
+                  <span aria-hidden="true">/</span>
+                  <strong>New audience</strong>
+                </nav>
+              )
             ) : null}
             {activeScreen === "integrations" || activeScreen === "product" ? (
               <div className="desktop-settings-context">
                 <nav aria-label="Page context" className="results-breadcrumb">
                   <span>Manage</span>
                   <span aria-hidden="true">/</span>
-                  <strong>{activeScreen === "integrations" ? "Integrations" : "Product settings"}</strong>
+                  <strong>{activeScreen === "integrations" ? "Integrations" : "Settings"}</strong>
                 </nav>
                 {activeScreen === "product" && selectedProduct ? (
-                  <div className="desktop-settings-stats" aria-label="Product summary">
+                  <div className="desktop-settings-stats" aria-label="Account summary">
                     <span><b>{productDiscoveryRuns.length}</b> {productDiscoveryRuns.length === 1 ? "run" : "runs"}</span>
                     <span><b>{productContacts.length}</b> {productContacts.length === 1 ? "contact" : "contacts"}</span>
                     <span>updated <b>{formatDate(selectedProduct.updated_at)}</b></span>
                   </div>
                 ) : null}
               </div>
-            ) : null}
-            {activeScreen === "product" ? (
-              <button
-                className="secondary desktop-settings-action"
-                type="button"
-                onClick={() => setIsCreatingProduct(true)}
-              >
-                <Plus size={14} />
-                New product
-              </button>
             ) : null}
             {accountName ? <span title={accountName}>{accountName}</span> : null}
             <AccountControl accountSlot={accountSlot} placement="desktop" />
@@ -736,15 +592,9 @@ function AppShell({
             renderScreen(
               activeScreen,
               {
-                isCreatingProduct: false,
-                onCreatingProductChange: setIsCreatingProduct,
-                onDeleteProduct: handleDeleteSelectedProduct,
-              },
-              {
                 listRequestId: leadListRequestId,
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
-                onCountsChange: handleWorkflowCountsChange,
                 onCreateAudience: startNewAudience,
                 accountControl: (
                   <div className="results-account-control">
@@ -862,7 +712,9 @@ function AppShell({
 }
 
 function AudienceSidebarRow({
+  menuOpen,
   onDelete,
+  onMenuToggle,
   onMove,
   onOpen,
   onRename,
@@ -870,7 +722,9 @@ function AudienceSidebarRow({
   selected,
   switching,
 }: {
+  menuOpen: boolean;
   onDelete: () => void;
+  onMenuToggle: () => void;
   onMove: () => void;
   onOpen: () => void;
   onRename: () => void;
@@ -884,9 +738,8 @@ function AudienceSidebarRow({
       <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.place_label || profile.city} · {profile.radius_km} km</small></span>
     </button>
     <div className="audience-row-actions">
-      <button aria-label={`Move ${profile.label}`} title="Move to folder" type="button" onClick={onMove}><Folder size={13} /></button>
-      <button aria-label={`Rename ${profile.label}`} title="Rename audience" type="button" onClick={onRename}><Pencil size={13} /></button>
-      <button aria-label={`Delete ${profile.label}`} title="Delete audience" type="button" onClick={onDelete}><Trash2 size={13} /></button>
+      <button aria-expanded={menuOpen} aria-label={`Actions for ${profile.label}`} type="button" onClick={onMenuToggle}><MoreVertical size={15} /></button>
+      {menuOpen ? <div className="audience-sidebar-menu"><button type="button" onClick={onMove}><Folder size={13} />Move to folder</button><button type="button" onClick={onRename}><Pencil size={13} />Rename audience</button><button className="is-danger" type="button" onClick={onDelete}><Trash2 size={13} />Delete audience</button></div> : null}
     </div>
   </div>;
 }
@@ -903,11 +756,11 @@ function FirstRunWorkspace({
       <span className="first-run-kicker">Start with your offer</span>
       <h1>Define the businesses you can help.</h1>
       <p>
-        Add a product profile so ScoutLead can connect your services to observable business opportunities.
+        Add your business details so ScoutLead can connect your services to observable business opportunities.
       </p>
       <div className="first-run-actions">
         <button className="runbtn" type="button" onClick={onSetUp}>
-          Set up product profile <ArrowRight size={15} />
+          Set up ScoutLead <ArrowRight size={15} />
         </button>
         <button className="secondary" type="button" onClick={onOpenDemo}>
           <PlayCircle size={15} /> View demo workflow
@@ -1043,20 +896,20 @@ function ProductManagementSection({
   onProductSettings: () => void;
 }) {
   return (
-    <section className="mng" aria-label="Product management">
+    <section className="mng" aria-label="Management">
       <p className="mng-label">Manage</p>
       <button
         className={manageItemClass(hasProduct, activeScreen === "product")}
         disabled={!hasProduct}
-        aria-label="Product settings"
-        title="Product settings"
+        aria-label="Settings"
+        title="Settings"
         type="button"
         onClick={onProductSettings}
       >
         <span className="mng-icon">
           <Settings size={13} />
         </span>
-        <span className="mng-label-text">Product settings</span>
+        <span className="mng-label-text">Settings</span>
       </button>
       <button
         className={manageItemClass(hasProduct, activeScreen === "integrations")}
@@ -1207,7 +1060,7 @@ function DeleteAudienceDialog({
     <Modal title="Delete audience" onClose={onClose}>
       <div className="audience-delete-dialog">
         <p>
-          Remove <strong>{audience.label}</strong> from this product? Existing lead history will be retained.
+          Remove <strong>{audience.label}</strong>? Existing lead history will be retained.
         </p>
         <div className="dialog-actions">
           <button className="secondary" type="button" onClick={onClose}>Cancel</button>
@@ -1282,19 +1135,19 @@ function AddProductDialog({
         exclusions: parseProfileValues(exclusions),
       });
       if (!created) {
-        showToast({ title: "Product was not created", message: "Check the product details and try again.", tone: "red" });
+        showToast({ title: "Setup was not completed", message: "Check the business details and try again.", tone: "red" });
         return;
       }
       showToast({
-        title: "Product created",
-        message: "The product profile is ready for its first search.",
+        title: "Setup complete",
+        message: "ScoutLead is ready for its first audience.",
         tone: "green",
       });
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setLocalError(message);
-      showToast({ title: "Product was not created", message, tone: "red" });
+      showToast({ title: "Setup was not completed", message, tone: "red" });
     } finally {
       setCreating(false);
     }
@@ -1303,7 +1156,7 @@ function AddProductDialog({
   return (
     <Modal
       className="add-product-modal"
-      title={onboarding ? "Set up your product profile" : "New product"}
+      title="Set up your business"
       onClose={onboarding && onSkip ? onSkip : onClose}
     >
       <form
@@ -1315,14 +1168,14 @@ function AddProductDialog({
       >
         <div className="add-product-fields">
           <label className="field add-product-name-field">
-            <span>Product name</span>
+            <span>Business or offer name</span>
             <input
               autoFocus
               placeholder="Local Service Website Growth"
               value={productName}
               onChange={(event) => setProductName(event.target.value)}
             />
-            {hasDuplicateProductName ? <em>A product with this name already exists.</em> : null}
+            {hasDuplicateProductName ? <em>This name is already in use.</em> : null}
           </label>
           <label className="field add-product-offer-field">
             <span>What you sell</span>
@@ -1384,7 +1237,7 @@ function AddProductDialog({
             {onboarding ? "Skip for now" : "Cancel"}
           </button>
           <button className="runbtn" disabled={!canCreateProduct} type="submit">
-            {creating ? "Creating..." : "Create product"}
+            {creating ? "Saving..." : "Complete setup"}
           </button>
         </div>
       </form>

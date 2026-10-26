@@ -1,21 +1,12 @@
-import { CircleOff, Plus, Target, Trash2, X } from "lucide-react";
+import { CircleOff, Plus, Target, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
 import type { Product } from "../types/domain";
 
-type ProductScreenProps = {
-  isCreatingProduct: boolean;
-  onCreatingProductChange: (isCreating: boolean) => void;
-  onDeleteProduct?: () => Promise<void> | void;
-};
-
 const DEFAULT_TARGET_GEOGRAPHY = "United States, Canada";
 
-export function ProductScreen({
-  onCreatingProductChange,
-  onDeleteProduct,
-}: ProductScreenProps) {
+export function ProductScreen() {
   const {
     products,
     selectedProduct,
@@ -31,8 +22,6 @@ export function ProductScreen({
   const [idealCustomerSignals, setIdealCustomerSignals] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const draft = productProfileDraft(selectedProduct);
@@ -81,17 +70,6 @@ export function ProductScreen({
       !saving,
   );
 
-  const confirmDeleteProduct = async () => {
-    if (!selectedProduct || !onDeleteProduct || deleting) return;
-    setDeleting(true);
-    try {
-      await onDeleteProduct();
-      setConfirmingDelete(false);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   const saveProduct = useCallback(async () => {
     if (!selectedProduct || !canAutosave) return;
     setSaving(true);
@@ -109,7 +87,7 @@ export function ProductScreen({
       });
     } catch (error) {
       showToast({
-        title: "Product changes were not saved",
+        title: "Settings were not saved",
         message: error instanceof Error ? error.message : String(error),
         tone: "red",
       });
@@ -144,12 +122,8 @@ export function ProductScreen({
     return (
       <div className="product-page product-settings-page">
         <section className="product-settings-empty">
-          <h1>No product selected</h1>
-          <p>Create a product profile before configuring lead discovery.</p>
-          <button className="runbtn" type="button" onClick={() => onCreatingProductChange(true)}>
-            <Plus size={15} />
-            New product
-          </button>
+          <h1>Settings unavailable</h1>
+          <p>Complete account setup before configuring lead discovery.</p>
         </section>
       </div>
     );
@@ -169,20 +143,20 @@ export function ProductScreen({
             <header className="product-profile-section-heading">
               <span>01</span>
               <div>
-                <h2 id="product-profile-offer">Product name</h2>
+                <h2 id="product-profile-offer">Business and offer</h2>
                 <p>Name the offer and describe the outcome you provide.</p>
               </div>
             </header>
             <div className="product-profile-section-fields">
               <label className="product-settings-field">
                 <input
-                  aria-label="Product name"
+                  aria-label="Business or offer name"
                   className="product-settings-input"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   onBlur={() => void saveProduct()}
                 />
-                {duplicateName ? <em>A product with this name already exists.</em> : null}
+                {duplicateName ? <em>This name is already in use.</em> : null}
               </label>
 
               <label className="product-settings-field">
@@ -276,38 +250,6 @@ export function ProductScreen({
             </div>
           </section>
 
-          <section className="product-settings-danger" aria-label="Danger zone">
-            <div>
-              <span className="product-settings-danger-label">Danger zone</span>
-              <p>Delete this product and remove its runs, contacts, and history.</p>
-            </div>
-            {confirmingDelete ? (
-              <div className="product-settings-delete-confirm">
-                <span>Delete this product?</span>
-                <button className="secondary" type="button" onClick={() => setConfirmingDelete(false)}>
-                  Cancel
-                </button>
-                <button
-                  className="product-settings-delete-button"
-                  disabled={deleting}
-                  type="button"
-                  onClick={() => void confirmDeleteProduct()}
-                >
-                  {deleting ? "Deleting..." : "Delete"}
-                </button>
-              </div>
-            ) : (
-              <button
-                className="product-settings-delete-button"
-                disabled={!onDeleteProduct}
-                type="button"
-                onClick={() => setConfirmingDelete(true)}
-              >
-                <Trash2 size={14} />
-                Delete product
-              </button>
-            )}
-          </section>
         </form>
       </section>
     </div>

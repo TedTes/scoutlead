@@ -40,6 +40,7 @@ import type {
   CampaignOutreachDraftInput,
   ContactPolicyStatus,
   ContactVerificationStatus,
+  DiscoveryRun,
   DiscoveryResult,
   LeadContactPolicyInput,
   LeadReviewStatus,
@@ -77,7 +78,7 @@ import {
   isRecord,
   rawValueToString,
 } from "../utils/contact-fields";
-import type { LeadWorkflowCounts, LeadWorkflowView } from "../types/navigation";
+import type { LeadWorkflowView } from "../types/navigation";
 
 type DrawerTab = "overview" | "evidence";
 type ContactActivityTone = "done" | "pending" | "warning" | "blocked";
@@ -130,14 +131,12 @@ export function ResultsScreen({
   accountControl,
   listRequestId = 0,
   onWorkflowViewChange,
-  onWorkflowCountsChange,
   onCreateAudience,
   workflowView,
 }: {
   accountControl?: ReactNode;
   listRequestId?: number;
   onWorkflowViewChange: (view: LeadWorkflowView) => void;
-  onWorkflowCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
   onCreateAudience?: () => void;
   workflowView: LeadWorkflowView;
 }) {
@@ -149,6 +148,8 @@ export function ResultsScreen({
     selectedProductId,
     selectedProfileId,
     profileBatch,
+    productContacts,
+    productDiscoveryRuns,
     setSelectedDiscoveryRunId,
     deleteDiscoveryRuns,
     renameDiscoveryRun,
@@ -217,7 +218,10 @@ export function ResultsScreen({
   const isAudienceView = Boolean(
     activeProfile && (isProfileAggregate || (!selectedDiscoveryRun && selectedProfileId)),
   );
-  const sourceContacts = visibleProfileBatch
+  const isGlobalView = !selectedProfileId && !selectedDiscoveryRunId;
+  const sourceContacts = isGlobalView
+    ? productContacts
+    : visibleProfileBatch
     ? visibleProfileBatch.leads
     : selectedRunMatchesActiveProfile && selectedDiscoveryRunId
       ? snapshot.results
@@ -249,17 +253,9 @@ export function ResultsScreen({
   const outreachReadyContacts = shortlistedContactRows.filter(isBulkOutreachReadyContact);
   const outreachSkippedContacts = shortlistedContactRows.filter((contact) => !isBulkOutreachReadyContact(contact));
   const workflowContext = {
-    includeAllLeads: isProfileAggregate,
+    includeAllLeads: isProfileAggregate || isGlobalView,
     thisWeekCutoffMs,
   };
-  const workflowCounts = useMemo<LeadWorkflowCounts>(() => ({
-    inbox: contacts.filter((contact) => matchesWorkflowView(contact, "inbox", workflowContext)).length,
-    this_week: contacts.filter((contact) => matchesWorkflowView(contact, "this_week", workflowContext)).length,
-    shortlisted: contacts.filter((contact) => matchesWorkflowView(contact, "shortlisted", workflowContext)).length,
-    contacted: contacts.filter((contact) => matchesWorkflowView(contact, "contacted", workflowContext)).length,
-    dismissed: contacts.filter((contact) => matchesWorkflowView(contact, "dismissed", workflowContext)).length,
-    all: contacts.length,
-  }), [contacts, isProfileAggregate, thisWeekCutoffMs]);
   const workflowContacts = contacts.filter((contact) =>
     matchesWorkflowView(contact, workflowView, workflowContext),
   );
@@ -272,6 +268,7 @@ export function ResultsScreen({
         contactListCategoryLabel(contact),
         contact.geography,
         contact.research?.geography,
+        isGlobalView ? contactAudienceLabel(contact, territories, productDiscoveryRuns) : "",
         contactOpportunityReasons(contact).join(" "),
       ]
         .filter(Boolean)
@@ -295,23 +292,6 @@ export function ResultsScreen({
   const selectedMessage = selectedContact
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
-  useEffect(() => {
-    const scopeId = selectedRunMatchesActiveProfile
-      ? selectedDiscoveryRunId
-      || visibleProfileBatch?.audience_run_id
-      || selectedProfileId
-      : visibleProfileBatch?.audience_run_id || selectedProfileId;
-    if (!scopeId || !onWorkflowCountsChange) return;
-    onWorkflowCountsChange(scopeId, workflowCounts);
-  }, [
-    onWorkflowCountsChange,
-    selectedDiscoveryRunId,
-    selectedProfileId,
-    selectedRunMatchesActiveProfile,
-    visibleProfileBatch?.audience_run_id,
-    workflowCounts,
-  ]);
-
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1160px)");
     const update = () => setDesktopSplitView(media.matches);
@@ -343,10 +323,10 @@ export function ResultsScreen({
     setSelectedContactId("");
     setDetailPanelOpen(true);
     setLeadSearch("");
-    onWorkflowViewChange("this_week");
+    if (!isGlobalView) onWorkflowViewChange("this_week");
     setRerunPromptOpen(false);
     setBulkOutreachOpen(false);
-  }, [onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
+  }, [isGlobalView, onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
 
   useEffect(() => {
     setSelectedContactId("");
@@ -723,7 +703,7 @@ export function ResultsScreen({
     });
   };
 
-  if (!activeProfile) {
+  if (!activeProfile && !isGlobalView) {
     return <AudienceProfileScreen />;
   }
 
@@ -738,7 +718,11 @@ export function ResultsScreen({
               {activeProfile.label}
             </button>
           </nav>
-        ) : null}
+        ) : (
+          <nav aria-label="Lead context" className="results-breadcrumb">
+            <strong>All audiences</strong>
+          </nav>
+        )}
         <div className="results-control-actions">
           {onCreateAudience ? (
             <button
@@ -823,7 +807,7 @@ export function ResultsScreen({
                     </button>
                     <div className="action-menu-divider" />
                   </>
-                ) : (
+                ) : selectedDiscoveryRun ? (
                   <>
                     <button type="button" disabled={scheduleBusy || !runPrompt.trim()} onClick={() => void openScheduleDialog()}>
                       <CalendarClock size={14} />
@@ -831,7 +815,7 @@ export function ResultsScreen({
                     </button>
                     <div className="action-menu-divider" />
                   </>
-                )}
+                ) : null}
                 <button
                   type="button"
                   disabled={!contacts.length}
@@ -854,30 +838,32 @@ export function ResultsScreen({
                   <Download size={14} />
                   Export shortlist
                 </button>
-                <button
-                  type="button"
-                  disabled={!approvedShortlistContacts.length}
-                  onClick={() => beginContactsExport(approvedShortlistContacts, exportName, "approved-shortlist")}
-                >
-                  <Download size={14} />
-                  Export approved shortlist
-                </button>
-                <button
-                  type="button"
-                  disabled={!webhookReady || sendingWebhook}
-                  onClick={() => void sendCurrentApprovedShortlistWebhook()}
-                >
-                  <PlugZap size={14} />
-                  {sendingWebhook ? "Sending webhook..." : "Send approved to webhook"}
-                </button>
-                <button
-                  type="button"
-                  disabled={!selectedDiscoveryRun || !draftableShortlistContacts.length || draftingShortlist}
-                  onClick={() => void draftCurrentShortlist()}
-                >
-                  <Mail size={14} />
-                  Generate drafts for shortlist
-                </button>
+                {!isGlobalView ? <>
+                  <button
+                    type="button"
+                    disabled={!approvedShortlistContacts.length}
+                    onClick={() => beginContactsExport(approvedShortlistContacts, exportName, "approved-shortlist")}
+                  >
+                    <Download size={14} />
+                    Export approved shortlist
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!webhookReady || sendingWebhook}
+                    onClick={() => void sendCurrentApprovedShortlistWebhook()}
+                  >
+                    <PlugZap size={14} />
+                    {sendingWebhook ? "Sending webhook..." : "Send approved to webhook"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedDiscoveryRun || !draftableShortlistContacts.length || draftingShortlist}
+                    onClick={() => void draftCurrentShortlist()}
+                  >
+                    <Mail size={14} />
+                    Generate drafts for shortlist
+                  </button>
+                </> : null}
                 {selectedDiscoveryRun ? (
                   <>
                     <button type="button" onClick={() => void renameCurrentRun()}>
@@ -895,13 +881,13 @@ export function ResultsScreen({
                     </button>
                   </>
                 ) : null}
-                {!selectedTerritory && !isAudienceView ? (
+                {!isGlobalView && !selectedTerritory && !isAudienceView ? (
                   <button type="button" disabled={running} onClick={openRerunPrompt}>
                     <RotateCw size={14} />
                     Re-run search
                   </button>
                 ) : null}
-                {!selectedTerritory && !isAudienceView ? (
+                {!isGlobalView && !selectedTerritory && !isAudienceView ? (
                   <button className="danger-item" type="button" onClick={() => void deleteCurrentRun()}>
                     <Trash2 size={14} />
                     Delete this search
@@ -931,7 +917,7 @@ export function ResultsScreen({
                 </span>
               </div>
               <div className="lead-feed-header-actions">
-                {workflowView === "shortlisted" && outreachReadyContacts.length ? (
+                {!isGlobalView && workflowView === "shortlisted" && outreachReadyContacts.length ? (
                   <div className="bulk-outreach-control" ref={bulkOutreachRef}>
                     <button
                       aria-expanded={bulkOutreachOpen}
@@ -991,6 +977,7 @@ export function ResultsScreen({
             <ul className="contact-card-list">
               {visibleContacts.map((contact) => (
                 <ContactCard
+                  audienceLabel={isGlobalView ? contactAudienceLabel(contact, territories, productDiscoveryRuns) : ""}
                   contact={contact}
                   key={contact.id}
                   selected={contact.id === detailContact?.id}
@@ -1021,8 +1008,8 @@ export function ResultsScreen({
             </ul>
           ) : (
             <section className="result-empty-card">
-              <strong>{emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).title}</strong>
-              <p>{emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
+              <strong>{isGlobalView ? "No leads in this view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).title}</strong>
+              <p>{isGlobalView ? "Create an audience or choose another workflow view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
             </section>
           )}
         </section>
@@ -2655,11 +2642,13 @@ async function prepareApproveAndSend({
 }
 
 function ContactCard({
+  audienceLabel,
   contact,
   onOpen,
   onToggleShortlist,
   selected = false,
 }: {
+  audienceLabel?: string;
   contact: DiscoveryResult;
   onOpen: () => void;
   onToggleShortlist: () => void;
@@ -2705,6 +2694,12 @@ function ContactCard({
                 </>
               ) : null}
             </small>
+            {audienceLabel ? (
+              <span className="contact-audience-line">
+                <Users size={11} />
+                <span>{audienceLabel}</span>
+              </span>
+            ) : null}
             {needsVerification ? (
               <span className="contact-evidence-line">Needs verification against search criteria</span>
             ) : opportunityReason ? (
@@ -4315,7 +4310,7 @@ function matchesWorkflowView(
   view: LeadWorkflowView,
   context: { includeAllLeads: boolean; thisWeekCutoffMs: number },
 ) {
-  if (view === "inbox") return reviewStatus(contact) === "unreviewed";
+  if (view === "inbox") return context.includeAllLeads || reviewStatus(contact) === "unreviewed";
   if (view === "this_week") {
     if (context.includeAllLeads) return true;
     const createdAt = new Date(contact.created_at).getTime();
@@ -4345,6 +4340,16 @@ function deduplicateContacts(contacts: DiscoveryResult[]) {
   }
 
   return order.map((key) => unique.get(key)).filter((contact): contact is DiscoveryResult => Boolean(contact));
+}
+
+function contactAudienceLabel(
+  contact: DiscoveryResult,
+  territories: Territory[],
+  runs: DiscoveryRun[],
+) {
+  const territoryId = contact.territory_id
+    || runs.find((run) => run.id === contact.campaign_id)?.territory_id;
+  return territories.find((territory) => territory.id === territoryId)?.label || "Unknown audience";
 }
 
 function contactBusinessKey(contact: DiscoveryResult) {

@@ -4,23 +4,14 @@ import { IntegrationsScreen } from "../screens/IntegrationsScreen";
 import { ProductScreen } from "../screens/ProductScreen";
 import { ResultsScreen } from "../screens/ResultsScreen";
 import type { ReactNode } from "react";
-import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
+import type { LeadWorkflowView, Screen } from "../types/navigation";
 
 export function renderScreen(
   screen: Screen,
-  productEditor: {
-    isCreatingProduct: boolean;
-    onCreatingProductChange: (isCreating: boolean) => void;
-    onDeleteProduct?: () => Promise<void> | void;
-  } = {
-    isCreatingProduct: false,
-    onCreatingProductChange: () => undefined,
-  },
   resultsNavigation: {
     listRequestId?: number;
     view: LeadWorkflowView;
     onViewChange: (view: LeadWorkflowView) => void;
-    onCountsChange?: (runId: string, counts: LeadWorkflowCounts) => void;
     onCreateAudience?: () => void;
     accountControl?: ReactNode;
   } = {
@@ -38,14 +29,13 @@ export function renderScreen(
     case "integrations":
       return <IntegrationsScreen />;
     case "product":
-      return <ProductScreen {...productEditor} />;
+      return <ProductScreen />;
     case "results":
       return (
         <ResultsScreen
           listRequestId={resultsNavigation.listRequestId}
           workflowView={resultsNavigation.view}
           onWorkflowViewChange={resultsNavigation.onViewChange}
-          onWorkflowCountsChange={resultsNavigation.onCountsChange}
           onCreateAudience={resultsNavigation.onCreateAudience}
           accountControl={resultsNavigation.accountControl}
         />
