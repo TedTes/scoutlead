@@ -487,10 +487,13 @@ function AppShell({
             <>
                 {audienceFolders.map((folder) => {
                   const profiles = productProfiles.filter((profile) => profile.folder_id === folder.id);
-                  const open = expandedFolders[folder.id] || profiles.some((profile) => profile.id === selectedProfileId);
+                  const containsSelected = profiles.some((profile) => profile.id === selectedProfileId);
+                  const explicitlySet = expandedFolders[folder.id];
+                  const open = explicitlySet === undefined ? containsSelected : explicitlySet;
                   return <section className="audience-folder" key={folder.id}>
                     <div className="audience-folder-row">
-                      <button aria-expanded={open} className="audience-folder-main" type="button" onClick={() => setExpandedFolders((current) => ({ ...current, [folder.id]: !open }))}>
+                      <button aria-expanded={open} className={open ? "audience-folder-main is-open" : "audience-folder-main"} type="button" onClick={() => setExpandedFolders((current) => ({ ...current, [folder.id]: !open }))}>
+                        <ChevronDown className="audience-folder-chevron" size={13} />
                         {open ? <FolderOpen size={15} /> : <Folder size={15} />}<span>{folder.name}</span><em>{profiles.length}</em>
                       </button>
                       <div className="audience-folder-actions"><button aria-expanded={folderMenuId === folder.id} aria-label={`Actions for ${folder.name}`} type="button" onClick={() => { setAudienceMenuId(""); setFolderMenuId((current) => current === folder.id ? "" : folder.id); }}><MoreVertical size={15} /></button>{folderMenuId === folder.id ? <div className="audience-sidebar-menu"><button type="button" onClick={() => { setFolderMenuId(""); startNewAudience(folder.id); }}><Plus size={13} />New</button><button type="button" onClick={() => { setFolderMenuId(""); setEditFolder(folder); }}><Pencil size={13} />Rename</button><button className="is-danger" type="button" onClick={() => { setFolderMenuId(""); setDeleteFolder(folder); }}><Trash2 size={13} />Delete</button></div> : null}</div>

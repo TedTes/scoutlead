@@ -6099,10 +6099,6 @@ a {
   font-style: normal;
 }
 
-.lead-workflow-links button.active em {
-  color: #765ee0;
-}
-
 .lead-workspace-heading {
   align-items: center;
   color: var(--faint);
@@ -6210,11 +6206,16 @@ a {
 
 .audience-folder { position: relative; }
 .audience-folder-row { align-items: center; display: grid; grid-template-columns: minmax(0, 1fr) 34px; position: relative; }
-.lead-workspace-list .audience-folder-main { align-items: center; display: grid; gap: 8px; grid-column: 1 / -1; grid-row: 1; grid-template-columns: 16px minmax(0, 1fr) auto; min-height: 39px; padding: 5px 40px 5px 18px; width: 100%; }
-.audience-folder-main svg { color: var(--green); }
+.lead-workspace-list .audience-folder-main { align-items: center; display: grid; gap: 7px; grid-column: 1 / -1; grid-row: 1; grid-template-columns: 13px 16px minmax(0, 1fr) auto; min-height: 39px; padding: 5px 40px 5px 14px; width: 100%; }
+.audience-folder-chevron { color: var(--faint); flex: 0 0 auto; transform: rotate(-90deg); transition: transform 150ms ease; }
+.audience-folder-main.is-open .audience-folder-chevron { color: var(--muted); transform: rotate(0deg); }
+.audience-folder-main svg:not(.audience-folder-chevron) { color: var(--green); }
 .audience-folder-main span { font-size: 10.5px; font-weight: 750; letter-spacing: .045em; text-align: left; text-transform: uppercase; }
 .audience-folder-main em,
+.lead-workflow-links button em,
 .audience-recents-heading em { align-items: center; background: var(--panel-muted); border-radius: 999px; color: var(--faint); display: inline-flex; font-family: var(--mono); font-size: 9px; font-style: normal; height: 18px; justify-content: center; min-width: 21px; padding: 0 5px; }
+.audience-folder-main.is-open em { background: var(--green-bg); color: var(--green); }
+.lead-workflow-links button.active em { background: #e3defa; color: #5d3fd3; }
 .audience-folder-actions { display: flex; grid-column: 2; grid-row: 1; opacity: .65; position: relative; z-index: 4; }
 .audience-folder-row:hover .audience-folder-actions,
 .audience-folder-row:focus-within .audience-folder-actions { opacity: 1; }
