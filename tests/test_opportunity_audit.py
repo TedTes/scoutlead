@@ -321,6 +321,153 @@ def test_campaign_opportunity_audit_records_completed_confirmation_search(monkey
         assert opportunity["signals"][0]["value"] == "Website not confirmed"
 
 
+def test_failed_confirmation_keeps_website_status_unknown(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+
+    class FailedSearch:
+        is_configured = True
+
+        def lookup(self, query: str, limit: int = 5):
+            raise RuntimeError("provider unavailable")
+
+    class FailedGoogleLookup:
+        is_configured = True
+
+        def lookup(self, query: str, limit: int = 5):
+            raise RuntimeError("google unavailable")
+
+    with session_factory() as session:
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Salivan Landscape Ltd",
+            website_url=None,
+            geography="75 Nashdene Rd, Toronto, ON M1V 2W3",
+            source="openstreetmap",
+            raw={
+                "businessStatus": "OPERATIONAL",
+                "source_url": "https://www.openstreetmap.org/way/659839192",
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            search=FailedSearch(),
+            google_places=FailedGoogleLookup(),
+            timeout_seconds=1,
+        ).audit_businesses(
+            [business.id],
+            category="landscaping contractors",
+            market="Toronto",
+            opportunity_policy="weak_or_missing",
+        )
+
+        latest = session.query(SourceObservationModel).filter_by(
+            business_id=business.id,
+            source="website_presence_check",
+        ).one()
+        presence = latest.raw_payload["website_presence"]
+        assert presence["status"] == "verification_incomplete"
+        assert presence["confirmation_attempted"] is False
+        assert presence["google_website_listed"] is None
+        assert latest.raw_payload["digital_opportunity"]["signals"] == []
+        assert any(
+            "google unavailable" in failure
+            for failure in presence["confirmation_failures"]
+        )
+        assert any(
+            "provider unavailable" in failure
+            for failure in presence["confirmation_failures"]
+        )
+
+
+def test_osm_candidate_is_cross_checked_with_google_places(monkeypatch) -> None:
+    session_factory = _session_factory()
+    monkeypatch.setattr(
+        "territories.opportunity_audit.enrich_business_pool",
+        lambda session, **kwargs: EnrichmentSummary(dry_run=False),
+    )
+
+    class ExactGoogleLookup:
+        is_configured = True
+
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def lookup(self, query: str, limit: int = 5):
+            self.queries.append(query)
+            return [
+                SearchResult(
+                    title="Salivan Landscape Ltd",
+                    url="https://salivanlandscape.com/",
+                    geography="75 Nashdene Rd, Toronto, ON M1V 2W3, Canada",
+                    source="google_places",
+                    raw={
+                        "id": "place_salivan",
+                        "displayName": {"text": "Salivan Landscape Ltd"},
+                        "formattedAddress": (
+                            "75 Nashdene Rd, Toronto, ON M1V 2W3, Canada"
+                        ),
+                        "location": {
+                            "latitude": 43.821,
+                            "longitude": -79.245,
+                        },
+                        "websiteUri": "https://salivanlandscape.com/",
+                        "googleMapsUri": "https://maps.google.com/?cid=salivan",
+                        "businessStatus": "OPERATIONAL",
+                    },
+                )
+            ]
+
+    google = ExactGoogleLookup()
+    with session_factory() as session:
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Salivan Landscape Ltd",
+            website_url=None,
+            geography="75 Nashdene Rd, Toronto, ON M1V 2W3",
+            source="openstreetmap",
+            raw={
+                "businessStatus": "OPERATIONAL",
+                "source_url": "https://www.openstreetmap.org/way/659839192",
+            },
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+
+        BusinessOpportunityAuditor(
+            session=session,
+            verifier=None,
+            google_places=google,
+            timeout_seconds=1,
+        ).audit_businesses(
+            [business.id],
+            category="landscaping contractors",
+            market="Toronto",
+            opportunity_policy="weak_or_missing",
+        )
+
+        session.refresh(business)
+        assert business.website_url == "https://salivanlandscape.com/"
+        assert "Salivan Landscape Ltd" in google.queries[0]
+        google_observation = session.query(SourceObservationModel).filter_by(
+            business_id=business.id,
+            source="google_places",
+        ).one()
+        assert google_observation.raw_payload["verification_scope"] == "entity"
+        presence = session.query(SourceObservationModel).filter_by(
+            business_id=business.id,
+            source="website_presence_check",
+        ).one()
+        assert presence.raw_payload["website_presence"]["status"] == (
+            "website_found_during_confirmation"
+        )
+
+
 def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatch) -> None:
     session_factory = _session_factory()
     monkeypatch.setattr(

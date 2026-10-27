@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
+import math
 import re
 from urllib.parse import urlparse
 
@@ -28,7 +30,8 @@ from db.models import (
     SourceObservationModel,
 )
 from shared.utils import normalize_url, utcnow
-from tools.search import SearchTool
+from tools.discovery.google_places import GooglePlacesDiscoveryAdapter
+from tools.search import SearchResult, SearchTool
 from tools.verify import EmailVerificationTool
 
 
@@ -106,6 +109,23 @@ class MissingWebsiteAudit:
     confirmed_absent: int = 0
 
 
+@dataclass
+class WebsiteConfirmation:
+    website_url: str | None
+    query: str
+    completed: bool = False
+    negative_supported: bool = False
+    google_profile_matched: bool = False
+    google_website_listed: bool | None = None
+    google_result: SearchResult | None = None
+    checks: list[dict] | None = None
+    failures: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        self.checks = list(self.checks or [])
+        self.failures = list(self.failures or [])
+
+
 class BusinessOpportunityAuditor:
     """Audit the exact businesses selected for a search or recurring delivery."""
 
@@ -116,6 +136,7 @@ class BusinessOpportunityAuditor:
         verifier: EmailVerificationTool | None,
         timeout_seconds: float,
         search: SearchTool | None = None,
+        google_places: GooglePlacesDiscoveryAdapter | None = None,
         workers: int = 4,
         browser_render_endpoint: str | None = None,
         browser_render_api_key: str | None = None,
@@ -123,6 +144,7 @@ class BusinessOpportunityAuditor:
         self.session = session
         self.verifier = verifier
         self.search = search
+        self.google_places = google_places
         self.timeout_seconds = timeout_seconds
         self.workers = max(1, workers)
         self.browser_render_endpoint = browser_render_endpoint
@@ -208,6 +230,7 @@ class BusinessOpportunityAuditor:
                 {
                     **observation.raw_payload,
                     "_observation_source": observation.source,
+                    "_observed_at": observation.observed_at.isoformat(),
                 }
             )
 
@@ -273,8 +296,12 @@ class BusinessOpportunityAuditor:
                         message="Google Business Profile lists a business website.",
                         score=0,
                         level="none",
-                        confirmation_attempted=False,
+                        confirmation_attempted=True,
                         website_url=google_website_url,
+                        google_website_listed=True,
+                        confirmation_checks=[
+                            {"provider": "google_places", "status": "matched"}
+                        ],
                     ),
                 )
                 continue
@@ -308,10 +335,20 @@ class BusinessOpportunityAuditor:
                 continue
             if not phone and not source_url:
                 continue
-            website_url, attempted, query = self._confirm_website(business)
-            if website_url:
-                business.website_url = website_url
-                business.domain = normalize_domain(website_url)
+            confirmation = self._confirm_website(
+                business,
+                google_already_checked=google_lists_no_website,
+            )
+            if confirmation.google_result is not None:
+                self._record_google_confirmation(
+                    canonical,
+                    business,
+                    confirmation.google_result,
+                    confirmation.query,
+                )
+            if confirmation.website_url:
+                business.website_url = confirmation.website_url
+                business.domain = normalize_domain(confirmation.website_url)
                 canonical.record_business_evidence(
                     business=business,
                     source=WEBSITE_PRESENCE_SOURCE,
@@ -319,18 +356,31 @@ class BusinessOpportunityAuditor:
                         business=business,
                         phone=phone,
                         maps_url=source_url,
-                        confirmation_query=query,
+                        confirmation_query=confirmation.query,
                         status="website_found_during_confirmation",
                         label="Website found",
                         message="A credible business website was found during confirmation.",
                         score=0,
                         level="none",
                         confirmation_attempted=True,
-                        website_url=website_url,
+                        website_url=confirmation.website_url,
+                        google_website_listed=confirmation.google_website_listed,
+                        confirmation_checks=confirmation.checks,
+                        confirmation_failures=confirmation.failures,
                     ),
                 )
                 continue
-            confirmed_missing = attempted
+            confirmed_missing = confirmation.negative_supported
+            web_confirmation_completed = any(
+                check.get("provider") == "configured_search"
+                and check.get("status") == "completed"
+                for check in confirmation.checks or []
+            )
+            google_confirmed_omission = (
+                confirmation.google_profile_matched
+                and confirmation.google_website_listed is False
+                and not web_confirmation_completed
+            )
             canonical.record_business_evidence(
                 business=business,
                 source=WEBSITE_PRESENCE_SOURCE,
@@ -338,20 +388,36 @@ class BusinessOpportunityAuditor:
                     business=business,
                     phone=phone,
                     maps_url=source_url,
-                    confirmation_query=query,
+                    confirmation_query=confirmation.query,
                     status=(
-                        "no_website_found" if confirmed_missing else "no_website_listed"
+                        "no_website_listed"
+                        if google_confirmed_omission
+                        else "no_website_found"
+                        if confirmed_missing
+                        else "verification_incomplete"
                     ),
-                    label="Website not confirmed" if attempted else "No website listed",
+                    label=(
+                        "No website listed"
+                        if google_confirmed_omission
+                        else "Website not confirmed"
+                        if confirmed_missing
+                        else "Website verification incomplete"
+                    ),
                     message=(
-                        "The source profile has no website listed, and the confirmation "
-                        "search did not identify a matching official site."
-                        if attempted
-                        else "The source profile has no website listed."
+                        "A matching Google Business Profile has no website listed."
+                        if google_confirmed_omission
+                        else "The source profile has no website listed, and completed "
+                        "verification did not identify a matching active website."
+                        if confirmed_missing
+                        else "The source omitted a website, but verification did not "
+                        "complete; website status remains unknown."
                     ),
-                    score=35,
-                    level="moderate",
-                    confirmation_attempted=attempted,
+                    score=35 if confirmed_missing else 0,
+                    level="moderate" if confirmed_missing else "none",
+                    confirmation_attempted=confirmation.completed,
+                    google_website_listed=confirmation.google_website_listed,
+                    confirmation_checks=confirmation.checks,
+                    confirmation_failures=confirmation.failures,
                 ),
             )
         self.session.commit()
@@ -386,25 +452,36 @@ class BusinessOpportunityAuditor:
             if not phone and not maps_url:
                 continue
 
-            website_url, confirmation_attempted, confirmation_query = self._confirm_website(
-                business
+            confirmation = self._confirm_website(
+                business,
+                google_already_checked=_sources_include_google(lead.raw_sources),
             )
-            if website_url:
-                business.website_url = website_url
-                business.domain = normalize_domain(website_url)
-                lead.website_url = website_url
+            if confirmation.google_result is not None:
+                self._record_google_confirmation(
+                    canonical,
+                    business,
+                    confirmation.google_result,
+                    confirmation.query,
+                )
+            if confirmation.website_url:
+                business.website_url = confirmation.website_url
+                business.domain = normalize_domain(confirmation.website_url)
+                lead.website_url = confirmation.website_url
                 raw = _website_presence_evidence(
                     business=business,
                     phone=phone,
                     maps_url=maps_url,
-                    confirmation_query=confirmation_query,
+                    confirmation_query=confirmation.query,
                     status="website_found_during_confirmation",
                     label="Website found",
                     message="A credible business website was found during confirmation.",
                     score=0,
                     level="none",
                     confirmation_attempted=True,
-                    website_url=website_url,
+                    website_url=confirmation.website_url,
+                    google_website_listed=confirmation.google_website_listed,
+                    confirmation_checks=confirmation.checks,
+                    confirmation_failures=confirmation.failures,
                 )
                 canonical.record_business_evidence(
                     business=business,
@@ -414,27 +491,53 @@ class BusinessOpportunityAuditor:
                 changed = True
                 continue
 
-            status = (
-                "no_website_found" if confirmation_attempted else "no_website_listed"
+            web_confirmation_completed = any(
+                check.get("provider") == "configured_search"
+                and check.get("status") == "completed"
+                for check in confirmation.checks or []
             )
-            label = "Website not confirmed" if confirmation_attempted else "No website listed"
+            google_confirmed_omission = (
+                confirmation.google_profile_matched
+                and confirmation.google_website_listed is False
+                and not web_confirmation_completed
+            )
+            status = (
+                "no_website_listed"
+                if google_confirmed_omission
+                else "no_website_found"
+                if confirmation.negative_supported
+                else "verification_incomplete"
+            )
+            label = (
+                "No website listed"
+                if google_confirmed_omission
+                else "Website not confirmed"
+                if confirmation.negative_supported
+                else "Website verification incomplete"
+            )
             message = (
-                "Google Business Profile has no website listed, and the confirmation "
-                "search did not identify a matching official site."
-                if confirmation_attempted
-                else "Google Business Profile has no website listed."
+                "Google Business Profile has no website listed."
+                if google_confirmed_omission
+                else "The source profile has no website listed, and completed verification "
+                "did not identify a matching active website."
+                if confirmation.negative_supported
+                else "The source omitted a website, but verification did not complete; "
+                "website status remains unknown."
             )
             raw = _website_presence_evidence(
                 business=business,
                 phone=phone,
                 maps_url=maps_url,
-                confirmation_query=confirmation_query,
+                confirmation_query=confirmation.query,
                 status=status,
                 label=label,
                 message=message,
-                score=35,
-                level="moderate",
-                confirmation_attempted=confirmation_attempted,
+                score=35 if confirmation.negative_supported else 0,
+                level="moderate" if confirmation.negative_supported else "none",
+                confirmation_attempted=confirmation.completed,
+                google_website_listed=confirmation.google_website_listed,
+                confirmation_checks=confirmation.checks,
+                confirmation_failures=confirmation.failures,
             )
             canonical.record_business_evidence(
                 business=business,
@@ -449,25 +552,127 @@ class BusinessOpportunityAuditor:
     def _confirm_website(
         self,
         business: BusinessModel,
-    ) -> tuple[str | None, bool, str]:
+        *,
+        google_already_checked: bool = False,
+    ) -> WebsiteConfirmation:
         queries = _website_confirmation_queries(business)
         default_query = queries[0]
-        attempted_candidates: list[str] = []
+        checks: list[dict] = []
+        failures: list[str] = []
         for website_url in self._contact_domain_candidates(business):
-            attempted_candidates.append(website_url)
             resolved_url = self._inspect_active_website(business, website_url)
+            checks.append(
+                {
+                    "provider": "contact_domain",
+                    "status": "matched" if resolved_url else "not_active",
+                    "query": website_url,
+                }
+            )
             if resolved_url:
-                return resolved_url, True, f"first-party email domain: {website_url}"
+                return WebsiteConfirmation(
+                    website_url=resolved_url,
+                    query=f"first-party email domain: {website_url}",
+                    completed=True,
+                    checks=checks,
+                )
+
+        google_profile_matched = google_already_checked
+        google_website_listed: bool | None = False if google_already_checked else None
+        google_result: SearchResult | None = None
+        negative_supported = google_already_checked
+        completed = google_already_checked
+        if google_already_checked:
+            checks.append(
+                {
+                    "provider": "google_places",
+                    "status": "cached_match_without_website",
+                }
+            )
+        elif self.google_places is not None and self.google_places.is_configured:
+            google_query = _google_place_confirmation_query(business)
+            try:
+                google_results = self.google_places.lookup(google_query, limit=5)
+                completed = True
+                google_result = next(
+                    (
+                        result
+                        for result in google_results
+                        if _google_place_matches_business(result, business)
+                    ),
+                    None,
+                )
+                google_profile_matched = google_result is not None
+                checks.append(
+                    {
+                        "provider": "google_places",
+                        "status": "matched" if google_result else "no_identity_match",
+                        "query": google_query,
+                        "result_count": len(google_results),
+                    }
+                )
+                if google_result is not None:
+                    google_website_listed = bool(normalize_url(google_result.url))
+                    if google_website_listed:
+                        return WebsiteConfirmation(
+                            website_url=normalize_url(google_result.url),
+                            query=google_query,
+                            completed=True,
+                            google_profile_matched=True,
+                            google_website_listed=True,
+                            google_result=google_result,
+                            checks=checks,
+                        )
+                    negative_supported = True
+            except Exception as exc:
+                failure = f"google_places: {exc}"
+                failures.append(failure)
+                checks.append(
+                    {
+                        "provider": "google_places",
+                        "status": "failed",
+                        "query": google_query,
+                        "error": str(exc),
+                    }
+                )
+
         if self.search is None or not self.search.is_configured:
-            return None, bool(attempted_candidates), default_query
+            return WebsiteConfirmation(
+                website_url=None,
+                query=default_query,
+                completed=completed,
+                negative_supported=negative_supported,
+                google_profile_matched=google_profile_matched,
+                google_website_listed=google_website_listed,
+                google_result=google_result,
+                checks=checks,
+                failures=failures,
+            )
         attempted_queries: list[str] = []
         seen_urls: set[str] = set()
         for query in queries[:2]:
             try:
                 results = self.search.lookup(query, limit=8)
-            except Exception:
+            except Exception as exc:
+                failures.append(f"configured_search: {exc}")
+                checks.append(
+                    {
+                        "provider": "configured_search",
+                        "status": "failed",
+                        "query": query,
+                        "error": str(exc),
+                    }
+                )
                 continue
+            completed = True
             attempted_queries.append(query)
+            checks.append(
+                {
+                    "provider": "configured_search",
+                    "status": "completed",
+                    "query": query,
+                    "result_count": len(results),
+                }
+            )
             for result in results:
                 normalized_result_url = normalize_url(result.url)
                 if normalized_result_url in seen_urls:
@@ -486,9 +691,52 @@ class BusinessOpportunityAuditor:
                     continue
                 resolved_url = self._inspect_active_website(business, website_url)
                 if resolved_url:
-                    return resolved_url, True, query
-        attempted = bool(attempted_candidates or attempted_queries)
-        return None, attempted, " | ".join(attempted_queries) or default_query
+                    return WebsiteConfirmation(
+                        website_url=resolved_url,
+                        query=query,
+                        completed=True,
+                        negative_supported=negative_supported,
+                        google_profile_matched=google_profile_matched,
+                        google_website_listed=google_website_listed,
+                        google_result=google_result,
+                        checks=checks,
+                        failures=failures,
+                    )
+        negative_supported = negative_supported or bool(attempted_queries)
+        return WebsiteConfirmation(
+            website_url=None,
+            query=" | ".join(attempted_queries) or default_query,
+            completed=completed,
+            negative_supported=negative_supported,
+            google_profile_matched=google_profile_matched,
+            google_website_listed=google_website_listed,
+            google_result=google_result,
+            checks=checks,
+            failures=failures,
+        )
+
+    @staticmethod
+    def _record_google_confirmation(
+        canonical: CanonicalRepository,
+        business: BusinessModel,
+        result: SearchResult,
+        query: str,
+    ) -> None:
+        raw = {
+            **result.raw,
+            "query": query,
+            "external_id": result.raw.get("id"),
+            "provider_id": "google_places",
+            "source_url": result.raw.get("googleMapsUri") or result.url,
+            "website_url": result.url,
+            "verification_scope": "entity",
+            "verification_target_business_id": business.id,
+        }
+        canonical.record_business_evidence(
+            business=business,
+            source="google_places",
+            raw=raw,
+        )
 
     def _contact_domain_candidates(self, business: BusinessModel) -> list[str]:
         candidates: list[str] = []
@@ -629,6 +877,9 @@ def _website_presence_evidence(
     level: str,
     confirmation_attempted: bool,
     website_url: str | None = None,
+    google_website_listed: bool | None = None,
+    confirmation_checks: list[dict] | None = None,
+    confirmation_failures: list[str] | None = None,
 ) -> dict:
     assessed_at = utcnow().isoformat()
     return {
@@ -638,8 +889,10 @@ def _website_presence_evidence(
         "website_presence": {
             "status": status,
             "label": label,
-            "google_website_listed": False,
+            "google_website_listed": google_website_listed,
             "confirmation_attempted": confirmation_attempted,
+            "confirmation_checks": list(confirmation_checks or []),
+            "confirmation_failures": list(confirmation_failures or []),
             "confirmed_at": assessed_at,
             "phone": phone,
             "google_maps_url": maps_url,
@@ -650,17 +903,124 @@ def _website_presence_evidence(
             "score": score,
             "level": level,
             "assessed_at": assessed_at,
-            "signals": [
-                {
-                    "key": status,
-                    "message": message,
-                    "points": score,
-                    "source_url": website_url or maps_url,
-                    "value": label,
-                }
-            ],
+            "signals": (
+                []
+                if status == "verification_incomplete"
+                else [
+                    {
+                        "key": status,
+                        "message": message,
+                        "points": score,
+                        "source_url": website_url or maps_url,
+                        "value": label,
+                    }
+                ]
+            ),
         },
     }
+
+
+def _sources_include_google(value: object) -> bool:
+    if isinstance(value, dict):
+        source = str(
+            value.get("_observation_source")
+            or value.get("provider_id")
+            or value.get("source")
+            or ""
+        ).strip().lower()
+        if source in {"google_places", "google_places_seed"}:
+            return True
+        return any(_sources_include_google(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_sources_include_google(item) for item in value)
+    return False
+
+
+def _google_place_confirmation_query(business: BusinessModel) -> str:
+    location = business.address or business.geography or ""
+    return " ".join(f"{business.display_name} {location}".split())
+
+
+def _google_place_matches_business(
+    result: SearchResult,
+    business: BusinessModel,
+) -> bool:
+    expected_name = normalize_business_name(business.display_name)
+    result_name = normalize_business_name(result.title)
+    if not expected_name or not result_name:
+        return False
+    name_similarity = SequenceMatcher(None, expected_name, result_name).ratio()
+    if not (
+        name_similarity >= 0.82
+        or expected_name in result_name
+        or result_name in expected_name
+    ):
+        return False
+
+    expected_phone = re.sub(r"\D+", "", business.phone or "")[-10:]
+    result_phone = re.sub(
+        r"\D+", "", str(result.raw.get("nationalPhoneNumber") or "")
+    )[-10:]
+    if expected_phone and result_phone:
+        return expected_phone == result_phone
+
+    location = result.raw.get("location")
+    if (
+        business.latitude is not None
+        and business.longitude is not None
+        and isinstance(location, dict)
+        and isinstance(location.get("latitude"), int | float)
+        and isinstance(location.get("longitude"), int | float)
+    ):
+        return _distance_km(
+            business.latitude,
+            business.longitude,
+            float(location["latitude"]),
+            float(location["longitude"]),
+        ) <= 3.0
+
+    expected_location = business.address or business.geography or ""
+    result_location = result.geography or str(result.raw.get("formattedAddress") or "")
+    expected_postal = _postal_code(expected_location)
+    result_postal = _postal_code(result_location)
+    if expected_postal and result_postal:
+        return expected_postal == result_postal
+
+    expected_number = _street_number(expected_location)
+    result_number = _street_number(result_location)
+    expected_tokens = _confirmation_location_tokens(expected_location)
+    result_tokens = set(normalize_business_name(result_location).split())
+    if expected_number and result_number and expected_number == result_number:
+        return not expected_tokens or bool(expected_tokens & result_tokens)
+    return name_similarity >= 0.96 and bool(expected_tokens & result_tokens)
+
+
+def _postal_code(value: str) -> str | None:
+    match = re.search(r"\b([A-Z]\d[A-Z])\s*(\d[A-Z]\d)\b", value, re.IGNORECASE)
+    return "".join(match.groups()).upper() if match else None
+
+
+def _street_number(value: str) -> str | None:
+    match = re.search(r"\b(\d+[A-Za-z]?)\b", value)
+    return match.group(1).lower() if match else None
+
+
+def _distance_km(
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    radius_km = 6371.0088
+    phi_a = math.radians(latitude_a)
+    phi_b = math.radians(latitude_b)
+    delta_phi = math.radians(latitude_b - latitude_a)
+    delta_lambda = math.radians(longitude_b - longitude_a)
+    haversine = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi_a) * math.cos(phi_b) * math.sin(delta_lambda / 2) ** 2
+    )
+    return radius_km * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
 
 
 def _credible_business_website(
@@ -731,6 +1091,16 @@ def _google_lists_no_website(sources: list[dict]) -> bool:
             "google_places_seed",
         }:
             continue
+        observed_at = source.get("_observed_at")
+        if observed_at:
+            try:
+                observed = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+                if observed.tzinfo is None:
+                    observed = observed.replace(tzinfo=UTC)
+                if observed < utcnow() - timedelta(days=30):
+                    continue
+            except ValueError:
+                continue
         return _google_listed_website([source]) is None
     return False
 

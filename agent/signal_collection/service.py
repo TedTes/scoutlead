@@ -502,6 +502,7 @@ def _website_status(enrichment: dict[str, Any]) -> str | None:
         "missing": "missing",
         "unavailable": "unavailable",
         "parked": "parked",
+        "not_checked": "unknown",
         "inconclusive": "unknown",
     }.get(status)
 

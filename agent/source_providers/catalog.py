@@ -266,6 +266,9 @@ def niche_slug_for_category(category: str) -> str | None:
     normalized = _normalize(category)
     if not normalized:
         return None
+    normalized_slug = normalized.replace(" ", "_")
+    if normalized_slug in NICHE_BY_SLUG:
+        return normalized_slug
     best: tuple[int, str] | None = None
     for slug, spec in NICHE_BY_SLUG.items():
         descriptors = {

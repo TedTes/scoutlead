@@ -544,12 +544,29 @@ class BusinessIndexPipelineService:
                 )
             )
         }
+        fact_observation_ids = {
+            fact.source_observation_id
+            for fact in current.values()
+            if fact.source_observation_id
+        }
+        fact_observations = {
+            observation.id: observation
+            for observation in self.session.scalars(
+                select(SourceObservationModel).where(
+                    SourceObservationModel.id.in_(fact_observation_ids)
+                )
+            )
+        }
         candidates = [
             business_id
             for business_id in business_ids
             if business_id not in current
             or _aware(current[business_id].observed_at) < _aware(freshness_cutoff)
             or current[business_id].value_text in {"unknown", "not_listed"}
+            or _unverified_missing_fact(
+                current[business_id],
+                fact_observations.get(current[business_id].source_observation_id),
+            )
         ]
         limit = min(max(int(segment.target_business_count or 25), 1), 100)
         return candidates[:limit]
@@ -583,6 +600,23 @@ class BusinessIndexPipelineService:
         )
         self.segments.complete_refresh(segment, succeeded=succeeded)
         return True
+
+
+def _unverified_missing_fact(
+    fact: BusinessFactModel,
+    observation: SourceObservationModel | None,
+) -> bool:
+    if fact.value_text != "missing" or observation is None:
+        return False
+    if observation.source not in {"company_website_signal", "company_website_seed"}:
+        return False
+    payload = observation.raw_payload or {}
+    enrichment = payload.get("website_enrichment")
+    return bool(
+        isinstance(enrichment, dict)
+        and not enrichment.get("inspected_urls")
+        and not payload.get("website_url")
+    )
 
 
 def _aware(value):

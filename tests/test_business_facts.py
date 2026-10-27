@@ -215,6 +215,39 @@ def test_verified_website_enrichment_promotes_canonical_url() -> None:
         assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
 
 
+def test_missing_url_does_not_become_a_missing_website_fact() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="Unverified Painter",
+            geography="Toronto",
+            source="openstreetmap",
+            raw={"businessStatus": "OPERATIONAL"},
+        )
+        business = session.get(BusinessModel, link.business_id)
+        assert business is not None
+
+        canonical.record_business_evidence(
+            business=business,
+            source="company_website_signal",
+            raw={
+                "website_url": None,
+                "website_enrichment": {
+                    "availability_status": "missing",
+                    "availability_reason": "No website URL was available for inspection.",
+                    "inspected_urls": [],
+                },
+            },
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses([business.id])
+        assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == (
+            "unknown"
+        )
+
+
 def test_verified_website_replaces_stale_canonical_url() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

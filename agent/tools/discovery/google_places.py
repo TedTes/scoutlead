@@ -52,6 +52,42 @@ class GooglePlacesDiscoveryAdapter:
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
+    def lookup(self, query: str, limit: int = 5) -> list[SearchResult]:
+        """Look up a specific business for cross-provider verification.
+
+        Discovery runs use ``run`` and may return only the highest-ranked businesses
+        for a broad trade query. This smaller lookup is intentionally separate: it is
+        called only when another provider supplied a candidate whose identity or
+        website listing still needs corroboration.
+        """
+        if not self.is_configured:
+            raise ConfigurationError(
+                "GOOGLE_PLACES_API_KEY is required for Google Places verification",
+                {"provider_id": self.provider_id},
+            )
+        normalized_query = " ".join(query.split())
+        if not normalized_query:
+            return []
+        response = httpx.post(
+            self.endpoint,
+            timeout=self.timeout_seconds,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": self.api_key or "",
+                "X-Goog-FieldMask": GOOGLE_PLACES_FIELD_MASK,
+            },
+            json={
+                "textQuery": normalized_query,
+                "pageSize": max(1, min(limit, 20)),
+                "includePureServiceAreaBusinesses": True,
+            },
+        )
+        response.raise_for_status()
+        return [
+            self._to_search_result(place=place, query=normalized_query)
+            for place in response.json().get("places", [])[:limit]
+        ]
+
     def run(self, source: CampaignSourceRead, context: dict[str, Any]) -> ToolResult:
         if not self.is_configured:
             raise ConfigurationError(

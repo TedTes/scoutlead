@@ -6,6 +6,7 @@ from business_index.pipeline import BusinessIndexPipelineService
 from campaigns.service import CampaignService
 from source_providers.registry import SourceProviderRegistry
 from territories.opportunity_audit import BusinessOpportunityAuditor
+from tools.discovery.google_places import GooglePlacesDiscoveryAdapter
 from tools.verify import EmailVerificationTool
 from tools.source_registry import SourceAdapterRegistry
 
@@ -49,6 +50,7 @@ def campaign_service(
             session=session,
             verifier=_verification_tool(services),
             search=services.search,
+            google_places=_google_places_verifier(settings),
             timeout_seconds=settings.request_timeout_seconds,
             browser_render_endpoint=settings.browser_render_endpoint,
             browser_render_api_key=settings.browser_render_api_key,
@@ -85,6 +87,7 @@ def business_index_refresh_service(
             session=session,
             verifier=_verification_tool(services),
             search=services.search,
+            google_places=_google_places_verifier(settings),
             timeout_seconds=settings.request_timeout_seconds,
             browser_render_endpoint=settings.browser_render_endpoint,
             browser_render_api_key=settings.browser_render_api_key,
@@ -119,5 +122,15 @@ def _verification_tool(services: AppServices) -> EmailVerificationTool:
         bouncer_api_endpoint=settings.bouncer_api_endpoint,
         zerobounce_api_key=settings.zerobounce_api_key,
         zerobounce_api_endpoint=settings.zerobounce_api_endpoint,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+
+
+def _google_places_verifier(settings) -> GooglePlacesDiscoveryAdapter | None:
+    if not settings.google_places_api_key:
+        return None
+    return GooglePlacesDiscoveryAdapter(
+        api_key=settings.google_places_api_key,
+        endpoint=settings.google_places_api_endpoint,
         timeout_seconds=settings.request_timeout_seconds,
     )

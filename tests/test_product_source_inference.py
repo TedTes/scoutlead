@@ -16,6 +16,7 @@ from products.schemas import (
 )
 from products.discovery_policy import (
     build_local_business_query,
+    build_local_business_queries,
     normalize_places_region_code,
     validate_local_business_intent,
     validate_google_places_query,
@@ -578,6 +579,13 @@ def test_local_business_intent_uses_parsed_location_dynamically() -> None:
         )
         == "residential painting contractors Toronto"
     )
+
+
+def test_internal_niche_slug_compiles_to_natural_google_query() -> None:
+    assert build_local_business_queries(
+        business_category="home_service_landscaping",
+        location="Toronto",
+    ) == ["landscaping companies Toronto"]
 
 
 def test_local_business_intent_requires_parsed_market_context() -> None:

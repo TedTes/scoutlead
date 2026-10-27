@@ -395,7 +395,14 @@ def _website_status_from_payload(payload: dict[str, Any]) -> tuple[str | None, i
             return mapped
     enrichment = payload.get("website_enrichment")
     if isinstance(enrichment, dict):
-        mapped = _map_website_status(str(enrichment.get("availability_status") or ""))
+        enrichment_status = str(enrichment.get("availability_status") or "")
+        if (
+            enrichment_status.strip().lower() == "missing"
+            and not enrichment.get("inspected_urls")
+            and not _payload_has_website(payload)
+        ):
+            return "unknown", 0
+        mapped = _map_website_status(enrichment_status)
         if mapped:
             return mapped
     opportunity = opportunity_evidence_from_sources([payload])
@@ -429,6 +436,8 @@ def _map_website_status(value: str) -> tuple[str, int] | None:
         "parked": ("parked", 95),
         "website_parked": ("parked", 95),
         "website_unreachable": ("unknown", 30),
+        "verification_incomplete": ("unknown", 0),
+        "not_checked": ("unknown", 0),
     }
     return mapping.get(normalized)
 

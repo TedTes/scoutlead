@@ -104,6 +104,29 @@ def test_google_places_adapter_maps_places_to_search_results(monkeypatch) -> Non
     assert "reviews: 42" in result.data[0]["snippet"]
 
 
+def test_google_places_adapter_supports_exact_business_lookup(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, *, timeout, headers, json):
+        calls.append({"url": url, "timeout": timeout, "headers": headers, "json": json})
+        return FakeResponse()
+
+    monkeypatch.setattr("tools.discovery.google_places.httpx.post", fake_post)
+
+    results = GooglePlacesDiscoveryAdapter(api_key="test-key").lookup(
+        "Cedar & Sons Painting 1 Main St Austin TX",
+        limit=5,
+    )
+
+    assert calls[0]["json"] == {
+        "textQuery": "Cedar & Sons Painting 1 Main St Austin TX",
+        "pageSize": 5,
+        "includePureServiceAreaBusinesses": True,
+    }
+    assert results[0].title == "Cedar & Sons Painting"
+    assert results[0].url == "https://cedarpainting.example"
+
+
 def test_google_places_adapter_paginates_up_to_source_limit(monkeypatch) -> None:
     calls = []
 

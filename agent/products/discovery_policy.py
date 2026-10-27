@@ -62,6 +62,21 @@ def build_local_business_queries(
         location=location,
         fallback_query=fallback_query,
     )
+    category_key = (
+        _normalized(business_category)
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    provider_queries = [
+        _normalized(template.template.format(location=_normalized(location)))
+        for template in _SOURCE_REGISTRY.templates(
+            provider_id="google_places",
+            niche_slug=category_key,
+        )
+    ]
+    if provider_queries:
+        base_query = provider_queries[0]
     if not expand_local_market:
         return [base_query]
 
@@ -78,7 +93,7 @@ def build_local_business_queries(
         return [base_query]
     category = _normalized(business_category)
     area_queries = [f"{category} in {area}" for area in areas]
-    variant_queries = [
+    variant_queries = provider_queries[1:4] or [
         f"{variant} in {_normalized(location)}"
         for variant in _category_search_variants(category)
     ]

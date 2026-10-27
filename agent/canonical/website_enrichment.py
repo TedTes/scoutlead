@@ -380,8 +380,10 @@ class WebsiteEnrichmentClient:
             return _empty_enrichment(
                 business,
                 error="Business has no website URL.",
-                availability_status="missing",
-                availability_reason="No website URL was available for inspection.",
+                availability_status="not_checked",
+                availability_reason=(
+                    "No verified website URL was available, so inspection was not run."
+                ),
             )
 
         pages: list[WebsitePage] = []
