@@ -418,7 +418,7 @@ class ProfileMatchService:
             )
             if not observation_is_quarantined(self.session, candidate)
         ]
-        observation = observations[0] if observations else None
+        observations_by_id = {candidate.id: candidate for candidate in observations}
         contact = next(
             (
                 candidate
@@ -435,27 +435,62 @@ class ProfileMatchService:
             ),
             None,
         )
-        signal_evidence = {
-            spec.key: {
+        signal_evidence = {}
+        for spec in signal_specs:
+            fact = facts.get(spec.fact_key)
+            fact_observation = (
+                observations_by_id.get(fact.source_observation_id)
+                if fact is not None and fact.source_observation_id
+                else None
+            )
+            evidence = {
                 "fact_key": spec.fact_key,
-                "value": fact_value(facts.get(spec.fact_key)),
-                "matched": (
-                    _signal_match_confidence(spec, facts.get(spec.fact_key)) is not None
-                ),
-                "confidence": _signal_match_confidence(spec, facts.get(spec.fact_key)),
+                "value": fact_value(fact),
+                "matched": _signal_match_confidence(spec, fact) is not None,
+                "confidence": _signal_match_confidence(spec, fact),
             }
-            for spec in signal_specs
-        }
+            if fact_observation is not None:
+                evidence.update(
+                    {
+                        "source_observation_id": fact_observation.id,
+                        "source": fact_observation.source,
+                        "source_url": fact_observation.source_url,
+                        "observed_at": fact_observation.observed_at.isoformat(),
+                    }
+                )
+            signal_evidence[spec.key] = evidence
         matched_signals = [
             {
                 "signal_key": signal,
                 "fact_key": evidence["fact_key"],
                 "value": evidence["value"],
                 "confidence": evidence["confidence"],
+                **(
+                    {
+                        "source_observation_id": evidence["source_observation_id"],
+                        "source": evidence["source"],
+                        "source_url": evidence["source_url"],
+                        "observed_at": evidence["observed_at"],
+                    }
+                    if evidence.get("source_observation_id")
+                    else {}
+                ),
             }
             for signal, evidence in signal_evidence.items()
             if evidence["matched"] is True
         ]
+        matched_observations = [
+            observations_by_id[item["source_observation_id"]]
+            for item in matched_signals
+            if item.get("source_observation_id") in observations_by_id
+        ]
+        observation = (
+            matched_observations[0]
+            if matched_observations
+            else observations[0]
+            if observations
+            else None
+        )
         matched_services = []
         for service in service_specs:
             supporting_evidence = [

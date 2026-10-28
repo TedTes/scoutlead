@@ -1381,6 +1381,73 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         ]
 
 
+def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        business = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )[1]
+        canonical = CanonicalRepository(session)
+        website_evidence = canonical.record_business_evidence(
+            business=business,
+            source="company_website_signal",
+            raw={
+                "source": "company_website_signal",
+                "source_url": "https://hvac.example/contact",
+                "website_enrichment": {"has_quote_form": False},
+            },
+        )
+        canonical.record_business_evidence(
+            business=business,
+            source="pagespeed_mobile",
+            raw={
+                "source": "pagespeed_mobile",
+                "source_url": "https://hvac.example",
+                "pagespeed_mobile": {"performance_score": 62},
+            },
+        )
+        BusinessFactRepository(session).upsert(
+            business.id,
+            BusinessFactValue(
+                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=website_evidence.source_observation_id,
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["no_quote_flow"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert rows[0]["source"] == "company_website_signal"
+        matched = rows[0]["raw"]["profile_match"]["matched_signals"][0]
+        assert matched["source"] == "company_website_signal"
+        assert matched["source_observation_id"] == website_evidence.source_observation_id
+        assert matched["source_url"] == "https://hvac.example/contact"
+
+
 def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

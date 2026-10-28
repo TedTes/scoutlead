@@ -23,7 +23,7 @@ from shared.utils import utcnow
 
 
 RESOLVER_VERSION = 1
-WEBSITE_EXTRACTOR_VERSION = 2
+WEBSITE_EXTRACTOR_VERSION = 3
 WEBSITE_COLLECTORS = {"website_http", "website_dom"}
 GOOGLE_SOURCES = {"google_places", "google_places_seed"}
 DOMAIN_COLLECTORS = {"domain_rdap"}
@@ -142,10 +142,18 @@ class SignalCollectionService:
                 sources={"company_website_signal"},
                 freshness_days=definition.freshness_days,
             )
-            if existing is not None and _extract_value(
-                definition, existing.raw_payload or {}
-            ) is not None:
-                return existing
+            if existing is not None:
+                payload = existing.raw_payload or {}
+                collected_version = _payload_path(
+                    payload,
+                    "signal_collection.extractor_version",
+                )
+                if (
+                    isinstance(collected_version, int)
+                    and collected_version >= WEBSITE_EXTRACTOR_VERSION
+                    and _extract_value(definition, payload) is not None
+                ):
+                    return existing
             self.session.commit()
             enrichment = self.website.inspect(business)
             raw = _website_payload(business, definition, enrichment)
@@ -332,6 +340,7 @@ class SignalCollectionService:
                     FactClaimModel.business_id == business_id,
                     FactClaimModel.signal_definition_id == definition.id,
                     FactClaimModel.expires_at >= newest.observed_at,
+                    FactClaimModel.extractor_version >= newest.extractor_version,
                 )
                 .order_by(FactClaimModel.observed_at.desc(), FactClaimModel.confidence.desc())
             )

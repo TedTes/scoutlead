@@ -280,6 +280,7 @@ class BusinessTarget:
 @dataclass
 class WebsitePage:
     url: str
+    requested_url: str = ""
     title: str = ""
     description: str = ""
     text: str = ""
@@ -389,21 +390,35 @@ class WebsiteEnrichmentClient:
         pages: list[WebsitePage] = []
         errors: list[str] = []
         checks: list[WebsitePage] = []
-        candidate_urls = [website_url]
-        if website_url.startswith("https://"):
-            candidate_urls.append("http://" + website_url.removeprefix("https://"))
+        candidate_urls = _protocol_candidates(website_url)
         homepage = WebsitePage(url=website_url, error="Website was not checked.")
         for candidate_url in candidate_urls:
+            candidate_check = WebsitePage(
+                url=candidate_url,
+                error="Website was not checked.",
+            )
             for _attempt in range(2):
-                homepage = self._fetch_page(candidate_url)
-                checks.append(homepage)
-                if not homepage.error:
+                candidate_check = self._fetch_page(
+                    candidate_url,
+                    inspect_content=not any(not check.error for check in checks),
+                )
+                candidate_check.requested_url = candidate_url
+                if not candidate_check.error:
                     break
-                errors.append(f"{candidate_url}: {homepage.error}")
-                if homepage.failure_kind == "not_found":
+                if candidate_check.failure_kind == "not_found":
                     break
-            if not homepage.error:
-                break
+            checks.append(candidate_check)
+        successful_checks = [check for check in checks if not check.error]
+        if successful_checks:
+            # HTTPS is deliberately attempted first. A stored HTTP URL must not
+            # become evidence that HTTPS is unavailable merely because HTTP also
+            # serves a page without redirecting.
+            homepage = successful_checks[0]
+        else:
+            homepage = checks[0] if checks else homepage
+            errors.extend(
+                f"{check.url}: {check.error}" for check in checks if check.error
+            )
         if not homepage.error:
             pages.append(homepage)
             if self.page_delay_seconds:
@@ -424,7 +439,7 @@ class WebsiteEnrichmentClient:
             links=homepage.links,
             base_url=pages[0].url,
         )
-        fallback_urls = self._candidate_urls(website_url)[1:4]
+        fallback_urls = self._candidate_urls(homepage.url)[1:4]
         attempted_internal_pages = 0
         max_internal_attempts = self.max_pages_per_business + 3
         for url in dict.fromkeys([*linked_urls, *fallback_urls]):
@@ -443,7 +458,13 @@ class WebsiteEnrichmentClient:
             if self.page_delay_seconds:
                 time.sleep(self.page_delay_seconds)
 
-        return _enrichment_from_pages(business=business, website_url=website_url, pages=pages, errors=errors)
+        return _enrichment_from_pages(
+            business=business,
+            website_url=website_url,
+            pages=pages,
+            errors=errors,
+            protocol_checks=checks,
+        )
 
     def _candidate_urls(self, website_url: str) -> list[str]:
         base_url = _site_base_url(website_url)
@@ -452,7 +473,7 @@ class WebsiteEnrichmentClient:
         urls = [website_url, *[urljoin(base_url, path) for path in COMMON_PATHS]]
         return list(dict.fromkeys(urls))
 
-    def _fetch_page(self, url: str) -> WebsitePage:
+    def _fetch_page(self, url: str, *, inspect_content: bool = True) -> WebsitePage:
         try:
             response = httpx.get(
                 url,
@@ -491,6 +512,12 @@ class WebsiteEnrichmentClient:
                 error=f"unsupported content type: {content_type}",
                 status_code=getattr(response, "status_code", 200),
                 failure_kind="unsupported",
+            )
+
+        if not inspect_content:
+            return WebsitePage(
+                url=str(response.url),
+                status_code=getattr(response, "status_code", 200),
             )
 
         html = response.text or ""
@@ -742,6 +769,15 @@ def _process_enrichment(
     progress_every: int,
     opportunity_policy: str,
 ) -> int:
+    preferred_url = enrichment.inspected_urls[0] if enrichment.inspected_urls else None
+    if (
+        enrichment.uses_https is True
+        and preferred_url
+        and preferred_url.lower().startswith("https://")
+        and normalize_domain(preferred_url) == normalize_domain(business.website_url)
+    ):
+        business.website_url = preferred_url
+        business.domain = normalize_domain(preferred_url)
     reputation = _google_places_reputation(session, business.id)
     if opportunity_policy == "missing_or_unavailable":
         assessment = _availability_assessment(
@@ -1093,6 +1129,7 @@ def _enrichment_from_pages(
     website_url: str,
     pages: list[WebsitePage],
     errors: list[str],
+    protocol_checks: list[WebsitePage],
 ) -> BusinessWebsiteEnrichment:
     combined_text = " ".join(f"{page.title} {page.description} {page.text}" for page in pages)
     emails = sorted({email for page in pages for email in page.emails})
@@ -1109,12 +1146,44 @@ def _enrichment_from_pages(
         emails=emails,
         phones=phones,
     )
-    uses_https = pages[0].url.lower().startswith("https://") if pages else None
+    https_check = next(
+        (
+            check
+            for check in protocol_checks
+            if (check.requested_url or check.url).lower().startswith("https://")
+        ),
+        None,
+    )
+    http_check = next(
+        (
+            check
+            for check in protocol_checks
+            if (check.requested_url or check.url).lower().startswith("http://")
+        ),
+        None,
+    )
+    uses_https = (
+        None
+        if https_check is None
+        else not https_check.error and https_check.url.lower().startswith("https://")
+    )
+    https_enforced = (
+        None
+        if http_check is None or http_check.error
+        else http_check.url.lower().startswith("https://")
+    )
     has_mobile_viewport = pages[0].has_mobile_viewport if pages else None
     signal_evidence = page_signals.setdefault("signal_evidence", {})
     signal_evidence["uses_https"] = (
-        [_evidence(pages[0].url, f"final URL uses {'HTTPS' if uses_https else 'HTTP'}")]
-        if pages
+        [
+            _evidence(
+                https_check.url,
+                "HTTPS endpoint loaded successfully"
+                if uses_https
+                else "HTTPS endpoint did not load",
+            )
+        ]
+        if https_check is not None
         else []
     )
     signal_evidence["mobile_viewport_present"] = (
@@ -1133,6 +1202,18 @@ def _enrichment_from_pages(
             for page in pages
         ],
     }
+    page_signals["https_available"] = uses_https
+    page_signals["https_enforced"] = https_enforced
+    page_signals["protocol_checks"] = [
+        {
+            "requested_url": check.requested_url or check.url,
+            "final_url": check.url,
+            "status_code": check.status_code,
+            "available": not check.error,
+            "error": check.error or None,
+        }
+        for check in protocol_checks
+    ]
     contact_name, contact_role = _extract_contact_name(combined_text)
     best_email = _best_email(emails, business.website_url)
     source_url = _best_source_url(pages)
@@ -2047,6 +2128,15 @@ def _site_base_url(value: str) -> str | None:
     if not parsed.scheme or not parsed.netloc:
         return None
     return f"{parsed.scheme}://{parsed.netloc}/"
+
+
+def _protocol_candidates(value: str) -> list[str]:
+    parsed = urlparse(value)
+    if not parsed.netloc:
+        return [value]
+    https_url = parsed._replace(scheme="https").geturl()
+    http_url = parsed._replace(scheme="http").geturl()
+    return list(dict.fromkeys([https_url, http_url]))
 
 
 def _like_pattern(value: str) -> str:

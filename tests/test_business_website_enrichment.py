@@ -116,6 +116,44 @@ def test_website_enrichment_collects_multilingual_signals(monkeypatch) -> None:
     assert result.page_signals["market_language_supported"] is True
 
 
+def test_http_canonical_url_does_not_hide_available_https(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def protocol_get(url: str, **kwargs) -> FakeResponse:
+        del kwargs
+        calls.append(url)
+        return FakeResponse(url, "<html><body>Blue Onion Landscaping</body></html>")
+
+    monkeypatch.setattr("canonical.website_enrichment.httpx.get", protocol_get)
+
+    result = WebsiteEnrichmentClient(
+        max_pages_per_business=1,
+        page_delay_seconds=0,
+    ).inspect(_target("http://blueonion.ca"))
+
+    assert calls == ["https://blueonion.ca", "http://blueonion.ca"]
+    assert result.inspected_urls == ["https://blueonion.ca"]
+    assert result.uses_https is True
+    assert result.page_signals["https_available"] is True
+    assert result.page_signals["https_enforced"] is False
+    assert result.page_signals["protocol_checks"] == [
+        {
+            "requested_url": "https://blueonion.ca",
+            "final_url": "https://blueonion.ca",
+            "status_code": 200,
+            "available": True,
+            "error": None,
+        },
+        {
+            "requested_url": "http://blueonion.ca",
+            "final_url": "http://blueonion.ca",
+            "status_code": 200,
+            "available": True,
+            "error": None,
+        },
+    ]
+
+
 def test_website_enrichment_records_review_and_conversion_opportunity(monkeypatch) -> None:
     session_factory = _session_factory()
 
