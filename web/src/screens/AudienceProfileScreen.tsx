@@ -198,7 +198,13 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
 
 function profilePlace(profile: Territory): PlaceOption | null { if (profile.latitude == null || profile.longitude == null) return null; return { label: profile.place_label || profile.city, provider: profile.place_provider || "stored", external_id: profile.place_external_id, country_code: profile.country_code, latitude: profile.latitude, longitude: profile.longitude }; }
 function autoName(nicheLabel: string | undefined, place: PlaceOption | null, radiusKm: number, services: string[], serviceOptions: ProfileOptions["services"]) { const opportunity = serviceOptions.find((service) => service.key === services[0])?.label; return [nicheLabel && place ? `${shortTradeLabel(nicheLabel)} near ${place.label.split(",")[0]}` : nicheLabel ? shortTradeLabel(nicheLabel) : null, place ? `${radiusKm} km` : null, opportunity].filter(Boolean).join(" · "); }
-function shortTradeLabel(label: string) { return label.replace(/^home[ -]services?\s+/i, "").replace(/\s+(businesses|companies|contractors|services)$/i, "").trim() || label; }
+function shortTradeLabel(label: string) {
+  const shortened = label
+    .replace(/^home[ -]services?\s+/i, "")
+    .replace(/\s+(businesses|companies|contractors|services)$/i, "")
+    .trim() || label;
+  return shortened.replace(/\bhvac\b/gi, "HVAC");
+}
 function toggleValue<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
 function getFormHint(nicheId: string, place: PlaceOption | null, services: string[]) { if (!nicheId) return "Choose a trade to continue."; if (!place) return "Select and confirm a city to continue."; if (!services.length) return "Choose at least one opportunity to continue."; return "Ready to create."; }
 function placeProviderLabel(value: string) { if (value === "google_places") return "Google Places"; if (value === "openstreetmap_nominatim") return "OpenStreetMap"; return "ScoutLead"; }

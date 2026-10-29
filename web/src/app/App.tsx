@@ -34,7 +34,7 @@ import {
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
-import { AppDataProvider, useAppData } from "../state/app-data";
+import { AppDataProvider, isActiveLead, useAppData } from "../state/app-data";
 import type {
   AudienceFolder,
   Product,
@@ -166,10 +166,7 @@ function AppShell({
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
   const recentProductContacts = productContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
-  const activeProductContacts = productContacts.filter(
-    (contact) => contact.review_status !== "not_fit"
-      && (!contact.contact_policy_status || contact.contact_policy_status === "allowed"),
-  );
+  const activeProductContacts = productContacts.filter(isActiveLead);
   const workflowCounts: LeadWorkflowCounts = {
     inbox: activeProductContacts.length,
     this_week: recentProductContacts.length,

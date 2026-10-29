@@ -195,6 +195,7 @@ class LeadUpdate(BaseModel):
     review_status: LeadReviewStatus | None = None
     review_note: str | None = None
     shortlisted: bool | None = None
+    territory_id: str | None = None
 
 
 class LeadContactPolicyUpdate(BaseModel):

@@ -68,6 +68,7 @@ from leads.schemas import (
     AgentFitStatus,
     ContactPolicyStatus,
     LeadContactPolicyUpdate,
+    LeadUpdate,
     SuppressionScope,
 )
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
@@ -2331,6 +2332,36 @@ def test_existing_search_can_be_attached_to_territory() -> None:
         assert attached_outcome.territory_id == territory.id
         assert attached_outcome.niche_id == territory.niche_id
         assert attached_outcome.market_key == territory.market_key
+
+
+def test_unassigned_lead_can_be_assigned_to_an_audience() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        territory = TerritoryService(session, workspace_id="workspace:first").create(
+            TerritoryCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                niche_slug=niche.slug,
+                niche_label=niche.label,
+                market_key="Toronto",
+                confirmed=True,
+            )
+        )
+        campaign = CampaignRepository(session, workspace_id="workspace:first").create(
+            CampaignCreate(product_id=offer.id, name="Unassigned leads", max_leads=10)
+        )
+        repository = LeadRepository(session, workspace_id="workspace:first")
+        lead = repository.create_from_seed(
+            campaign.id,
+            offer.id,
+            LeadSeedInput(company_name="Unassigned HVAC", geography="Toronto"),
+        )
+
+        assigned = repository.update(lead.id, LeadUpdate(territory_id=territory.id))
+
+        assert assigned.territory_id == territory.id
 
 
 def test_territory_metrics_report_coverage_and_conversion() -> None:

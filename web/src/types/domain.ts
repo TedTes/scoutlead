@@ -230,6 +230,7 @@ export type LeadUpdateInput = {
   review_status?: LeadReviewStatus;
   review_note?: string | null;
   shortlisted?: boolean;
+  territory_id?: string | null;
 };
 
 export type LeadContactPolicyInput = {
@@ -570,6 +571,7 @@ export type OutreachStrategy = {
 };
 
 export type OutreachPackageContent = {
+  evidence_fingerprint: string;
   observation: string;
   evidence: OutreachEvidence[];
   message: { body: string };

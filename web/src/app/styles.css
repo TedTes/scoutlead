@@ -11086,7 +11086,7 @@ button.bulk-recipient-select:hover {
 
 .contact-card.is-selected {
   background: var(--panel-muted);
-  box-shadow: inset 3px 0 0 #6f51df;
+  box-shadow: inset 3px 0 0 var(--green);
 }
 
 .contact-main {
@@ -11222,6 +11222,10 @@ button.bulk-recipient-select:hover {
   min-width: 0;
 }
 
+.contact-audience-line.is-unassigned {
+  color: var(--faint);
+}
+
 .contact-audience-line svg {
   flex: 0 0 auto;
 }
@@ -11263,7 +11267,14 @@ button.bulk-recipient-select:hover {
 }
 
 .contact-evidence-line {
-  color: var(--muted);
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 5px;
+}
+
+.contact-evidence-line.is-unverified {
+  color: var(--amber);
+  font-weight: 500;
 }
 
 .contact-missing-line {
@@ -11828,6 +11839,57 @@ button.bulk-recipient-select:hover {
 .outreach-signal-chip svg {
   color: var(--green);
   flex: 0 0 auto;
+}
+
+.outreach-channel-availability {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  gap: 6px 10px;
+}
+
+.outreach-channel-availability > span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.outreach-channel-availability em {
+  align-items: center;
+  display: inline-flex;
+  font-style: normal;
+  gap: 4px;
+}
+
+.drawer-audience-assignment {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  padding: 10px 22px;
+}
+
+.drawer-audience-assignment > span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.drawer-audience-assignment select {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  padding: 7px 9px;
 }
 
 .outreach-editor-card {

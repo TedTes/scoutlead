@@ -232,21 +232,15 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   );
 
   const refreshProductContacts = useCallback(
-    async (productId: string, runs: DiscoveryRun[], profiles: Territory[]) => {
+    async (_productId: string, runs: DiscoveryRun[], profiles: Territory[]) => {
       const mutationEpoch = leadMutationEpochRef.current;
-      if (!productId) {
-        setProductContacts([]);
-        return;
-      }
-      const productRuns = runs.filter((run) => run.product_id === productId);
-      const productProfiles = profiles.filter((profile) => profile.product_id === productId);
-      if (!productRuns.length && !productProfiles.length) {
+      if (!runs.length && !profiles.length) {
         setProductContacts([]);
         return;
       }
       const [resultGroups, profileBatches] = await Promise.all([
-        Promise.all(productRuns.map((run) => api.getResults(run.id).catch(() => []))),
-        Promise.all(productProfiles.map((profile) => api.getProfileBatch(profile.id).catch(() => null))),
+        Promise.all(runs.map((run) => api.getResults(run.id).catch(() => []))),
+        Promise.all(profiles.map((profile) => api.getProfileBatch(profile.id).catch(() => null))),
       ]);
       if (mutationEpoch !== leadMutationEpochRef.current) return;
       setProductContacts(dedupeContacts([
@@ -815,6 +809,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
             ...(update.shortlisted !== undefined
               ? { shortlisted_at: update.shortlisted ? lead.shortlisted_at || optimisticTimestamp : null }
               : {}),
+            ...(update.territory_id !== undefined ? { territory_id: update.territory_id } : {}),
             updated_at: optimisticTimestamp,
           }), setProductContacts, setSnapshot, setProfileBatch);
           try {
@@ -966,16 +961,27 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 }
 
-function dedupeContacts(contacts: DiscoveryResult[]) {
-  const seen = new Set<string>();
-  const deduped: DiscoveryResult[] = [];
+export function dedupeContacts(contacts: DiscoveryResult[]) {
+  const unique = new Map<string, DiscoveryResult>();
+  const order: string[] = [];
   for (const contact of contacts) {
     const key = contactKey(contact);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(contact);
+    const existing = unique.get(key);
+    if (!existing) {
+      unique.set(key, contact);
+      order.push(key);
+      continue;
+    }
+    if (leadRecordPriority(contact) > leadRecordPriority(existing)) {
+      unique.set(key, contact);
+    }
   }
-  return deduped;
+  return order.map((key) => unique.get(key)).filter((contact): contact is DiscoveryResult => Boolean(contact));
+}
+
+export function isActiveLead(contact: DiscoveryResult) {
+  return contact.review_status !== "not_fit"
+    && (!contact.contact_policy_status || contact.contact_policy_status === "allowed");
 }
 
 function updateLeadInState(
@@ -998,6 +1004,7 @@ function upsertDiscoveryRun(runs: DiscoveryRun[], nextRun: DiscoveryRun) {
 }
 
 function contactKey(contact: DiscoveryResult) {
+  if (contact.business_id) return `business:${contact.business_id}`;
   const website = (contact.website_url || contact.research?.website_url || "").trim();
   try {
     const domain = new URL(website).hostname.replace(/^www\./, "").toLowerCase();
@@ -1014,12 +1021,20 @@ function contactKey(contact: DiscoveryResult) {
     "telephone",
   ]).replace(/\D+/g, "");
   if (name && phone) return `name-phone:${name}|${phone}`;
-  if (contact.business_id) return `business:${contact.business_id}`;
   const geography = (contact.geography || contact.research?.geography || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
   return `name:${name}|${geography}`;
+}
+
+function leadRecordPriority(contact: DiscoveryResult) {
+  const updatedAt = new Date(contact.updated_at || contact.created_at).getTime();
+  return Number(Boolean(contact.shortlisted_at)) * 10_000
+    + Number(Boolean(contact.last_contacted_at || contact.latest_outcome)) * 5_000
+    + Number(isActiveLead(contact)) * 2_000
+    + Number(contact.id.startsWith("audience_result_")) * 1_000
+    + (Number.isFinite(updatedAt) ? updatedAt / 1_000_000_000_000 : 0);
 }
 
 function contactRawValue(contact: DiscoveryResult, keys: string[]) {

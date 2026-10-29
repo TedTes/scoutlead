@@ -352,6 +352,21 @@ class LeadRepository:
         if "review_note" in data:
             note = data["review_note"]
             model.review_note = note.strip() if isinstance(note, str) and note.strip() else None
+        if "territory_id" in data:
+            territory_id = data["territory_id"]
+            if territory_id is None:
+                model.territory_id = None
+            else:
+                territory = self.session.scalar(
+                    select(TerritoryModel).where(
+                        TerritoryModel.id == territory_id,
+                        TerritoryModel.workspace_id == self.workspace_id,
+                        TerritoryModel.product_id == model.product_id,
+                    )
+                )
+                if territory is None:
+                    raise NotFoundError("audience not found", {"territory_id": territory_id})
+                model.territory_id = territory.id
         if "shortlisted" in data:
             if data["shortlisted"] and is_blocked_contact_policy(model.contact_policy_status):
                 raise ConflictError(

@@ -1,10 +1,10 @@
 import { ArrowRight, LoaderCircle, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useAppData } from "../state/app-data";
+import { isActiveLead, useAppData } from "../state/app-data";
 import type { AudiencePerformance, DiscoveryResult } from "../types/domain";
 
 export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (id: string) => void }) {
-  const { productContacts, selectedProductId, territoryApi } = useAppData();
+  const { productContacts, territoryApi } = useAppData();
   const [rows, setRows] = useState<AudiencePerformance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -12,19 +12,14 @@ export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (i
 
   useEffect(() => {
     let active = true;
-    if (!selectedProductId) {
-      setRows([]);
-      setLoading(false);
-      return () => { active = false; };
-    }
     setLoading(true);
     setError("");
-    void territoryApi.getAudiencePerformance(selectedProductId)
+    void territoryApi.getAudiencePerformance()
       .then((result) => { if (active) setRows(result); })
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [selectedProductId, territoryApi]);
+  }, [territoryApi]);
 
   return (
     <section className="audiences-overview">
@@ -95,14 +90,15 @@ function OverviewStatus({ label, tone, value }: { label: string; tone: "green" |
 }
 
 function summarizeAudiences(rows: AudiencePerformance[], contacts: DiscoveryResult[]) {
-  const leads = contacts.length;
-  const shortlisted = contacts.filter((contact) => Boolean(contact.shortlisted_at)).length;
-  const contacted = contacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length;
+  const activeContacts = contacts.filter(isActiveLead);
+  const leads = activeContacts.length;
+  const shortlisted = activeContacts.filter((contact) => Boolean(contact.shortlisted_at)).length;
+  const contacted = activeContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length;
   const readyStates = new Set(["ready", "partial"]);
   const buildingStates = new Set(["setup", "queued", "scoring", "retrying", "waiting_validation"]);
   const byNiche = new Map<string, { audiences: number; label: string; leads: number }>();
   for (const row of rows) {
-    const label = row.niche_label || "Other";
+    const label = displayNicheLabel(row.niche_label || "Other");
     const current = byNiche.get(label) || { audiences: 0, label, leads: 0 };
     current.audiences += 1;
     current.leads += row.lead_count;
@@ -123,6 +119,14 @@ function summarizeAudiences(rows: AudiencePerformance[], contacts: DiscoveryResu
     latestRun: latestTimestamps.length ? new Date(Math.max(...latestTimestamps)).toISOString() : "",
     byNiche: [...byNiche.values()].sort((a, b) => b.leads - a.leads || b.audiences - a.audiences),
   };
+}
+
+function displayNicheLabel(value: string) {
+  return value
+    .replace(/^home[ -]services?\s+/i, "")
+    .replace(/\s+(businesses|companies|contractors|services)$/i, "")
+    .replace(/\bhvac\b/gi, "HVAC")
+    .trim() || value;
 }
 
 function formatRate(value: number) {

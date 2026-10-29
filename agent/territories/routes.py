@@ -197,9 +197,9 @@ def list_audiences(session: DbSession, auth: CurrentAuth):
 
 @audience_router.get("/summary", response_model=list[AudiencePerformanceRead])
 def audience_performance_summary(
-    product_id: str,
     session: DbSession,
     auth: CurrentAuth,
+    product_id: str | None = None,
 ):
     return TerritoryMetricsService(
         session,

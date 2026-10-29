@@ -33,7 +33,7 @@ import { createPortal } from "react-dom";
 import { AudienceProfileScreen } from "./AudienceProfileScreen";
 import { searchIntentFromRun } from "../components/SearchIntentChips";
 import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
-import { useAppData } from "../state/app-data";
+import { dedupeContacts, useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
   CampaignMessageBatchResult,
@@ -228,7 +228,7 @@ export function ResultsScreen({
     : selectedRunMatchesActiveProfile && selectedDiscoveryRunId
       ? snapshot.results
       : [];
-  const contacts = useMemo(() => deduplicateContacts(sourceContacts), [sourceContacts]);
+  const contacts = useMemo(() => dedupeContacts(sourceContacts), [sourceContacts]);
   const thisWeekCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = runPrompt;
@@ -1056,6 +1056,7 @@ export function ResultsScreen({
           />
         ) : (
           <ContactDrawer
+            audiences={territories.filter((territory) => territory.product_id === detailContact.product_id)}
             contact={detailContact}
             dismissedView={workflowView === "dismissed"}
             persistent={desktopSplitView}
@@ -1161,6 +1162,17 @@ function textMessageSegmentCount(value: string) {
 
 function outreachEvidenceLabel(evidence: OutreachPackageContent["evidence"][number]) {
   if (evidence.signal_key === "website_status" && evidence.value === "not_listed") return "No website listed";
+  const booleanLabels: Record<string, [string, string]> = {
+    contact_form_present: ["Contact form present", "Contact form missing"],
+    primary_cta_present: ["Primary CTA present", "Primary CTA missing"],
+    click_to_call_present: ["Click to call present", "Click to call missing"],
+    quote_or_booking_form_present: ["Quote or booking present", "Quote or booking missing"],
+    complete_contact_details: ["Contact details complete", "Contact details incomplete"],
+    uses_https: ["HTTPS present", "HTTPS missing"],
+  };
+  if (typeof evidence.value === "boolean" && booleanLabels[evidence.signal_key]) {
+    return booleanLabels[evidence.signal_key][evidence.value ? 0 : 1];
+  }
   const labels: Record<string, string> = {
     website_unavailable: "Website unavailable",
     no_quote_flow: "No quote flow",
@@ -1250,7 +1262,7 @@ function OutreachWorkspace({
   const channelButtonRefs = useRef<Partial<Record<OutreachChannel, HTMLButtonElement | null>>>({});
   const displayedChannels = useMemo<OutreachChannel[]>(() => {
     if (!outreachPackage) return [];
-    return ["message", "call", "form", "email"];
+    return outreachPackage.channels;
   }, [outreachPackage]);
   const hasUnsavedChanges = Boolean(
     outreachPackage
@@ -1643,8 +1655,8 @@ function OutreachWorkspace({
         {outreachPackage && draft ? (
           <>
             <div className="outreach-canvas">
-              <section className="outreach-signals" aria-label="Verified signals">
-                <span className="outreach-section-label">Verified signals</span>
+              <section className="outreach-signals" aria-label="Verified opportunity">
+                <span className="outreach-section-label">Verified opportunity</span>
                 <div className="outreach-signal-list">
                   {draft.evidence.map((evidence) => (
                     <span className="outreach-signal-chip" key={`${evidence.signal_key}:${String(evidence.value)}`} title={evidence.statement}>
@@ -1652,6 +1664,15 @@ function OutreachWorkspace({
                       {outreachEvidenceLabel(evidence)}
                     </span>
                   ))}
+                </div>
+                <div className="outreach-channel-availability" aria-label="Available contact channels">
+                  <span>Available:</span>
+                  {outreachPackage.phone ? <em><Phone size={12} /> Phone on file</em> : null}
+                  {outreachPackage.contact_url ? <em><FileText size={12} /> Website form</em> : null}
+                  {outreachPackage.email ? <em><Mail size={12} /> Email</em> : null}
+                  {!outreachPackage.phone && !outreachPackage.contact_url && !outreachPackage.email
+                    ? <em>No direct channel found</em>
+                    : null}
                 </div>
               </section>
 
@@ -2000,10 +2021,13 @@ function audienceSignalStatement(
     return "The website was unavailable during the latest check.";
   }
   if (signalKey === "website_status" && value === "not_listed") {
-    return "The latest business listing does not include a website.";
+    return "No website is listed in the latest source profile.";
   }
   if (signalKey === "website_status" && typeof value === "string") {
-    return `The latest website status is ${value.replace(/_/g, " ")}.`;
+    if (value === "missing") return "No website was found after verification.";
+    if (value === "unavailable") return "The known website was unreachable during the latest check.";
+    if (value === "unknown") return "Website presence has not been verified.";
+    return `Verified website status: ${value.replace(/_/g, " ")}.`;
   }
   if (signalKey === "uses_https" && value === false) {
     return "The latest website check found that the site is not using HTTPS.";
@@ -2683,6 +2707,9 @@ function ContactCard({
 }) {
   const opportunityReason = contactListPrimarySignal(contact);
   const category = contactListCategoryLabel(contact);
+  const displayCategory = /^(?:local service provider|service contractor)$/i.test(category)
+    ? ""
+    : category;
   const geography = contact.geography || contact.research?.geography || "";
   const needsVerification = searchMatchStatus(contact) === "unknown";
   const cardClass = [
@@ -2712,8 +2739,13 @@ function ContactCard({
             <span className="contact-title-line">
               <strong>{contact.company_name}</strong>
             </span>
+            {needsVerification ? (
+              <span className="contact-evidence-line is-unverified">Not yet verified against the audience criteria</span>
+            ) : opportunityReason ? (
+              <span className="contact-evidence-line">{opportunityReason}</span>
+            ) : null}
             <small className="contact-meta-line">
-              <span>{category}</span>
+              {displayCategory ? <span>{displayCategory}</span> : null}
               {geography ? (
                 <>
                   <MapPin size={12} />
@@ -2722,15 +2754,10 @@ function ContactCard({
               ) : null}
             </small>
             {audienceLabel ? (
-              <span className="contact-audience-line">
+              <span className={audienceLabel === "Unassigned" ? "contact-audience-line is-unassigned" : "contact-audience-line"}>
                 <Users size={11} />
                 <span>{audienceLabel}</span>
               </span>
-            ) : null}
-            {needsVerification ? (
-              <span className="contact-evidence-line">Needs verification against search criteria</span>
-            ) : opportunityReason ? (
-              <span className="contact-evidence-line">{opportunityReason}</span>
             ) : null}
           </span>
         </div>
@@ -2756,6 +2783,7 @@ function ContactCard({
 }
 
 function ContactDrawer({
+  audiences,
   contact,
   dismissedView = false,
   gmailConnected,
@@ -2773,6 +2801,7 @@ function ContactDrawer({
   onUpdateLead,
   onUpdateMessage,
 }: {
+  audiences: Territory[];
   contact: DiscoveryResult;
   dismissedView?: boolean;
   gmailConnected: boolean;
@@ -3186,6 +3215,27 @@ function ContactDrawer({
                 </a>
               ) : null}
             </section>
+
+            {!contact.territory_id && !contact.id.startsWith("audience_result_") ? (
+              <label className="drawer-audience-assignment">
+                <span>Audience</span>
+                <select
+                  aria-label="Assign lead to an audience"
+                  defaultValue=""
+                  disabled={savingReview}
+                  onChange={(event) => {
+                    if (!event.target.value) return;
+                    void saveLeadUpdate(
+                      { territory_id: event.target.value },
+                      "Lead assigned to audience",
+                    );
+                  }}
+                >
+                  <option value="">Unassigned — choose an audience</option>
+                  {audiences.map((audience) => <option key={audience.id} value={audience.id}>{audience.label}</option>)}
+                </select>
+              </label>
+            ) : null}
 
             <nav className="drawer-tabs" aria-label="Contact detail sections">
               <button
@@ -4398,26 +4448,6 @@ function matchesWorkflowView(
   return true;
 }
 
-function deduplicateContacts(contacts: DiscoveryResult[]) {
-  const unique = new Map<string, DiscoveryResult>();
-  const order: string[] = [];
-
-  for (const contact of contacts) {
-    const key = contactBusinessKey(contact);
-    const existing = unique.get(key);
-    if (!existing) {
-      unique.set(key, contact);
-      order.push(key);
-      continue;
-    }
-    if (contactRecordPriority(contact) > contactRecordPriority(existing)) {
-      unique.set(key, contact);
-    }
-  }
-
-  return order.map((key) => unique.get(key)).filter((contact): contact is DiscoveryResult => Boolean(contact));
-}
-
 function contactAudienceLabel(
   contact: DiscoveryResult,
   territories: Territory[],
@@ -4425,43 +4455,7 @@ function contactAudienceLabel(
 ) {
   const territoryId = contact.territory_id
     || runs.find((run) => run.id === contact.campaign_id)?.territory_id;
-  return territories.find((territory) => territory.id === territoryId)?.label || "Unknown audience";
-}
-
-function contactBusinessKey(contact: DiscoveryResult) {
-  const name = contact.company_name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const website = contact.website_url || contact.research?.website_url || "";
-  try {
-    const domain = new URL(website).hostname.replace(/^www\./, "").toLowerCase();
-    if (domain) return `domain:${domain}`;
-  } catch {
-    // Continue with canonical and public-listing identity fields.
-  }
-
-  const phone = getPhone(contact).replace(/\D+/g, "");
-  if (name && phone) return `name-phone:${name}|${phone}`;
-  if (contact.business_id) return `business:${contact.business_id}`;
-
-  const geography = (contact.geography || contact.research?.geography || "")
-    .toLowerCase()
-    .split(",")
-    .slice(0, 2)
-    .join(" ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-  if (name) return `${name}|${geography}`;
-  return contact.id;
-}
-
-function contactRecordPriority(contact: DiscoveryResult) {
-  return (
-    Number(Boolean(contact.shortlisted_at)) * 1_000
-    + Number(reviewStatus(contact) !== "unreviewed") * 400
-    + Number(isVerifiedContact(contact)) * 200
-    + Number(Boolean(bulkOutreachEmail(contact))) * 100
-    + Number(Boolean(contact.research)) * 25
-    + contactOpportunityAssessment(contact).score
-  );
+  return territories.find((territory) => territory.id === territoryId)?.label || "Unassigned";
 }
 
 function formatLeadAge(value: string) {
@@ -4591,9 +4585,12 @@ function profileSignalMessage(signalKey: string, evidence: Record<string, unknow
   const value = evidence.value;
   if (signalKey === "website_status") {
     if (rawValueToString(value) === "not_listed") {
-      return "The latest business listing does not include a website.";
+      return "No website is listed in the latest source profile.";
     }
-    return `The latest website status is ${rawValueToString(value).replace(/_/g, " ")}.`;
+    if (rawValueToString(value) === "missing") return "No website was found after verification.";
+    if (rawValueToString(value) === "unavailable") return "The known website was unreachable during the latest check.";
+    if (rawValueToString(value) === "unknown") return "Website presence has not been verified.";
+    return `Verified website status: ${rawValueToString(value).replace(/_/g, " ")}.`;
   }
   if (signalKey === "website_unavailable") {
     if (rawValueToString(value) === "not_listed") {

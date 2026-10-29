@@ -313,9 +313,10 @@ export class ApiClient {
     return this.request<void>(`/audience-folders/${folderId}`, { method: "DELETE" });
   }
 
-  getAudiencePerformance(productId: string) {
+  getAudiencePerformance(productId?: string) {
+    const query = productId ? `?product_id=${encodeURIComponent(productId)}` : "";
     return this.request<import("../types/domain").AudiencePerformance[]>(
-      `/audiences/summary?product_id=${encodeURIComponent(productId)}`,
+      `/audiences/summary${query}`,
     );
   }
 

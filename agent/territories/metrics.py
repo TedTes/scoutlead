@@ -116,16 +116,18 @@ class TerritoryMetricsService:
             by_week=rows,
         )
 
-    def audience_performance(self, *, product_id: str) -> list[AudiencePerformanceRead]:
+    def audience_performance(self, *, product_id: str | None = None) -> list[AudiencePerformanceRead]:
+        filters = [
+            TerritoryModel.workspace_id == self.workspace_id,
+            TerritoryModel.status != "archived",
+        ]
+        if product_id:
+            filters.append(TerritoryModel.product_id == product_id)
         audience_rows = list(
             self.session.execute(
                 select(TerritoryModel, NicheModel.label)
                 .join(NicheModel, NicheModel.id == TerritoryModel.niche_id)
-                .where(
-                    TerritoryModel.workspace_id == self.workspace_id,
-                    TerritoryModel.product_id == product_id,
-                    TerritoryModel.status != "archived",
-                )
+                .where(*filters)
                 .order_by(TerritoryModel.created_at.desc())
             )
         )
