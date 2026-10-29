@@ -73,7 +73,7 @@ SOURCE_PROVIDERS: dict[str, SourceProviderSpec] = {
         capabilities=frozenset({"public_web", "official_website", "directory_reference"}),
         stage=2,
         priority=25,
-        detail="Public-web coverage and configured site recipes.",
+        detail="Verification and enrichment for already identified businesses.",
     ),
     SEED_PROVIDER_ID: SourceProviderSpec(
         id=SEED_PROVIDER_ID,

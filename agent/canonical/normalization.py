@@ -143,6 +143,40 @@ def stable_content_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+_VOLATILE_OBSERVATION_KEYS = frozenset(
+    {
+        "batch_id",
+        "business_index_segment_id",
+        "collected_at",
+        "confirmed_at",
+        "created_at",
+        "fetched_at",
+        "job_id",
+        "observed_at",
+        "source_item_id",
+        "updated_at",
+    }
+)
+
+
+def meaningful_observation_hash(payload: dict[str, Any]) -> str:
+    """Hash provider evidence while ignoring pipeline timestamps and run IDs."""
+
+    return stable_content_hash(_without_volatile_observation_fields(payload))
+
+
+def _without_volatile_observation_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_volatile_observation_fields(nested)
+            for key, nested in value.items()
+            if key not in _VOLATILE_OBSERVATION_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_volatile_observation_fields(item) for item in value]
+    return value
+
+
 def iter_raw_layers(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(raw, dict):
         return []

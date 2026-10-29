@@ -347,19 +347,18 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert [call.provider_id for call in registry.calls] == [
         "google_places",
         "openstreetmap",
-        "configured_search",
     ]
     assert all(call.config["limit"] == 25 for call in registry.calls)
-    assert summary["successful_source_count"] == 3
+    assert summary["successful_source_count"] == 2
     assert summary["filled_campaign_count"] == 0
     assert refreshed_run.status == "completed"
-    assert len(leads) == 3
+    assert len(leads) == 2
     assert all(
         lead.raw_sources[0]["raw"]["search_match"]["status"] == "unknown"
         for lead in leads
     )
     assert segment is not None
-    assert len(segment.source_state) == 3
+    assert len(segment.source_state) == 2
     assert job.type == "business_index.refresh"
     assert scheduled_before_refresh == 1
     assert jobs_before_refresh == 1
@@ -367,9 +366,9 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert queued_job_count == 1
     assert diagnostics.retention == "exact"
     assert diagnostics.summary["final"] == 0
-    assert len(source_items) == 3
+    assert len(source_items) == 2
     assert all(item.state == "audit_pending" for item in source_items)
-    assert len(source_item_decisions) == 3
+    assert len(source_item_decisions) == 2
 
 
 def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
@@ -443,7 +442,7 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
         memberships = session.query(BusinessNicheMembershipModel).all()
         segment = BusinessIndexRepository(session).get(segment_id)
 
-    assert planned["source_job_count"] == 3
+    assert planned["source_job_count"] == 2
     assert set(processed_types) == {
         JobType.SOURCE_FETCH.value,
         JobType.BUSINESS_IDENTITY_RESOLVE.value,
@@ -522,7 +521,7 @@ def test_review_first_refresh_stops_after_source_items_are_collected() -> None:
         items = session.query(SourceItemModel).all()
         jobs = session.query(QueueJobModel).all()
 
-    assert planned["source_job_count"] == 3
+    assert planned["source_job_count"] == 2
     assert planned["fact_audit_job_count"] == 0
     assert set(processed_types) == {JobType.SOURCE_FETCH.value}
     assert {job.type for job in jobs} == {JobType.SOURCE_FETCH.value}
@@ -601,6 +600,6 @@ def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:
     raw = leads[0].raw_sources[0]["raw"]
     assert raw["search_match"] == {
         "status": "unknown",
-        "reason": "Website presence has not been verified.",
+        "reason": "Current fact is unavailable: website_status.",
     }
-    assert raw["business_facts"]["website_status"]["value"] == "unknown"
+    assert "website_status" not in raw["business_facts"]

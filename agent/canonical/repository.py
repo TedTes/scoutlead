@@ -21,6 +21,7 @@ from canonical.normalization import (
     phone_from_raw,
     query_from_source_input,
     query_signature,
+    meaningful_observation_hash,
     source_input_signature,
     source_url_from_raw,
     stable_content_hash,
@@ -98,7 +99,7 @@ class CanonicalRepository:
         source: str | None = None,
         raw: dict[str, Any] | None = None,
         allow_raw_contact_email: bool = True,
-        append_observation: bool = True,
+        append_observation: bool = False,
     ) -> CanonicalLeadLink:
         raw_payload = deepcopy(raw or {})
         if website_url:
@@ -722,7 +723,7 @@ class CanonicalRepository:
         source: str,
         query: str | None,
         raw: dict[str, Any],
-        append: bool = True,
+        append: bool = False,
     ) -> SourceObservationModel:
         now = utcnow()
         # An observation is an immutable evidence snapshot. Keep it independent
@@ -733,17 +734,23 @@ class CanonicalRepository:
         content_hash = stable_content_hash(snapshot)
 
         if not append:
-            existing = self.session.scalar(
+            candidates = self.session.scalars(
                 select(SourceObservationModel)
                 .where(
+                    SourceObservationModel.business_id == business.id,
                     SourceObservationModel.source == source,
-                    SourceObservationModel.content_hash == content_hash,
+                    or_(
+                        SourceObservationModel.external_id == external_id,
+                        SourceObservationModel.query_signature == signature,
+                    ),
                 )
                 .order_by(SourceObservationModel.observed_at.desc())
-                .limit(1)
+                .limit(25)
             )
-            if existing is not None:
-                return existing
+            fingerprint = meaningful_observation_hash(snapshot)
+            for existing in candidates:
+                if meaningful_observation_hash(existing.raw_payload or {}) == fingerprint:
+                    return existing
 
         observation = SourceObservationModel(
             id=new_id("sourceobs"),

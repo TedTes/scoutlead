@@ -50,6 +50,7 @@ from source_items.schemas import (
 )
 from business_facts.repository import BusinessFactRepository, fact_value
 from source_requests.schemas import SourceTask
+from source_providers.catalog import CONFIGURED_SEARCH_PROVIDER_ID
 from territories.opportunity_audit import BusinessOpportunityAuditor
 from tools.search import SearchResult
 from tools.source_registry import SourceAdapterRegistry
@@ -139,6 +140,24 @@ class BusinessIndexPipelineService:
         task = SourceTask.model_validate(task_data)
         state_key = _source_state_key(task, source_index)
         attempted_at = utcnow()
+        if task.provider_id == CONFIGURED_SEARCH_PROVIDER_ID:
+            self.segments.record_source_result(
+                segment,
+                provider_id=state_key,
+                state={
+                    "provider_id": task.provider_id,
+                    "query": task.query,
+                    "quota": task.max_results,
+                    "fetched_count": 0,
+                    "persisted_count": 0,
+                    "cost_usd": 0,
+                    "last_attempt_at": attempted_at.isoformat(),
+                    "failure": None,
+                    "skipped": "verification_only_provider",
+                },
+            )
+            self._maybe_complete(segment, current_job_id=job_id)
+            return {"fetched_count": 0, "processing_job_count": 0}
         previous_state = (segment.source_state or {}).get(state_key) or {}
         source = _campaign_source(
             task,
@@ -283,6 +302,24 @@ class BusinessIndexPipelineService:
     def resolve_identity(self, source_item_id: str) -> dict[str, Any]:
         item = self.items.get(source_item_id)
         segment = self._segment(item.segment_id)
+        if item.provider_id == CONFIGURED_SEARCH_PROVIDER_ID:
+            self.items.add_decision(
+                item.id,
+                SourceItemDecisionCreate(
+                    stage=SourceItemStage.IDENTITY,
+                    decision=SourceItemDecisionValue.REJECTED,
+                    reason=(
+                        "Public web search is verification-only and cannot create "
+                        "a canonical business."
+                    ),
+                ),
+                next_state=SourceItemState.REJECTED,
+            )
+            return {
+                "business_id": None,
+                "state": "rejected",
+                "reason": "verification_only_provider",
+            }
         result = SearchResult.model_validate(item.raw_payload)
         raw = {**(result.raw or {}), "source_item_id": item.id}
         canonical = CanonicalRepository(self.session, embedding=self.embedding)

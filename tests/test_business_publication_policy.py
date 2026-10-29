@@ -63,7 +63,34 @@ def test_all_profile_niches_have_google_source_definitions() -> None:
 def test_generic_search_headlines_are_not_business_identities() -> None:
     assert _is_generic_business_title("find painters in toronto") is True
     assert _is_generic_business_title("professional painter for hire") is True
+    assert _is_generic_business_title(
+        "best 15 house painters painting companies in toronto on"
+    ) is True
+    assert _is_generic_business_title("the best 10 roofing near toronto on canada") is True
+    assert _is_generic_business_title("best roofing company in toronto r askto") is True
+    assert _is_generic_business_title(
+        "69 ads for garage door repair in services in toronto gta kijiji marketplaces"
+    ) is True
     assert _is_generic_business_title("cedar ridge painting") is False
+
+
+def test_configured_search_is_verification_only_not_business_identity() -> None:
+    now = utcnow()
+    result = BusinessValidationService(None)._business_type(
+        SimpleNamespace(id="business_1", display_name="Cedar Ridge Painting", is_directory=False),
+        SimpleNamespace(
+            id="source_1",
+            source_observation_id="observation_1",
+            provider_id="configured_search",
+            title="Cedar Ridge Painting",
+            source_url="https://cedarridge.example",
+        ),
+        now,
+        now,
+    )
+
+    assert result.status == "failed"
+    assert result.evidence[0]["verification_only_provider"] is True
 
 
 def test_secondary_provider_category_does_not_override_primary_trade() -> None:

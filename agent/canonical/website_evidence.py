@@ -44,6 +44,7 @@ BLOCKED_WEBSITE_HOSTS = {
     "kijiji.ca",
     "linkedin.com",
     "mapquest.com",
+    "reddit.com",
     "thumbtack.com",
     "trustedpros.ca",
     "yelp.ca",

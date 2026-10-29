@@ -265,9 +265,8 @@ def test_auto_source_request_expands_ranked_discovery_tasks() -> None:
         assert [source.provider_id for source in sources] == [
             "google_places",
             "openstreetmap",
-            "configured_search",
         ]
-        assert [source.priority for source in sources] == [10, 20, 25]
+        assert [source.priority for source in sources] == [10, 20]
         assert sources[1].input["business_category"] == "painting service"
         assert sources[1].input["location"] == "Toronto ON"
 

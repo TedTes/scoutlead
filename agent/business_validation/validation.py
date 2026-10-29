@@ -223,10 +223,12 @@ class BusinessValidationService:
     def _business_type(self, business, item, observed_at, expires_at) -> ValidationResult:
         host = urlparse(item.source_url or "").netloc.lower().removeprefix("www.")
         title = _normalized(item.title or business.display_name)
+        provider_id = str(getattr(item, "provider_id", None) or "").strip().lower()
         blocked = any(host == value or host.endswith(f".{value}") for value in BLOCKED_HOSTS)
         generic = _is_generic_business_title(title)
         directory = business.is_directory is True
-        passed = not (blocked or generic or directory)
+        verification_only = provider_id == "configured_search"
+        passed = not (blocked or generic or directory or verification_only)
         reason = (
             "Candidate is a business record rather than an ad, directory, or generic service title."
             if passed
@@ -242,7 +244,17 @@ class BusinessValidationService:
             reason,
             observed_at,
             expires_at,
-            evidence=[{"host": host, "title": title}],
+            evidence=[
+                {
+                    "host": host,
+                    "title": title,
+                    "provider_id": provider_id,
+                    "blocked_host": blocked,
+                    "generic_title": generic,
+                    "directory": directory,
+                    "verification_only_provider": verification_only,
+                }
+            ],
         )
 
     def _trade(self, business, item, segment, observed_at, expires_at) -> ValidationResult:
@@ -388,11 +400,20 @@ def _is_generic_business_title(title: str) -> bool:
     return bool(
         title in GENERIC_TITLES
         or len(title) < 4
-        or re.match(r"^find\s+.+\s+in\s+", title)
-        or re.match(r"^top\s+\d+\s+", title)
+        or re.match(r"^find\s+(?:a\s+|an\s+)?[^|]+\s+in\s+", title)
+        or re.match(r"^(?:the\s+)?(?:top|best)\s+\d+\s+", title)
+        or re.search(r"\b(?:ads?|listings?)\s+for\s+", title)
+        or re.search(r"\br\s+ask[a-z0-9]*\b", title)
+        or title.endswith(" marketplaces")
         or re.search(r"\b(service|services|contractor|contractors)\s+near\s+me$", title)
         or re.search(r"\bfor\s+hire$", title)
     )
+
+
+def is_generic_business_title(value: str) -> bool:
+    """Return whether a display title describes a result page instead of an entity."""
+
+    return _is_generic_business_title(_normalized(value))
 
 
 def _trade_terms(niche) -> set[str]:

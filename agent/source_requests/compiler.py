@@ -14,7 +14,6 @@ from source_providers.catalog import SourceTemplateSpec
 from source_providers.registry import SourceProviderRegistry
 from source_requests.schemas import (
     AUTO_PROVIDER_ID,
-    CONFIGURED_SEARCH_PROVIDER_ID,
     GOOGLE_PLACES_PROVIDER_ID,
     OPENSTREETMAP_PROVIDER_ID,
     SourceProviderKind,
@@ -205,60 +204,9 @@ class SourceRequestCompiler:
                     config={"website_policy": website_policy},
                 )
             )
-        search_provider = self.registry.provider(CONFIGURED_SEARCH_PROVIDER_ID)
-        if search_provider and search_provider.enabled:
-            tasks.append(
-                SourceTask(
-                    provider_id=CONFIGURED_SEARCH_PROVIDER_ID,
-                    query=intent.search_query,
-                    stage=search_provider.stage,
-                    priority=search_provider.priority,
-                    max_results=DEFAULT_SOURCE_RESULT_QUOTA,
-                    reason="Expand coverage through public-web business results.",
-                    input={
-                        "source_type": "web_search",
-                        "business_category": intent.business_category,
-                        "location": intent.location,
-                    },
-                    config={"website_policy": website_policy},
-                )
-            )
-        if search_provider and search_provider.enabled:
-            recipes = self.registry.templates_for_category(
-                CONFIGURED_SEARCH_PROVIDER_ID,
-                intent.business_category,
-            )
-            for index, recipe in enumerate(recipes):
-                query = _render_search_template(recipe, intent=intent, product=product)
-                if not query:
-                    continue
-                tasks.append(
-                    SourceTask(
-                        provider_id=CONFIGURED_SEARCH_PROVIDER_ID,
-                        query=query,
-                        stage=int(recipe.metadata.get("stage") or 3),
-                        priority=int(recipe.metadata.get("priority") or 40 + index),
-                        max_results=min(
-                            DEFAULT_SOURCE_RESULT_QUOTA,
-                            int(
-                                recipe.metadata.get("max_results")
-                                or DEFAULT_SOURCE_RESULT_QUOTA
-                            ),
-                        ),
-                        reason=str(
-                            recipe.metadata.get("reason")
-                            or f"Search configured public source {recipe.id}."
-                        ),
-                        input={
-                            "source_type": "web_search",
-                            "source_recipe_id": recipe.id,
-                            "source_template_version": recipe.version,
-                            "business_category": intent.business_category,
-                            "location": intent.location,
-                        },
-                        config={"website_policy": website_policy},
-                    )
-                )
+        # Public web search is intentionally absent from automatic discovery.
+        # It may verify or enrich an identified business, but a page title is
+        # not a structured business entity and must never be promoted here.
         for provider in self.registry.providers(enabled_only=True):
             if provider.adapter_kind != "apify_actor":
                 continue
@@ -280,8 +228,8 @@ class SourceRequestCompiler:
             max_results=request.max_results,
             source_preset_id="dynamic-discovery",
             explanation=(
-                "Search the business index immediately, then use every configured live "
-                "discovery source to expand coverage in the background."
+                "Search the business index immediately, then use configured structured "
+                "business sources to expand coverage in the background."
             ),
             intent=intent,
             source_inputs={
