@@ -32,6 +32,7 @@ from shared.utils import normalize_url, utcnow
 
 
 RESOLVER_VERSION = 3
+GOOGLE_REPUTATION_SOURCES = frozenset({"google_places", "google_places_seed"})
 
 
 def reconcile_business_facts(session: Session, business_id: str) -> dict[str, Any]:
@@ -111,28 +112,6 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
         for key, fact in resolved.items()
     }
     repository = BusinessFactRepository(session)
-    if trusted is None:
-        existing_facts = repository.map_for_businesses([business.id]).get(business.id, {})
-        for key in (
-            BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-            BusinessFactKey.CONTACT_FORM_PRESENT,
-        ):
-            if key.value in resolved or key.value not in existing_facts:
-                continue
-            repository.upsert(
-                business.id,
-                BusinessFactValue(
-                    key=key,
-                    value="unknown",
-                    observed_at=utcnow(),
-                    source_observation_id=None,
-                    confidence=0,
-                    resolution_state="unknown",
-                    quality_state="staged",
-                    expires_at=fact_expires_at(key.value, utcnow()),
-                    resolver_version=RESOLVER_VERSION,
-                ),
-            )
     website_fact_changed = False
     for fact in resolved.values():
         model, value_changed = repository.upsert_with_value_change(business.id, fact)
@@ -357,27 +336,7 @@ def _website_status_fact(
             )
             return direct_failure or present
     if not candidates:
-        latest_observation = observations[0] if observations else None
-        return BusinessFactValue(
-            key=BusinessFactKey.WEBSITE_STATUS,
-            value="unknown",
-            observed_at=(
-                latest_observation.observed_at
-                if latest_observation is not None
-                else business.updated_at
-            ),
-            source_observation_id=(
-                latest_observation.id if latest_observation is not None else None
-            ),
-            confidence=0,
-            expires_at=fact_expires_at(
-                BusinessFactKey.WEBSITE_STATUS.value,
-                latest_observation.observed_at
-                if latest_observation is not None
-                else business.updated_at,
-            ),
-            resolver_version=RESOLVER_VERSION,
-        )
+        return None
     conclusive = [
         fact
         for fact in candidates
@@ -518,6 +477,7 @@ def _google_rating_fact(
         observations,
         key=BusinessFactKey.GOOGLE_RATING,
         field_names={"google_rating", "rating"},
+        allowed_sources=GOOGLE_REPUTATION_SOURCES,
     )
 
 
@@ -528,6 +488,7 @@ def _google_review_count_fact(
         observations,
         key=BusinessFactKey.GOOGLE_REVIEW_COUNT,
         field_names={"google_review_count", "userRatingCount", "review_count"},
+        allowed_sources=GOOGLE_REPUTATION_SOURCES,
     )
 
 
@@ -536,8 +497,11 @@ def _number_fact(
     *,
     key: BusinessFactKey,
     field_names: set[str],
+    allowed_sources: frozenset[str] | None = None,
 ) -> BusinessFactValue | None:
     for observation in observations:
+        if allowed_sources is not None and observation.source not in allowed_sources:
+            continue
         value = _first_value(observation.raw_payload or {}, field_names)
         try:
             number = float(value) if value is not None else None

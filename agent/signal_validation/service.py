@@ -129,6 +129,13 @@ class SignalValidationService:
             decision = self._decision(definition, fact, claim)
             fact.quality_state = decision.quality_state
             fact.quality_policy_version = VALIDATOR_VERSION
+            fact.confidence = decision.confidence
+            if decision.status == "passed":
+                fact.resolution_state = "confirmed"
+            elif "stale" in decision.reason.lower():
+                fact.resolution_state = "stale"
+            elif "disagree" in decision.reason.lower():
+                fact.resolution_state = "conflicted"
             ValidationRepository(self.session).record(
                 ValidationResult(
                     business_id=business_id,
@@ -298,7 +305,15 @@ def _valid_value(
             else "Numeric value is outside its allowed range.",
         )
     if definition.value_type == "text":
-        valid = isinstance(value, str) and bool(value.strip())
+        valid = (
+            isinstance(value, str)
+            and bool(value.strip())
+            and value.strip().lower() not in {
+                "unknown",
+                "not_checked",
+                "not_verified",
+            }
+        )
         if valid and definition.key == "website_status":
             valid = value in WEBSITE_STATUSES
         return (

@@ -13,6 +13,7 @@ from app.service_factory import (
     campaign_service,
 )
 from business_index.scheduler import enqueue_due_business_index_refreshes
+from business_facts.maintenance import enforce_fact_publication_invariants
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
@@ -537,6 +538,7 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
         enqueue_due_business_index_refreshes(session)
         _last_business_index_scheduler_tick = now
     if now - _last_evidence_expiry_tick >= 3600:
+        enforce_fact_publication_invariants(session)
         _last_evidence_expiry_tick = now
     today = datetime.now(timezone.utc).date()
     if _last_outcome_maintenance_date != today:

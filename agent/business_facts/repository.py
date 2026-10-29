@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.models import BusinessFactChangeModel, BusinessFactModel, SignalDefinitionModel
+from business_facts.freshness import fact_expires_at
 from shared.utils import new_id
 
 
@@ -62,6 +63,7 @@ class BusinessFactRepository:
         commit: bool = False,
     ) -> tuple[BusinessFactModel, bool]:
         fact_key = _fact_key(fact.key)
+        expires_at = fact.expires_at or fact_expires_at(fact_key, fact.observed_at)
         existing = self.session.scalar(
             select(BusinessFactModel).where(
                 BusinessFactModel.business_id == business_id,
@@ -94,7 +96,7 @@ class BusinessFactRepository:
                 quality_state=fact.quality_state,
                 quality_policy_version=fact.quality_policy_version,
                 observed_at=fact.observed_at,
-                expires_at=fact.expires_at,
+                expires_at=expires_at,
                 source_observation_id=fact.source_observation_id,
                 resolver_version=fact.resolver_version,
             )
@@ -112,7 +114,7 @@ class BusinessFactRepository:
             existing.quality_state = fact.quality_state
             existing.quality_policy_version = fact.quality_policy_version
             existing.observed_at = fact.observed_at
-            existing.expires_at = fact.expires_at
+            existing.expires_at = expires_at
             existing.source_observation_id = fact.source_observation_id
             existing.resolver_version = fact.resolver_version
         if value_changed:

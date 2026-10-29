@@ -4,6 +4,8 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from business_facts.repository import BusinessFactKey, BusinessFactRepository, fact_value
+from business_facts.maintenance import enforce_fact_publication_invariants
+from business_facts.repository import BusinessFactValue
 from business_facts.service import _replace_website_fact
 from business_index.contracts import compile_search_contract, search_contract_hash
 from business_index.schemas import BusinessIndexSearch, OpportunityType
@@ -71,7 +73,54 @@ def _source_payload(
     }
 
 
-def test_repeated_provider_fetches_append_observations_and_preserve_identity() -> None:
+def test_publication_maintenance_demotes_expired_and_unknown_facts() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        _add_painting_niche(session)
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Publication Maintenance Painter",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("no_website_listed", external_id="places/maintenance"),
+        )
+        repository = BusinessFactRepository(session)
+        expired = repository.upsert(
+            link.business_id,
+            BusinessFactValue(
+                key="expired_test_signal",
+                value=True,
+                observed_at=utcnow() - timedelta(days=30),
+                expires_at=utcnow() - timedelta(days=1),
+                source_observation_id=link.source_observation_id,
+            ),
+        )
+        unknown = repository.upsert(
+            link.business_id,
+            BusinessFactValue(
+                key="website_status",
+                value="unknown",
+                observed_at=utcnow(),
+                expires_at=utcnow() + timedelta(days=1),
+                source_observation_id=link.source_observation_id,
+            ),
+        )
+        unknown.quality_state = "published"
+        unknown.resolution_state = "confirmed"
+        session.commit()
+
+        summary = enforce_fact_publication_invariants(session)
+
+        assert summary["demoted"] == 3
+        assert summary["expired"] == 1
+        assert summary["unknown"] == 1
+        assert summary["missing_validation"] == 1
+        assert expired.quality_state == "staged"
+        assert expired.resolution_state == "stale"
+        assert unknown.quality_state == "staged"
+        assert unknown.resolution_state == "unknown"
+
+
+def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_identity() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         _add_painting_niche(session)
@@ -90,8 +139,78 @@ def test_repeated_provider_fetches_append_observations_and_preserve_identity() -
         )
 
         assert first.business_id == second.business_id
-        assert first.source_observation_id != second.source_observation_id
+        assert first.source_observation_id == second.source_observation_id
+        assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 1
+
+        changed = canonical.upsert_from_discovery_result(
+            company_name="Test Painter",
+            geography="Toronto",
+            source="google_places",
+            raw={**_source_payload("no_website_listed"), "rating": 4.8},
+        )
+
+        assert changed.source_observation_id != first.source_observation_id
         assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 2
+
+
+def test_google_reputation_facts_require_google_places_provenance() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        website_seed = canonical.upsert_from_discovery_result(
+            company_name="Reputation Source Painter",
+            geography="Toronto",
+            source="company_website_seed",
+            raw={
+                "external_id": "website-seed/reputation-painter",
+                "rating": 2.0,
+                "review_count": 3,
+            },
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses(
+            [website_seed.business_id]
+        ).get(website_seed.business_id, {})
+        assert "google_rating" not in facts
+        assert "google_review_count" not in facts
+
+        canonical.upsert_from_discovery_result(
+            company_name="Reputation Source Painter",
+            geography="Toronto",
+            source="google_places",
+            raw={
+                "id": "places/reputation-painter",
+                "rating": 4.7,
+                "userRatingCount": 28,
+            },
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses(
+            [website_seed.business_id]
+        )[website_seed.business_id]
+        assert fact_value(facts["google_rating"]) == 4.7
+        assert fact_value(facts["google_review_count"]) == 28.0
+
+
+def test_reconciliation_does_not_materialize_unknown_placeholder_facts() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        _add_painting_niche(session)
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Uninspected Painter",
+            geography="Toronto",
+            source="openstreetmap",
+            raw={"id": "osm/uninspected-painter", "name": "Uninspected Painter"},
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses(
+            [link.business_id]
+        ).get(link.business_id, {})
+
+        assert "website_status" not in facts
+        assert "contact_form_present" not in facts
+        assert "quote_or_booking_form_present" not in facts
 
 
 def test_name_alone_does_not_merge_businesses_across_locations() -> None:

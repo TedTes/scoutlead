@@ -22,6 +22,7 @@ from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessIndexSegmentModel,
+    BusinessFactModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     AudienceResultModel,
@@ -37,6 +38,7 @@ from db.models import (
     SignalDefinitionModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
+    SourceObservationModel,
     TerritoryModel,
     ValidationResultModel,
 )
@@ -1344,7 +1346,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
                 key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, businesses[1].id),
             ),
         )
         session.commit()
@@ -1373,14 +1375,51 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         assert rows[0]["raw"]["profile_match"]["rank_position"] == 1
         assert rows[0]["raw"]["profile_match"]["matched_signal_count"] == 1
         assert rows[0]["raw"]["profile_match"]["signals"]["no_quote_flow"]["matched"] is True
-        assert rows[0]["raw"]["profile_match"]["matched_signals"] == [
-            {
-                "signal_key": "no_quote_flow",
-                "fact_key": "quote_or_booking_form_present",
-                "value": False,
-                "confidence": "confirmed",
-            }
-        ]
+        matched_signal = rows[0]["raw"]["profile_match"]["matched_signals"][0]
+        assert matched_signal["source_observation_id"]
+        assert matched_signal["source"] == "google_places"
+        assert {
+            "signal_key": matched_signal["signal_key"],
+            "fact_key": matched_signal["fact_key"],
+            "value": matched_signal["value"],
+            "confidence": matched_signal["confidence"],
+        } == {
+            "signal_key": "no_quote_flow",
+            "fact_key": "quote_or_booking_form_present",
+            "value": False,
+            "confidence": "confirmed",
+        }
+
+        fact = session.scalar(
+            select(BusinessFactModel).where(
+                BusinessFactModel.business_id == businesses[1].id,
+                BusinessFactModel.fact_key == "quote_or_booking_form_present",
+            )
+        )
+        session.add(
+            ValidationResultModel(
+                id=new_id("validation"),
+                idempotency_key=f"test:{fact.id}:newer-failure",
+                business_id=fact.business_id,
+                source_observation_id=fact.source_observation_id,
+                validation_type="signal:quote_or_booking_form_present",
+                status="failed",
+                confidence=0,
+                reason="Newer validation failed.",
+                evidence=[],
+                validator="test",
+                validator_version=1,
+                observed_at=utcnow() + timedelta(minutes=1),
+                expires_at=utcnow() + timedelta(days=30),
+            )
+        )
+        session.commit()
+
+        assert ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        ) == []
 
 
 def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
@@ -1752,7 +1791,7 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
                 key=signal.key,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, business.id),
                 quality_state="published",
             ),
         )
@@ -1808,7 +1847,7 @@ def test_profile_learning_reorders_only_already_eligible_matches() -> None:
                 key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, businesses[0].id),
             ),
         )
         facts.upsert(
@@ -1817,7 +1856,7 @@ def test_profile_learning_reorders_only_already_eligible_matches() -> None:
                 key=BusinessFactKey.CONTACT_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, businesses[1].id),
             ),
         )
         profile = TerritoryService(
@@ -1978,7 +2017,7 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
                 key=BusinessFactKey.WEBSITE_STATUS,
                 value="missing",
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, businesses[1].id),
             ),
         )
         session.commit()
@@ -2005,12 +2044,21 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
 
         assert [row["title"] for row in rows] == [businesses[1].display_name]
         assert rows[0]["raw"]["profile_match"]["confirmed_signal_count"] == 1
-        assert rows[0]["raw"]["profile_match"]["signals"]["website_unavailable"] == {
+        website_evidence = rows[0]["raw"]["profile_match"]["signals"][
+            "website_unavailable"
+        ]
+        assert {
+            "fact_key": website_evidence["fact_key"],
+            "value": website_evidence["value"],
+            "matched": website_evidence["matched"],
+            "confidence": website_evidence["confidence"],
+        } == {
             "fact_key": "website_status",
             "value": "missing",
             "matched": True,
             "confidence": "confirmed",
         }
+        assert website_evidence["source_observation_id"]
         campaign = CampaignRepository(
             session,
             workspace_id="workspace:first",
@@ -2057,7 +2105,7 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
                     key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                     value=False,
                     observed_at=utcnow(),
-                    source_observation_id=None,
+                        source_observation_id=_latest_observation_id(session, business.id),
                 ),
             )
         facts.upsert(
@@ -2066,7 +2114,7 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
                 key=BusinessFactKey.CONTACT_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, businesses[1].id),
             ),
         )
         session.commit()
@@ -2123,7 +2171,7 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
                 key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_observation_id=_latest_observation_id(session, business.id),
             ),
         )
         session.commit()
@@ -2709,6 +2757,7 @@ def _profile_create(
     niche = session.scalar(select(NicheModel).where(NicheModel.slug == slug))
     if niche is None:
         niche = _niche(session, slug=slug, label=label)
+    _validate_signal_facts(session)
     place_label = str(market["city"])
     coordinates = {
         "Toronto": (43.6532, -79.3832),
@@ -2759,6 +2808,17 @@ def _seed_hvac_businesses(session) -> None:
     _validate_business_memberships(session)
 
 
+def _latest_observation_id(session, business_id: str) -> str:
+    observation_id = session.scalar(
+        select(SourceObservationModel.id)
+        .where(SourceObservationModel.business_id == business_id)
+        .order_by(SourceObservationModel.observed_at.desc())
+        .limit(1)
+    )
+    assert observation_id is not None
+    return observation_id
+
+
 def _validate_business_memberships(session) -> None:
     now = utcnow()
     for membership in session.scalars(select(BusinessNicheMembershipModel)):
@@ -2789,4 +2849,37 @@ def _validate_business_memberships(session) -> None:
                     expires_at=now + timedelta(days=30),
                 )
             )
+    session.commit()
+
+
+def _validate_signal_facts(session) -> None:
+    now = utcnow()
+    for fact in session.scalars(select(BusinessFactModel)):
+        if fact.source_observation_id is None:
+            continue
+        existing = session.scalar(
+            select(ValidationResultModel.id).where(
+                ValidationResultModel.idempotency_key
+                == f"test:{fact.id}:signal-validation",
+            )
+        )
+        if existing is not None:
+            continue
+        session.add(
+            ValidationResultModel(
+                id=new_id("validation"),
+                idempotency_key=f"test:{fact.id}:signal-validation",
+                business_id=fact.business_id,
+                source_observation_id=fact.source_observation_id,
+                validation_type=f"signal:{fact.fact_key}",
+                status="passed",
+                confidence=fact.confidence,
+                reason="Test signal validation passed.",
+                evidence=[],
+                validator="test",
+                validator_version=1,
+                observed_at=now + timedelta(minutes=1),
+                expires_at=fact.expires_at or now + timedelta(days=30),
+            )
+        )
     session.commit()

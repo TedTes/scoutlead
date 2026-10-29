@@ -307,7 +307,7 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
         assert package.content.observation.startswith("No quote")
 
 
-def test_outreach_package_uses_grounded_not_listed_website_observation() -> None:
+def test_outreach_package_rejects_unconfirmed_not_listed_website_observation() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=False)
         snapshot = dict(result.match_snapshot)
@@ -331,15 +331,11 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
             workspace_id="workspace:first",
         )
 
-        package = service.generate(result.id)
-
-        assert package.content.observation == (
-            "The latest business listing does not include a website."
-        )
-        assert "business listing" in package.content.message.body
-        assert len(package.content.message.body) <= 160
-        assert "you do not have a website" not in package.content.message.body.lower()
-        assert package.content.message.body.endswith("?")
+        with pytest.raises(
+            WorkflowBoundaryError,
+            match="A verified opportunity is required",
+        ):
+            service.generate(result.id)
 
 
 def _session_factory():

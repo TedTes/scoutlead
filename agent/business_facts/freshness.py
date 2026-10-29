@@ -19,7 +19,7 @@ def fact_expires_at(fact_key: str, observed_at: datetime) -> datetime:
 
 def fact_is_current(*, expires_at: datetime | None, now: datetime) -> bool:
     if expires_at is None:
-        return True
+        return False
     if expires_at.tzinfo is None and now.tzinfo is not None:
         expires_at = expires_at.replace(tzinfo=now.tzinfo)
     return expires_at >= now

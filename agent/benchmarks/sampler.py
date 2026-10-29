@@ -6,14 +6,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from benchmarks.schemas import BenchmarkObserved, BenchmarkRecord
+from business_facts.eligibility import fact_is_eligible
 from business_facts.repository import BusinessFactRepository, fact_value
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     NicheModel,
     SourceObservationModel,
+    ValidationResultModel,
 )
 from seeding.batches import active_membership_condition
+from shared.utils import utcnow
 
 
 def sample_businesses(
@@ -51,7 +54,42 @@ def sample_businesses(
                 break
 
     ids = [business.id for business, _ in selected]
-    facts = BusinessFactRepository(session).map_for_businesses(ids)
+    stored_facts = BusinessFactRepository(session).map_for_businesses(ids)
+    now = utcnow()
+    passed_validations = {
+        (
+            validation.business_id,
+            validation.validation_type.removeprefix("signal:"),
+            validation.source_observation_id,
+        )
+        for validation in session.scalars(
+            select(ValidationResultModel).where(
+                ValidationResultModel.business_id.in_(ids),
+                ValidationResultModel.status == "passed",
+                ValidationResultModel.validation_type.like("signal:%"),
+                ValidationResultModel.expires_at > now,
+            )
+        )
+    }
+    facts = {
+        business_id: {
+            key: fact
+            for key, fact in business_facts.items()
+            if fact_is_eligible(
+                fact,
+                minimum_confidence=90,
+                now=now,
+                require_provenance=True,
+            )
+            and (
+                business_id,
+                key,
+                fact.source_observation_id,
+            )
+            in passed_validations
+        }
+        for business_id, business_facts in stored_facts.items()
+    }
     memberships: dict[str, list[str]] = defaultdict(list)
     source_urls: dict[str, list[str]] = defaultdict(list)
     if ids:

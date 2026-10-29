@@ -547,7 +547,6 @@ def _outreach_eligible_matched_signals(
     signal_details = profile_match.get("signals")
     details = signal_details if isinstance(signal_details, dict) else {}
     confirmed = []
-    grounded_listing_gaps = []
     for item in matched:
         signal_key = str(item.get("signal_key") or "")
         detail = details.get(signal_key)
@@ -555,17 +554,10 @@ def _outreach_eligible_matched_signals(
             detail.get("confidence") if isinstance(detail, dict) else None
         )
         confidence = item.get("confidence") or detail_confidence
-        is_listed_website_gap = (
-            signal_key == "website_status"
-            and item.get("value") == "not_listed"
-            and confidence == "possible"
-        )
         if confidence == "confirmed":
             confirmed.append(item)
-        elif is_listed_website_gap:
-            grounded_listing_gaps.append(item)
-    if confirmed or grounded_listing_gaps:
-        return [*confirmed, *grounded_listing_gaps]
+    if confirmed:
+        return confirmed
     if int(profile_match.get("confirmed_signal_count") or 0) >= len(matched):
         return matched
     return []

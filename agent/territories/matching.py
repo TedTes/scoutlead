@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from business_facts.eligibility import eligible_fact_condition, fact_is_eligible
 from business_facts.repository import fact_value
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import (
@@ -593,7 +594,7 @@ class ProfileMatchService:
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
-    evidence = _usable_evidence_condition(spec, fact, include_probable=True)
+    evidence = _usable_evidence_condition(spec, fact)
     signal = spec.key
     if signal == "website_unavailable":
         return and_(
@@ -640,53 +641,32 @@ def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
 
 
 def _confirmed_signal_condition(spec: SignalMatchSpec, fact) -> Any:
-    return and_(
-        _signal_condition(spec, fact),
-        _usable_evidence_condition(spec, fact, include_probable=False),
-    )
+    return _signal_condition(spec, fact)
 
 
 def _usable_evidence_condition(
     spec: SignalMatchSpec,
     fact,
-    *,
-    include_probable: bool,
 ) -> Any:
-    acceptable_quality = fact.quality_state == "published"
-    confirmed = and_(
-        fact.resolution_state == "confirmed",
-        fact.confidence >= int(spec.config.get("minimum_confidence", 90)),
+    return eligible_fact_condition(
+        fact,
+        minimum_confidence=int(spec.config.get("minimum_confidence", 90)),
+        require_provenance=True,
+        require_validation=True,
     )
-    if not include_probable:
-        return and_(acceptable_quality, confirmed)
-    probable = and_(
-        fact.resolution_state == "probable",
-        fact.confidence >= int(spec.config.get("possible_minimum_confidence", 50)),
-    )
-    return and_(acceptable_quality, or_(confirmed, probable))
 
 
 def _signal_match_confidence(
     spec: SignalMatchSpec,
     fact: BusinessFactModel | None,
 ) -> str | None:
-    if fact is None:
-        return None
-    if fact.quality_state != "published":
-        return None
-    if (
-        fact.resolution_state == "confirmed"
-        and fact.confidence >= int(spec.config.get("minimum_confidence", 90))
+    if not fact_is_eligible(
+        fact,
+        minimum_confidence=int(spec.config.get("minimum_confidence", 90)),
+        require_provenance=True,
     ):
-        evidence_confidence = "confirmed"
-    elif (
-        fact.resolution_state == "probable"
-        and fact.confidence
-        >= int(spec.config.get("possible_minimum_confidence", 50))
-    ):
-        evidence_confidence = "possible"
-    else:
         return None
+    evidence_confidence = "confirmed"
     value = fact_value(fact)
     signal = spec.key
     if signal == "website_unavailable":
