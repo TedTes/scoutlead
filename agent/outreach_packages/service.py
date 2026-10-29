@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -36,7 +38,7 @@ from outreach_packages.schemas import (
 )
 from outreach_packages.ai import OpenAIPhrasingAdapter, ResponseClassifier
 from outreach_packages.playbooks import PlaybookRepository
-from outreach_packages.policy import OutreachPolicyValidator
+from outreach_packages.policy import OutreachPolicyValidator, validate_text_message
 from outreach_packages.repository import OutreachEventRepository, OutreachPlaybookRepository
 from outreach_packages.templates import OutreachTemplateContext, render_outreach
 from messages.repository import MessageRepository
@@ -45,7 +47,7 @@ from shared.errors import ConfigurationError, NotFoundError, ValidationError, Wo
 from shared.utils import new_id
 
 
-TEMPLATE_VERSION = 6
+TEMPLATE_VERSION = 7
 
 
 class OutreachPackageService:
@@ -71,7 +73,9 @@ class OutreachPackageService:
             )
         )
         if row is not None and (
-            _should_refresh_template(row) or _needs_strategy_upgrade(row)
+            _should_refresh_template(row)
+            or _needs_strategy_upgrade(row)
+            or not _evidence_is_current(row, result)
         ):
             fresh = self._render_content(
                 result, audience, product, business, workspace
@@ -96,7 +100,11 @@ class OutreachPackageService:
             )
         )
         if existing is not None:
-            if _should_refresh_template(existing) or _needs_strategy_upgrade(existing):
+            if (
+                _should_refresh_template(existing)
+                or _needs_strategy_upgrade(existing)
+                or not _evidence_is_current(existing, result)
+            ):
                 fresh = self._render_content(
                     result, audience, product, business, workspace
                 )
@@ -226,6 +234,7 @@ class OutreachPackageService:
             signature=signature,
         )
         return OutreachPackageContent(
+            evidence_fingerprint=_evidence_fingerprint(result),
             observation=observation,
             evidence=evidence,
             message=generated.message,
@@ -277,8 +286,14 @@ class OutreachPackageService:
         row = self._owned(package_id)
         result, _, _, business, _ = self._context(row.audience_result_id)
         original = OutreachPackageContent.model_validate(row.content)
+        if original.evidence_fingerprint != _evidence_fingerprint(result):
+            raise WorkflowBoundaryError(
+                "The verified opportunity changed. Refresh outreach before using this draft.",
+                {"result_id": result.id},
+            )
         if (
-            data.content.observation != original.observation
+            data.content.evidence_fingerprint != original.evidence_fingerprint
+            or data.content.observation != original.observation
             or data.content.evidence != original.evidence
             or data.content.strategy != original.strategy
             or data.content.alternatives != original.alternatives
@@ -291,6 +306,7 @@ class OutreachPackageService:
                 raise ValidationError(
                     "Selected call response is not part of this outreach playbook."
                 )
+        validate_text_message(data.content.message.body)
         row.content = data.content.model_dump()
         self.session.commit()
         self.session.refresh(row)
@@ -558,12 +574,16 @@ def _outreach_eligible_matched_signals(
 def _evidence(item: dict[str, Any]) -> OutreachEvidence:
     key = str(item.get("signal_key") or "opportunity")
     value = item.get("value")
-    label = key.replace("_", " ").strip().capitalize()
+    label = _evidence_label(key, value)
     statements = {
         "website_status": (
             "The latest business listing does not include a website."
             if value == "not_listed"
-            else f"The latest website status is {str(value).replace('_', ' ')}."
+            else "No website was found after verification."
+            if value == "missing"
+            else "The known website was unreachable during the latest check."
+            if value == "unavailable"
+            else "The website has not been verified."
         ),
         "website_unavailable": "The business website was unavailable during the latest check.",
         "no_quote_flow": "No quote or booking flow was found in the latest website check.",
@@ -576,6 +596,51 @@ def _evidence(item: dict[str, Any]) -> OutreachEvidence:
     else:
         statement = statements.get(key, f"The latest check confirmed {label.lower()}.")
     return OutreachEvidence(signal_key=key, label=label, statement=statement, value=value)
+
+
+def _evidence_label(key: str, value: object) -> str:
+    boolean_labels = {
+        "contact_form_present": ("Contact form present", "Contact form missing"),
+        "primary_cta_present": ("Primary CTA present", "Primary CTA missing"),
+        "click_to_call_present": ("Click to call present", "Click to call missing"),
+        "quote_or_booking_form_present": ("Quote or booking present", "Quote or booking missing"),
+        "complete_contact_details": ("Contact details complete", "Contact details incomplete"),
+        "uses_https": ("HTTPS present", "HTTPS missing"),
+    }
+    if key in boolean_labels and isinstance(value, bool):
+        return boolean_labels[key][0 if value else 1]
+    labels = {
+        "website_unavailable": "Website unavailable",
+        "no_quote_flow": "Quote or booking missing",
+        "no_contact_form": "Contact form missing",
+        "mobile_viewport_missing": "Mobile setup missing",
+        "uses_http": "HTTPS missing",
+        "reviews_under_15": "Low review count",
+    }
+    return labels.get(key, key.replace("_", " ").strip().capitalize())
+
+
+def _evidence_fingerprint(result: AudienceResultModel) -> str:
+    profile_match = _profile_match(result.match_snapshot or {})
+    matched = _outreach_eligible_matched_signals(profile_match)
+    normalized = [
+        {
+            "signal_key": item.get("signal_key"),
+            "fact_key": item.get("fact_key"),
+            "value": item.get("value"),
+            "confidence": item.get("confidence"),
+            "source_observation_id": item.get("source_observation_id"),
+            "observed_at": item.get("observed_at"),
+        }
+        for item in matched[:6]
+    ]
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _evidence_is_current(row: OutreachPackageModel, result: AudienceResultModel) -> bool:
+    content = row.content if isinstance(row.content, dict) else {}
+    return content.get("evidence_fingerprint") == _evidence_fingerprint(result)
 
 
 def _find_string(value: object, keys: set[str]) -> str | None:

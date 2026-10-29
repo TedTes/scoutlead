@@ -21,9 +21,17 @@ from outreach_packages.schemas import (
     OutreachPackageUpdate,
     OutreachResponseClassifyRequest,
 )
-from outreach_packages.service import OutreachPackageService
+from outreach_packages.service import OutreachPackageService, _evidence
 from shared.errors import ValidationError, WorkflowBoundaryError
 from shared.utils import new_id, utcnow
+
+
+def test_boolean_evidence_labels_reflect_the_value() -> None:
+    missing = _evidence({"signal_key": "contact_form_present", "value": False})
+    present = _evidence({"signal_key": "contact_form_present", "value": True})
+
+    assert missing.label == "Contact form missing"
+    assert present.label == "Contact form present"
 
 
 def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
@@ -46,10 +54,12 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert "Lakeside Painting" in package.content.message.body
         assert "quote or booking" in package.content.message.body
         assert "quote" in package.content.message.body.lower()
-        assert package.content.strategy.customer_consequence in package.content.message.body
+        assert len(package.content.message.body) <= 160
+        assert "example" not in package.content.message.body.lower()
+        assert len(package.content.evidence_fingerprint) == 64
         assert len(package.content.alternatives) == 6
         assert package.content.reply_paths
-        assert package.content.message.body.count("\n\n") >= 3
+        assert package.content.message.body.endswith("?")
         assert package.content.form.body.count("\n\n") >= 5
         assert package.content.call.ask.endswith("?")
         assert package.content.call.discovery_question == (
@@ -62,7 +72,7 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert session.scalar(select(func.count()).select_from(OutreachPackageModel)) == 1
 
         content = package.content.model_copy(deep=True)
-        content.message.body = "Updated message grounded in the same verified opportunity evidence."
+        content.message.body = "Updated message grounded in the same verified opportunity evidence?"
         updated = service.update(package.id, OutreachPackageUpdate(content=content))
 
         assert updated.content.message.body.startswith("Updated message")
@@ -118,6 +128,29 @@ def test_outreach_package_handoff_snapshots_one_message() -> None:
         assert session.scalar(select(func.count()).select_from(MessageModel)) == 1
 
 
+def test_outreach_package_refreshes_when_evidence_snapshot_changes() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(session, workspace_id="workspace:first")
+        package = service.generate(result.id)
+        original_fingerprint = package.content.evidence_fingerprint
+        snapshot = dict(result.match_snapshot)
+        raw = dict(snapshot["raw"])
+        profile_match = dict(raw["profile_match"])
+        matched = [dict(item) for item in profile_match["matched_signals"]]
+        matched[0]["source_observation_id"] = "source_observation:new"
+        profile_match["matched_signals"] = matched
+        raw["profile_match"] = profile_match
+        snapshot["raw"] = raw
+        result.match_snapshot = snapshot
+        session.commit()
+
+        refreshed = service.find_for_result(result.id)
+
+        assert refreshed is not None
+        assert refreshed.content.evidence_fingerprint != original_fingerprint
+
+
 def test_outreach_package_generates_grounded_ai_suggestion_on_demand() -> None:
     class SuggestionLLM:
         def generate_object(self, *, response_model, **_kwargs):
@@ -147,7 +180,8 @@ def test_outreach_package_generates_grounded_ai_suggestion_on_demand() -> None:
         assert suggestion.id.startswith("openai:message:")
         assert suggestion.label == "AI suggestion"
         assert package.content.strategy.observation in suggestion.body
-        assert "simplify online quote requests" in suggestion.body
+        assert len(suggestion.body) <= 160
+        assert "example" not in suggestion.body.lower()
 
 
 def test_outreach_package_refreshes_older_template_copy() -> None:
@@ -172,8 +206,8 @@ def test_outreach_package_refreshes_older_template_copy() -> None:
         assert refreshed is not None
         assert "on businesses in" not in refreshed.content.message.body
         assert "quote" in refreshed.content.message.body.lower()
-        assert refreshed.content.strategy.customer_consequence in refreshed.content.message.body
-        assert row.prompt_version == 6
+        assert len(refreshed.content.message.body) <= 160
+        assert row.prompt_version == 7
 
 
 def test_outreach_package_preserves_edited_older_template_copy() -> None:
@@ -196,7 +230,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         assert preserved.content.message.body == custom_body
         assert preserved.content.strategy is not None
         assert preserved.content.call.branches
-        assert session.get(OutreachPackageModel, package.id).prompt_version == 6
+        assert session.get(OutreachPackageModel, package.id).prompt_version == 7
 
 
 def test_outreach_package_rejects_unverified_opportunity() -> None:
@@ -303,8 +337,7 @@ def test_outreach_package_uses_grounded_not_listed_website_observation() -> None
             "The latest business listing does not include a website."
         )
         assert "business listing" in package.content.message.body
-        assert "If you already have a website" in package.content.message.body
-        assert "homeowners" in package.content.message.body.lower()
+        assert len(package.content.message.body) <= 160
         assert "you do not have a website" not in package.content.message.body.lower()
         assert package.content.message.body.endswith("?")
 

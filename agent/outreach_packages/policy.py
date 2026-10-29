@@ -94,5 +94,19 @@ class OutreachPolicyValidator:
             strategy.primary_signal_key not in claim.evidence_keys for claim in evidence_claims
         ):
             raise ValidationError("Every factual outreach claim must reference stored evidence.")
-        if not generation.message.body.rstrip().endswith("?"):
-            raise ValidationError("Text outreach must end with one clear next-step question.")
+        validate_text_message(generation.message.body)
+
+
+def validate_text_message(body: str) -> None:
+    if not body.rstrip().endswith("?"):
+        raise ValidationError("Text outreach must end with one clear next-step question.")
+    if len(body) > 160:
+        raise ValidationError("Text outreach must fit in one 160-character SMS segment.")
+    if re.search(
+        r"\b(?:send|show|share|prepare|make|create)\b.{0,30}\b(?:example|preview|mockup)\b",
+        body,
+        re.I,
+    ):
+        raise ValidationError(
+            "Text outreach cannot promise an example or preview that was not generated."
+        )

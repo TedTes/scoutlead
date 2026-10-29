@@ -29,22 +29,8 @@ class PhrasingAdapter(Protocol):
 class TextRenderer:
     def render(self, context: OutreachTemplateContext) -> WrittenDraft:
         strategy = context.strategy
-        relevance = " ".join(
-            value
-            for value in [
-                strategy.customer_consequence,
-                strategy.uncertainty_clause,
-            ]
-            if value
-        )
-        close = f"{strategy.seller_positioning} {strategy.next_step}"
         return WrittenDraft(
-            body=_sentence_limit(
-                "\n\n".join(
-                    [f"Hi {context.business_name},", strategy.observation, relevance, close]
-                ),
-                560,
-            )
+            body=_text_message(context.business_name, strategy.observation)
         )
 
 
@@ -137,6 +123,24 @@ def _email_subject(strategy: OutreachStrategy) -> str:
     if strategy.service_key == "multilingual_localization":
         return "Quick question about website languages"
     return "Quick question about your website"
+
+
+def _text_message(business_name: str, observation: str) -> str:
+    """Keep cold text factual, single-segment, and free of invented deliverables."""
+    options = (
+        f"Hi {business_name} — {observation} Is improving that a priority?",
+        f"{observation} Is improving that a priority?",
+        f"{observation} Worth reviewing?",
+    )
+    for option in options:
+        compact = _clean_lines(option)
+        if len(compact) <= 160:
+            return compact
+    # Observations come from reviewed playbooks and should normally fit. This final
+    # fallback preserves the factual observation and a question without promising
+    # an example, preview, or result that does not exist.
+    room = max(20, 160 - len(" Worth reviewing?"))
+    return f"{observation[:room].rstrip(' ,.;:')} Worth reviewing?"
 
 
 def _long_body(context: OutreachTemplateContext, *, limit: int) -> str:

@@ -119,6 +119,7 @@ class OutreachGeneration(BaseModel):
 
 
 class OutreachPackageContent(BaseModel):
+    evidence_fingerprint: str = Field(min_length=64, max_length=64)
     observation: str = Field(min_length=8, max_length=320)
     evidence: list[OutreachEvidence] = Field(min_length=1, max_length=6)
     message: WrittenDraft
