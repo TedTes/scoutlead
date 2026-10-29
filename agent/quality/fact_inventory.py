@@ -57,6 +57,53 @@ def audit_fact_inventory(
         )
     )
     summary = FactInventorySummary(dry_run=not apply)
+    if not facts:
+        return summary
+
+    business_ids = {fact.business_id for fact in facts}
+    observation_ids = {
+        fact.source_observation_id
+        for fact in facts
+        if fact.source_observation_id is not None
+    }
+    observations_by_id = {
+        observation.id: observation
+        for observation in session.scalars(
+            select(SourceObservationModel).where(
+                SourceObservationModel.id.in_(observation_ids)
+            )
+        )
+    }
+    newest_claims: dict[tuple[str, str], FactClaimModel] = {}
+    for claim in session.scalars(
+        select(FactClaimModel)
+        .where(FactClaimModel.business_id.in_(business_ids))
+        .order_by(
+            FactClaimModel.observed_at.desc(),
+            FactClaimModel.confidence.desc(),
+            FactClaimModel.id.desc(),
+        )
+    ):
+        newest_claims.setdefault((claim.business_id, claim.fact_key), claim)
+    validation_types = {f"signal:{fact.fact_key}" for fact in facts}
+    latest_validations: dict[tuple[str, str], ValidationResultModel] = {}
+    for validation in session.scalars(
+        select(ValidationResultModel)
+        .where(
+            ValidationResultModel.business_id.in_(business_ids),
+            ValidationResultModel.validation_type.in_(validation_types),
+        )
+        .order_by(
+            ValidationResultModel.observed_at.desc(),
+            ValidationResultModel.created_at.desc(),
+            ValidationResultModel.id.desc(),
+        )
+    ):
+        latest_validations.setdefault(
+            (validation.business_id, validation.validation_type),
+            validation,
+        )
+
     issue_counts: dict[str, int] = {}
     for fact in facts:
         summary.checked += 1
@@ -67,11 +114,7 @@ def audit_fact_inventory(
         elif fact.signal_definition_id != definition.id:
             issues.append("definition_link_mismatch")
 
-        observation = (
-            session.get(SourceObservationModel, fact.source_observation_id)
-            if fact.source_observation_id
-            else None
-        )
+        observation = observations_by_id.get(fact.source_observation_id or "")
         if observation is None:
             issues.append("missing_source_observation")
         elif definition is not None:
@@ -87,17 +130,8 @@ def audit_fact_inventory(
         if fact.expires_at is None or _aware(fact.expires_at) <= _aware(now):
             issues.append("expired_or_unbounded")
 
-        newest_claim = session.scalar(
-            select(FactClaimModel)
-            .where(
-                FactClaimModel.business_id == fact.business_id,
-                FactClaimModel.fact_key == fact.fact_key,
-            )
-            .order_by(
-                FactClaimModel.observed_at.desc(),
-                FactClaimModel.confidence.desc(),
-            )
-            .limit(1)
+        newest_claim = newest_claims.get(
+            (fact.business_id, fact.fact_key)
         )
         if newest_claim is None:
             issues.append("missing_claim")
@@ -107,18 +141,8 @@ def audit_fact_inventory(
         ):
             issues.append("resolved_fact_claim_mismatch")
 
-        latest_validation = session.scalar(
-            select(ValidationResultModel)
-            .where(
-                ValidationResultModel.business_id == fact.business_id,
-                ValidationResultModel.validation_type == f"signal:{fact.fact_key}",
-            )
-            .order_by(
-                ValidationResultModel.observed_at.desc(),
-                ValidationResultModel.created_at.desc(),
-                ValidationResultModel.id.desc(),
-            )
-            .limit(1)
+        latest_validation = latest_validations.get(
+            (fact.business_id, f"signal:{fact.fact_key}")
         )
         passed_validation = bool(
             latest_validation is not None
