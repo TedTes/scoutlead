@@ -381,6 +381,27 @@ export type AudiencePerformance = {
   latest_run_at?: string | null;
 };
 
+export type WorkspaceLeadCounts = {
+  leads: number;
+  shortlisted: number;
+  contacted: number;
+  dismissed: number;
+  all: number;
+};
+
+export type WorkspaceAudienceOverview = {
+  counts: WorkspaceLeadCounts;
+  audiences: AudiencePerformance[];
+};
+
+export type WorkspaceLeadPage = {
+  items: DiscoveryResult[];
+  total: number;
+  limit: number;
+  offset: number;
+  counts: WorkspaceLeadCounts;
+};
+
 export type ProfileCustomerKind = "residential" | "commercial" | "both";
 export type ProfileSignal = string;
 export type ProfileExclusion = "closed" | "chains" | "franchises" | "directories" | "agencies";

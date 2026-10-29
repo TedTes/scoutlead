@@ -25,6 +25,8 @@ import type {
   SourceProvider,
   SourceRequestSource,
   Territory,
+  WorkspaceAudienceOverview,
+  WorkspaceLeadPage,
 } from "../types/domain";
 import { normalizeActiveSourceIds } from "../utils/source-providers";
 
@@ -45,6 +47,8 @@ type AppDataContextValue = {
   profileBatch: ProfileBatch | null;
   productDiscoveryRuns: DiscoveryRun[];
   productContacts: DiscoveryResult[];
+  workspaceOverview: WorkspaceAudienceOverview | null;
+  workspaceLeadPage: WorkspaceLeadPage | null;
   territories: Territory[];
   audienceFolders: AudienceFolder[];
   snapshot: DiscoverySnapshot;
@@ -57,6 +61,8 @@ type AppDataContextValue = {
   selectProfile: (profileId: string) => Promise<void>;
   setActiveSourceIds: (sourceIds: SourceRequestSource[]) => void;
   refreshAll: (options?: RefreshAllOptions) => Promise<void>;
+  refreshWorkspaceOverview: () => Promise<WorkspaceAudienceOverview>;
+  loadWorkspaceLeads: (view: string, offset?: number, search?: string) => Promise<WorkspaceLeadPage>;
   refreshSnapshot: (runId?: string) => Promise<void>;
   refreshProfileBatch: (profileId?: string) => Promise<ProfileBatch | null>;
   refreshGmailConnection: (productId?: string) => Promise<void>;
@@ -162,6 +168,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   const leadMutationEpochRef = useRef(0);
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot>(emptySnapshot);
   const [productContacts, setProductContacts] = useState<DiscoveryResult[]>([]);
+  const [workspaceOverview, setWorkspaceOverview] = useState<WorkspaceAudienceOverview | null>(null);
+  const [workspaceLeadPage, setWorkspaceLeadPage] = useState<WorkspaceLeadPage | null>(null);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [audienceFolders, setAudienceFolders] = useState<AudienceFolder[]>([]);
   const [profileBatch, setProfileBatch] = useState<ProfileBatch | null>(null);
@@ -231,25 +239,23 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     [sourceProviders],
   );
 
-  const refreshProductContacts = useCallback(
-    async (_productId: string, runs: DiscoveryRun[], profiles: Territory[]) => {
-      const mutationEpoch = leadMutationEpochRef.current;
-      if (!runs.length && !profiles.length) {
-        setProductContacts([]);
-        return;
-      }
-      const [resultGroups, profileBatches] = await Promise.all([
-        Promise.all(runs.map((run) => api.getResults(run.id).catch(() => []))),
-        Promise.all(profiles.map((profile) => api.getProfileBatch(profile.id).catch(() => null))),
-      ]);
-      if (mutationEpoch !== leadMutationEpochRef.current) return;
-      setProductContacts(dedupeContacts([
-        ...resultGroups.flat(),
-        ...profileBatches.flatMap((batch) => batch?.leads || []),
-      ]));
-    },
-    [api],
-  );
+  const refreshWorkspaceOverview = useCallback(async () => {
+    const overview = await api.getWorkspaceOverview();
+    setWorkspaceOverview(overview);
+    return overview;
+  }, [api]);
+
+  const loadWorkspaceLeads = useCallback(async (
+    view: string,
+    offset = 0,
+    search = "",
+  ) => {
+    const page = await api.getWorkspaceLeads({ view, limit: 25, offset, search });
+    setWorkspaceLeadPage(page);
+    setProductContacts(page.items);
+    setWorkspaceOverview((current) => current ? { ...current, counts: page.counts } : current);
+    return page;
+  }, [api]);
 
   const fetchSnapshot = useCallback(
     async (targetRunId: string): Promise<DiscoverySnapshot> => {
@@ -398,7 +404,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     if (showLoading) setLoading(true);
     setError("");
     try {
-      const [health, nextProducts, nextRuns, nextSourceProviders, nextTerritories] = await Promise.all([
+      const [health, nextProducts, nextRuns, nextSourceProviders, nextTerritories, nextOverview] = await Promise.all([
         api.getHealth().then(
           () => true,
           () => false,
@@ -407,12 +413,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         api.getDiscoveryRuns(),
         api.getSourceProviders().catch(() => []),
         api.getTerritories().catch(() => []),
+        api.getWorkspaceOverview(),
       ]);
       setApiHealthy(health);
       setProducts(nextProducts);
       setDiscoveryRuns(nextRuns);
       setSourceProviders(nextSourceProviders);
       setTerritories(nextTerritories);
+      setWorkspaceOverview(nextOverview);
       const nextActiveSourceIds = normalizeActiveSourceIds(readStoredActiveSourceIds(), nextSourceProviders);
       localStorage.setItem(activeSourcesStorageKey, JSON.stringify(nextActiveSourceIds));
       setActiveSourceIdsState(nextActiveSourceIds);
@@ -448,7 +456,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectedDiscoveryRunIdRef.current = nextRunId;
       localStorage.setItem("selectedDiscoveryRunId", nextRunId);
 
-      await refreshProductContacts(nextProductId, nextRuns, nextTerritories);
       const nextBatch = nextProfileId
         ? await api.getProfileBatch(nextProfileId).catch(() => null)
         : null;
@@ -474,7 +481,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [api, refreshGmailConnection, refreshProductContacts, refreshSnapshot]);
+  }, [api, refreshGmailConnection, refreshSnapshot]);
 
   const mutate = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -492,10 +499,6 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
-
-  useEffect(() => {
-    void refreshProductContacts(selectedProductIdState, discoveryRuns, territories);
-  }, [discoveryRuns, refreshProductContacts, selectedProductIdState, territories]);
 
   useEffect(() => {
     void refreshGmailConnection(selectedProductIdState);
@@ -532,6 +535,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       profileBatch,
       productDiscoveryRuns,
       productContacts,
+      workspaceOverview,
+      workspaceLeadPage,
       territories,
       audienceFolders,
       snapshot,
@@ -544,6 +549,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       selectProfile,
       setActiveSourceIds: persistActiveSourceIds,
       refreshAll,
+      refreshWorkspaceOverview,
+      loadWorkspaceLeads,
       refreshSnapshot,
       refreshProfileBatch,
       refreshGmailConnection,
@@ -817,6 +824,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
             leadMutationEpochRef.current += 1;
             if (leadMutationVersionRef.current.get(leadId) !== mutationVersion) return;
             updateLeadInState(leadId, () => saved, setProductContacts, setSnapshot, setProfileBatch);
+            await refreshWorkspaceOverview();
           } catch (err) {
             leadMutationEpochRef.current += 1;
             if (leadMutationVersionRef.current.get(leadId) !== mutationVersion) return;
@@ -935,10 +943,14 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       persistActiveSourceIds,
       productDiscoveryRuns,
       productContacts,
+      workspaceOverview,
+      workspaceLeadPage,
       territories,
       audienceFolders,
       products,
       refreshAll,
+      refreshWorkspaceOverview,
+      loadWorkspaceLeads,
       refreshGmailConnection,
       refreshProfileBatch,
       refreshSnapshot,

@@ -141,6 +141,7 @@ function AppShell({
     profileBatch,
     productDiscoveryRuns,
     productContacts,
+    workspaceOverview,
     territories,
     audienceFolders,
     gmailConnectionStatus,
@@ -167,13 +168,14 @@ function AppShell({
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
   const recentProductContacts = productContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
   const activeProductContacts = productContacts.filter(isActiveLead);
+  const overviewCounts = workspaceOverview?.counts;
   const workflowCounts: LeadWorkflowCounts = {
-    inbox: activeProductContacts.length,
+    inbox: overviewCounts?.leads ?? activeProductContacts.length,
     this_week: recentProductContacts.length,
-    shortlisted: productContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
-    contacted: productContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
-    dismissed: productContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
-    all: productContacts.length,
+    shortlisted: overviewCounts?.shortlisted ?? productContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
+    contacted: overviewCounts?.contacted ?? productContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
+    dismissed: overviewCounts?.dismissed ?? productContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
+    all: overviewCounts?.all ?? productContacts.length,
   };
   const leadWorkflowItems: Array<{ id: LeadWorkflowView; label: string; count: number; icon: ReactNode }> = [
     {

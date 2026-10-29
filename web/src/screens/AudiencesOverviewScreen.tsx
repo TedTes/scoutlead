@@ -1,32 +1,19 @@
-import { ArrowRight, LoaderCircle, Users } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { isActiveLead, useAppData } from "../state/app-data";
-import type { AudiencePerformance, DiscoveryResult } from "../types/domain";
+import { ArrowRight, Users } from "lucide-react";
+import { useMemo } from "react";
+import { useAppData } from "../state/app-data";
+import type { AudiencePerformance, WorkspaceLeadCounts } from "../types/domain";
 
 export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (id: string) => void }) {
-  const { productContacts, territoryApi } = useAppData();
-  const [rows, setRows] = useState<AudiencePerformance[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const summary = useMemo(() => summarizeAudiences(rows, productContacts), [productContacts, rows]);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError("");
-    void territoryApi.getAudiencePerformance()
-      .then((result) => { if (active) setRows(result); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [territoryApi]);
+  const { workspaceOverview } = useAppData();
+  const rows = workspaceOverview?.audiences || [];
+  const counts = workspaceOverview?.counts || { leads: 0, shortlisted: 0, contacted: 0, dismissed: 0, all: 0 };
+  const summary = useMemo(() => summarizeAudiences(rows, counts), [counts, rows]);
 
   return (
     <section className="audiences-overview">
-      {loading ? <div className="audiences-overview-empty"><LoaderCircle className="sl-spin-icon" size={18} /> Loading audiences</div> : null}
-      {!loading && error ? <div className="audiences-overview-empty error">{error}</div> : null}
-      {!loading && !error && !rows.length ? <div className="audiences-overview-empty">No audiences yet.</div> : null}
-      {!loading && !error && rows.length ? (
+      {!workspaceOverview ? <div className="audiences-overview-empty">Loading audiences</div> : null}
+      {workspaceOverview && !rows.length ? <div className="audiences-overview-empty">No audiences yet.</div> : null}
+      {workspaceOverview && rows.length ? (
         <>
           <section className="audiences-overview-metrics" aria-label="Lead funnel">
             <OverviewMetric label="Leads" value={summary.leads} detail="Unique across all audiences" />
@@ -89,11 +76,10 @@ function OverviewStatus({ label, tone, value }: { label: string; tone: "green" |
   return <div><span><i className={`overview-status-dot ${tone}`} />{label}</span><strong>{value}</strong></div>;
 }
 
-function summarizeAudiences(rows: AudiencePerformance[], contacts: DiscoveryResult[]) {
-  const activeContacts = contacts.filter(isActiveLead);
-  const leads = activeContacts.length;
-  const shortlisted = activeContacts.filter((contact) => Boolean(contact.shortlisted_at)).length;
-  const contacted = activeContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length;
+function summarizeAudiences(rows: AudiencePerformance[], counts: WorkspaceLeadCounts) {
+  const leads = counts.leads;
+  const shortlisted = counts.shortlisted;
+  const contacted = counts.contacted;
   const readyStates = new Set(["ready", "partial"]);
   const buildingStates = new Set(["setup", "queued", "scoring", "retrying", "waiting_validation"]);
   const byNiche = new Map<string, { audiences: number; label: string; leads: number }>();

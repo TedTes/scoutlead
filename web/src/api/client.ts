@@ -320,6 +320,24 @@ export class ApiClient {
     );
   }
 
+  getWorkspaceOverview() {
+    return this.request<import("../types/domain").WorkspaceAudienceOverview>(
+      "/audiences/overview",
+    );
+  }
+
+  getWorkspaceLeads(input: { view?: string; limit?: number; offset?: number; search?: string } = {}) {
+    const params = new URLSearchParams();
+    if (input.view) params.set("view", input.view);
+    if (input.limit !== undefined) params.set("limit", String(input.limit));
+    if (input.offset !== undefined) params.set("offset", String(input.offset));
+    if (input.search?.trim()) params.set("search", input.search.trim());
+    const query = params.toString();
+    return this.request<import("../types/domain").WorkspaceLeadPage>(
+      `/leads${query ? `?${query}` : ""}`,
+    );
+  }
+
   getProfileOptions() {
     return this.request<ProfileOptions>("/audiences/options");
   }

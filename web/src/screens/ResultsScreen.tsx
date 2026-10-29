@@ -149,6 +149,8 @@ export function ResultsScreen({
     selectedProfileId,
     profileBatch,
     productContacts,
+    workspaceLeadPage,
+    loadWorkspaceLeads,
     productDiscoveryRuns,
     setSelectedDiscoveryRunId,
     deleteDiscoveryRuns,
@@ -179,6 +181,8 @@ export function ResultsScreen({
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [outreachDraftDirty, setOutreachDraftDirty] = useState(false);
   const [leadSearch, setLeadSearch] = useState("");
+  const [workspaceLeadsLoading, setWorkspaceLeadsLoading] = useState(false);
+  const [workspaceLeadsError, setWorkspaceLeadsError] = useState("");
   const [desktopSplitView, setDesktopSplitView] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1160px)").matches : false,
   );
@@ -282,6 +286,9 @@ export function ResultsScreen({
       contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score
       || contactScore(b) - contactScore(a),
     );
+  const displayedLeadTotal = isGlobalView
+    ? workspaceLeadPage?.total ?? workflowContacts.length
+    : workflowContacts.length;
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
@@ -329,6 +336,24 @@ export function ResultsScreen({
     setRerunPromptOpen(false);
     setBulkOutreachOpen(false);
   }, [isGlobalView, onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
+
+  useEffect(() => {
+    if (!isGlobalView) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setWorkspaceLeadsLoading(true);
+      setWorkspaceLeadsError("");
+      void loadWorkspaceLeads(workflowView, 0, leadSearch).catch((cause) => {
+        if (active) setWorkspaceLeadsError(cause instanceof Error ? cause.message : String(cause));
+      }).finally(() => {
+        if (active) setWorkspaceLeadsLoading(false);
+      });
+    }, leadSearch ? 250 : 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isGlobalView, leadSearch, listRequestId, loadWorkspaceLeads, workflowView]);
 
   useEffect(() => {
     setSelectedContactId("");
@@ -913,9 +938,7 @@ export function ResultsScreen({
                     : workflowViewLabel(workflowView)}
                 </strong>
                 <span>
-                  {visibleContacts.length === workflowContacts.length
-                    ? workflowContacts.length
-                    : `${visibleContacts.length} of ${workflowContacts.length}`}
+                  {workspaceLeadsLoading ? "Loading" : displayedLeadTotal}
                 </span>
               </div>
               <div className="lead-feed-header-actions">
@@ -1038,6 +1061,32 @@ export function ResultsScreen({
               ) : null}
             </section>
           )}
+          {isGlobalView && workspaceLeadsError ? <p className="workspace-lead-page-error">{workspaceLeadsError}</p> : null}
+          {isGlobalView && workspaceLeadPage && workspaceLeadPage.total > workspaceLeadPage.limit ? (
+            <nav className="workspace-lead-pagination" aria-label="Lead pages">
+              <button
+                disabled={workspaceLeadsLoading || workspaceLeadPage.offset === 0}
+                type="button"
+                onClick={() => void loadWorkspaceLeads(
+                  workflowView,
+                  Math.max(0, workspaceLeadPage.offset - workspaceLeadPage.limit),
+                  leadSearch,
+                )}
+              >Previous</button>
+              <span>
+                {workspaceLeadPage.offset + 1}–{Math.min(workspaceLeadPage.offset + workspaceLeadPage.items.length, workspaceLeadPage.total)} of {workspaceLeadPage.total}
+              </span>
+              <button
+                disabled={workspaceLeadsLoading || workspaceLeadPage.offset + workspaceLeadPage.limit >= workspaceLeadPage.total}
+                type="button"
+                onClick={() => void loadWorkspaceLeads(
+                  workflowView,
+                  workspaceLeadPage.offset + workspaceLeadPage.limit,
+                  leadSearch,
+                )}
+              >Next</button>
+            </nav>
+          ) : null}
         </section>
 
         {detailContact ? (workflowView === "shortlisted" ? (
