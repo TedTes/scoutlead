@@ -243,3 +243,11 @@ class LeadRead(LeadCreate):
     rank_score: float | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class WorkspaceLeadCounts(BaseModel):
+    leads: int = 0
+    shortlisted: int = 0
+    contacted: int = 0
+    dismissed: int = 0
+    all: int = 0

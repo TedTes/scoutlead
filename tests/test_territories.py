@@ -64,6 +64,7 @@ from territories.refill import enqueue_refill_if_depleted
 from territories.scheduler import enqueue_due_territories
 from territories.source_expansion import enqueue_profile_source_expansion
 from leads.repository import LeadRepository
+from leads.workspace import WorkspaceLeadService
 from leads.schemas import (
     AgentFitStatus,
     ContactPolicyStatus,
@@ -2362,6 +2363,40 @@ def test_unassigned_lead_can_be_assigned_to_an_audience() -> None:
         assigned = repository.update(lead.id, LeadUpdate(territory_id=territory.id))
 
         assert assigned.territory_id == territory.id
+
+
+def test_workspace_lead_read_model_returns_counts_and_one_page() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        campaign = CampaignRepository(session, workspace_id="workspace:first").create(
+            CampaignCreate(product_id=offer.id, name="Workspace leads", max_leads=10)
+        )
+        repository = LeadRepository(session, workspace_id="workspace:first")
+        active = repository.create_from_seed(
+            campaign.id,
+            offer.id,
+            LeadSeedInput(company_name="Active Painting", geography="Toronto"),
+        )
+        dismissed = repository.create_from_seed(
+            campaign.id,
+            offer.id,
+            LeadSeedInput(company_name="Dismissed Painting", geography="Toronto"),
+        )
+        repository.update(
+            dismissed.id,
+            LeadUpdate(review_status="not_fit"),
+        )
+        service = WorkspaceLeadService(session, workspace_id="workspace:first")
+
+        counts = service.counts()
+        page = service.page(view="inbox", limit=1)
+
+        assert counts.leads == 1
+        assert counts.dismissed == 1
+        assert counts.all == 2
+        assert page.total == 1
+        assert page.items[0].id == active.id
 
 
 def test_territory_metrics_report_coverage_and_conversion() -> None:

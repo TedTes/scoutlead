@@ -15,6 +15,7 @@ from db.models import (
     TerritoryModel,
 )
 from outcomes.schemas import LeadOutcome
+from leads.schemas import WorkspaceLeadCounts
 from territories.repository import TerritoryRepository
 
 
@@ -53,6 +54,11 @@ class AudiencePerformanceRead(BaseModel):
     shortlist_rate: float
     contact_rate: float
     latest_run_at: datetime | None = None
+
+
+class WorkspaceOverviewRead(BaseModel):
+    counts: WorkspaceLeadCounts
+    audiences: list[AudiencePerformanceRead]
 
 
 class TerritoryMetricsService:

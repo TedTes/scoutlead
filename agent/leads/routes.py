@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaigns.repository import CampaignRepository
@@ -10,6 +10,7 @@ from discovery.schemas import DiscoveryCandidateRead
 from leads.repository import LeadRepository
 from leads.approach_service import LeadApproachService
 from leads.schemas import LeadContactPolicyUpdate, LeadRead, LeadUpdate
+from leads.workspace import WorkspaceLeadPage, WorkspaceLeadService, WorkspaceLeadView
 from leads.service import LeadQualificationService
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeSource
 from outcomes.service import OutcomeService
@@ -40,6 +41,21 @@ def add_campaign_seed_leads(
     campaign = CampaignRepository(session, workspace_id=auth.workspace_id).get(campaign_id)
     leads = LeadRepository(session, workspace_id=auth.workspace_id)
     return [leads.create_from_seed(campaign_id, campaign.product_id, seed) for seed in seeds]
+
+
+@router.get("/leads", response_model=WorkspaceLeadPage)
+def list_workspace_leads(
+    session: DbSession,
+    auth: CurrentAuth,
+    view: WorkspaceLeadView = "inbox",
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None, max_length=200),
+):
+    return WorkspaceLeadService(
+        session,
+        workspace_id=auth.workspace_id or "workspace_default",
+    ).page(view=view, limit=limit, offset=offset, search=search)
 
 
 @router.get("/leads/{lead_id}", response_model=LeadRead)

@@ -18,8 +18,10 @@ from territories.metrics import (
     AudiencePerformanceRead,
     TerritoryMetricsRead,
     TerritoryMetricsService,
+    WorkspaceOverviewRead,
     territory_metrics_csv,
 )
+from leads.workspace import WorkspaceLeadService
 from territories.changes import ProfileChangeService, ProfileFactChangeRead
 from territories.schemas import (
     AudienceFolderCreate,
@@ -205,6 +207,18 @@ def audience_performance_summary(
         session,
         workspace_id=auth.workspace_id or "workspace_default",
     ).audience_performance(product_id=product_id)
+
+
+@audience_router.get("/overview", response_model=WorkspaceOverviewRead)
+def workspace_audience_overview(session: DbSession, auth: CurrentAuth):
+    workspace_id = auth.workspace_id or "workspace_default"
+    return WorkspaceOverviewRead(
+        counts=WorkspaceLeadService(session, workspace_id=workspace_id).counts(),
+        audiences=TerritoryMetricsService(
+            session,
+            workspace_id=workspace_id,
+        ).audience_performance(),
+    )
 
 
 @audience_router.get("/options", response_model=ProfileOptionsRead)
