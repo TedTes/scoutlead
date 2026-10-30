@@ -186,12 +186,23 @@ class ProfileMatchService:
         for fact in signal_aliases.values():
             group_columns.extend(
                 [
+                    # These columns are consumed by the eligibility predicate
+                    # and its correlated validation subquery.  PostgreSQL
+                    # requires every outer reference used by the grouped
+                    # SELECT/ORDER BY expressions to be grouped explicitly;
+                    # SQLite happens to accept the previous, incomplete set.
+                    fact.id,
+                    fact.business_id,
+                    fact.fact_key,
+                    fact.value_type,
                     fact.value_text,
                     fact.value_number,
                     fact.value_boolean,
                     fact.confidence,
                     fact.resolution_state,
                     fact.quality_state,
+                    fact.expires_at,
+                    fact.source_observation_id,
                 ]
             )
         group_columns.extend(
