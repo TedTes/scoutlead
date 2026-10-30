@@ -74,47 +74,55 @@ def run_once() -> bool:
             _execute_job(session, services, job)
         except Exception as exc:
             logger.exception("job_failed job_id=%s", job.id)
+            # A database error leaves PostgreSQL transactions aborted.  Reset
+            # the failed unit of work before trying to persist the queue retry
+            # or dead-letter state; otherwise queue.fail() raises
+            # InFailedSqlTransaction and terminates the worker.
+            job_id = job.id
+            job_type = job.type
+            job_payload = dict(job.payload or {})
+            session.rollback()
             failed_job = queue.fail(
-                job.id,
+                job_id,
                 str(exc),
                 retry_delay_seconds=None,
             )
             if failed_job.status in {
                 JobStatus.FAILED.value,
                 JobStatus.DEAD_LETTER.value,
-            } and job.payload.get("source_item_id"):
+            } and job_payload.get("source_item_id"):
                 _record_source_item_failure(
                     session,
-                    source_item_id=str(job.payload["source_item_id"]),
-                    job_type=str(job.type),
+                    source_item_id=str(job_payload["source_item_id"]),
+                    job_type=str(job_type),
                     reason=str(exc),
                 )
             if (
                 failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
-                and job.type == JobType.BUSINESS_INDEX_REFRESH.value
+                and job_type == JobType.BUSINESS_INDEX_REFRESH.value
             ):
                 _fail_expanding_campaigns(
                     session,
-                    segment_id=str(job.payload["segment_id"]),
+                    segment_id=str(job_payload["segment_id"]),
                     reason=str(exc),
                 )
             if (
                 failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
-                and job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
-                and job.payload.get("campaign_id")
+                and job_type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
+                and job_payload.get("campaign_id")
             ):
                 _fail_campaign(
                     session,
-                    campaign_id=str(job.payload["campaign_id"]),
+                    campaign_id=str(job_payload["campaign_id"]),
                     reason=str(exc),
                 )
             if (
                 failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
-                and job.type == JobType.AUDIENCE_RUN.value
+                and job_type == JobType.AUDIENCE_RUN.value
             ):
                 _fail_audience_run(
                     session,
-                    run_id=str(job.payload["audience_run_id"]),
+                    run_id=str(job_payload["audience_run_id"]),
                     reason=str(exc),
                 )
             return True
