@@ -289,6 +289,14 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         ]
         assert [row["id"] for row in reliable_rows] == [reliable.id]
         assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 1
+        assert [
+            component["key"]
+            for component in reliable_rows[0]["data_quality_breakdown"][
+                "validation_components"
+            ]
+        ] == ["identity", "business_identity", "trade", "location"]
+        assert reliable_rows[0]["data_quality_breakdown"]["provenance"]["count"] == 1
+        assert reliable_rows[0]["data_quality_breakdown"]["provenance"]["total"] == 1
 
         fact = session.scalar(
             select(BusinessFactModel).where(BusinessFactModel.business_id == reliable.id)

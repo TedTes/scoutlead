@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Download,
   ExternalLink,
   Pencil,
   Plus,
@@ -50,6 +51,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  const [selectedBusinesses, setSelectedBusinesses] = useState<Record<string, AdminBusinessSummary>>({});
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -78,6 +80,13 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       });
       setOverview(summary);
       setRows(businessPage.items);
+      setSelectedBusinesses((current) => {
+        const next = { ...current };
+        businessPage.items.forEach((row) => {
+          if (next[row.id]) next[row.id] = row;
+        });
+        return next;
+      });
       setTotal(businessPage.total);
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
@@ -114,6 +123,25 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       setSelectedId(result.id);
     }
     await load();
+  };
+  const selectedCount = Object.keys(selectedBusinesses).length;
+  const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedBusinesses[row.id]);
+  const someVisibleSelected = rows.some((row) => selectedBusinesses[row.id]);
+  const toggleVisibleSelection = () => {
+    setSelectedBusinesses((current) => {
+      const next = { ...current };
+      if (allVisibleSelected) rows.forEach((row) => delete next[row.id]);
+      else rows.forEach((row) => { next[row.id] = row; });
+      return next;
+    });
+  };
+  const toggleBusinessSelection = (row: AdminBusinessSummary) => {
+    setSelectedBusinesses((current) => {
+      const next = { ...current };
+      if (next[row.id]) delete next[row.id];
+      else next[row.id] = row;
+      return next;
+    });
   };
 
   if (allowed === false) {
@@ -193,6 +221,14 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <option value="score_desc">Highest quality first</option>
           <option value="name">Name A–Z</option>
         </select>
+        <button
+          className="admin-export-button"
+          disabled={!selectedCount}
+          type="button"
+          onClick={() => exportBusinessesCsv(Object.values(selectedBusinesses))}
+        >
+          <Download size={14} /> Export {selectedCount || ""}
+        </button>
         <button className="admin-icon-button" title="Refresh" type="button" onClick={() => void load()}>
           <RefreshCw size={15} />
         </button>
@@ -203,17 +239,28 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       <div className="admin-workspace admin-leads-workspace">
         <div className="admin-table-pane">
           <table className="admin-business-table">
-            <thead><tr><th>Business</th><th>Market</th><th>Data quality</th><th>State</th></tr></thead>
+            <thead><tr>
+              <th className="admin-select-column"><input
+                aria-checked={someVisibleSelected && !allVisibleSelected ? "mixed" : allVisibleSelected}
+                aria-label="Select businesses on this page"
+                checked={allVisibleSelected}
+                ref={(input) => { if (input) input.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                type="checkbox"
+                onChange={toggleVisibleSelection}
+              /></th>
+              <th>Business</th><th>Market</th><th>Data quality</th><th>State</th>
+            </tr></thead>
             <tbody>
               {rows.map((row) => (
-                <tr className={row.id === selectedId ? "is-selected" : ""} key={row.id} onClick={() => setSelectedId(row.id)}>
+                <tr className={`${row.id === selectedId ? "is-selected" : ""} ${selectedBusinesses[row.id] ? "is-checked" : ""}`} key={row.id} onClick={() => setSelectedId(row.id)}>
+                  <td className="admin-select-column"><input aria-label={`Select ${row.display_name}`} checked={Boolean(selectedBusinesses[row.id])} type="checkbox" onClick={(event) => event.stopPropagation()} onChange={() => toggleBusinessSelection(row)} /></td>
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
                   <td><QualityScore row={row} /></td>
                   <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
-              {!loading && !rows.length ? <tr><td colSpan={4} className="admin-empty">No businesses match these filters.</td></tr> : null}
+              {!loading && !rows.length ? <tr><td colSpan={5} className="admin-empty">No businesses match these filters.</td></tr> : null}
             </tbody>
           </table>
           <footer className="admin-pagination">
@@ -266,6 +313,87 @@ function QualityScore({ row }: { row: AdminBusinessSummary }) {
       <small>{row.data_quality_label}</small>
     </span>
   );
+}
+
+function QualityBreakdown({ business }: { business: AdminBusinessSummary }) {
+  const breakdown = business.data_quality_breakdown;
+  const limitations = breakdown.limitations || [];
+  const validationLabels: Record<string, [string, string]> = {
+    identity: ["Identity", "Stable provider or contact identifier"],
+    business_identity: ["Business record", "Not an ad, directory, or generic service title"],
+    trade: ["Trade/category", "Evidence supports the assigned trade"],
+    location: ["Location", "Address or coordinates support the market"],
+  };
+  const factComponents = [
+    ["Facts with a source", breakdown.provenance],
+    ["Facts still fresh", breakdown.freshness],
+    ["Facts confirmed", breakdown.resolution],
+    ["Facts published", breakdown.publication],
+  ] as const;
+  return (
+    <section className="admin-quality-breakdown" aria-label="Data quality score breakdown">
+      <header>
+        <div><strong>Data quality</strong><small>{breakdown.fact_count} business facts assessed</small></div>
+        <QualityScore row={business} />
+      </header>
+      <div className="admin-quality-section-heading"><strong>Required validations</strong><span>{breakdown.validation.points}/{breakdown.validation.max} points</span></div>
+      <div className="admin-quality-validations">
+        {(breakdown.validation_components || []).map((component) => {
+          const [label, description] = validationLabels[component.key] || [component.key, "Required business validation"];
+          return <div key={component.key}>
+            <span className="admin-quality-parameter-label"><strong>{label}</strong><small>{description}</small></span>
+            <StatusPill value={component.status} />
+            <span>{component.status === "missing" ? "Not run" : `${component.confidence}% confidence`}</span>
+            <strong>{component.points}/{component.max}</strong>
+          </div>;
+        })}
+      </div>
+      <div className="admin-quality-section-heading"><strong>Fact checks</strong><span>{breakdown.fact_count} total facts</span></div>
+      <div className="admin-quality-components">
+        {factComponents.map(([label, component]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <i><b style={{ width: `${component.max ? component.points / component.max * 100 : 0}%` }} /></i>
+            <small>{component.count ?? 0} of {component.total ?? breakdown.fact_count}</small>
+            <strong>{component.points}/{component.max}</strong>
+          </div>
+        ))}
+      </div>
+      <div className={`admin-quality-reasons ${limitations.length ? "has-limitations" : ""}`}>
+        <strong>{limitations.length ? "Score limitations" : "Reliability gates passed"}</strong>
+        {limitations.length
+          ? <ul>{limitations.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          : <p>No score-limiting data problems were detected.</p>}
+      </div>
+    </section>
+  );
+}
+
+function exportBusinessesCsv(rows: AdminBusinessSummary[]) {
+  const headers = [
+    "Business ID", "Business", "Trade", "Market", "Address", "Website", "Phone",
+    "State", "Quality score", "Quality label", "Validation points", "Provenance points",
+    "Freshness points", "Resolution points", "Publication points", "Fact count",
+    "Quality limitations", "Last seen",
+  ];
+  const values = rows.map((row) => {
+    const quality = row.data_quality_breakdown;
+    return [
+      row.id, row.display_name, row.niche_label, row.market_key, row.address || row.geography,
+      row.website_url || row.domain, row.phone, row.status, row.data_quality_score,
+      row.data_quality_label, quality.validation.points, quality.provenance.points,
+      quality.freshness.points, quality.resolution.points, quality.publication.points,
+      quality.fact_count, quality.limitations.join("; "), row.last_seen_at,
+    ];
+  });
+  const quote = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const csv = [headers, ...values].map((row) => row.map(quote).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `scoutlead-businesses-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function BusinessInspector({
@@ -368,7 +496,10 @@ function BusinessInspector({
         <div><dt>Phone</dt><dd>{detail.phone || "Not stored"}</dd></div>
         <div><dt>Address</dt><dd>{detail.address || detail.geography || "Not stored"}</dd></div>
         <div><dt>Coordinates</dt><dd>{detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored"}</dd></div>
+        <div><dt>Business ID</dt><dd title={detail.id}>{detail.id}</dd></div>
+        <div><dt>Last seen</dt><dd>{formatDate(detail.last_seen_at)}</dd></div>
       </dl>
+      <QualityBreakdown business={detail} />
       <nav className="admin-tabs">
         {(["validation", "signals", "facts", "sources", "history"] as const).map((value) => <button className={tab === value ? "active" : ""} key={value} type="button" onClick={() => setTab(value)}>{value}</button>)}
       </nav>

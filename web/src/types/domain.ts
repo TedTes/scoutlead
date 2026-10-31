@@ -985,10 +985,17 @@ export type AdminBusinessSummary = {
   data_quality_label: "reliable" | "review" | "poor";
   data_quality_breakdown: {
     validation: { points: number; max: number };
-    provenance: { points: number; max: number };
-    freshness: { points: number; max: number };
-    resolution: { points: number; max: number };
-    publication: { points: number; max: number };
+    validation_components: Array<{
+      key: string;
+      status: string;
+      confidence: number;
+      points: number;
+      max: number;
+    }>;
+    provenance: { points: number; max: number; count: number; total: number };
+    freshness: { points: number; max: number; count: number; total: number };
+    resolution: { points: number; max: number; count: number; total: number };
+    publication: { points: number; max: number; count: number; total: number };
     fact_count: number;
     limitations: string[];
   };

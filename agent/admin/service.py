@@ -1908,13 +1908,21 @@ def _data_quality_score(
     required: dict[str, ValidationResultModel | None],
     facts: dict[str, int] | None,
 ) -> dict[str, Any]:
-    validation_points = sum(
-        QUALITY_VALIDATION_WEIGHTS[validation_type]
-        * min(max(validation.confidence, 0), 100)
-        / 100
-        for validation_type, validation in required.items()
-        if validation is not None and validation.status == "passed"
-    )
+    validation_components = []
+    for validation_type, maximum in QUALITY_VALIDATION_WEIGHTS.items():
+        validation = required.get(validation_type)
+        confidence = min(max(validation.confidence, 0), 100) if validation else 0
+        points = maximum * confidence / 100 if validation and validation.status == "passed" else 0
+        validation_components.append(
+            {
+                "key": validation_type,
+                "status": validation.status if validation else "missing",
+                "confidence": confidence,
+                "points": round(points, 1),
+                "max": maximum,
+            }
+        )
+    validation_points = sum(component["points"] for component in validation_components)
     total_facts = facts["total"] if facts else 0
 
     def fact_points(key: str) -> float:
@@ -1963,10 +1971,23 @@ def _data_quality_score(
         "data_quality_label": label,
         "data_quality_breakdown": {
             "validation": {"points": round(validation_points), "max": 60},
-            "provenance": {"points": round(provenance_points), "max": 10},
-            "freshness": {"points": round(freshness_points), "max": 10},
-            "resolution": {"points": round(resolution_points), "max": 10},
-            "publication": {"points": round(publication_points), "max": 10},
+            "validation_components": validation_components,
+            "provenance": {
+                "points": round(provenance_points), "max": 10,
+                "count": facts["provenance"] if facts else 0, "total": total_facts,
+            },
+            "freshness": {
+                "points": round(freshness_points), "max": 10,
+                "count": facts["fresh"] if facts else 0, "total": total_facts,
+            },
+            "resolution": {
+                "points": round(resolution_points), "max": 10,
+                "count": facts["confirmed"] if facts else 0, "total": total_facts,
+            },
+            "publication": {
+                "points": round(publication_points), "max": 10,
+                "count": facts["published"] if facts else 0, "total": total_facts,
+            },
             "fact_count": total_facts,
             "limitations": hard_limitations + review_limitations,
         },
