@@ -21,11 +21,14 @@ from db.models import (
     BusinessModel,
     BusinessIndexSegmentModel,
     BusinessNicheMembershipModel,
+    FactClaimModel,
     NicheModel,
     QueueJobModel,
     SignalDefinitionModel,
     ServiceDefinitionModel,
+    ServiceSignalMappingModel,
     SourceItemModel,
+    SourceObservationModel,
     ValidationResultModel,
 )
 from db.session import create_database
@@ -180,6 +183,124 @@ def test_admin_reports_validated_membership_as_searchable() -> None:
         overview = _service(session).overview()
 
         assert overview["searchable"] == 1
+
+
+def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        now = utcnow()
+        definition = SignalDefinitionModel(
+            id="signal_contact_form_present",
+            key="contact_form_present",
+            label="Contact form present",
+            value_type="boolean",
+            category="conversion",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="contact_form",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"minimum_confidence": 90},
+            version=1,
+        )
+        service = ServiceDefinitionModel(
+            id="service_lead_capture",
+            key="lead_capture",
+            label="Lead capture and conversion",
+            status="active",
+            sort_order=1,
+            version=1,
+        )
+        observation = SourceObservationModel(
+            id=new_id("observation"),
+            business_id=business.id,
+            source="company_website_signal",
+            external_id="example-painting/contact",
+            query_signature=None,
+            content_hash="a" * 64,
+            source_url="https://example.test/contact",
+            raw_payload={"has_contact_form": False},
+            observed_at=now,
+        )
+        session.add_all([definition, service, observation])
+        session.flush()
+        mapping = ServiceSignalMappingModel(
+            id=new_id("mapping"),
+            service_definition_id=service.id,
+            signal_definition_id=definition.id,
+            weight=1.0,
+            sort_order=1,
+        )
+        claim = FactClaimModel(
+            id=new_id("fact_claim"),
+            idempotency_key=f"{business.id}:contact-form",
+            business_id=business.id,
+            fact_key=definition.key,
+            signal_definition_id=definition.id,
+            value=False,
+            source_observation_id=observation.id,
+            confidence=95,
+            extractor="contact_form",
+            extractor_version=1,
+            observed_at=now,
+            expires_at=now + timedelta(days=30),
+        )
+        session.add_all([mapping, claim])
+        session.flush()
+        fact = BusinessFactRepository(session).upsert(
+            business.id,
+            BusinessFactValue(
+                key=definition.key,
+                value=False,
+                observed_at=now,
+                expires_at=now + timedelta(days=30),
+                source_observation_id=observation.id,
+                supporting_claim_ids=(claim.id,),
+                confidence=95,
+                quality_state="published",
+            ),
+        )
+        session.add(
+            ValidationResultModel(
+                id=new_id("validation"),
+                idempotency_key=f"{business.id}:signal-contact-form",
+                business_id=business.id,
+                source_observation_id=observation.id,
+                validation_type="signal:contact_form_present",
+                status="passed",
+                confidence=95,
+                reason="Observation reproduces the fact.",
+                evidence=[],
+                validator="test",
+                validator_version=1,
+                observed_at=now,
+                expires_at=now + timedelta(days=30),
+            )
+        )
+        session.commit()
+
+        result = _service(session).fact_lineage(business.id)
+
+        assert result["business_id"] == business.id
+        assert len(result["facts"]) == 1
+        lineage_fact = result["facts"][0]
+        assert lineage_fact["id"] == fact.id
+        assert lineage_fact["source_observation_id"] == observation.id
+        assert lineage_fact["supporting_claim_ids"] == [claim.id]
+        assert lineage_fact["validation"]["status"] == "passed"
+        assert lineage_fact["signal"]["matches_opportunity_value"] is True
+        assert lineage_fact["signal"]["eligible_for_matching"] is True
+        assert lineage_fact["signal"]["services"][0]["key"] == "lead_capture"
+        assert result["claims"][0]["id"] == claim.id
+        assert result["observations"][0]["raw_payload"] == {
+            "has_contact_form": False
+        }
+
+        session.query(ValidationResultModel).delete()
+        session.commit()
+        without_validation = _service(session).fact_lineage(business.id)
+        assert without_validation["facts"][0]["signal"]["eligible_for_matching"] is False
 
 
 def test_admin_revalidation_makes_passed_business_searchable_without_publication() -> None:

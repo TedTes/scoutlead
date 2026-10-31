@@ -335,6 +335,11 @@ def business_detail(business_id: str, session: DbSession, auth: AdminAuth):
     return _service(session, auth).detail(business_id)
 
 
+@router.get("/businesses/{business_id}/fact-lineage")
+def business_fact_lineage(business_id: str, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).fact_lineage(business_id)
+
+
 @router.patch("/businesses/{business_id}")
 def update_business(
     business_id: str,

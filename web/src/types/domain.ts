@@ -1031,6 +1031,86 @@ export type AdminBusinessSignal = {
   expires_at?: string | null;
 };
 
+export type AdminFactLineageValidation = {
+  id: string;
+  type: string;
+  status: string;
+  confidence: number;
+  reason: string;
+  evidence: Array<Record<string, unknown>>;
+  validator: string;
+  validator_version: number;
+  observed_at: string;
+  expires_at: string;
+};
+
+export type AdminFactLineageService = {
+  id: string;
+  key: string;
+  label: string;
+  status: string;
+  weight: number;
+};
+
+export type AdminFactLineageSignal = {
+  definition_id: string;
+  key: string;
+  label: string;
+  category: string;
+  status: string;
+  opportunity_direction: string;
+  matches_opportunity_value: boolean;
+  eligible_for_matching: boolean;
+  services: AdminFactLineageService[];
+};
+
+export type AdminFactLineageFact = {
+  id: string;
+  key: string;
+  value: unknown;
+  value_type: string;
+  confidence: number;
+  resolution_state: string;
+  quality_state: string;
+  observed_at: string;
+  expires_at?: string | null;
+  source_observation_id?: string | null;
+  supporting_claim_ids: string[];
+  validation?: AdminFactLineageValidation | null;
+  signal?: AdminFactLineageSignal | null;
+};
+
+export type AdminFactLineageClaim = {
+  id: string;
+  fact_key: string;
+  signal_definition_id?: string | null;
+  value: unknown;
+  source_observation_id: string;
+  confidence: number;
+  extractor: string;
+  extractor_version: number;
+  observed_at: string;
+  expires_at: string;
+};
+
+export type AdminFactLineageObservation = {
+  id: string;
+  source: string;
+  external_id?: string | null;
+  query_signature?: string | null;
+  content_hash: string;
+  source_url?: string | null;
+  raw_payload: Record<string, unknown>;
+  observed_at: string;
+};
+
+export type AdminFactLineage = {
+  business_id: string;
+  facts: AdminFactLineageFact[];
+  claims: AdminFactLineageClaim[];
+  observations: AdminFactLineageObservation[];
+};
+
 export type AdminBusinessPage = {
   items: AdminBusinessSummary[];
   total: number;

@@ -26,11 +26,13 @@ from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
+    FactClaimModel,
     NicheModel,
     QueueJobModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     SignalDefinitionModel,
+    SourceObservationModel,
     SourceItemModel,
     ValidationResultModel,
 )
@@ -1034,6 +1036,159 @@ class AdminDataService:
             "delete_dependencies": {},
         }
 
+    def fact_lineage(self, business_id: str) -> dict[str, Any]:
+        self._business(business_id)
+        facts = list(
+            self.session.scalars(
+                select(BusinessFactModel)
+                .where(BusinessFactModel.business_id == business_id)
+                .order_by(BusinessFactModel.fact_key)
+            )
+        )
+        definition_ids = {
+            fact.signal_definition_id
+            for fact in facts
+            if fact.signal_definition_id is not None
+        }
+        fact_keys = {fact.fact_key for fact in facts}
+        definitions = list(
+            self.session.scalars(
+                select(SignalDefinitionModel).where(
+                    or_(
+                        SignalDefinitionModel.id.in_(definition_ids),
+                        SignalDefinitionModel.key.in_(fact_keys),
+                    )
+                )
+            )
+        ) if facts else []
+        definitions_by_id = {definition.id: definition for definition in definitions}
+        definitions_by_key = {definition.key: definition for definition in definitions}
+
+        supporting_claim_ids = {
+            claim_id
+            for fact in facts
+            for claim_id in (fact.supporting_claim_ids or [])
+        }
+        claims = list(
+            self.session.scalars(
+                select(FactClaimModel)
+                .where(
+                    FactClaimModel.business_id == business_id,
+                    FactClaimModel.id.in_(supporting_claim_ids),
+                )
+                .order_by(FactClaimModel.observed_at.desc())
+            )
+        ) if supporting_claim_ids else []
+        observation_ids = {
+            observation_id
+            for observation_id in [
+                *(fact.source_observation_id for fact in facts),
+                *(claim.source_observation_id for claim in claims),
+            ]
+            if observation_id is not None
+        }
+        observations = list(
+            self.session.scalars(
+                select(SourceObservationModel)
+                .where(
+                    SourceObservationModel.business_id == business_id,
+                    SourceObservationModel.id.in_(observation_ids),
+                )
+                .order_by(SourceObservationModel.observed_at.desc())
+            )
+        ) if observation_ids else []
+
+        validation_types = {f"signal:{fact.fact_key}" for fact in facts}
+        validations = list(
+            self.session.scalars(
+                select(ValidationResultModel)
+                .where(
+                    ValidationResultModel.business_id == business_id,
+                    ValidationResultModel.validation_type.in_(validation_types),
+                )
+                .order_by(ValidationResultModel.observed_at.desc())
+            )
+        ) if validation_types else []
+        validation_by_fact = {}
+        for fact in facts:
+            validation_by_fact[fact.id] = next(
+                (
+                    validation
+                    for validation in validations
+                    if validation.validation_type == f"signal:{fact.fact_key}"
+                    and validation.source_observation_id == fact.source_observation_id
+                ),
+                None,
+            )
+
+        mapping_rows = list(
+            self.session.execute(
+                select(ServiceSignalMappingModel, ServiceDefinitionModel)
+                .join(
+                    ServiceDefinitionModel,
+                    ServiceDefinitionModel.id
+                    == ServiceSignalMappingModel.service_definition_id,
+                )
+                .where(
+                    ServiceSignalMappingModel.signal_definition_id.in_(definition_ids)
+                )
+                .order_by(ServiceDefinitionModel.sort_order, ServiceDefinitionModel.label)
+            )
+        ) if definition_ids else []
+        mappings_by_definition: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for mapping, service in mapping_rows:
+            mappings_by_definition[mapping.signal_definition_id].append(
+                {
+                    "id": service.id,
+                    "key": service.key,
+                    "label": service.label,
+                    "status": service.status,
+                    "weight": mapping.weight,
+                }
+            )
+
+        return {
+            "business_id": business_id,
+            "facts": [
+                _fact_lineage_dict(
+                    fact,
+                    definitions_by_id.get(fact.signal_definition_id or "")
+                    or definitions_by_key.get(fact.fact_key),
+                    validation_by_fact.get(fact.id),
+                    mappings_by_definition,
+                )
+                for fact in facts
+            ],
+            "claims": [
+                {
+                    "id": claim.id,
+                    "fact_key": claim.fact_key,
+                    "signal_definition_id": claim.signal_definition_id,
+                    "value": claim.value,
+                    "source_observation_id": claim.source_observation_id,
+                    "confidence": claim.confidence,
+                    "extractor": claim.extractor,
+                    "extractor_version": claim.extractor_version,
+                    "observed_at": claim.observed_at,
+                    "expires_at": claim.expires_at,
+                }
+                for claim in claims
+            ],
+            "observations": [
+                {
+                    "id": observation.id,
+                    "source": observation.source,
+                    "external_id": observation.external_id,
+                    "query_signature": observation.query_signature,
+                    "content_hash": observation.content_hash,
+                    "source_url": observation.source_url,
+                    "raw_payload": observation.raw_payload,
+                    "observed_at": observation.observed_at,
+                }
+                for observation in observations
+            ],
+        }
+
     def create(self, data: AdminBusinessCreate) -> dict[str, Any]:
         segment = self.session.scalar(
             select(BusinessIndexSegmentModel)
@@ -1749,6 +1904,119 @@ def _fact_value(fact: BusinessFactModel) -> Any:
     if fact.value_type == "number":
         return fact.value_number
     return fact.value_text
+
+
+def _fact_lineage_dict(
+    fact: BusinessFactModel,
+    definition: SignalDefinitionModel | None,
+    validation: ValidationResultModel | None,
+    mappings_by_definition: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    value = _fact_value(fact)
+    matches_opportunity = bool(
+        definition is not None and _fact_matches_opportunity(definition, value)
+    )
+    minimum_confidence = int(
+        ((definition.config or {}).get("minimum_confidence", 90))
+        if definition is not None
+        else 90
+    )
+    eligible = bool(
+        matches_opportunity
+        and definition is not None
+        and definition.status == "active"
+        and fact.quality_state == "published"
+        and fact.resolution_state == "confirmed"
+        and fact.source_observation_id is not None
+        and fact.confidence >= minimum_confidence
+        and not _datetime_is_past(fact.expires_at)
+        and validation is not None
+        and validation.status == "passed"
+        and validation.confidence >= minimum_confidence
+        and not _datetime_is_past(validation.expires_at)
+    )
+    return {
+        "id": fact.id,
+        "key": fact.fact_key,
+        "value": value,
+        "value_type": fact.value_type,
+        "confidence": fact.confidence,
+        "resolution_state": fact.resolution_state,
+        "quality_state": fact.quality_state,
+        "observed_at": fact.observed_at,
+        "expires_at": fact.expires_at,
+        "source_observation_id": fact.source_observation_id,
+        "supporting_claim_ids": list(fact.supporting_claim_ids or []),
+        "validation": (
+            {
+                "id": validation.id,
+                "type": validation.validation_type,
+                "status": validation.status,
+                "confidence": validation.confidence,
+                "reason": validation.reason,
+                "evidence": validation.evidence,
+                "validator": validation.validator,
+                "validator_version": validation.validator_version,
+                "observed_at": validation.observed_at,
+                "expires_at": validation.expires_at,
+            }
+            if validation is not None
+            else None
+        ),
+        "signal": (
+            {
+                "definition_id": definition.id,
+                "key": definition.key,
+                "label": definition.label,
+                "category": definition.category,
+                "status": definition.status,
+                "opportunity_direction": definition.opportunity_direction,
+                "matches_opportunity_value": matches_opportunity,
+                "eligible_for_matching": eligible,
+                "services": mappings_by_definition.get(definition.id, []),
+            }
+            if definition is not None
+            else None
+        ),
+    }
+
+
+def _fact_matches_opportunity(
+    definition: SignalDefinitionModel,
+    value: Any,
+) -> bool:
+    direction = definition.opportunity_direction
+    config = definition.config or {}
+    if direction == "false_is_opportunity":
+        return value is False
+    if direction == "true_is_opportunity":
+        return value is True
+    threshold = config.get("opportunity_threshold")
+    if direction == "lower_is_opportunity":
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isinstance(threshold, (int, float))
+            and not isinstance(threshold, bool)
+            and float(value) < float(threshold)
+        )
+    if direction == "higher_is_opportunity":
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isinstance(threshold, (int, float))
+            and not isinstance(threshold, bool)
+            and float(value) > float(threshold)
+        )
+    if direction == "missing_is_opportunity":
+        values = config.get("opportunity_values") or [
+            "missing",
+            "not_listed",
+            "unavailable",
+            "parked",
+        ]
+        return value in values
+    return False
 
 
 def _business_signal_dict(
