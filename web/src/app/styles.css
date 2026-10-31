@@ -16282,6 +16282,13 @@ button.bulk-recipient-select:hover {
 
 .admin-shell-brand strong { font-size: 13px; }
 .admin-shell-brand small { gap: 4px; margin-top: 2px; color: #778190; font-size: 9px; text-transform: uppercase; }
+.admin-shell-page-header { min-width: 0; flex: 1; display: flex; align-items: center; justify-content: flex-end; }
+.admin-business-header { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.admin-shell-page-header .admin-business-metrics { min-width: 0; display: flex; align-items: center; gap: 0; margin: 0; border: 0; background: transparent; overflow: hidden; }
+.admin-shell-page-header .admin-metric { min-width: 0; display: flex; align-items: baseline; gap: 5px; padding: 0 12px; border: 0; white-space: nowrap; }
+.admin-shell-page-header .admin-metric span { display: inline; font-size: 9px; }
+.admin-shell-page-header .admin-metric strong { display: inline; margin: 0; font-size: 12px; }
+.admin-shell-page-header .admin-primary-button { flex: 0 0 auto; }
 .admin-shell-account { gap: 14px; color: #778190; font-size: 11px; }
 .admin-shell-account a { gap: 5px; color: #4f5b6b; font-weight: 700; text-decoration: none; }
 .admin-shell-account a:hover { color: #20242a; }
@@ -16351,6 +16358,16 @@ button.bulk-recipient-select:hover {
   padding: 26px 28px 36px;
   background: #f5f6f7;
   color: #20242a;
+}
+
+.admin-business-data-screen {
+  height: calc(100vh - 58px);
+  min-height: 0;
+  padding: 14px 28px 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .admin-data-header,
@@ -16665,9 +16682,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 
 .admin-signals-workspace { height: calc(100vh - 150px); min-height: 480px; grid-template-columns: minmax(600px, 1.15fr) minmax(340px, .85fr); }
 .admin-leads-workspace { height: calc(100vh - 214px); min-height: 480px; }
+.admin-business-data-screen .admin-leads-workspace { height: auto; min-height: 0; flex: 1; }
 .admin-leads-workspace .admin-table-pane { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .admin-leads-workspace .admin-business-table thead { position: sticky; top: 0; z-index: 2; background: #f7f8fa; }
-.admin-leads-workspace .admin-pagination { position: sticky; bottom: 0; z-index: 2; margin-top: auto; background: #fff; }
+.admin-leads-workspace .admin-pagination { position: sticky; bottom: 0; z-index: 2; min-height: 42px; flex: 0 0 42px; margin-top: auto; box-sizing: border-box; border-top: 1px solid #e4e7ec; background: #fff; }
 .admin-leads-workspace > .admin-inspector { min-height: 0; overflow: hidden; }
 .admin-leads-workspace > .admin-inspector .admin-inspector-content { max-height: none; min-height: 0; flex: 1; }
 .admin-signals-workspace .admin-table-pane { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
@@ -16725,9 +16743,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .admin-status-pill.is-stale { border-color: #efd19d; background: #fff7e8; color: #9a620b; }
 .admin-status-pill.is-missing { border-color: #d5dae2; background: #f1f3f5; color: #697383; }
 
+@media (max-width: 1200px) {
+  .admin-shell-page-header .admin-metric:nth-child(4),
+  .admin-shell-page-header .admin-metric:nth-child(5) { display: none; }
+}
+
 @media (max-width: 1050px) {
   .admin-shell-layout { grid-template-columns: 160px minmax(0, 1fr); }
   .admin-workspace { grid-template-columns: 1fr; }
+  .admin-business-data-screen { height: auto; min-height: calc(100vh - 58px); overflow: visible; }
   .admin-table-pane { border-right: 0; }
   .admin-inspector { border-top: 1px solid #d8dde5; }
   .admin-metrics { grid-template-columns: repeat(3, 1fr); }
@@ -16741,6 +16765,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 
 @media (max-width: 700px) {
   .admin-shell-header { min-height: 54px; padding: 0 12px; }
+  .admin-shell-page-header .admin-business-metrics { display: none; }
+  .admin-shell-page-header .admin-primary-button { min-height: 32px; padding: 0 9px; font-size: 10px; }
   .admin-shell-account { gap: 9px; }
   .admin-shell-account > span { display: none; }
   .admin-shell-account a { font-size: 0; }
@@ -16752,6 +16778,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .admin-sidebar-account { justify-content: center; padding-left: 0; padding-right: 0; }
   .admin-sidebar-account > span { display: none; }
   .admin-data-screen { padding: 16px 12px 28px; }
+  .admin-business-data-screen { min-height: calc(100vh - 54px); }
   .admin-data-header { align-items: center; flex-wrap: wrap; gap: 12px; }
   .admin-overview-header .admin-metrics { order: 2; flex-basis: 100%; }
   .admin-overview-header > .admin-primary-button { margin-left: auto; }

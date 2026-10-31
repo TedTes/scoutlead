@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ApiClient } from "../api/client";
 import type {
   AdminBusinessDetail,
@@ -125,9 +126,13 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     );
   }
 
+  const pageHeader = typeof document !== "undefined"
+    ? document.getElementById("admin-page-header")
+    : null;
+
   return (
-    <section className="admin-data-screen">
-      <header className="admin-data-header admin-overview-header">
+    <section className="admin-data-screen admin-business-data-screen">
+      {pageHeader ? createPortal(<div className="admin-business-header">
         <div className="admin-metrics admin-business-metrics" aria-label="Business quality overview">
           <Metric label="Businesses" value={overview.total} />
           <Metric label="Validated" value={overview.fully_validated} tone="good" />
@@ -138,7 +143,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         <button className="admin-primary-button" type="button" onClick={() => setDialog("add")}>
           <Plus size={15} /> Add business
         </button>
-      </header>
+      </div>, pageHeader) : null}
 
       {overview.trade_groups.length ? (
         <nav className="admin-trade-chips" aria-label="Business trades">

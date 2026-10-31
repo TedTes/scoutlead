@@ -37,6 +37,7 @@ export function AdminApp({ accountSlot, adminEmail, getAuthToken }: AdminAppProp
               <small><ShieldCheck size={11} /> Data stewardship</small>
             </span>
           </a>
+          <div className="admin-shell-page-header" id="admin-page-header" />
         </header>
         <div className="admin-shell-layout">
           <nav className="admin-section-nav" aria-label="Admin sections">
