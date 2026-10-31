@@ -34,6 +34,7 @@ const emptyOverview: AdminOverview = {
   needs_attention: 0,
   incomplete: 0,
   searchable: 0,
+  trade_groups: [],
 };
 
 export function AdminDataScreen({ api }: { api: ApiClient }) {
@@ -45,6 +46,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [search, setSearch] = useState("");
   const [validation, setValidation] = useState("");
   const [status, setStatus] = useState("");
+  const [nicheSlug, setNicheSlug] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,10 +59,20 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     try {
       await api.getAdminAccess();
       setAllowed(true);
-      const [summary, businessPage] = await Promise.all([
-        api.getAdminOverview(),
-        api.getAdminBusinesses({ q: search, validation, status, page, page_size: 50 }),
-      ]);
+      const summary = await api.getAdminOverview();
+      const tradeGroups = summary.trade_groups || [];
+      const selectedNiche = tradeGroups.some((group) => group.slug === nicheSlug)
+        ? nicheSlug
+        : tradeGroups[0]?.slug || "";
+      if (selectedNiche !== nicheSlug) setNicheSlug(selectedNiche);
+      const businessPage = await api.getAdminBusinesses({
+        q: search,
+        validation,
+        status,
+        niche_slug: selectedNiche,
+        page,
+        page_size: 50,
+      });
       setOverview(summary);
       setRows(businessPage.items);
       setTotal(businessPage.total);
@@ -76,7 +88,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, page, search, status, validation]);
+  }, [api, nicheSlug, page, search, status, validation]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -125,6 +137,27 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <Plus size={15} /> Add business
         </button>
       </header>
+
+      {overview.trade_groups.length ? (
+        <nav className="admin-trade-chips" aria-label="Business trades">
+          {overview.trade_groups.map((group) => (
+            <button
+              aria-pressed={group.slug === nicheSlug}
+              className={group.slug === nicheSlug ? "active" : ""}
+              key={group.slug}
+              type="button"
+              onClick={() => {
+                setNicheSlug(group.slug);
+                setPage(1);
+                setSelectedId("");
+              }}
+            >
+              <span>{group.label}</span>
+              <strong>{group.count.toLocaleString()}</strong>
+            </button>
+          ))}
+        </nav>
+      ) : null}
 
       <div className="admin-toolbar">
         <label className="admin-search">

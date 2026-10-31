@@ -183,6 +183,9 @@ def test_admin_reports_validated_membership_as_searchable() -> None:
         overview = _service(session).overview()
 
         assert overview["searchable"] == 1
+        assert overview["trade_groups"] == [
+            {"slug": niche.slug, "label": niche.label, "count": 1}
+        ]
 
 
 def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:

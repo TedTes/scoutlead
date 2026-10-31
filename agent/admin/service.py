@@ -851,6 +851,27 @@ class AdminDataService:
         states = self._validation_states([business.id for business in businesses])
         status_counts = Counter(business.status for business in businesses)
         validation_counts = Counter(states[business.id]["state"] for business in businesses)
+        trade_rows = list(
+            self.session.execute(
+                select(
+                    NicheModel.slug,
+                    NicheModel.label,
+                    func.count(func.distinct(BusinessNicheMembershipModel.business_id)).label(
+                        "business_count"
+                    ),
+                )
+                .join(
+                    BusinessNicheMembershipModel,
+                    BusinessNicheMembershipModel.niche_id == NicheModel.id,
+                )
+                .where(NicheModel.active.is_(True))
+                .group_by(NicheModel.slug, NicheModel.label)
+                .order_by(
+                    func.count(func.distinct(BusinessNicheMembershipModel.business_id)).desc(),
+                    NicheModel.label,
+                )
+            )
+        )
         return {
             "total": len(businesses),
             "active": status_counts["active"],
@@ -869,6 +890,10 @@ class AdminDataService:
                 .where(active_membership_condition())
                 .where(*searchable_business_conditions())
             ) or 0,
+            "trade_groups": [
+                {"slug": slug, "label": label, "count": business_count}
+                for slug, label, business_count in trade_rows
+            ],
         }
 
     def list_businesses(

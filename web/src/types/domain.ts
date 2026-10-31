@@ -969,6 +969,11 @@ export type AdminOverview = {
   needs_attention: number;
   incomplete: number;
   searchable: number;
+  trade_groups: Array<{
+    slug: string;
+    label: string;
+    count: number;
+  }>;
 };
 
 export type AdminBusinessSummary = {
