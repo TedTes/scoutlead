@@ -44,7 +44,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [validation, setValidation] = useState("");
+  const [quality, setQuality] = useState("");
+  const [sort, setSort] = useState("score_asc");
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -67,7 +68,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       if (selectedNiche !== nicheSlug) setNicheSlug(selectedNiche);
       const businessPage = await api.getAdminBusinesses({
         q: search,
-        validation,
+        quality,
+        sort,
         status,
         niche_slug: selectedNiche,
         page,
@@ -88,7 +90,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, nicheSlug, page, search, status, validation]);
+  }, [api, nicheSlug, page, quality, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -169,17 +171,22 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
         </label>
-        <select aria-label="Validation state" value={validation} onChange={(event) => { setValidation(event.target.value); setPage(1); }}>
-          <option value="">All validation</option>
-          <option value="passed">Passed</option>
-          <option value="attention">Needs attention</option>
-          <option value="incomplete">Incomplete</option>
+        <select aria-label="Data quality" value={quality} onChange={(event) => { setQuality(event.target.value); setPage(1); }}>
+          <option value="">All quality</option>
+          <option value="poor">Poor · 0–64</option>
+          <option value="review">Review · 65–84</option>
+          <option value="reliable">Reliable · 85–100</option>
         </select>
         <select aria-label="Business state" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
           <option value="">All states</option>
           <option value="active">Active</option>
           <option value="quarantined">Quarantined</option>
           <option value="archived">Archived</option>
+        </select>
+        <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
+          <option value="score_asc">Lowest quality first</option>
+          <option value="score_desc">Highest quality first</option>
+          <option value="name">Name A–Z</option>
         </select>
         <button className="admin-icon-button" title="Refresh" type="button" onClick={() => void load()}>
           <RefreshCw size={15} />
@@ -191,13 +198,13 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       <div className="admin-workspace admin-leads-workspace">
         <div className="admin-table-pane">
           <table className="admin-business-table">
-            <thead><tr><th>Business</th><th>Market</th><th>Validation</th><th>State</th></tr></thead>
+            <thead><tr><th>Business</th><th>Market</th><th>Data quality</th><th>State</th></tr></thead>
             <tbody>
               {rows.map((row) => (
                 <tr className={row.id === selectedId ? "is-selected" : ""} key={row.id} onClick={() => setSelectedId(row.id)}>
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
-                  <td><StatusPill value={row.validation_state} /></td>
+                  <td><QualityScore row={row} /></td>
                   <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
@@ -235,6 +242,25 @@ function Metric({ label, value, tone = "" }: { label: string; value: number; ton
 
 function StatusPill({ value }: { value: string }) {
   return <span className={`admin-status-pill is-${value.replace(/_/g, "-")}`}>{value.replace(/_/g, " ")}</span>;
+}
+
+function QualityScore({ row }: { row: AdminBusinessSummary }) {
+  const breakdown = row.data_quality_breakdown;
+  const title = [
+    `Validation ${breakdown.validation.points}/${breakdown.validation.max}`,
+    `Provenance ${breakdown.provenance.points}/${breakdown.provenance.max}`,
+    `Freshness ${breakdown.freshness.points}/${breakdown.freshness.max}`,
+    `Resolution ${breakdown.resolution.points}/${breakdown.resolution.max}`,
+    `Publication ${breakdown.publication.points}/${breakdown.publication.max}`,
+    `${breakdown.fact_count} facts`,
+    ...(breakdown.limitations || []),
+  ].join(" · ");
+  return (
+    <span className={`admin-quality-score is-${row.data_quality_label}`} title={title}>
+      <strong>{row.data_quality_score}</strong>
+      <small>{row.data_quality_label}</small>
+    </span>
+  );
 }
 
 function BusinessInspector({

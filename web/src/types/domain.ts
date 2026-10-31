@@ -981,6 +981,17 @@ export type AdminBusinessSummary = {
   display_name: string;
   status: string;
   validation_state: "passed" | "attention" | "incomplete";
+  data_quality_score: number;
+  data_quality_label: "reliable" | "review" | "poor";
+  data_quality_breakdown: {
+    validation: { points: number; max: number };
+    provenance: { points: number; max: number };
+    freshness: { points: number; max: number };
+    resolution: { points: number; max: number };
+    publication: { points: number; max: number };
+    fact_count: number;
+    limitations: string[];
+  };
   website_url?: string | null;
   domain?: string | null;
   phone?: string | null;

@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from admin.schemas import (
@@ -57,6 +57,12 @@ from source_items.schemas import (
 
 
 REQUIRED_VALIDATIONS = {"identity", "business_identity", "trade", "location"}
+QUALITY_VALIDATION_WEIGHTS = {
+    "identity": 15,
+    "business_identity": 15,
+    "trade": 20,
+    "location": 10,
+}
 SOURCE_PRIORITY = {
     "google_places": 0,
     "google_places_seed": 1,
@@ -901,6 +907,8 @@ class AdminDataService:
         *,
         query: str | None,
         validation: str | None,
+        quality: str | None,
+        sort: str,
         status: str | None,
         niche_slug: str | None,
         market_key: str | None,
@@ -940,6 +948,22 @@ class AdminDataService:
         ]
         if validation:
             rows = [row for row in rows if row["validation_state"] == validation]
+        if quality == "reliable":
+            rows = [row for row in rows if row["data_quality_score"] >= 85]
+        elif quality == "review":
+            rows = [row for row in rows if 65 <= row["data_quality_score"] < 85]
+        elif quality == "poor":
+            rows = [row for row in rows if row["data_quality_score"] < 65]
+        elif quality:
+            raise ValidationError("Unknown data quality filter", {"quality": quality})
+        if sort == "score_asc":
+            rows.sort(key=lambda row: (row["data_quality_score"], row["display_name"].lower()))
+        elif sort == "score_desc":
+            rows.sort(key=lambda row: (-row["data_quality_score"], row["display_name"].lower()))
+        elif sort == "name":
+            rows.sort(key=lambda row: row["display_name"].lower())
+        else:
+            raise ValidationError("Unknown business sort", {"sort": sort})
         total = len(rows)
         start = (page - 1) * page_size
         return {
@@ -1738,6 +1762,7 @@ class AdminDataService:
             )
             for row in rows:
                 grouped[row.business_id].setdefault(row.validation_type, row)
+        fact_quality = self._fact_quality_stats(business_ids)
         result: dict[str, dict[str, Any]] = {}
         for business_id in business_ids:
             validations = grouped[business_id]
@@ -1750,8 +1775,10 @@ class AdminDataService:
                 if statuses == {"passed"}
                 else "attention"
             )
+            quality = _data_quality_score(required, fact_quality.get(business_id))
             result[business_id] = {
                 "state": state,
+                **quality,
                 "validations": [
                     {
                         "id": row.id,
@@ -1769,6 +1796,50 @@ class AdminDataService:
             }
         return result
 
+    def _fact_quality_stats(self, business_ids: list[str]) -> dict[str, dict[str, int]]:
+        if not business_ids:
+            return {}
+        now = utcnow()
+        rows = self.session.execute(
+            select(
+                BusinessFactModel.business_id,
+                func.count(BusinessFactModel.id),
+                func.sum(
+                    case((BusinessFactModel.source_observation_id.is_not(None), 1), else_=0)
+                ),
+                func.sum(
+                    case(
+                        (
+                            or_(
+                                BusinessFactModel.expires_at.is_(None),
+                                BusinessFactModel.expires_at >= now,
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case((BusinessFactModel.resolution_state == "confirmed", 1), else_=0)
+                ),
+                func.sum(
+                    case((BusinessFactModel.quality_state == "published", 1), else_=0)
+                ),
+            )
+            .where(BusinessFactModel.business_id.in_(business_ids))
+            .group_by(BusinessFactModel.business_id)
+        )
+        return {
+            business_id: {
+                "total": total,
+                "provenance": provenance or 0,
+                "fresh": fresh or 0,
+                "confirmed": confirmed or 0,
+                "published": published or 0,
+            }
+            for business_id, total, provenance, fresh, confirmed, published in rows
+        }
+
     def _business_summary(
         self,
         business: BusinessModel,
@@ -1780,6 +1851,9 @@ class AdminDataService:
             "display_name": business.display_name,
             "status": business.status,
             "validation_state": state["state"],
+            "data_quality_score": state["data_quality_score"],
+            "data_quality_label": state["data_quality_label"],
+            "data_quality_breakdown": state["data_quality_breakdown"],
             "website_url": business.website_url,
             "domain": business.domain,
             "phone": business.phone,
@@ -1828,6 +1902,75 @@ class AdminDataService:
                 after=after,
             )
         )
+
+
+def _data_quality_score(
+    required: dict[str, ValidationResultModel | None],
+    facts: dict[str, int] | None,
+) -> dict[str, Any]:
+    validation_points = sum(
+        QUALITY_VALIDATION_WEIGHTS[validation_type]
+        * min(max(validation.confidence, 0), 100)
+        / 100
+        for validation_type, validation in required.items()
+        if validation is not None and validation.status == "passed"
+    )
+    total_facts = facts["total"] if facts else 0
+
+    def fact_points(key: str) -> float:
+        return 10 * facts[key] / total_facts if facts and total_facts else 0
+
+    provenance_points = fact_points("provenance")
+    freshness_points = fact_points("fresh")
+    resolution_points = fact_points("confirmed")
+    publication_points = fact_points("published")
+    score = round(
+        validation_points
+        + provenance_points
+        + freshness_points
+        + resolution_points
+        + publication_points
+    )
+    hard_limitations: list[str] = []
+    review_limitations: list[str] = []
+    if any(
+        validation is None or validation.status != "passed"
+        for validation in required.values()
+    ):
+        hard_limitations.append("Required validation is incomplete or did not pass")
+    if not total_facts:
+        hard_limitations.append("No current facts")
+    elif facts:
+        dimensions = {
+            "provenance": "Some facts lack source provenance",
+            "fresh": "Some facts are expired",
+            "confirmed": "Some facts are unresolved or conflicted",
+            "published": "Some facts are not published",
+        }
+        for key, reason in dimensions.items():
+            ratio = facts[key] / total_facts
+            if ratio == 0:
+                hard_limitations.append(reason)
+            elif ratio < 0.8:
+                review_limitations.append(reason)
+    if hard_limitations:
+        score = min(score, 64)
+    elif review_limitations:
+        score = min(score, 84)
+    label = "reliable" if score >= 85 else "review" if score >= 65 else "poor"
+    return {
+        "data_quality_score": min(max(score, 0), 100),
+        "data_quality_label": label,
+        "data_quality_breakdown": {
+            "validation": {"points": round(validation_points), "max": 60},
+            "provenance": {"points": round(provenance_points), "max": 10},
+            "freshness": {"points": round(freshness_points), "max": 10},
+            "resolution": {"points": round(resolution_points), "max": 10},
+            "publication": {"points": round(publication_points), "max": 10},
+            "fact_count": total_facts,
+            "limitations": hard_limitations + review_limitations,
+        },
+    }
 
 
 def _business_dict(business: BusinessModel) -> dict[str, Any]:

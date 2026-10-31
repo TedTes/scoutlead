@@ -188,6 +188,124 @@ def test_admin_reports_validated_membership_as_searchable() -> None:
         ]
 
 
+def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        reliable, niche = _business(session)
+        now = utcnow()
+        poor = BusinessModel(
+            id=new_id("business"),
+            display_name="Needs Review Painting",
+            normalized_name="needs review painting",
+            geography="Toronto",
+            market_key="toronto",
+            status="active",
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        observation = SourceObservationModel(
+            id=new_id("observation"),
+            business_id=reliable.id,
+            source="google_places",
+            external_id="reliable-painting",
+            query_signature=None,
+            content_hash="q" * 64,
+            source_url="https://example.test/reliable",
+            raw_payload={"website": "https://example.test"},
+            observed_at=now,
+        )
+        session.add_all([poor, observation])
+        session.flush()
+        for business in (reliable, poor):
+            session.add(
+                BusinessNicheMembershipModel(
+                    id=new_id("membership"),
+                    business_id=business.id,
+                    niche_id=niche.id,
+                    market_key="toronto",
+                    confidence=1.0,
+                    evidence=[],
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+        for validation_type in ("identity", "business_identity", "trade", "location"):
+            session.add(
+                ValidationResultModel(
+                    id=new_id("validation"),
+                    idempotency_key=f"{reliable.id}:{validation_type}:quality-score",
+                    business_id=reliable.id,
+                    niche_id=niche.id,
+                    market_key="toronto",
+                    validation_type=validation_type,
+                    status="passed",
+                    confidence=100,
+                    reason="Current evidence passed.",
+                    evidence=[],
+                    validator="test",
+                    validator_version=1,
+                    observed_at=now,
+                    expires_at=now + timedelta(days=30),
+                )
+            )
+        session.add(
+            BusinessFactModel(
+                id=new_id("fact"),
+                business_id=reliable.id,
+                fact_key="website_status",
+                value_type="text",
+                value_text="present",
+                confidence=100,
+                resolution_state="confirmed",
+                supporting_claim_ids=[],
+                quality_state="published",
+                quality_policy_version=1,
+                observed_at=now,
+                expires_at=now + timedelta(days=30),
+                source_observation_id=observation.id,
+                resolver_version=1,
+            )
+        )
+        session.commit()
+
+        service = _service(session)
+        params = {
+            "query": None,
+            "validation": None,
+            "status": None,
+            "niche_slug": niche.slug,
+            "market_key": None,
+            "page": 1,
+            "page_size": 50,
+        }
+        rows = service.list_businesses(**params, quality=None, sort="score_asc")["items"]
+        reliable_rows = service.list_businesses(
+            **params, quality="reliable", sort="score_desc"
+        )["items"]
+
+        assert [(row["display_name"], row["data_quality_score"]) for row in rows] == [
+            ("Needs Review Painting", 0),
+            ("Example Painting", 100),
+        ]
+        assert [row["id"] for row in reliable_rows] == [reliable.id]
+        assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 1
+
+        fact = session.scalar(
+            select(BusinessFactModel).where(BusinessFactModel.business_id == reliable.id)
+        )
+        fact.expires_at = now - timedelta(days=1)
+        session.commit()
+        degraded = service.list_businesses(
+            **params, quality="poor", sort="score_desc"
+        )["items"]
+
+        reliable_after_expiry = next(row for row in degraded if row["id"] == reliable.id)
+        assert reliable_after_expiry["data_quality_score"] == 64
+        assert "Some facts are expired" in reliable_after_expiry[
+            "data_quality_breakdown"
+        ]["limitations"]
+
+
 def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:
     factory = _session_factory()
     with factory() as session:

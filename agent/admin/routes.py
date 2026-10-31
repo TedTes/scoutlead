@@ -308,6 +308,8 @@ def list_businesses(
     auth: AdminAuth,
     q: str | None = None,
     validation: str | None = None,
+    quality: str | None = None,
+    sort: str = "score_asc",
     status: str | None = None,
     niche_slug: str | None = None,
     market_key: str | None = None,
@@ -317,6 +319,8 @@ def list_businesses(
     return _service(session, auth).list_businesses(
         query=q,
         validation=validation,
+        quality=quality,
+        sort=sort,
         status=status,
         niche_slug=niche_slug,
         market_key=market_key,
