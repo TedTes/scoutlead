@@ -52,11 +52,13 @@ class BusinessFactRepository:
         fact: BusinessFactValue,
         *,
         commit: bool = False,
+        track_change: bool = True,
     ) -> BusinessFactModel:
         model, _ = self.upsert_with_value_change(
             business_id,
             fact,
             commit=commit,
+            track_change=track_change,
         )
         return model
 
@@ -66,6 +68,7 @@ class BusinessFactRepository:
         fact: BusinessFactValue,
         *,
         commit: bool = False,
+        track_change: bool = True,
     ) -> tuple[BusinessFactModel, bool]:
         fact_key = _fact_key(fact.key)
         expires_at = fact.expires_at or fact_expires_at(fact_key, fact.observed_at)
@@ -135,7 +138,7 @@ class BusinessFactRepository:
             existing.expires_at = expires_at
             existing.source_observation_id = fact.source_observation_id
             existing.resolver_version = fact.resolver_version
-        if value_changed:
+        if value_changed and track_change:
             self.session.add(
                 BusinessFactChangeModel(
                     id=new_id("fact_change"),

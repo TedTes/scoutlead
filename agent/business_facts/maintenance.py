@@ -45,12 +45,9 @@ def enforce_fact_publication_invariants(
     for fact in facts:
         summary["checked"] += 1
         definition = definitions.get(fact.signal_definition_id or "")
-        minimum_confidence = int(
-            ((definition.config or {}) if definition is not None else {}).get(
-                "minimum_confidence",
-                90,
-            )
-        )
+        config = (definition.config or {}) if definition is not None else {}
+        minimum_confidence = int(config.get("minimum_confidence", 90))
+        requires_validation = bool(config.get("requires_validation", True))
         fact_eligible = fact_is_eligible(
             fact,
             minimum_confidence=minimum_confidence,
@@ -70,13 +67,12 @@ def enforce_fact_publication_invariants(
             )
             .limit(1)
         )
-        passed_validation = bool(
+        passed_validation = not requires_validation or bool(
             latest_validation is not None
             and latest_validation.status == "passed"
             and latest_validation.confidence >= minimum_confidence
             and _aware(latest_validation.expires_at) > _aware(now)
-            and latest_validation.source_observation_id
-            == fact.source_observation_id
+            and latest_validation.source_observation_id == fact.source_observation_id
         )
         if fact_eligible and passed_validation:
             continue
@@ -97,7 +93,7 @@ def enforce_fact_publication_invariants(
             summary["low_confidence"] += 1
         elif fact.source_observation_id is None:
             summary["missing_provenance"] += 1
-        elif not passed_validation:
+        elif requires_validation and not passed_validation:
             summary["missing_validation"] += 1
         fact.quality_state = "staged"
     if commit:

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from business_facts.claims import FactClaim, FactClaimRepository
 from business_facts.repository import BusinessFactRepository, BusinessFactValue
+from business_facts.core_attributes import sync_observed_business_attributes
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import BusinessWebsiteEnrichment, WebsiteEnrichmentClient
 from db.models import (
@@ -371,6 +372,14 @@ class SignalCollectionService:
                 resolver_version=RESOLVER_VERSION,
             ),
         )
+        business = self.session.get(BusinessModel, business_id)
+        observation = self.session.get(SourceObservationModel, newest.source_observation_id)
+        if business is not None and observation is not None:
+            sync_observed_business_attributes(
+                self.session,
+                business=business,
+                observation=observation,
+            )
 
 
 def _website_payload(
@@ -426,6 +435,8 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
         "google_review_count": lambda: _first_value(
             payload, {"google_review_count", "userRatingCount", "review_count"}
         ),
+        "review_recency_days": lambda: _review_recency_days(payload),
+        "google_business_profile_present": lambda: True,
         "business_operational": lambda: _operational_value(payload),
         "domain_age_days": lambda: _payload_path(payload, "domain_rdap.age_days"),
         "uses_https": lambda: enrichment.get("uses_https"),
@@ -529,6 +540,39 @@ def _website_status(enrichment: dict[str, Any]) -> str | None:
 def _combined_boolean(*values: Any) -> bool | None:
     present = [value for value in values if isinstance(value, bool)]
     return any(present) if present else None
+
+
+def _review_recency_days(payload: dict[str, Any]) -> float | None:
+    candidates: list[datetime] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, entry in value.items():
+                if key in {
+                    "publishTime",
+                    "publish_time",
+                    "review_date",
+                    "reviewDate",
+                    "published_at",
+                } and isinstance(entry, str):
+                    try:
+                        parsed = datetime.fromisoformat(entry.replace("Z", "+00:00"))
+                    except ValueError:
+                        pass
+                    else:
+                        candidates.append(
+                            parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+                        )
+                visit(entry)
+        elif isinstance(value, list):
+            for entry in value:
+                visit(entry)
+
+    visit(payload)
+    if not candidates:
+        return None
+    newest = max(candidates)
+    return max(0.0, (utcnow() - newest).total_seconds() / 86400)
 
 
 def _payload_path(payload: dict[str, Any], path: str) -> Any | None:

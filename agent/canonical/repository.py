@@ -35,6 +35,7 @@ from canonical.semantics import (
 )
 from canonical.website_evidence import trusted_website_evidence
 from business_facts.service import reconcile_business_facts
+from business_facts.core_attributes import sync_observed_business_attributes
 from business_validation.policy import business_is_publishable
 from business_validation.validation import BusinessValidationService
 from db.models import (
@@ -152,6 +153,11 @@ class CanonicalRepository:
             commit=False,
         )
         reconcile_business_facts(self.session, business.id)
+        sync_observed_business_attributes(
+            self.session,
+            business=business,
+            observation=observation,
+        )
         self.session.flush()
         return CanonicalLeadLink(
             business_id=business.id,
@@ -202,6 +208,11 @@ class CanonicalRepository:
             commit=False,
         )
         reconcile_business_facts(self.session, business.id)
+        sync_observed_business_attributes(
+            self.session,
+            business=business,
+            observation=observation,
+        )
         self.session.flush()
         return CanonicalLeadLink(
             business_id=business.id,
@@ -403,6 +414,14 @@ class CanonicalRepository:
         contact.verification_details = details
         contact.last_seen_at = utcnow()
         self.session.flush()
+        observation = self._latest_observation_for_business(contact.business_id)
+        business = self.session.get(BusinessModel, contact.business_id)
+        if observation is not None and business is not None:
+            sync_observed_business_attributes(
+                self.session,
+                business=business,
+                observation=observation,
+            )
 
     def _upsert_business(
         self,

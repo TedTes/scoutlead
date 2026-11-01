@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import BusinessFactModel
+from db.models import BusinessFactModel, SignalDefinitionModel
 
 
 FACT_DIMENSIONS = {
@@ -17,6 +17,7 @@ FACT_DIMENSIONS = {
     "click_to_call_present": "no_click_to_call",
     "online_payment_or_financing_present": "no_online_payment_or_financing",
     "service_area_pages_present": "no_service_area_pages",
+    "service_area_content_present": "no_service_area_pages",
 }
 FACT_KEYS_BY_DIMENSION = {value: key for key, value in FACT_DIMENSIONS.items()}
 POLICY_VERSION = 1
@@ -32,6 +33,18 @@ class FactQualityPolicyService:
         *,
         commit: bool = True,
     ) -> BusinessFactModel:
+        definition = (
+            self.session.get(SignalDefinitionModel, fact.signal_definition_id)
+            if fact.signal_definition_id
+            else None
+        )
+        config = (definition.config or {}) if definition is not None else {}
+        if bool(config.get("auto_publish")) and not bool(
+            config.get("requires_validation", True)
+        ):
+            fact.quality_state = "published"
+            fact.quality_policy_version = POLICY_VERSION
+            return self._finish(fact, commit)
         dimension = FACT_DIMENSIONS.get(fact.fact_key)
         if dimension is None:
             fact.quality_state = "published"

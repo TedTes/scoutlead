@@ -50,13 +50,25 @@ BOOLEAN_POSITIVE_ATTRIBUTES = frozenset(
     }
 )
 
+BOOLEAN_NEGATIVE_ATTRIBUTES = frozenset(
+    {
+        "is_directory",
+        "is_chain",
+        "is_franchise",
+    }
+)
+
 PRESENCE_ATTRIBUTES = frozenset(
     {
+        "business_name",
+        "trade_category",
         "provider_business_id",
         "address",
         "city",
         "region",
         "postal_code",
+        "latitude",
+        "longitude",
         "phone",
         "website_url",
         "domain",
@@ -65,6 +77,7 @@ PRESENCE_ATTRIBUTES = frozenset(
         "contact_form_url",
         "verified_email",
         "verified_phone",
+        "preferred_contact_channel",
     }
 )
 
@@ -108,6 +121,8 @@ def score_attribute(
     if key in BOOLEAN_POSITIVE_ATTRIBUTES or opportunity_direction == "false_is_opportunity":
         if isinstance(value, bool):
             return AttributeScore(100.0 if value else 0.0, "present" if value else "missing")
+    if key in BOOLEAN_NEGATIVE_ATTRIBUTES and isinstance(value, bool):
+        return AttributeScore(0.0 if value else 100.0, "excluded classification" if value else "independent business")
     if opportunity_direction == "true_is_opportunity" and isinstance(value, bool):
         return AttributeScore(0.0 if value else 100.0, "undesired state present" if value else "desired state")
 

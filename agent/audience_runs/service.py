@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, select, true
+from sqlalchemy.orm import Session, aliased
 
 from business_index.eligibility import searchable_business_conditions
 from audience_runs.schemas import (
@@ -104,7 +104,7 @@ class AudienceRunService:
         run.index_snapshot_at = now
         self.session.commit()
         niches = _territory_niches(self.session, audience)
-        self._enqueue_staged_signal_collection(audience, niches)
+        self._enqueue_required_attribute_collection(audience, niches)
         rows = ProfileMatchService(self.session).match(
             profile=audience,
             niche_ids=[niche.id for niche in niches],
@@ -199,12 +199,12 @@ class AudienceRunService:
         self.session.refresh(run)
         return run, needs_expansion
 
-    def _enqueue_staged_signal_collection(
+    def _enqueue_required_attribute_collection(
         self,
         audience: TerritoryModel,
         niches: list[NicheModel],
     ) -> int:
-        """Validate relevant staged facts already present when a run starts."""
+        """Collect missing, staged, or expired attributes required by an audience."""
         signal_keys = list(dict.fromkeys(audience.signal_keys or []))
         if (
             not signal_keys
@@ -219,13 +219,18 @@ class AudienceRunService:
             latitude=BusinessModel.latitude,
             longitude=BusinessModel.longitude,
         )
+        fact = aliased(BusinessFactModel, name="required_attribute_fact")
         statement = (
             select(SignalDefinitionModel, BusinessModel.id)
-            .join(
-                BusinessFactModel,
-                BusinessFactModel.signal_definition_id == SignalDefinitionModel.id,
+            .select_from(SignalDefinitionModel)
+            .join(BusinessModel, true())
+            .outerjoin(
+                fact,
+                and_(
+                    fact.signal_definition_id == SignalDefinitionModel.id,
+                    fact.business_id == BusinessModel.id,
+                ),
             )
-            .join(BusinessModel, BusinessModel.id == BusinessFactModel.business_id)
             .join(
                 BusinessNicheMembershipModel,
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
@@ -235,7 +240,13 @@ class AudienceRunService:
                 SignalDefinitionModel.status == "active",
                 SignalDefinitionModel.collector_key.is_not(None),
                 SignalDefinitionModel.opportunity_direction != "none",
-                BusinessFactModel.quality_state == "staged",
+                or_(
+                    fact.id.is_(None),
+                    fact.quality_state == "staged",
+                    fact.resolution_state != "confirmed",
+                    fact.expires_at.is_(None),
+                    fact.expires_at <= utcnow(),
+                ),
                 BusinessNicheMembershipModel.niche_id.in_(
                     [niche.id for niche in niches]
                 ),

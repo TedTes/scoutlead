@@ -13,9 +13,11 @@ from business_index.search import BusinessIndexSearchService
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessModel,
+    BusinessFactModel,
     BusinessFactChangeModel,
     BusinessNicheMembershipModel,
     NicheModel,
+    SignalDefinitionModel,
     SourceObservationModel,
 )
 from db.session import create_database
@@ -120,6 +122,56 @@ def test_publication_maintenance_demotes_expired_and_unknown_facts() -> None:
         assert unknown.resolution_state == "unknown"
 
 
+def test_deterministic_attribute_does_not_require_duplicate_validation_stamp() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        _add_painting_niche(session)
+        definition = SignalDefinitionModel(
+            id="attribute_contact_form_present",
+            key="contact_form_present",
+            label="Contact form present",
+            value_type="boolean",
+            category="conversion",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="contact_form",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"auto_publish": True, "requires_validation": False},
+            version=1,
+        )
+        session.add(definition)
+        session.commit()
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Deterministic Form Painter",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("present", external_id="places/deterministic-form"),
+        )
+        fact = BusinessFactRepository(session).upsert(
+            link.business_id,
+            BusinessFactValue(
+                key="contact_form_present",
+                value=False,
+                observed_at=utcnow(),
+                source_observation_id=link.source_observation_id,
+                quality_state="published",
+            ),
+        )
+        for other in list(
+            session.scalars(
+                select(BusinessFactModel).where(BusinessFactModel.id != fact.id)
+            )
+        ):
+            session.delete(other)
+        session.commit()
+
+        summary = enforce_fact_publication_invariants(session)
+
+        assert fact.quality_state == "published"
+        assert summary["missing_validation"] == 0
+
+
 def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_identity() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -151,6 +203,69 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
 
         assert changed.source_observation_id != first.source_observation_id
         assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 2
+
+
+def test_canonical_business_attributes_are_materialized_and_scored() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        _add_painting_niche(session)
+        session.add_all(
+            [
+                SignalDefinitionModel(
+                    id=f"attribute_{key}",
+                    key=key,
+                    label=key.replace("_", " ").title(),
+                    value_type=value_type,
+                    category="identity",
+                    status="derived",
+                    freshness_days=365,
+                    opportunity_direction=(
+                        "false_is_opportunity"
+                        if key == "google_business_profile_present"
+                        else "none"
+                    ),
+                    config={},
+                    version=1,
+                )
+                for key, value_type in (
+                    ("business_name", "text"),
+                    ("provider_business_id", "text"),
+                    ("city", "text"),
+                    ("region", "text"),
+                    ("postal_code", "text"),
+                    ("google_business_profile_present", "boolean"),
+                )
+            ]
+        )
+        session.commit()
+        link = CanonicalRepository(session).upsert_from_discovery_result(
+            company_name="Scored Painting Co.",
+            website_url="https://scoredpainting.example",
+            geography="Toronto, ON",
+            source="google_places",
+            raw={
+                **_source_payload("present", external_id="places/scored-painting"),
+                "city": "Toronto",
+                "province": "Ontario",
+                "postal_code": "M5V 1A1",
+                "latitude": 43.65,
+                "longitude": -79.38,
+            },
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses(
+            [link.business_id]
+        )[link.business_id]
+
+        assert fact_value(facts["business_name"]) == "Scored Painting Co."
+        assert fact_value(facts["provider_business_id"]) == "places/scored-painting"
+        assert fact_value(facts["city"]) == "Toronto"
+        assert fact_value(facts["region"]) == "Ontario"
+        assert fact_value(facts["postal_code"]) == "M5V 1A1"
+        assert fact_value(facts["google_business_profile_present"]) is True
+        assert facts["business_name"].attribute_score == 100
+        assert facts["google_business_profile_present"].attribute_score == 100
+        assert facts["business_name"].confidence == 95
 
 
 def test_google_reputation_facts_require_google_places_provenance() -> None:

@@ -1565,7 +1565,9 @@ def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
             )
         )
         assert processed.state == "waiting_validation"
-        assert len(collection_jobs) == 1
+        # The run collects both the staged value and the missing value for the
+        # other eligible business before attempting to match either one.
+        assert len(collection_jobs) == 2
         assert collection_jobs[0].payload["signal_definition_id"] == definition.id
         assert collection_jobs[0].payload["business_ids"] == [businesses[0].id]
         assert collection_jobs[0].payload["reason"] == (

@@ -295,7 +295,7 @@ class ProfileMatchService:
             for definition in self.session.scalars(
                 select(SignalDefinitionModel).where(
                     SignalDefinitionModel.key.in_(selected_signals),
-                    SignalDefinitionModel.status == "active",
+                    SignalDefinitionModel.status.in_(("active", "derived")),
                 )
             )
         }
@@ -360,7 +360,7 @@ class ProfileMatchService:
                     ServiceSignalMappingModel.service_definition_id.in_(
                         [definition.id for definition in definitions]
                     ),
-                    SignalDefinitionModel.status == "active",
+                    SignalDefinitionModel.status.in_(("active", "derived")),
                 )
                 .order_by(ServiceSignalMappingModel.sort_order)
             )

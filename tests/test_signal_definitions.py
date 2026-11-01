@@ -9,7 +9,7 @@ from db.models import BusinessModel, SignalDefinitionModel, SourceObservationMod
 from db.session import create_database
 from shared.utils import new_id, utcnow
 from signal_definitions.repository import SignalDefinitionRepository
-from signal_collection.service import SignalCollectionService
+from signal_collection.service import SignalCollectionService, _review_recency_days
 
 
 def _session_factory():
@@ -347,3 +347,17 @@ def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
         assert facts["mobile_performance_score"].value_number == 64
         assert facts["accessibility_score"].value_number == 91
         assert facts["mobile_performance_score"].quality_state == "published"
+
+
+def test_review_recency_uses_the_newest_observed_review() -> None:
+    payload = {
+        "reviews": [
+            {"publishTime": (utcnow() - timedelta(days=45)).isoformat()},
+            {"publishTime": (utcnow() - timedelta(days=12)).isoformat()},
+        ]
+    }
+
+    recency = _review_recency_days(payload)
+
+    assert recency is not None
+    assert 11.9 <= recency <= 12.1
