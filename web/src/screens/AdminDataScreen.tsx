@@ -1,12 +1,9 @@
 import {
-  Archive,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
   Download,
   ExternalLink,
-  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -21,8 +18,6 @@ import type {
   AdminBusinessDetail,
   AdminBusinessSummary,
   AdminFactLineage,
-  AdminFactLineageClaim,
-  AdminFactLineageObservation,
   AdminOverview,
 } from "../types/domain";
 
@@ -271,13 +266,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           </footer>
         </div>
 
-        <BusinessInspector
-          api={api}
-          detail={detail}
-          onEdit={() => setDialog("edit")}
-          onDelete={() => setDialog("delete")}
-          onRefresh={refreshDetail}
-        />
+        <BusinessInspector api={api} detail={detail} />
       </div>
 
       {dialog === "add" ? <BusinessForm api={api} mode="add" onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
@@ -344,17 +333,10 @@ function exportBusinessesCsv(rows: AdminBusinessSummary[]) {
 function BusinessInspector({
   api,
   detail,
-  onEdit,
-  onDelete,
-  onRefresh,
 }: {
   api: ApiClient;
   detail: AdminBusinessDetail | null;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRefresh: (value?: AdminBusinessDetail) => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
   const [lineage, setLineage] = useState<AdminFactLineage | null>(null);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [lineageError, setLineageError] = useState("");
@@ -376,42 +358,13 @@ function BusinessInspector({
   useEffect(() => {
     void loadLineage();
   }, [loadLineage]);
-  if (!detail) return <aside className="admin-inspector is-empty">Select a business to inspect its evidence.</aside>;
-
-  const runAction = async (action: "revalidate" | "status", status?: string) => {
-    const reason = window.prompt(action === "revalidate" ? "Reason for revalidation" : `Reason for ${status}`);
-    if (!reason?.trim()) return;
-    setBusy(true);
-    try {
-      const result = action === "revalidate"
-        ? await api.revalidateAdminBusiness(detail.id, reason)
-        : await api.changeAdminBusinessStatus(detail.id, status || "active", reason);
-      await onRefresh(result);
-      await loadLineage();
-    } finally {
-      setBusy(false);
-    }
-  };
+  if (!detail) return <aside className="admin-inspector is-empty">Select a business to view its attributes.</aside>;
 
   return (
     <aside className="admin-inspector">
       <header>
-        <div><h2>{detail.display_name}</h2><p>{detail.niche_label} · {detail.market_key}</p></div>
-        <div className="admin-inspector-header-actions">
-          <QualityScore row={detail} />
-          <button className="admin-icon-button" title="Edit business" type="button" onClick={onEdit}><Pencil size={15} /></button>
-        </div>
+        <div><h2>{detail.display_name}</h2><p>Business attributes</p></div>
       </header>
-      <div className="admin-inspector-actions">
-        <button disabled={busy} type="button" onClick={() => void runAction("revalidate")}><RefreshCw size={14} /> Revalidate</button>
-        {detail.status === "active" ? (
-          <button disabled={busy} type="button" onClick={() => void runAction("status", "quarantined")}><ShieldAlert size={14} /> Quarantine</button>
-        ) : (
-          <button disabled={busy} type="button" onClick={() => void runAction("status", "active")}><CheckCircle2 size={14} /> Restore</button>
-        )}
-        <button disabled={busy} type="button" onClick={() => void runAction("status", "archived")}><Archive size={14} /> Archive</button>
-        <button className="danger" type="button" onClick={onDelete}><Trash2 size={14} /></button>
-      </div>
       <BusinessAttributeRecord
         detail={detail}
         error={lineageError}
@@ -433,23 +386,18 @@ function BusinessAttributeRecord({
   loading: boolean;
   error: string;
 }) {
-  const validations = new Map(detail.validations.map((validation) => [validation.type, validation]));
   const contacts = detail.contacts || [];
   const profileAttributes: Array<{
     label: string;
     value: ReactNode;
-    validation?: AdminBusinessDetail["validations"][number];
   }> = [
-    { label: "Business name", value: detail.display_name, validation: validations.get("business_identity") },
-    { label: "Normalized name", value: detail.normalized_name },
-    { label: "Business ID", value: detail.id, validation: validations.get("identity") },
-    { label: "Trade/category", value: detail.niche_label || detail.niche_slug || "Not classified", validation: validations.get("trade") },
+    { label: "Business name", value: detail.display_name },
+    { label: "Trade/category", value: detail.niche_label || detail.niche_slug || "Not classified" },
     { label: "Market", value: detail.market_key || "Not stored" },
     { label: "Customer type", value: humanizeKey(detail.customer_kind || "unknown") },
-    { label: "Status", value: <StatusPill value={detail.status} /> },
   ];
   const locationAttributes = [
-    { label: "Address", value: detail.address || "Not stored", validation: validations.get("location") },
+    { label: "Address", value: detail.address || "Not stored" },
     { label: "Geography", value: detail.geography || "Not stored" },
     { label: "Coordinates", value: detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored" },
   ];
@@ -468,8 +416,6 @@ function BusinessAttributeRecord({
     { label: "Franchise", value: formatKnownBoolean(detail.is_franchise) },
     { label: "Directory", value: formatKnownBoolean(detail.is_directory) },
     { label: "Agency", value: formatKnownBoolean(detail.is_agency) },
-    { label: "First seen", value: formatDate(detail.first_seen_at) },
-    { label: "Last seen", value: formatDate(detail.last_seen_at) },
   ];
   return (
     <div className="admin-inspector-content admin-business-record">
@@ -483,35 +429,20 @@ function BusinessAttributeRecord({
         {contactAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
         {contacts.length ? contacts.map((contact) => (
           <article className="admin-contact-record" key={contact.id}>
-            <div><strong>{contact.name || contact.email || contact.phone || "Unnamed contact"}</strong><StatusPill value={contact.verification_status} /></div>
+            <div><strong>{contact.name || contact.email || contact.phone || "Unnamed contact"}</strong></div>
             <dl>
               <div><dt>Role</dt><dd>{contact.role || "Not stored"}</dd></div>
               <div><dt>Email</dt><dd>{contact.email || "Not stored"}</dd></div>
               <div><dt>Phone</dt><dd>{contact.phone || "Not stored"}</dd></div>
-              <div><dt>Verification</dt><dd>{contact.verification_score != null ? `${contact.verification_score}%` : "Not scored"}</dd></div>
             </dl>
-            <small>Last seen {formatDate(contact.last_seen_at)}{contact.verification_reason ? ` · ${contact.verification_reason}` : ""}</small>
           </article>
         )) : <p className="admin-record-empty">No individual contacts collected.</p>}
       </AttributeSection>
       <AttributeSection title="Business classification flags">
         {classificationAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
       </AttributeSection>
-      <AttributeSection title={`Canonical attributes${lineage?.facts.length ? ` · ${lineage.facts.length}` : ""}`}>
-        <FactLineageView lineage={lineage} loading={loading} error={error} />
-      </AttributeSection>
-      <AttributeSection title={`Supporting observations${lineage?.observations.length ? ` · ${lineage.observations.length}` : ""}`}>
-        {lineage?.observations.length
-          ? lineage.observations.map((observation) => <ObservationEvidence observation={observation} label="Source observation" key={observation.id} />)
-          : <p className="admin-record-empty">No supporting source observations linked to current facts.</p>}
-      </AttributeSection>
-      <AttributeSection title={`Collected source items · ${detail.sources.length}`}>
-        {detail.sources.length
-          ? detail.sources.map((source) => <article className="admin-source-row" key={String(source.id)}><div><strong>{humanizeKey(String(source.provider))}</strong><StatusPill value={String(source.state)} /></div><p>{String(source.title || "Untitled source")}</p><small>{source.fetched_at ? formatDate(String(source.fetched_at)) : "Date unavailable"}</small>{source.source_url ? <a href={String(source.source_url)} target="_blank" rel="noreferrer">Open source <ExternalLink size={11} /></a> : null}</article>)
-          : <p className="admin-record-empty">No source items collected.</p>}
-      </AttributeSection>
-      <AttributeSection title={`Administrative history · ${detail.audit.length}`}>
-        <KeyValueRows rows={detail.audit} primary="action" secondary="reason" />
+      <AttributeSection title={`Resolved attributes${lineage?.facts.length ? ` · ${lineage.facts.length}` : ""}`}>
+        <ResolvedAttributeList lineage={lineage} loading={loading} error={error} />
       </AttributeSection>
     </div>
   );
@@ -524,16 +455,13 @@ function AttributeSection({ title, children }: { title: string; children: ReactN
 function BusinessAttributeRow({
   label,
   value,
-  validation,
 }: {
   label: string;
   value: ReactNode;
-  validation?: AdminBusinessDetail["validations"][number];
 }) {
   return <article className="admin-business-attribute">
-    <div><strong>{label}</strong>{validation ? <StatusPill value={validation.status} /> : null}</div>
+    <div><strong>{label}</strong></div>
     <p>{value}</p>
-    {validation ? <small>{validation.confidence}% confidence · {validation.reason} · checked {formatDate(validation.observed_at)}</small> : null}
   </article>;
 }
 
@@ -541,7 +469,7 @@ function formatKnownBoolean(value?: boolean | null) {
   return value == null ? "Unknown" : value ? "Yes" : "No";
 }
 
-function FactLineageView({
+function ResolvedAttributeList({
   lineage,
   loading,
   error,
@@ -550,109 +478,16 @@ function FactLineageView({
   loading: boolean;
   error: string;
 }) {
-  if (loading && !lineage) return <p className="admin-empty">Loading fact evidence…</p>;
-  if (error) return <div className="admin-lineage-error"><strong>Fact evidence unavailable</strong><span>{error}</span></div>;
-  if (!lineage?.facts.length) return <p className="admin-empty">No current facts for this business.</p>;
-  const claims = new Map(lineage.claims.map((claim) => [claim.id, claim]));
-  const observations = new Map(lineage.observations.map((observation) => [observation.id, observation]));
-  return <div className="admin-fact-lineage-list">{lineage.facts.map((fact) => {
-    const supportingClaims = fact.supporting_claim_ids
-      .map((claimId) => claims.get(claimId))
-      .filter((claim): claim is AdminFactLineageClaim => Boolean(claim));
-    const missingClaimCount = fact.supporting_claim_ids.length - supportingClaims.length;
-    const primaryObservation = fact.source_observation_id
-      ? observations.get(fact.source_observation_id)
-      : undefined;
-    const claimObservationIds = new Set(supportingClaims.map((claim) => claim.source_observation_id));
-    return (
-      <details className="admin-fact-lineage" key={fact.id}>
-        <summary>
-          <div className="admin-fact-lineage-title">
-            <strong>{humanizeKey(fact.key)}</strong>
-            <span>{formatValue(fact.value)}</span>
-          </div>
-          <div className="admin-fact-lineage-state">
-            <StatusPill value={fact.quality_state} />
-            <small>{fact.confidence}%</small>
-          </div>
-        </summary>
-        <div className="admin-fact-lineage-body">
-          <dl className="admin-lineage-metadata">
-            <div><dt>Resolution</dt><dd>{humanizeKey(fact.resolution_state)}</dd></div>
-            <div><dt>Observed</dt><dd>{formatDate(fact.observed_at)}</dd></div>
-            <div><dt>Fresh until</dt><dd>{fact.expires_at ? formatDate(fact.expires_at) : "Not bounded"}</dd></div>
-          </dl>
-
-          <section className="admin-lineage-section">
-            <h4>Signal</h4>
-            {fact.signal ? <>
-              <div className="admin-lineage-signal-heading">
-                <div><strong>{fact.signal.label}</strong><small>{humanizeKey(fact.signal.category)}</small></div>
-                <StatusPill value={fact.signal.eligible_for_matching ? "opportunity" : fact.signal.matches_opportunity_value ? "ineligible" : "context"} />
-              </div>
-              <p>{fact.signal.eligible_for_matching
-                ? "This published fact currently produces an eligible opportunity."
-                : fact.signal.matches_opportunity_value
-                  ? "The value represents an opportunity, but the fact is not currently eligible for matching."
-                  : "The current value does not represent an opportunity."}</p>
-              {fact.signal.services.length ? <div className="admin-lineage-services">{fact.signal.services.map((service) => <span key={service.id}>{service.label}</span>)}</div> : <small className="admin-lineage-muted">No service mapping.</small>}
-            </> : <p>No signal definition is linked to this fact.</p>}
-          </section>
-
-          <section className="admin-lineage-section">
-            <h4>Validation</h4>
-            {fact.validation ? <>
-              <div className="admin-lineage-validation-heading"><StatusPill value={fact.validation.status} /><span>{fact.validation.confidence}% confidence</span></div>
-              <p>{fact.validation.reason}</p>
-              <small className="admin-lineage-muted">{fact.validation.validator} · {formatDate(fact.validation.observed_at)}</small>
-            </> : <p>No validation exists for this fact’s current observation.</p>}
-          </section>
-
-          <section className="admin-lineage-section">
-            <h4>Supporting evidence <span>{supportingClaims.length} claim{supportingClaims.length === 1 ? "" : "s"}</span></h4>
-            {supportingClaims.map((claim) => <FactClaimEvidence claim={claim} observation={observations.get(claim.source_observation_id)} key={claim.id} />)}
-            {primaryObservation && !claimObservationIds.has(primaryObservation.id) ? <ObservationEvidence observation={primaryObservation} label="Primary observation" /> : null}
-            {!supportingClaims.length && !primaryObservation ? <p>No supporting observation is linked.</p> : null}
-            {missingClaimCount ? <p className="admin-lineage-warning">{missingClaimCount} supporting claim record{missingClaimCount === 1 ? " is" : "s are"} missing.</p> : null}
-          </section>
-        </div>
-      </details>
-    );
-  })}</div>;
-}
-
-function FactClaimEvidence({
-  claim,
-  observation,
-}: {
-  claim: AdminFactLineageClaim;
-  observation?: AdminFactLineageObservation;
-}) {
-  return <article className="admin-lineage-claim">
-    <div><strong>{formatValue(claim.value)}</strong><span>{claim.confidence}% · {claim.extractor} v{claim.extractor_version}</span></div>
-    <small>{formatDate(claim.observed_at)}</small>
-    {observation ? <ObservationEvidence observation={observation} label="Source observation" /> : <p className="admin-lineage-warning">Source observation {claim.source_observation_id} is missing.</p>}
-  </article>;
-}
-
-function ObservationEvidence({
-  observation,
-  label,
-}: {
-  observation: AdminFactLineageObservation;
-  label: string;
-}) {
-  return <div className="admin-lineage-observation">
-    <div><span>{label}</span><strong>{humanizeKey(observation.source)}</strong></div>
-    <small>{formatDate(observation.observed_at)} · {observation.content_hash.slice(0, 10)}</small>
-    {observation.source_url ? <a href={observation.source_url} target="_blank" rel="noreferrer">Open source <ExternalLink size={11} /></a> : null}
-    <details className="admin-lineage-raw"><summary>Raw observation JSON</summary><pre>{JSON.stringify(observation.raw_payload, null, 2)}</pre></details>
-  </div>;
-}
-
-function KeyValueRows({ rows, primary, secondary }: { rows: Array<Record<string, unknown>>; primary: string; secondary: string }) {
-  if (!rows.length) return <p className="admin-empty">No records.</p>;
-  return <>{rows.map((row, index) => <article className="admin-key-value-row" key={String(row.id || index)}><strong>{String(row[primary] ?? "-")}</strong><span>{formatValue(row[secondary])}</span>{row.confidence != null ? <small>{String(row.confidence)}% confidence</small> : null}</article>)}</>;
+  if (loading && !lineage) return <p className="admin-record-empty">Loading attributes…</p>;
+  if (error) return <p className="admin-record-empty">Resolved attributes are unavailable.</p>;
+  if (!lineage?.facts.length) return <p className="admin-record-empty">No resolved attributes stored.</p>;
+  return <>{lineage.facts.map((fact) => (
+    <BusinessAttributeRow
+      key={fact.id}
+      label={humanizeKey(fact.key)}
+      value={formatValue(fact.value)}
+    />
+  ))}</>;
 }
 
 function formatValue(value: unknown) {
@@ -663,10 +498,6 @@ function formatValue(value: unknown) {
 
 function humanizeKey(value: string) {
   return value.replace(/_/g, " ");
-}
-
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString();
 }
 
 function BusinessForm({ api, mode, detail, onClose, onSaved }: { api: ApiClient; mode: "add" | "edit"; detail?: AdminBusinessDetail; onClose: () => void; onSaved: (value: AdminBusinessDetail) => void }) {
