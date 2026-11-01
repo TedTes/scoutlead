@@ -331,11 +331,21 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
                 "attribute_scores"
             ]
         }
-        assert attribute_scores["business_name"]["score"] == 100
-        assert attribute_scores["trade_category"]["score"] == 100
-        assert attribute_scores["geography"]["score"] == 100
         assert attribute_scores["website_status"]["score"] == 100
+        assert attribute_scores["website_status"]["evidence_confidence"] == 100
+        assert attribute_scores["website_status"]["evidence_state"] == "usable"
         assert "source linked" in attribute_scores["website_status"]["basis"]
+        assert {
+            component["key"]: component["score"]
+            for component in reliable_rows[0]["data_quality_breakdown"][
+                "validation_scores"
+            ]
+        } == {
+            "identity": 100,
+            "business_identity": 100,
+            "trade": 100,
+            "location": 100,
+        }
 
         fact = session.scalar(
             select(BusinessFactModel).where(BusinessFactModel.business_id == reliable.id)
@@ -347,8 +357,8 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         )["items"]
 
         reliable_after_expiry = next(row for row in degraded if row["id"] == reliable.id)
-        assert reliable_after_expiry["data_quality_score"] == 97
-        assert "Website Status scored 80" in reliable_after_expiry[
+        assert reliable_after_expiry["data_quality_score"] == 100
+        assert "Website Status evidence is expired" in reliable_after_expiry[
             "data_quality_breakdown"
         ]["limitations"]
 
@@ -451,6 +461,14 @@ def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:
         result = _service(session).fact_lineage(business.id)
 
         assert result["business_id"] == business.id
+        assert len(result["attribute_definitions"]) == 44
+        contact_form_definition = next(
+            item
+            for item in result["attribute_definitions"]
+            if item["key"] == "contact_form_present"
+        )
+        assert contact_form_definition["category"] == "lead_capture"
+        assert contact_form_definition["category_label"] == "Lead-capture opportunity"
         assert len(result["facts"]) == 1
         lineage_fact = result["facts"][0]
         assert lineage_fact["id"] == fact.id

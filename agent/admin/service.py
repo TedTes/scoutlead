@@ -17,6 +17,12 @@ from admin.schemas import (
     AdminSignalDefinitionUpdate,
 )
 from auth.context import AuthContext
+from business_facts.catalog import (
+    ATTRIBUTE_GROUP_BY_KEY,
+    ATTRIBUTE_SORT_ORDER,
+    TRACKED_ATTRIBUTE_KEYS,
+)
+from business_facts.attribute_scoring import score_attribute
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from db.base import Base
@@ -1127,11 +1133,13 @@ class AdminDataService:
                 select(SignalDefinitionModel).where(
                     or_(
                         SignalDefinitionModel.id.in_(definition_ids),
-                        SignalDefinitionModel.key.in_(fact_keys),
+                        SignalDefinitionModel.key.in_(
+                            tuple(set(fact_keys) | set(TRACKED_ATTRIBUTE_KEYS))
+                        ),
                     )
                 )
             )
-        ) if facts else []
+        )
         definitions_by_id = {definition.id: definition for definition in definitions}
         definitions_by_key = {definition.key: definition for definition in definitions}
 
@@ -1192,6 +1200,11 @@ class AdminDataService:
                 None,
             )
 
+        catalog_definition_ids = {
+            definition.id
+            for definition in definitions
+            if definition.key in TRACKED_ATTRIBUTE_KEYS
+        }
         mapping_rows = list(
             self.session.execute(
                 select(ServiceSignalMappingModel, ServiceDefinitionModel)
@@ -1201,7 +1214,9 @@ class AdminDataService:
                     == ServiceSignalMappingModel.service_definition_id,
                 )
                 .where(
-                    ServiceSignalMappingModel.signal_definition_id.in_(definition_ids)
+                    ServiceSignalMappingModel.signal_definition_id.in_(
+                        definition_ids | catalog_definition_ids
+                    )
                 )
                 .order_by(ServiceDefinitionModel.sort_order, ServiceDefinitionModel.label)
             )
@@ -1220,6 +1235,31 @@ class AdminDataService:
 
         return {
             "business_id": business_id,
+            "attribute_definitions": [
+                {
+                    "key": key,
+                    "label": (
+                        definitions_by_key[key].label
+                        if key in definitions_by_key
+                        else key.replace("_", " ").title()
+                    ),
+                    "category": ATTRIBUTE_GROUP_BY_KEY[key]["key"],
+                    "category_label": ATTRIBUTE_GROUP_BY_KEY[key]["label"],
+                    "category_sort_order": ATTRIBUTE_GROUP_BY_KEY[key]["sort_order"],
+                    "sort_order": ATTRIBUTE_SORT_ORDER[key],
+                    "value_type": (
+                        definitions_by_key[key].value_type
+                        if key in definitions_by_key
+                        else "text"
+                    ),
+                    "status": (
+                        definitions_by_key[key].status
+                        if key in definitions_by_key
+                        else "not_configured"
+                    ),
+                }
+                for key in TRACKED_ATTRIBUTE_KEYS
+            ],
             "facts": [
                 _fact_lineage_dict(
                     fact,
@@ -1855,8 +1895,6 @@ class AdminDataService:
         membership=None,
     ) -> dict[str, Any]:
         quality = _attribute_data_quality_score(
-            business,
-            membership,
             state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
         )
@@ -1918,142 +1956,57 @@ class AdminDataService:
 
 
 def _attribute_data_quality_score(
-    business: BusinessModel,
-    membership: Any,
     validations: dict[str, ValidationResultModel],
     fact_attributes: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    identity_score = _combined_validation_score(
-        validations.get("identity"),
-        validations.get("business_identity"),
-    )
-    trade_score = _validation_score(validations.get("trade"))
-    location_score = _validation_score(validations.get("location"))
-    niche_label = membership[1].label if membership else business.category_key
-    market_key = membership[0].market_key if membership else business.market_key
-    attributes: list[dict[str, Any]] = [
-        _attribute_component(
-            "business_name", "Business name",
-            identity_score if business.display_name else 0,
-            2,
-            "Identity and business-record validation",
-        ),
-        _attribute_component(
-            "trade_category", "Trade/category",
-            trade_score if niche_label else 0,
-            2,
-            "Trade validation",
-        ),
+    # Record quality answers whether this is a trustworthy business identity.
+    # Footprint scores answer whether an observed digital capability is strong
+    # or weak. Combining the two produced misleading averages and duplicated
+    # canonical fields that also existed as business facts.
+    validation_components = [
+        {
+            "key": key,
+            "label": label,
+            "score": _validation_score(validations.get(key)),
+            "status": (
+                validations[key].status if validations.get(key) is not None else "missing"
+            ),
+            "confidence": (
+                validations[key].confidence if validations.get(key) is not None else None
+            ),
+        }
+        for key, label in (
+            ("identity", "Identity"),
+            ("business_identity", "Business record"),
+            ("trade", "Trade/category"),
+            ("location", "Location"),
+        )
     ]
-
-    location_values = [
-        ("address", "Address", business.address),
-        ("geography", "Geography", business.geography),
-        (
-            "coordinates",
-            "Coordinates",
-            f"{business.latitude}, {business.longitude}"
-            if business.latitude is not None and business.longitude is not None
-            else None,
-        ),
-    ]
-    primary_location_key = next(
-        (key for key, _, value in location_values if value),
-        "address",
-    )
-    for key, label, value in location_values:
-        attributes.append(
-            _attribute_component(
-                key,
-                label,
-                location_score if value else (0 if key == primary_location_key else None),
-                2 if key == primary_location_key else 0,
-                "Location validation" if value else "No value stored",
-            )
-        )
-    attributes.append(
-        _attribute_component(
-            "market", "Market",
-            location_score if market_key else None,
-            0,
-            "Location validation",
-        )
-    )
-
-    facts_by_key = {item["key"]: item for item in fact_attributes}
-    website_fact = facts_by_key.get("website_status")
-    ownership = validations.get("website_ownership")
-    website_value_present = bool(business.website_url or business.domain)
-    if ownership is not None:
-        website_score: int | None = _validation_score(ownership)
-        website_basis = "Website ownership validation"
-    elif website_fact is not None:
-        website_score = website_fact["score"]
-        website_basis = "Website-status evidence"
-    elif website_value_present:
-        website_score = 40
-        website_basis = "Stored without attribute-specific evidence"
-    else:
-        website_score = None
-        website_basis = "No value stored"
-    attributes.extend(
-        [
-            _attribute_component(
-                "website", "Website", website_score,
-                0 if website_fact is not None else (1 if website_value_present else 0),
-                website_basis,
-            ),
-            _attribute_component("domain", "Domain", website_score, 0, website_basis),
-            _attribute_component(
-                "phone", "Business phone",
-                40 if business.phone else None,
-                0.5 if business.phone else 0,
-                "Stored without attribute-specific evidence" if business.phone else "No value stored",
-            ),
-            _attribute_component(
-                "customer_kind", "Customer type",
-                40 if business.customer_kind and business.customer_kind != "unknown" else None,
-                0.5 if business.customer_kind and business.customer_kind != "unknown" else 0,
-                "Stored without attribute-specific evidence",
-            ),
-        ]
-    )
-    for key, label, value in (
-        ("is_chain", "Chain", business.is_chain),
-        ("is_franchise", "Franchise", business.is_franchise),
-        ("is_directory", "Directory", business.is_directory),
-        ("is_agency", "Agency", business.is_agency),
-    ):
-        attributes.append(
-            _attribute_component(
-                key,
-                label,
-                40 if value is not None else None,
-                0.25 if value is not None else 0,
-                "Stored without attribute-specific evidence",
-            )
-        )
-    attributes.extend(fact_attributes)
-
-    scored = [item for item in attributes if item["score"] is not None and item["weight"] > 0]
-    total_weight = sum(float(item["weight"]) for item in scored)
     score = round(
-        sum(float(item["score"]) * float(item["weight"]) for item in scored)
-        / total_weight
-    ) if total_weight else 0
+        sum(component["score"] for component in validation_components)
+        / len(validation_components)
+    )
     score = min(max(score, 0), 100)
     label = "reliable" if score >= 85 else "review" if score >= 65 else "poor"
     limitations = [
-        f'{item["label"]} scored {item["score"]}'
-        for item in scored
-        if int(item["score"]) < 85
+        f'{component["label"]} validation is {component["status"]}'
+        for component in validation_components
+        if component["status"] != "passed"
     ]
+    limitations.extend(
+        f'{item["label"]} evidence is {item["evidence_state"]}'
+        for item in fact_attributes
+        if item["evidence_state"] != "usable"
+    )
     return {
         "data_quality_score": score,
         "data_quality_label": label,
         "data_quality_breakdown": {
-            "attribute_scores": attributes,
-            "scored_attribute_count": len(scored),
+            "validation_scores": validation_components,
+            "attribute_scores": fact_attributes,
+            "scored_attribute_count": sum(
+                item["score"] is not None for item in fact_attributes
+            ),
             "fact_count": len(fact_attributes),
             "limitations": limitations,
         },
@@ -2115,31 +2068,51 @@ def _fact_attribute_component(
     is_confirmed = fact.resolution_state == "confirmed"
     is_published = fact.quality_state == "published"
     confidence = min(max(int(fact.confidence), 0), 100)
-    score = round(
-        confidence * 0.35
-        + (20 if has_source else 0)
-        + (20 if is_fresh else 0)
-        + (15 if is_confirmed else 0)
-        + (10 if is_published else 0)
+    score = fact.attribute_score
+    if score is None:
+        score = score_attribute(fact.fact_key, _fact_value(fact)).score
+    evidence_state = (
+        "usable"
+        if has_source and is_fresh and is_confirmed and is_published
+        else "rejected"
+        if fact.quality_state in {"rejected", "quarantined"}
+        else "source missing"
+        if not has_source
+        else "expired"
+        if not is_fresh
+        else "conflicted"
+        if not is_confirmed
+        else "staged"
     )
-    if fact.quality_state in {"rejected", "quarantined"}:
-        score = min(score, 39)
     basis = ", ".join(
         [
-            f"{confidence}% detector confidence",
+            fact.score_reason or "footprint score",
+            f"{confidence}% evidence confidence",
             "source linked" if has_source else "source missing",
             "fresh" if is_fresh else "expired",
             fact.resolution_state,
             fact.quality_state,
         ]
     )
-    return _attribute_component(
+    component = _attribute_component(
         fact.fact_key,
         fact.fact_key.replace("_", " ").title(),
-        score,
-        1,
+        round(score) if score is not None else None,
+        0,
         basis,
     )
+    component.update(
+        {
+            "evidence_confidence": confidence,
+            "evidence_state": evidence_state,
+            "resolution_state": fact.resolution_state,
+            "quality_state": fact.quality_state,
+            "source_observation_id": fact.source_observation_id,
+            "observed_at": fact.observed_at,
+            "expires_at": fact.expires_at,
+        }
+    )
+    return component
 
 
 def _business_dict(business: BusinessModel) -> dict[str, Any]:
