@@ -147,7 +147,24 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     setExporting(true);
     setError("");
     try {
-      const payload = await api.exportAdminBusinessesJson(Object.keys(selectedBusinesses));
+      const businessIds = Object.keys(selectedBusinesses);
+      const businesses: unknown[] = [];
+      for (let index = 0; index < businessIds.length; index += 5) {
+        const batch = businessIds.slice(index, index + 5);
+        const batchPayloads = await Promise.all(batch.map(async (businessId) => {
+          const [businessDetail, businessLineage] = await Promise.all([
+            api.getAdminBusiness(businessId),
+            api.getAdminBusinessFactLineage(businessId),
+          ]);
+          return buildBusinessJsonPayload(businessDetail, businessLineage);
+        }));
+        businesses.push(...batchPayloads);
+      }
+      const payload = {
+        exported_at: new Date().toISOString(),
+        business_count: businesses.length,
+        businesses,
+      };
       downloadJson(payload, `scoutlead-businesses-${new Date().toISOString().slice(0, 10)}.json`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -339,25 +356,19 @@ function BusinessInspector({
   detail: AdminBusinessDetail | null;
 }) {
   const [lineage, setLineage] = useState<AdminFactLineage | null>(null);
-  const [jsonPayload, setJsonPayload] = useState<Record<string, unknown> | null>(null);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [lineageError, setLineageError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<"attributes" | "json">("attributes");
   const loadLineage = useCallback(async () => {
     if (!detail?.id) {
       setLineage(null);
-      setJsonPayload(null);
       return;
     }
     setLineageLoading(true);
     setLineageError("");
     try {
-      const [nextLineage, nextJson] = await Promise.all([
-        api.getAdminBusinessFactLineage(detail.id),
-        api.getAdminBusinessJson(detail.id),
-      ]);
-      setLineage(nextLineage);
-      setJsonPayload(nextJson);
+      setLineage(await api.getAdminBusinessFactLineage(detail.id));
     } catch (cause) {
       setLineageError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -367,6 +378,14 @@ function BusinessInspector({
   useEffect(() => {
     void loadLineage();
   }, [loadLineage]);
+  useEffect(() => {
+    setActiveTab("attributes");
+    setCopied(false);
+  }, [detail?.id]);
+  const jsonPayload = useMemo(
+    () => detail && lineage ? buildBusinessJsonPayload(detail, lineage) : null,
+    [detail, lineage],
+  );
   const copyJson = async () => {
     if (!jsonPayload) return;
     await navigator.clipboard.writeText(JSON.stringify(jsonPayload, null, 2));
@@ -378,25 +397,104 @@ function BusinessInspector({
   return (
     <aside className="admin-inspector">
       <header>
-        <div><h2>{detail.display_name}</h2><p>Business JSON</p></div>
+        <div><h2>{detail.display_name}</h2><p>Business attributes and evidence</p></div>
         <div className="admin-json-actions">
           <AttributeCoverage lineage={lineage} />
-          <button className="admin-json-copy" disabled={!jsonPayload} type="button" onClick={() => void copyJson()}>
-            <Copy size={12} /> {copied ? "Copied" : "Copy JSON"}
-          </button>
         </div>
       </header>
-      <div className="admin-inspector-content admin-json-inspector">
-        {lineageLoading && !jsonPayload ? <p className="admin-record-empty">Preparing JSON…</p> : null}
-        {lineageError && !jsonPayload ? <p className="admin-record-empty">Business JSON is unavailable.</p> : null}
-        {jsonPayload ? <pre>{JSON.stringify(jsonPayload, null, 2)}</pre> : null}
-        {jsonPayload ? <details>
-          <summary>Readable attribute view</summary>
-          <BusinessAttributeRecord detail={detail} error={lineageError} lineage={lineage} loading={lineageLoading} />
-        </details> : null}
-      </div>
+      <nav className="admin-inspector-tabs" aria-label="Business detail views">
+        <button className={activeTab === "attributes" ? "is-active" : ""} type="button" onClick={() => setActiveTab("attributes")}>Attributes</button>
+        <button className={activeTab === "json" ? "is-active" : ""} type="button" onClick={() => setActiveTab("json")}>JSON</button>
+        {activeTab === "json" ? <button className="admin-json-copy" disabled={!jsonPayload} type="button" onClick={() => void copyJson()}>
+          <Copy size={12} /> {copied ? "Copied" : "Copy JSON"}
+        </button> : null}
+      </nav>
+      {activeTab === "attributes" ? (
+        <BusinessAttributeRecord detail={detail} error={lineageError} lineage={lineage} loading={lineageLoading} />
+      ) : (
+        <div className="admin-inspector-content admin-json-inspector">
+          {lineageLoading && !jsonPayload ? <p className="admin-record-empty">Preparing JSON…</p> : null}
+          {lineageError && !jsonPayload ? <p className="admin-record-empty">Business JSON is unavailable.</p> : null}
+          {jsonPayload ? <pre>{JSON.stringify(jsonPayload, null, 2)}</pre> : null}
+        </div>
+      )}
     </aside>
   );
+}
+
+function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFactLineage) {
+  const factsByKey = new Map(lineage.facts.map((fact) => [fact.key, fact]));
+  const observationsById = new Map(lineage.observations.map((observation) => [observation.id, observation]));
+  const definitions = lineage.attribute_definitions.length
+    ? lineage.attribute_definitions
+    : FALLBACK_ATTRIBUTE_DEFINITIONS;
+  const fallbackValues: Record<string, unknown> = {
+    business_name: detail.display_name,
+    trade_category: detail.niche_label || detail.niche_slug,
+    address: detail.address,
+    phone: detail.phone,
+    website_url: detail.website_url,
+    domain: detail.domain,
+    latitude: detail.latitude,
+    longitude: detail.longitude,
+    is_directory: detail.is_directory,
+    is_chain: detail.is_chain,
+    is_franchise: detail.is_franchise,
+  };
+  const attributes = Object.fromEntries(definitions.map((definition) => {
+    const fact = factsByKey.get(definition.key);
+    const value = fact?.value ?? fallbackValues[definition.key] ?? null;
+    const observation = fact?.source_observation_id
+      ? observationsById.get(fact.source_observation_id)
+      : undefined;
+    return [definition.key, {
+      label: definition.label,
+      category: definition.category,
+      observed: value !== null && value !== "",
+      value,
+      footprint_score: fact?.attribute_score ?? null,
+      score_reason: fact?.score_reason ?? null,
+      evidence_confidence: fact?.evidence_confidence ?? null,
+      resolution_state: fact?.resolution_state ?? null,
+      quality_state: fact?.quality_state ?? null,
+      observed_at: fact?.observed_at ?? null,
+      expires_at: fact?.expires_at ?? null,
+      source: observation ? {
+        observation_id: observation.id,
+        provider: observation.source,
+        url: observation.source_url,
+      } : null,
+    }];
+  }));
+  return {
+    business: {
+      id: detail.id,
+      name: detail.display_name,
+      state: detail.status,
+      trade: detail.niche_label,
+      market: detail.market_key,
+      address: detail.address,
+      coordinates: { latitude: detail.latitude, longitude: detail.longitude },
+      website_url: detail.website_url,
+      domain: detail.domain,
+      phone: detail.phone,
+      first_seen_at: detail.first_seen_at,
+      last_seen_at: detail.last_seen_at,
+    },
+    record_quality: {
+      score: detail.data_quality_score,
+      label: detail.data_quality_label,
+      required_checks: detail.data_quality_breakdown.validation_scores,
+      limitations: detail.data_quality_breakdown.limitations,
+    },
+    attributes,
+    contacts: detail.contacts,
+    evidence: {
+      facts: lineage.facts,
+      claims: lineage.claims,
+      observations: lineage.observations,
+    },
+  };
 }
 
 function BusinessAttributeRecord({

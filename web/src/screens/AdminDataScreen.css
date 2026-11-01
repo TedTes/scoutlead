@@ -81,6 +81,34 @@
 
 .admin-json-copy:disabled { cursor: default; opacity: .5; }
 
+.admin-inspector-tabs {
+  display: flex;
+  align-items: center;
+  min-height: 35px;
+  padding: 0 12px;
+  border-bottom: 1px solid #d9dee6;
+  background: #fff;
+}
+
+.admin-inspector-tabs > button:not(.admin-json-copy) {
+  align-self: stretch;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #768193;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.admin-inspector-tabs > button.is-active {
+  border-bottom-color: #151c24;
+  color: #151c24;
+}
+
+.admin-inspector-tabs .admin-json-copy { margin-left: auto; }
+
 .admin-json-inspector {
   padding: 0;
   background: #111820;
@@ -97,18 +125,4 @@
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.admin-json-inspector > details {
-  border-top: 1px solid #2b3642;
-  background: #f7f8fa;
-}
-
-.admin-json-inspector > details > summary {
-  padding: 9px 13px;
-  color: #4f5b6b;
-  font-size: 8px;
-  font-weight: 800;
-  cursor: pointer;
-  text-transform: uppercase;
 }
