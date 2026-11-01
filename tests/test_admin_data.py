@@ -325,14 +325,17 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         ]
         assert [row["id"] for row in reliable_rows] == [reliable.id]
         assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 1
-        assert [
-            component["key"]
+        attribute_scores = {
+            component["key"]: component
             for component in reliable_rows[0]["data_quality_breakdown"][
-                "validation_components"
+                "attribute_scores"
             ]
-        ] == ["identity", "business_identity", "trade", "location"]
-        assert reliable_rows[0]["data_quality_breakdown"]["provenance"]["count"] == 1
-        assert reliable_rows[0]["data_quality_breakdown"]["provenance"]["total"] == 1
+        }
+        assert attribute_scores["business_name"]["score"] == 100
+        assert attribute_scores["trade_category"]["score"] == 100
+        assert attribute_scores["geography"]["score"] == 100
+        assert attribute_scores["website_status"]["score"] == 100
+        assert "source linked" in attribute_scores["website_status"]["basis"]
 
         fact = session.scalar(
             select(BusinessFactModel).where(BusinessFactModel.business_id == reliable.id)
@@ -340,12 +343,12 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         fact.expires_at = now - timedelta(days=1)
         session.commit()
         degraded = service.list_businesses(
-            **params, quality="poor", sort="score_desc"
+            **params, quality=None, sort="score_desc"
         )["items"]
 
         reliable_after_expiry = next(row for row in degraded if row["id"] == reliable.id)
-        assert reliable_after_expiry["data_quality_score"] == 64
-        assert "Some facts are expired" in reliable_after_expiry[
+        assert reliable_after_expiry["data_quality_score"] == 97
+        assert "Website Status scored 80" in reliable_after_expiry[
             "data_quality_breakdown"
         ]["limitations"]
 
