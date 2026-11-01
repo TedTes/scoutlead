@@ -209,6 +209,12 @@ class BusinessModel(TimestampMixin, Base):
 
 
 class SignalDefinitionModel(TimestampMixin, Base):
+    """Collector and scoring metadata for a canonical business attribute.
+
+    The physical table and class name are retained for migration/API
+    compatibility. They do not store a signal assigned to a business; that
+    state lives only in ``business_facts``.
+    """
     __tablename__ = "signal_definitions"
     __table_args__ = (
         UniqueConstraint("key", name="uq_signal_definitions_key"),
@@ -231,6 +237,11 @@ class SignalDefinitionModel(TimestampMixin, Base):
     )
     config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+# Preferred name for new code. Removing the legacy name/table would break
+# queued jobs and historical migrations without changing the data model.
+BusinessAttributeDefinitionModel = SignalDefinitionModel
 
 
 class ServiceDefinitionModel(TimestampMixin, Base):
@@ -307,6 +318,11 @@ class BusinessFactModel(TimestampMixin, Base):
     value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
     value_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    # The footprint score describes the observed business condition.  It is
+    # intentionally separate from confidence, which describes the evidence.
+    attribute_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    score_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolution_state: Mapped[str] = mapped_column(
         String(32), nullable=False, default="unknown", index=True
     )

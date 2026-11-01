@@ -8,7 +8,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models import BusinessFactChangeModel, BusinessFactModel, SignalDefinitionModel
+from db.models import (
+    BusinessAttributeDefinitionModel,
+    BusinessFactChangeModel,
+    BusinessFactModel,
+)
+from business_facts.attribute_scoring import score_attribute
 from business_facts.freshness import fact_expires_at
 from shared.utils import new_id
 
@@ -80,17 +85,27 @@ class BusinessFactRepository:
         previous_confidence = existing.confidence if existing is not None else None
         value_changed = existing is None or previous_value != fact.value
         value_type, value_text, value_number, value_boolean = _typed_value(fact.value)
+        definition = self._attribute_definition(fact_key)
+        scored = score_attribute(
+            fact_key,
+            fact.value,
+            opportunity_direction=(definition.opportunity_direction if definition else None),
+            config=(definition.config if definition else None),
+        )
         if existing is None:
             existing = BusinessFactModel(
                 id=new_id("business_fact"),
                 business_id=business_id,
                 fact_key=fact_key,
-                signal_definition_id=self._signal_definition_id(fact_key),
+                signal_definition_id=definition.id if definition else None,
                 value_type=value_type,
                 value_text=value_text,
                 value_number=value_number,
                 value_boolean=value_boolean,
                 confidence=fact.confidence,
+                attribute_score=scored.score,
+                score_version=scored.version,
+                score_reason=scored.reason,
                 resolution_state=fact.resolution_state,
                 supporting_claim_ids=list(fact.supporting_claim_ids),
                 quality_state=fact.quality_state,
@@ -103,12 +118,15 @@ class BusinessFactRepository:
             self.session.add(existing)
         else:
             if existing.signal_definition_id is None:
-                existing.signal_definition_id = self._signal_definition_id(fact_key)
+                existing.signal_definition_id = definition.id if definition else None
             existing.value_type = value_type
             existing.value_text = value_text
             existing.value_number = value_number
             existing.value_boolean = value_boolean
             existing.confidence = fact.confidence
+            existing.attribute_score = scored.score
+            existing.score_version = scored.version
+            existing.score_reason = scored.reason
             existing.resolution_state = fact.resolution_state
             existing.supporting_claim_ids = list(fact.supporting_claim_ids)
             existing.quality_state = fact.quality_state
@@ -138,10 +156,12 @@ class BusinessFactRepository:
             self.session.flush()
         return existing, value_changed
 
-    def _signal_definition_id(self, fact_key: str) -> str | None:
+    def _attribute_definition(
+        self, fact_key: str
+    ) -> BusinessAttributeDefinitionModel | None:
         return self.session.scalar(
-            select(SignalDefinitionModel.id)
-            .where(SignalDefinitionModel.key == fact_key)
+            select(BusinessAttributeDefinitionModel)
+            .where(BusinessAttributeDefinitionModel.key == fact_key)
             .limit(1)
         )
 

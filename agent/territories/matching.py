@@ -8,6 +8,7 @@ from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from business_facts.eligibility import eligible_fact_condition, fact_is_eligible
+from business_facts.attribute_scoring import score_attribute
 from business_facts.repository import fact_value
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import (
@@ -39,6 +40,13 @@ SIGNAL_FACTS = {
     "no_quote_flow": "quote_or_booking_form_present",
     "no_contact_form": "contact_form_present",
     "reviews_under_15": "google_review_count",
+}
+
+LEGACY_SIGNAL_CONFIG = {
+    "reviews_under_15": {
+        "opportunity_threshold": 15,
+        "minimum_confidence": 90,
+    },
 }
 
 
@@ -199,6 +207,8 @@ class ProfileMatchService:
                     fact.value_number,
                     fact.value_boolean,
                     fact.confidence,
+                    fact.attribute_score,
+                    fact.score_version,
                     fact.resolution_state,
                     fact.quality_state,
                     fact.expires_at,
@@ -297,7 +307,11 @@ class ProfileMatchService:
                         key=key,
                         fact_key=SIGNAL_FACTS[key],
                         opportunity_direction="legacy",
-                        config={},
+                        config=_attribute_match_config(
+                            SIGNAL_FACTS[key],
+                            "lower_is_opportunity" if key == "reviews_under_15" else "legacy",
+                            LEGACY_SIGNAL_CONFIG.get(key, {}),
+                        ),
                     )
                 )
                 continue
@@ -308,7 +322,11 @@ class ProfileMatchService:
                         key=key,
                         fact_key=definition.key,
                         opportunity_direction=definition.opportunity_direction,
-                        config=definition.config or {},
+                        config=_attribute_match_config(
+                            definition.key,
+                            definition.opportunity_direction,
+                            definition.config or {},
+                        ),
                     )
                 )
         return specs
@@ -460,6 +478,8 @@ class ProfileMatchService:
                 "value": fact_value(fact),
                 "matched": _signal_match_confidence(spec, fact) is not None,
                 "confidence": _signal_match_confidence(spec, fact),
+                "evidence_confidence": fact.confidence if fact is not None else None,
+                "attribute_score": fact.attribute_score if fact is not None else None,
             }
             if fact_observation is not None:
                 evidence.update(
@@ -477,6 +497,8 @@ class ProfileMatchService:
                 "fact_key": evidence["fact_key"],
                 "value": evidence["value"],
                 "confidence": evidence["confidence"],
+                "evidence_confidence": evidence["evidence_confidence"],
+                "attribute_score": evidence["attribute_score"],
                 **(
                     {
                         "source_observation_id": evidence["source_observation_id"],
@@ -550,7 +572,13 @@ class ProfileMatchService:
                         if spec.fact_key in facts
                         else None
                     ),
-                    "severity": _signal_severity(spec, service_specs),
+                    "severity": _signal_severity(
+                        spec,
+                        service_specs,
+                        facts[spec.fact_key].attribute_score
+                        if spec.fact_key in facts
+                        else None,
+                    ),
                 }
                 for spec in signal_specs
             },
@@ -606,49 +634,12 @@ class ProfileMatchService:
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
     evidence = _usable_evidence_condition(spec, fact)
-    signal = spec.key
-    if signal == "website_unavailable":
-        return and_(
-            evidence,
-            fact.value_text.in_(("missing", "unavailable", "parked")),
-        )
-    if signal in {"no_quote_flow", "no_contact_form"}:
-        return and_(
-            evidence,
-            fact.value_boolean.is_(False),
-        )
-    if signal == "reviews_under_15":
-        return and_(
-            evidence,
-            fact.value_number < 15.0,
-        )
-    if spec.opportunity_direction == "false_is_opportunity":
-        return and_(evidence, fact.value_boolean.is_(False))
-    if spec.opportunity_direction == "true_is_opportunity":
-        return and_(evidence, fact.value_boolean.is_(True))
-    if spec.opportunity_direction == "lower_is_opportunity":
-        threshold = spec.config.get("opportunity_threshold")
-        return (
-            and_(evidence, fact.value_number < float(threshold))
-            if isinstance(threshold, (int, float))
-            else literal(False)
-        )
-    if spec.opportunity_direction == "higher_is_opportunity":
-        threshold = spec.config.get("opportunity_threshold")
-        return (
-            and_(evidence, fact.value_number > float(threshold))
-            if isinstance(threshold, (int, float))
-            else literal(False)
-        )
-    if spec.opportunity_direction == "missing_is_opportunity":
-        values = spec.config.get("opportunity_values") or [
-            "missing",
-            "not_listed",
-            "unavailable",
-            "parked",
-        ]
-        return and_(evidence, fact.value_text.in_(tuple(str(value) for value in values)))
-    return literal(False)
+    maximum_score = float(spec.config.get("audience_max_score", 49.999))
+    return and_(
+        evidence,
+        fact.attribute_score.is_not(None),
+        fact.attribute_score <= maximum_score,
+    )
 
 
 def _confirmed_signal_condition(spec: SignalMatchSpec, fact) -> Any:
@@ -663,7 +654,9 @@ def _usable_evidence_condition(
         fact,
         minimum_confidence=int(spec.config.get("minimum_confidence", 90)),
         require_provenance=True,
-        require_validation=True,
+        # Publication is the eligibility stamp. Requiring a second validation
+        # row here duplicated that decision and hid otherwise publishable facts.
+        require_validation=False,
     )
 
 
@@ -678,44 +671,12 @@ def _signal_match_confidence(
     ):
         return None
     evidence_confidence = "confirmed"
-    value = fact_value(fact)
-    signal = spec.key
-    if signal == "website_unavailable":
-        return evidence_confidence if value in {"missing", "unavailable", "parked"} else None
-    if signal in {"no_quote_flow", "no_contact_form"}:
-        return evidence_confidence if value is False else None
-    if signal == "reviews_under_15":
-        return evidence_confidence if isinstance(value, (int, float)) and value < 15 else None
-    if spec.opportunity_direction == "false_is_opportunity":
-        return evidence_confidence if value is False else None
-    if spec.opportunity_direction == "true_is_opportunity":
-        return evidence_confidence if value is True else None
-    threshold = spec.config.get("opportunity_threshold")
-    if spec.opportunity_direction == "lower_is_opportunity":
-        return (
-            evidence_confidence
-            if isinstance(value, (int, float))
-            and isinstance(threshold, (int, float))
-            and value < threshold
-            else None
-        )
-    if spec.opportunity_direction == "higher_is_opportunity":
-        return (
-            evidence_confidence
-            if isinstance(value, (int, float))
-            and isinstance(threshold, (int, float))
-            and value > threshold
-            else None
-        )
-    if spec.opportunity_direction == "missing_is_opportunity":
-        values = spec.config.get("opportunity_values") or [
-            "missing",
-            "not_listed",
-            "unavailable",
-            "parked",
-        ]
-        return evidence_confidence if value in values else None
-    return None
+    maximum_score = float(spec.config.get("audience_max_score", 49.999))
+    return (
+        evidence_confidence
+        if fact.attribute_score is not None and fact.attribute_score <= maximum_score
+        else None
+    )
 
 
 def _contact_has_active_support(
@@ -760,7 +721,12 @@ def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
 def _signal_severity(
     spec: SignalMatchSpec,
     service_specs: list[ServiceMatchSpec],
+    attribute_score: float | None,
 ) -> float:
+    # The gap itself drives severity: a score of 0 is a severe opportunity;
+    # a score just below the matching threshold is a weaker one.
+    if attribute_score is not None:
+        return round(1.0 + 4.0 * (1.0 - max(0.0, min(100.0, attribute_score)) / 100.0), 2)
     configured = spec.config.get("opportunity_severity")
     if isinstance(configured, (int, float)):
         return round(max(1.0, min(5.0, float(configured))), 2)
@@ -813,3 +779,28 @@ def _opportunity_score(
 
 def literal_column_nulls_last(name: str):
     return literal_column(name).asc().nulls_last()
+
+
+def _attribute_match_config(
+    fact_key: str,
+    opportunity_direction: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Translate an old opportunity threshold into the attribute-score scale."""
+
+    result = dict(config)
+    if isinstance(result.get("audience_max_score"), (int, float)):
+        return result
+    threshold = result.get("opportunity_threshold")
+    if opportunity_direction in {"lower_is_opportunity", "higher_is_opportunity"} and isinstance(
+        threshold, (int, float)
+    ):
+        normalized = score_attribute(
+            fact_key,
+            threshold,
+            opportunity_direction=opportunity_direction,
+            config=result,
+        ).score
+        if normalized is not None:
+            result["audience_max_score"] = max(0.0, normalized - 0.001)
+    return result

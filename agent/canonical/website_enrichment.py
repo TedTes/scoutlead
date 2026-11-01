@@ -1317,6 +1317,33 @@ def _page_signals(
         "service_area_pages_present": _aggregate_evidence(pages, "service_area_pages"),
     }
 
+    def evidence_url(*keys: str) -> str | None:
+        for key in keys:
+            for evidence in signal_evidence.get(key, []):
+                url = normalize_text(str(evidence.get("url") or ""))
+                if url:
+                    return url
+        return None
+
+    contact_page_url = next(
+        (page.url for page in pages if "contact" in page.url.lower()),
+        evidence_url("contact_form"),
+    )
+    contact_form_url = next(
+        (page.url for page in pages if page.has_contact_form is True),
+        evidence_url("contact_form"),
+    )
+    booking_url = evidence_url("booking_form")
+    homepage = pages[0] if pages else None
+    local_business_schema_present = _known_boolean(
+        any(
+            re.search(r'"@type"\s*:\s*"(?:LocalBusiness|[A-Za-z]+Contractor)"', page.html)
+            is not None
+            for page in pages
+        ),
+        dom_complete=dom_complete,
+    )
+
     return {
         "crawl_complete": dom_complete,
         "signal_evidence": signal_evidence,
@@ -1340,6 +1367,17 @@ def _page_signals(
             if has_contact_form is not None or emails
             else None
         ),
+        "public_email_present": _known_boolean(bool(emails), dom_complete=dom_complete),
+        "public_phone_present": _known_boolean(bool(phones), dom_complete=dom_complete),
+        "contact_page_url": contact_page_url,
+        "contact_form_url": contact_form_url,
+        "booking_url": booking_url,
+        "local_business_schema_present": local_business_schema_present,
+        "title_and_meta_present": _known_boolean(
+            bool(homepage and homepage.title and homepage.description),
+            dom_complete=dom_complete,
+        ),
+        "http_status": homepage.status_code if homepage else None,
         "html_language_present": any(page.html_language for page in pages),
         "hreflang_present": any(page.alternate_languages for page in pages),
         "language_selector_present": any(page.has_language_selector for page in pages),

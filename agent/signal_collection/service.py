@@ -441,6 +441,16 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
         "complete_contact_details": lambda: enrichment.get(
             "has_complete_contact_details"
         ),
+        "public_email_present": lambda: enrichment.get("public_email_present"),
+        "public_phone_present": lambda: enrichment.get("public_phone_present"),
+        "contact_page_url": lambda: enrichment.get("contact_page_url"),
+        "contact_form_url": lambda: enrichment.get("contact_form_url"),
+        "booking_url": lambda: enrichment.get("booking_url"),
+        "local_business_schema_present": lambda: enrichment.get(
+            "local_business_schema_present"
+        ),
+        "title_and_meta_present": lambda: enrichment.get("title_and_meta_present"),
+        "http_status": lambda: enrichment.get("http_status"),
         "html_language_present": lambda: enrichment.get("html_language_present"),
         "hreflang_present": lambda: enrichment.get("hreflang_present"),
         "language_selector_present": lambda: enrichment.get(

@@ -1415,11 +1415,13 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         )
         session.commit()
 
-        assert ProfileMatchService(session).match(
+        # Publication is the eligibility stamp. A separate validation row is
+        # review evidence and no longer overrides the canonical published fact.
+        assert len(ProfileMatchService(session).match(
             profile=profile,
             niche_ids=[profile.niche_id],
             limit=25,
-        ) == []
+        )) == 1
 
 
 def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:

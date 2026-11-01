@@ -791,6 +791,36 @@ def test_semantic_actions_record_exact_signal_evidence(monkeypatch) -> None:
     assert evidence["click_to_call_present"][0]["match"].startswith("tel:")
 
 
+def test_inspection_extracts_matchable_digital_footprint_attributes(monkeypatch) -> None:
+    html = """
+        <html><head>
+          <title>Example Landscaper</title>
+          <meta name="description" content="Local landscape services" />
+          <script type="application/ld+json">{"@type":"LocalBusiness"}</script>
+        </head><body>
+          <p>Email hello@greenlandscape.ca or call 416-555-0101.</p>
+          <form action="/contact"><input name="name" /><input name="email" />
+            <textarea name="message"></textarea><button>Send message</button></form>
+        </body></html>
+    """
+    monkeypatch.setattr(
+        "canonical.website_enrichment.httpx.get",
+        lambda url, **kwargs: FakeResponse(url, html),
+    )
+
+    result = WebsiteEnrichmentClient(max_pages_per_business=1, page_delay_seconds=0).inspect(
+        _target("https://example.test/contact")
+    )
+
+    assert result.page_signals["public_email_present"] is True
+    assert result.page_signals["public_phone_present"] is True
+    assert result.page_signals["contact_page_url"] == "https://example.test/contact"
+    assert result.page_signals["contact_form_url"] == "https://example.test/contact"
+    assert result.page_signals["local_business_schema_present"] is True
+    assert result.page_signals["title_and_meta_present"] is True
+    assert result.page_signals["http_status"] == 200
+
+
 def test_unrendered_javascript_shell_returns_unknown_negative_signals(monkeypatch) -> None:
     monkeypatch.setattr(
         "canonical.website_enrichment.httpx.get",
