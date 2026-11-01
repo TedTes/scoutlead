@@ -126,3 +126,15 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.admin-quality-score.is-refresh_required {
+  border-color: #efd19d !important;
+  background: #fff7e8 !important;
+  color: #9a620b !important;
+}
+
+.admin-quality-score.is-missing_evidence {
+  border-color: #cfd6df !important;
+  background: #f4f6f8 !important;
+  color: #667085 !important;
+}

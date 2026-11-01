@@ -383,6 +383,7 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
             ("Needs Review Painting", None),
             ("Example Painting", 100),
         ]
+        assert rows[0]["data_quality_label"] == "missing_evidence"
         assert [row["id"] for row in reliable_rows] == [reliable.id]
         assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 2
         attribute_scores = {
@@ -422,6 +423,27 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         reliable_after_expiry = next(row for row in degraded if row["id"] == reliable.id)
         assert reliable_after_expiry["data_quality_score"] == 100
         assert "Website Status evidence is expired" in reliable_after_expiry[
+            "data_quality_breakdown"
+        ]["limitations"]
+
+        operational_fact = session.scalar(
+            select(BusinessFactModel).where(
+                BusinessFactModel.business_id == reliable.id,
+                BusinessFactModel.fact_key == "business_operational",
+            )
+        )
+        operational_fact.expires_at = now - timedelta(days=1)
+        session.commit()
+        refresh_required = next(
+            row
+            for row in service.list_businesses(
+                **params, quality="refresh_required", sort="score_desc"
+            )["items"]
+            if row["id"] == reliable.id
+        )
+        assert refresh_required["data_quality_score"] is None
+        assert refresh_required["data_quality_label"] == "refresh_required"
+        assert "Operational status evidence requires refresh" in refresh_required[
             "data_quality_breakdown"
         ]["limitations"]
 

@@ -235,7 +235,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         </label>
         <select aria-label="Record quality" value={quality} onChange={(event) => { setQuality(event.target.value); setPage(1); }}>
           <option value="">All quality</option>
-          <option value="pending">Pending validation</option>
+          <option value="refresh_required">Refresh required</option>
+          <option value="missing_evidence">Missing evidence</option>
           <option value="poor">Poor · 0–64</option>
           <option value="review">Review · 65–84</option>
           <option value="reliable">Reliable · 85–100</option>
@@ -333,7 +334,7 @@ function QualityScore({ row }: { row: AdminBusinessSummary }) {
   return (
     <span className={`admin-quality-score is-${row.data_quality_label}`} title={title}>
       <strong>{row.data_quality_score ?? "—"}</strong>
-      <small>{row.data_quality_label}</small>
+      <small>{row.data_quality_label.replace(/_/g, " ")}</small>
     </span>
   );
 }

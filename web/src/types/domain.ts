@@ -982,7 +982,7 @@ export type AdminBusinessSummary = {
   status: string;
   validation_state: "passed" | "attention" | "incomplete";
   data_quality_score: number | null;
-  data_quality_label: "reliable" | "review" | "poor" | "pending";
+  data_quality_label: "reliable" | "review" | "poor" | "refresh_required" | "missing_evidence";
   data_quality_breakdown: {
     validation_scores?: Array<{
       key: string;

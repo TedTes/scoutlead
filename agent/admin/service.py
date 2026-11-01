@@ -958,6 +958,10 @@ class AdminDataService:
             rows = [row for row in rows if row["data_quality_score"] is not None and 65 <= row["data_quality_score"] < 85]
         elif quality == "poor":
             rows = [row for row in rows if row["data_quality_score"] is not None and row["data_quality_score"] < 65]
+        elif quality == "refresh_required":
+            rows = [row for row in rows if row["data_quality_label"] == "refresh_required"]
+        elif quality == "missing_evidence":
+            rows = [row for row in rows if row["data_quality_label"] == "missing_evidence"]
         elif quality == "pending":
             rows = [row for row in rows if row["data_quality_score"] is None]
         elif quality:
@@ -2091,6 +2095,8 @@ def _attribute_data_quality_score(
         else "failed"
         if operational_fact["value"] is False
         and operational_fact["evidence_state"] == "usable"
+        else "refresh_required"
+        if operational_fact["evidence_state"] == "expired"
         else "uncertain"
     )
     operational_score = (
@@ -2156,7 +2162,12 @@ def _attribute_data_quality_score(
     if score is not None:
         score = min(max(score, 0), 100)
     label = (
-        "pending"
+        "refresh_required"
+        if score is None and any(
+            component["status"] == "refresh_required"
+            for component in validation_components
+        )
+        else "missing_evidence"
         if score is None
         else "reliable"
         if score >= 85
@@ -2164,11 +2175,18 @@ def _attribute_data_quality_score(
         if score >= 65
         else "poor"
     )
-    limitations = [
-        f'{component["label"]} validation is {component["status"]}'
-        for component in validation_components
-        if component["status"] != "passed"
-    ]
+    limitations = []
+    for component in validation_components:
+        if component["status"] == "passed":
+            continue
+        if component["status"] == "refresh_required":
+            limitations.append(f'{component["label"]} evidence requires refresh')
+        elif component["status"] == "missing":
+            limitations.append(f'{component["label"]} evidence is missing')
+        else:
+            limitations.append(
+                f'{component["label"]} validation is {component["status"]}'
+            )
     limitations.extend(
         f'{item["label"]} evidence is {item["evidence_state"]}'
         for item in fact_attributes
