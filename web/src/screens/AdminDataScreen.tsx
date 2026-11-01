@@ -286,13 +286,14 @@ function StatusPill({ value }: { value: string }) {
 
 function QualityScore({ row }: { row: AdminBusinessSummary }) {
   const breakdown = row.data_quality_breakdown;
+  const attributeScores = breakdown.attribute_scores || [];
   const title = [
-    `Validation ${breakdown.validation.points}/${breakdown.validation.max}`,
-    `Provenance ${breakdown.provenance.points}/${breakdown.provenance.max}`,
-    `Freshness ${breakdown.freshness.points}/${breakdown.freshness.max}`,
-    `Resolution ${breakdown.resolution.points}/${breakdown.resolution.max}`,
-    `Publication ${breakdown.publication.points}/${breakdown.publication.max}`,
-    `${breakdown.fact_count} facts`,
+    attributeScores.length
+      ? `${breakdown.scored_attribute_count ?? attributeScores.filter((attribute) => attribute.score != null && attribute.weight > 0).length} scored attributes`
+      : "Attribute details are not available from the running API",
+    ...attributeScores
+      .filter((attribute) => attribute.score != null && attribute.weight > 0)
+      .map((attribute) => `${attribute.label} ${attribute.score}`),
     ...(breakdown.limitations || []),
   ].join(" · ");
   return (
@@ -306,17 +307,19 @@ function QualityScore({ row }: { row: AdminBusinessSummary }) {
 function exportBusinessesCsv(rows: AdminBusinessSummary[]) {
   const headers = [
     "Business ID", "Business", "Trade", "Market", "Address", "Website", "Phone",
-    "State", "Quality score", "Quality label", "Validation points", "Provenance points",
-    "Freshness points", "Resolution points", "Publication points", "Fact count",
+    "State", "Quality score", "Quality label", "Attribute scores", "Fact count",
     "Quality limitations", "Last seen",
   ];
   const values = rows.map((row) => {
     const quality = row.data_quality_breakdown;
+    const attributeScores = quality.attribute_scores || [];
     return [
       row.id, row.display_name, row.niche_label, row.market_key, row.address || row.geography,
       row.website_url || row.domain, row.phone, row.status, row.data_quality_score,
-      row.data_quality_label, quality.validation.points, quality.provenance.points,
-      quality.freshness.points, quality.resolution.points, quality.publication.points,
+      row.data_quality_label, attributeScores
+        .filter((attribute) => attribute.score != null)
+        .map((attribute) => `${attribute.label}: ${attribute.score}`)
+        .join("; "),
       quality.fact_count, quality.limitations.join("; "), row.last_seen_at,
     ];
   });
@@ -364,6 +367,7 @@ function BusinessInspector({
     <aside className="admin-inspector">
       <header>
         <div><h2>{detail.display_name}</h2><p>Business attributes</p></div>
+        <QualityScore row={detail} />
       </header>
       <BusinessAttributeRecord
         detail={detail}
@@ -387,35 +391,40 @@ function BusinessAttributeRecord({
   error: string;
 }) {
   const contacts = detail.contacts || [];
+  const attributeScores = new Map(
+    (detail.data_quality_breakdown.attribute_scores || []).map((attribute) => [attribute.key, attribute])
+  );
   const profileAttributes: Array<{
     label: string;
     value: ReactNode;
+    quality?: AttributeQuality;
   }> = [
-    { label: "Business name", value: detail.display_name },
-    { label: "Trade/category", value: detail.niche_label || detail.niche_slug || "Not classified" },
-    { label: "Market", value: detail.market_key || "Not stored" },
-    { label: "Customer type", value: humanizeKey(detail.customer_kind || "unknown") },
+    { label: "Business name", value: detail.display_name, quality: attributeScores.get("business_name") },
+    { label: "Trade/category", value: detail.niche_label || detail.niche_slug || "Not classified", quality: attributeScores.get("trade_category") },
+    { label: "Market", value: detail.market_key || "Not stored", quality: attributeScores.get("market") },
+    { label: "Customer type", value: humanizeKey(detail.customer_kind || "unknown"), quality: attributeScores.get("customer_kind") },
   ];
   const locationAttributes = [
-    { label: "Address", value: detail.address || "Not stored" },
-    { label: "Geography", value: detail.geography || "Not stored" },
-    { label: "Coordinates", value: detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored" },
+    { label: "Address", value: detail.address || "Not stored", quality: attributeScores.get("address") },
+    { label: "Geography", value: detail.geography || "Not stored", quality: attributeScores.get("geography") },
+    { label: "Coordinates", value: detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored", quality: attributeScores.get("coordinates") },
   ];
-  const contactAttributes: Array<{ label: string; value: ReactNode }> = [
+  const contactAttributes: Array<{ label: string; value: ReactNode; quality?: AttributeQuality }> = [
     {
       label: "Website",
       value: detail.website_url
         ? <a href={detail.website_url} target="_blank" rel="noreferrer">{detail.website_url}<ExternalLink size={11} /></a>
         : "Not stored",
+      quality: attributeScores.get("website"),
     },
-    { label: "Domain", value: detail.domain || "Not stored" },
-    { label: "Business phone", value: detail.phone || "Not stored" },
+    { label: "Domain", value: detail.domain || "Not stored", quality: attributeScores.get("domain") },
+    { label: "Business phone", value: detail.phone || "Not stored", quality: attributeScores.get("phone") },
   ];
   const classificationAttributes = [
-    { label: "Chain", value: formatKnownBoolean(detail.is_chain) },
-    { label: "Franchise", value: formatKnownBoolean(detail.is_franchise) },
-    { label: "Directory", value: formatKnownBoolean(detail.is_directory) },
-    { label: "Agency", value: formatKnownBoolean(detail.is_agency) },
+    { label: "Chain", value: formatKnownBoolean(detail.is_chain), quality: attributeScores.get("is_chain") },
+    { label: "Franchise", value: formatKnownBoolean(detail.is_franchise), quality: attributeScores.get("is_franchise") },
+    { label: "Directory", value: formatKnownBoolean(detail.is_directory), quality: attributeScores.get("is_directory") },
+    { label: "Agency", value: formatKnownBoolean(detail.is_agency), quality: attributeScores.get("is_agency") },
   ];
   return (
     <div className="admin-inspector-content admin-business-record">
@@ -442,7 +451,7 @@ function BusinessAttributeRecord({
         {classificationAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
       </AttributeSection>
       <AttributeSection title={`Resolved attributes${lineage?.facts.length ? ` · ${lineage.facts.length}` : ""}`}>
-        <ResolvedAttributeList lineage={lineage} loading={loading} error={error} />
+        <ResolvedAttributeList attributeScores={attributeScores} lineage={lineage} loading={loading} error={error} />
       </AttributeSection>
     </div>
   );
@@ -455,14 +464,28 @@ function AttributeSection({ title, children }: { title: string; children: ReactN
 function BusinessAttributeRow({
   label,
   value,
+  quality,
 }: {
   label: string;
   value: ReactNode;
+  quality?: AttributeQuality;
 }) {
   return <article className="admin-business-attribute">
-    <div><strong>{label}</strong></div>
+    <div><strong>{label}</strong>{quality ? <AttributeScore quality={quality} /> : null}</div>
     <p>{value}</p>
   </article>;
+}
+
+type AttributeQuality = AdminBusinessSummary["data_quality_breakdown"]["attribute_scores"][number];
+
+function AttributeScore({ quality }: { quality: AttributeQuality }) {
+  return <span
+    className={`admin-quality-score is-${quality.label_state}`}
+    title={quality.basis}
+  >
+    <strong>{quality.score == null ? "—" : quality.score}</strong>
+    <small>{quality.score == null ? "unscored" : quality.label_state}</small>
+  </span>;
 }
 
 function formatKnownBoolean(value?: boolean | null) {
@@ -470,10 +493,12 @@ function formatKnownBoolean(value?: boolean | null) {
 }
 
 function ResolvedAttributeList({
+  attributeScores,
   lineage,
   loading,
   error,
 }: {
+  attributeScores: Map<string, AttributeQuality>;
   lineage: AdminFactLineage | null;
   loading: boolean;
   error: string;
@@ -486,6 +511,7 @@ function ResolvedAttributeList({
       key={fact.id}
       label={humanizeKey(fact.key)}
       value={formatValue(fact.value)}
+      quality={attributeScores.get(fact.key)}
     />
   ))}</>;
 }
