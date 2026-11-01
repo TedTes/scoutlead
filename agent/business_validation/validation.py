@@ -12,6 +12,7 @@ from canonical.website_evidence import (
     BLOCKED_WEBSITE_HOSTS,
     assess_website_ownership,
 )
+from canonical.normalization import first_raw_text, nested_raw
 from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
@@ -128,13 +129,17 @@ class BusinessValidationService:
         segment: BusinessIndexSegmentModel,
     ) -> list[ValidationResult]:
         payload = observation.raw_payload or {}
+        raw = nested_raw(payload)
         item = SimpleNamespace(
             id=None,
             source_observation_id=observation.id,
             provider_id=observation.source,
             external_id=observation.external_id,
             source_url=observation.source_url,
-            title=payload.get("title") or payload.get("displayName") or business.display_name,
+            title=(
+                first_raw_text(raw, ("title", "displayName", "name"))
+                or business.display_name
+            ),
             raw_payload=payload,
         )
         return self.evaluate(

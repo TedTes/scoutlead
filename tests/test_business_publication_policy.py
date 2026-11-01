@@ -93,6 +93,54 @@ def test_configured_search_is_verification_only_not_business_identity() -> None:
     assert result.evidence[0]["verification_only_provider"] is True
 
 
+def test_observation_validation_accepts_structured_google_display_name() -> None:
+    now = utcnow()
+    results = BusinessValidationService(None).evaluate_observation(
+        business=SimpleNamespace(
+            id="business_1",
+            display_name="CertaPro Painters of North York",
+            phone="6479335628",
+            domain="certapro.com",
+            website_url="https://certapro.com/north-york/",
+            is_directory=False,
+            address="4789 Yonge St, North York, ON",
+            geography="North York, ON",
+            latitude=43.76,
+            longitude=-79.41,
+        ),
+        observation=SimpleNamespace(
+            id="observation_1",
+            source="google_places",
+            external_id="places/certapro-north-york",
+            source_url="https://certapro.com/north-york/",
+            observed_at=now,
+            raw_payload={
+                "displayName": {"text": "CertaPro Painters of North York"},
+                "primaryTypeDisplayName": "Painter",
+                "types": ["painter"],
+                "formattedAddress": "4789 Yonge St, North York, ON",
+            },
+        ),
+        segment=SimpleNamespace(
+            niche_id="niche_1",
+            market_key="north-york",
+            market_label="North York",
+            niche=SimpleNamespace(
+                slug="home_service_painting",
+                label="Painting",
+                category="painting contractor",
+                search_config={},
+            ),
+        ),
+    )
+
+    business_identity = next(
+        result for result in results if result.validation_type == "business_identity"
+    )
+    assert business_identity.status == "passed"
+    assert business_identity.evidence[0]["title"] == "certapro painters of north york"
+
+
 def test_secondary_provider_category_does_not_override_primary_trade() -> None:
     now = utcnow()
     result = BusinessValidationService(None)._trade(
