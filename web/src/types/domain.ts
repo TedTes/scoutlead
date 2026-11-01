@@ -984,6 +984,13 @@ export type AdminBusinessSummary = {
   data_quality_score: number;
   data_quality_label: "reliable" | "review" | "poor";
   data_quality_breakdown: {
+    validation_scores?: Array<{
+      key: string;
+      label: string;
+      score: number;
+      status: string;
+      confidence: number | null;
+    }>;
     attribute_scores: Array<{
       key: string;
       label: string;
@@ -991,6 +998,13 @@ export type AdminBusinessSummary = {
       weight: number;
       basis: string;
       label_state: "reliable" | "review" | "poor" | "unknown";
+      evidence_confidence?: number | null;
+      evidence_state?: string;
+      resolution_state?: string;
+      quality_state?: string;
+      source_observation_id?: string | null;
+      observed_at?: string | null;
+      expires_at?: string | null;
     }>;
     scored_attribute_count: number;
     fact_count: number;
@@ -1104,6 +1118,10 @@ export type AdminFactLineageFact = {
   key: string;
   value: unknown;
   value_type: string;
+  attribute_score?: number | null;
+  score_version?: number | null;
+  score_reason?: string | null;
+  evidence_confidence?: number | null;
   confidence: number;
   resolution_state: string;
   quality_state: string;
@@ -1113,6 +1131,17 @@ export type AdminFactLineageFact = {
   supporting_claim_ids: string[];
   validation?: AdminFactLineageValidation | null;
   signal?: AdminFactLineageSignal | null;
+};
+
+export type AdminAttributeDefinition = {
+  key: string;
+  label: string;
+  category: string;
+  category_label: string;
+  category_sort_order: number;
+  sort_order: number;
+  value_type: string;
+  status: string;
 };
 
 export type AdminFactLineageClaim = {
@@ -1141,6 +1170,7 @@ export type AdminFactLineageObservation = {
 
 export type AdminFactLineage = {
   business_id: string;
+  attribute_definitions: AdminAttributeDefinition[];
   facts: AdminFactLineageFact[];
   claims: AdminFactLineageClaim[];
   observations: AdminFactLineageObservation[];

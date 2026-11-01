@@ -1,0 +1,60 @@
+.admin-attribute-coverage {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid #d9dee6;
+  border-radius: 999px;
+  color: #6d7787;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.admin-attribute-coverage strong {
+  color: #20242a;
+  font-size: 10px;
+}
+
+.admin-business-attribute.tracked-attribute > div > span:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-business-attribute.tracked-attribute code {
+  color: #919baa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 7px;
+  font-weight: 500;
+}
+
+.admin-business-attribute.tracked-attribute.is-unobserved p {
+  color: #919baa;
+  font-style: italic;
+}
+
+.admin-footprint-score {
+  min-width: 48px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  color: #5f6978;
+  font-size: 9px;
+}
+
+.admin-footprint-score strong {
+  font-size: 11px;
+}
+
+.admin-footprint-score small {
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-footprint-score.is-strong { color: #14805e; }
+.admin-footprint-score.is-fair { color: #607181; }
+.admin-footprint-score.is-weak { color: #9c620d; }
+.admin-footprint-score.is-gap { color: #c33535; }
+.admin-footprint-score.is-unscored { color: #98a1ae; }
