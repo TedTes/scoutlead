@@ -26,6 +26,7 @@ from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
+    ContactModel,
     FactClaimModel,
     NicheModel,
     QueueJobModel,
@@ -1005,6 +1006,13 @@ class AdminDataService:
                 .limit(30)
             )
         )
+        contacts = list(
+            self.session.scalars(
+                select(ContactModel)
+                .where(ContactModel.business_id == business_id)
+                .order_by(ContactModel.last_seen_at.desc())
+            )
+        )
         audit = list(
             self.session.scalars(
                 select(AdminAuditEventModel)
@@ -1069,6 +1077,23 @@ class AdminDataService:
                     "last_error": item.last_error,
                 }
                 for item in sources
+            ],
+            "contacts": [
+                {
+                    "id": contact.id,
+                    "name": contact.name,
+                    "role": contact.role,
+                    "email": contact.email,
+                    "phone": contact.phone,
+                    "verification_status": contact.verification_status,
+                    "verification_provider": contact.verification_provider,
+                    "verification_checked_at": contact.verification_checked_at,
+                    "verification_reason": contact.verification_reason,
+                    "verification_score": contact.verification_score,
+                    "first_seen_at": contact.first_seen_at,
+                    "last_seen_at": contact.last_seen_at,
+                }
+                for contact in contacts
             ],
             "audit": [
                 {
@@ -1862,6 +1887,7 @@ class AdminDataService:
             "market_key": membership[0].market_key if membership else business.market_key,
             "niche_slug": membership[1].slug if membership else business.category_key,
             "niche_label": membership[1].label if membership else business.category_key,
+            "first_seen_at": business.first_seen_at,
             "last_seen_at": business.last_seen_at,
         }
 

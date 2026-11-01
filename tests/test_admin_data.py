@@ -21,6 +21,7 @@ from db.models import (
     BusinessModel,
     BusinessIndexSegmentModel,
     BusinessNicheMembershipModel,
+    ContactModel,
     FactClaimModel,
     NicheModel,
     QueueJobModel,
@@ -109,6 +110,41 @@ def test_edit_quarantines_business_and_audits() -> None:
         assert audit.actor_email == "admin@example.com"
         assert audit.before["phone"] is None
         assert audit.after["phone"] == "4165550199"
+
+
+def test_admin_business_detail_includes_collected_contacts() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        now = utcnow()
+        session.add(
+            ContactModel(
+                id=new_id("contact"),
+                business_id=business.id,
+                name="Alex Owner",
+                role="Owner",
+                email="alex@example.test",
+                phone="4165550100",
+                verification_status="verified",
+                verification_provider="test",
+                verification_checked_at=now,
+                verification_score=98,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+        )
+        session.commit()
+
+        detail = _service(session).detail(business.id)
+
+        assert detail["first_seen_at"] == business.first_seen_at
+        assert len(detail["contacts"]) == 1
+        assert detail["contacts"][0]["id"] == session.scalar(select(ContactModel.id))
+        assert detail["contacts"][0]["name"] == "Alex Owner"
+        assert detail["contacts"][0]["role"] == "Owner"
+        assert detail["contacts"][0]["email"] == "alex@example.test"
+        assert detail["contacts"][0]["verification_status"] == "verified"
+        assert detail["contacts"][0]["verification_score"] == 98
 
 
 def test_expired_validation_is_reported_as_incomplete() -> None:

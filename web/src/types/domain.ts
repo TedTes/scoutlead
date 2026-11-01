@@ -1007,6 +1007,7 @@ export type AdminBusinessSummary = {
   market_key?: string | null;
   niche_slug?: string | null;
   niche_label?: string | null;
+  first_seen_at: string;
   last_seen_at: string;
 };
 
@@ -1035,6 +1036,20 @@ export type AdminBusinessDetail = AdminBusinessSummary & {
   facts: Array<Record<string, unknown>>;
   signals: AdminBusinessSignal[];
   sources: Array<Record<string, unknown>>;
+  contacts: Array<{
+    id: string;
+    name?: string | null;
+    role?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    verification_status: string;
+    verification_provider?: string | null;
+    verification_checked_at?: string | null;
+    verification_reason?: string | null;
+    verification_score?: number | null;
+    first_seen_at: string;
+    last_seen_at: string;
+  }>;
   audit: Array<Record<string, unknown>>;
   delete_dependencies: Record<string, number>;
 };

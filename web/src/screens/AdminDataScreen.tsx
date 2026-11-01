@@ -1,5 +1,4 @@
 import {
-  Activity,
   Archive,
   CheckCircle2,
   ChevronLeft,
@@ -15,7 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ApiClient } from "../api/client";
 import type {
@@ -315,60 +314,6 @@ function QualityScore({ row }: { row: AdminBusinessSummary }) {
   );
 }
 
-function QualityBreakdown({ business }: { business: AdminBusinessSummary }) {
-  const breakdown = business.data_quality_breakdown;
-  const limitations = breakdown.limitations || [];
-  const validationLabels: Record<string, [string, string]> = {
-    identity: ["Identity", "Stable provider or contact identifier"],
-    business_identity: ["Business record", "Not an ad, directory, or generic service title"],
-    trade: ["Trade/category", "Evidence supports the assigned trade"],
-    location: ["Location", "Address or coordinates support the market"],
-  };
-  const factComponents = [
-    ["Facts with a source", breakdown.provenance],
-    ["Facts still fresh", breakdown.freshness],
-    ["Facts confirmed", breakdown.resolution],
-    ["Facts published", breakdown.publication],
-  ] as const;
-  return (
-    <section className="admin-quality-breakdown" aria-label="Data quality score breakdown">
-      <header>
-        <div><strong>Data quality</strong><small>{breakdown.fact_count} business facts assessed</small></div>
-        <QualityScore row={business} />
-      </header>
-      <div className="admin-quality-section-heading"><strong>Required validations</strong><span>{breakdown.validation.points}/{breakdown.validation.max} points</span></div>
-      <div className="admin-quality-validations">
-        {(breakdown.validation_components || []).map((component) => {
-          const [label, description] = validationLabels[component.key] || [component.key, "Required business validation"];
-          return <div key={component.key}>
-            <span className="admin-quality-parameter-label"><strong>{label}</strong><small>{description}</small></span>
-            <StatusPill value={component.status} />
-            <span>{component.status === "missing" ? "Not run" : `${component.confidence}% confidence`}</span>
-            <strong>{component.points}/{component.max}</strong>
-          </div>;
-        })}
-      </div>
-      <div className="admin-quality-section-heading"><strong>Fact checks</strong><span>{breakdown.fact_count} total facts</span></div>
-      <div className="admin-quality-components">
-        {factComponents.map(([label, component]) => (
-          <div key={label}>
-            <span>{label}</span>
-            <i><b style={{ width: `${component.max ? component.points / component.max * 100 : 0}%` }} /></i>
-            <small>{component.count ?? 0} of {component.total ?? breakdown.fact_count}</small>
-            <strong>{component.points}/{component.max}</strong>
-          </div>
-        ))}
-      </div>
-      <div className={`admin-quality-reasons ${limitations.length ? "has-limitations" : ""}`}>
-        <strong>{limitations.length ? "Score limitations" : "Reliability gates passed"}</strong>
-        {limitations.length
-          ? <ul>{limitations.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-          : <p>No score-limiting data problems were detected.</p>}
-      </div>
-    </section>
-  );
-}
-
 function exportBusinessesCsv(rows: AdminBusinessSummary[]) {
   const headers = [
     "Business ID", "Business", "Trade", "Market", "Address", "Website", "Phone",
@@ -409,7 +354,6 @@ function BusinessInspector({
   onDelete: () => void;
   onRefresh: (value?: AdminBusinessDetail) => Promise<void>;
 }) {
-  const [tab, setTab] = useState<"validation" | "signals" | "facts" | "sources" | "history">("facts");
   const [busy, setBusy] = useState(false);
   const [lineage, setLineage] = useState<AdminFactLineage | null>(null);
   const [lineageLoading, setLineageLoading] = useState(false);
@@ -449,37 +393,14 @@ function BusinessInspector({
     }
   };
 
-  const collectSignal = async (definitionId: string, label: string) => {
-    const reason = window.prompt(`Reason for collecting ${label} for this business`);
-    if (!reason?.trim()) return;
-    setBusy(true);
-    try {
-      await api.collectAdminSignal(definitionId, reason, [detail.id]);
-      await onRefresh();
-      await loadLineage();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const validateSignal = async (definitionId: string, label: string, decision: "approve" | "reject") => {
-    const reason = window.prompt(`Reason to ${decision} ${label} for this business`);
-    if (!reason?.trim()) return;
-    setBusy(true);
-    try {
-      await api.validateAdminSignal(definitionId, decision, reason, [detail.id]);
-      await onRefresh();
-      await loadLineage();
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <aside className="admin-inspector">
       <header>
         <div><h2>{detail.display_name}</h2><p>{detail.niche_label} · {detail.market_key}</p></div>
-        <button className="admin-icon-button" title="Edit business" type="button" onClick={onEdit}><Pencil size={15} /></button>
+        <div className="admin-inspector-header-actions">
+          <QualityScore row={detail} />
+          <button className="admin-icon-button" title="Edit business" type="button" onClick={onEdit}><Pencil size={15} /></button>
+        </div>
       </header>
       <div className="admin-inspector-actions">
         <button disabled={busy} type="button" onClick={() => void runAction("revalidate")}><RefreshCw size={14} /> Revalidate</button>
@@ -491,27 +412,133 @@ function BusinessInspector({
         <button disabled={busy} type="button" onClick={() => void runAction("status", "archived")}><Archive size={14} /> Archive</button>
         <button className="danger" type="button" onClick={onDelete}><Trash2 size={14} /></button>
       </div>
-      <dl className="admin-identity-grid">
-        <div><dt>Website</dt><dd>{detail.website_url ? <a href={detail.website_url} target="_blank" rel="noreferrer">{detail.domain || detail.website_url}<ExternalLink size={12} /></a> : "Not stored"}</dd></div>
-        <div><dt>Phone</dt><dd>{detail.phone || "Not stored"}</dd></div>
-        <div><dt>Address</dt><dd>{detail.address || detail.geography || "Not stored"}</dd></div>
-        <div><dt>Coordinates</dt><dd>{detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored"}</dd></div>
-        <div><dt>Business ID</dt><dd title={detail.id}>{detail.id}</dd></div>
-        <div><dt>Last seen</dt><dd>{formatDate(detail.last_seen_at)}</dd></div>
-      </dl>
-      <QualityBreakdown business={detail} />
-      <nav className="admin-tabs">
-        {(["validation", "signals", "facts", "sources", "history"] as const).map((value) => <button className={tab === value ? "active" : ""} key={value} type="button" onClick={() => setTab(value)}>{value}</button>)}
-      </nav>
-      <div className="admin-inspector-content">
-        {tab === "validation" ? detail.validations.map((item) => <article className="admin-validation-row" key={item.type}><div><strong>{item.type.replace(/_/g, " ")}</strong><StatusPill value={item.status} /></div><p>{item.reason}</p><small>{item.confidence}% confidence · {new Date(item.observed_at).toLocaleDateString()}</small></article>) : null}
-        {tab === "signals" ? detail.signals.map((signal) => <article className="admin-signal-row" key={signal.definition_id}><div className="admin-signal-row-heading"><div><strong>{signal.label}</strong><small>{signal.category}{signal.quality_state ? ` · ${signal.quality_state}` : ""}</small></div><StatusPill value={signal.status} /></div><div className="admin-signal-row-value"><span>{signal.status === "missing" ? "No observation" : formatValue(signal.value)}{signal.unit && signal.value != null ? ` ${signal.unit}` : ""}</span><div className="admin-signal-row-actions">{signal.quality_state === "staged" ? <><button disabled={busy} type="button" onClick={() => void validateSignal(signal.definition_id, signal.label, "approve")}><CheckCircle2 size={13} /> Approve</button><button className="danger" disabled={busy} type="button" onClick={() => void validateSignal(signal.definition_id, signal.label, "reject")}><X size={13} /> Reject</button></> : null}<button disabled={busy} title={`Collect ${signal.label}`} type="button" onClick={() => void collectSignal(signal.definition_id, signal.label)}><Activity size={13} /> Collect</button></div></div>{signal.observed_at ? <small>{signal.confidence}% confidence · observed {new Date(signal.observed_at).toLocaleDateString()}</small> : null}</article>) : null}
-        {tab === "facts" ? <FactLineageView lineage={lineage} loading={lineageLoading} error={lineageError} /> : null}
-        {tab === "sources" ? detail.sources.map((source) => <article className="admin-source-row" key={String(source.id)}><div><strong>{String(source.provider)}</strong><StatusPill value={String(source.state)} /></div><p>{String(source.title || "Untitled source")}</p>{source.source_url ? <a href={String(source.source_url)} target="_blank" rel="noreferrer">Open evidence <ExternalLink size={12} /></a> : null}</article>) : null}
-        {tab === "history" ? <KeyValueRows rows={detail.audit} primary="action" secondary="reason" /> : null}
-      </div>
+      <BusinessAttributeRecord
+        detail={detail}
+        error={lineageError}
+        lineage={lineage}
+        loading={lineageLoading}
+      />
     </aside>
   );
+}
+
+function BusinessAttributeRecord({
+  detail,
+  lineage,
+  loading,
+  error,
+}: {
+  detail: AdminBusinessDetail;
+  lineage: AdminFactLineage | null;
+  loading: boolean;
+  error: string;
+}) {
+  const validations = new Map(detail.validations.map((validation) => [validation.type, validation]));
+  const contacts = detail.contacts || [];
+  const profileAttributes: Array<{
+    label: string;
+    value: ReactNode;
+    validation?: AdminBusinessDetail["validations"][number];
+  }> = [
+    { label: "Business name", value: detail.display_name, validation: validations.get("business_identity") },
+    { label: "Normalized name", value: detail.normalized_name },
+    { label: "Business ID", value: detail.id, validation: validations.get("identity") },
+    { label: "Trade/category", value: detail.niche_label || detail.niche_slug || "Not classified", validation: validations.get("trade") },
+    { label: "Market", value: detail.market_key || "Not stored" },
+    { label: "Customer type", value: humanizeKey(detail.customer_kind || "unknown") },
+    { label: "Status", value: <StatusPill value={detail.status} /> },
+  ];
+  const locationAttributes = [
+    { label: "Address", value: detail.address || "Not stored", validation: validations.get("location") },
+    { label: "Geography", value: detail.geography || "Not stored" },
+    { label: "Coordinates", value: detail.latitude != null && detail.longitude != null ? `${detail.latitude}, ${detail.longitude}` : "Not stored" },
+  ];
+  const contactAttributes: Array<{ label: string; value: ReactNode }> = [
+    {
+      label: "Website",
+      value: detail.website_url
+        ? <a href={detail.website_url} target="_blank" rel="noreferrer">{detail.website_url}<ExternalLink size={11} /></a>
+        : "Not stored",
+    },
+    { label: "Domain", value: detail.domain || "Not stored" },
+    { label: "Business phone", value: detail.phone || "Not stored" },
+  ];
+  const classificationAttributes = [
+    { label: "Chain", value: formatKnownBoolean(detail.is_chain) },
+    { label: "Franchise", value: formatKnownBoolean(detail.is_franchise) },
+    { label: "Directory", value: formatKnownBoolean(detail.is_directory) },
+    { label: "Agency", value: formatKnownBoolean(detail.is_agency) },
+    { label: "First seen", value: formatDate(detail.first_seen_at) },
+    { label: "Last seen", value: formatDate(detail.last_seen_at) },
+  ];
+  return (
+    <div className="admin-inspector-content admin-business-record">
+      <AttributeSection title="Identity and classification">
+        {profileAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
+      </AttributeSection>
+      <AttributeSection title="Location">
+        {locationAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
+      </AttributeSection>
+      <AttributeSection title="Website and contact">
+        {contactAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
+        {contacts.length ? contacts.map((contact) => (
+          <article className="admin-contact-record" key={contact.id}>
+            <div><strong>{contact.name || contact.email || contact.phone || "Unnamed contact"}</strong><StatusPill value={contact.verification_status} /></div>
+            <dl>
+              <div><dt>Role</dt><dd>{contact.role || "Not stored"}</dd></div>
+              <div><dt>Email</dt><dd>{contact.email || "Not stored"}</dd></div>
+              <div><dt>Phone</dt><dd>{contact.phone || "Not stored"}</dd></div>
+              <div><dt>Verification</dt><dd>{contact.verification_score != null ? `${contact.verification_score}%` : "Not scored"}</dd></div>
+            </dl>
+            <small>Last seen {formatDate(contact.last_seen_at)}{contact.verification_reason ? ` · ${contact.verification_reason}` : ""}</small>
+          </article>
+        )) : <p className="admin-record-empty">No individual contacts collected.</p>}
+      </AttributeSection>
+      <AttributeSection title="Business classification flags">
+        {classificationAttributes.map((attribute) => <BusinessAttributeRow {...attribute} key={attribute.label} />)}
+      </AttributeSection>
+      <AttributeSection title={`Canonical attributes${lineage?.facts.length ? ` · ${lineage.facts.length}` : ""}`}>
+        <FactLineageView lineage={lineage} loading={loading} error={error} />
+      </AttributeSection>
+      <AttributeSection title={`Supporting observations${lineage?.observations.length ? ` · ${lineage.observations.length}` : ""}`}>
+        {lineage?.observations.length
+          ? lineage.observations.map((observation) => <ObservationEvidence observation={observation} label="Source observation" key={observation.id} />)
+          : <p className="admin-record-empty">No supporting source observations linked to current facts.</p>}
+      </AttributeSection>
+      <AttributeSection title={`Collected source items · ${detail.sources.length}`}>
+        {detail.sources.length
+          ? detail.sources.map((source) => <article className="admin-source-row" key={String(source.id)}><div><strong>{humanizeKey(String(source.provider))}</strong><StatusPill value={String(source.state)} /></div><p>{String(source.title || "Untitled source")}</p><small>{source.fetched_at ? formatDate(String(source.fetched_at)) : "Date unavailable"}</small>{source.source_url ? <a href={String(source.source_url)} target="_blank" rel="noreferrer">Open source <ExternalLink size={11} /></a> : null}</article>)
+          : <p className="admin-record-empty">No source items collected.</p>}
+      </AttributeSection>
+      <AttributeSection title={`Administrative history · ${detail.audit.length}`}>
+        <KeyValueRows rows={detail.audit} primary="action" secondary="reason" />
+      </AttributeSection>
+    </div>
+  );
+}
+
+function AttributeSection({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="admin-attribute-section"><h3>{title}</h3>{children}</section>;
+}
+
+function BusinessAttributeRow({
+  label,
+  value,
+  validation,
+}: {
+  label: string;
+  value: ReactNode;
+  validation?: AdminBusinessDetail["validations"][number];
+}) {
+  return <article className="admin-business-attribute">
+    <div><strong>{label}</strong>{validation ? <StatusPill value={validation.status} /> : null}</div>
+    <p>{value}</p>
+    {validation ? <small>{validation.confidence}% confidence · {validation.reason} · checked {formatDate(validation.observed_at)}</small> : null}
+  </article>;
+}
+
+function formatKnownBoolean(value?: boolean | null) {
+  return value == null ? "Unknown" : value ? "Yes" : "No";
 }
 
 function FactLineageView({
