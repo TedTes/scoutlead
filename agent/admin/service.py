@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete as sql_delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from admin.schemas import (
@@ -1382,6 +1382,9 @@ class AdminDataService:
                 "required_checks": detail["data_quality_breakdown"].get(
                     "validation_scores", []
                 ),
+                "reasons": detail["data_quality_breakdown"].get(
+                    "quality_reasons", []
+                ),
                 "limitations": detail["data_quality_breakdown"].get(
                     "limitations", []
                 ),
@@ -1576,37 +1579,92 @@ class AdminDataService:
 
     def delete_dependencies(self, business_id: str) -> dict[str, int]:
         self._business(business_id)
-        dependencies: dict[str, int] = {}
+        targets = self._dependent_record_ids(business_id)
+        return {
+            table_name: len(record_ids)
+            for table_name, record_ids in targets.items()
+            if table_name != "businesses" and record_ids
+        }
+
+    def _dependent_record_ids(self, business_id: str) -> dict[str, set[Any]]:
+        targets: dict[str, set[Any]] = {"businesses": {business_id}}
         for table in Base.metadata.sorted_tables:
             if table.name in {"businesses", "admin_audit_events"}:
                 continue
-            columns = [
-                column for column in table.columns
-                if any(fk.column.table.name == "businesses" for fk in column.foreign_keys)
-            ]
-            if not columns:
+            primary_keys = list(table.primary_key.columns)
+            if len(primary_keys) != 1:
                 continue
-            count = 0
-            for column in columns:
-                count += int(self.session.scalar(select(func.count()).select_from(table).where(column == business_id)) or 0)
-            if count:
-                dependencies[table.name] = count
-        return dependencies
+            conditions = []
+            for column in table.columns:
+                for foreign_key in column.foreign_keys:
+                    parent_ids = targets.get(foreign_key.column.table.name)
+                    if parent_ids:
+                        conditions.append(column.in_(parent_ids))
+            if not conditions:
+                continue
+            record_ids = set(
+                self.session.scalars(
+                    select(primary_keys[0]).select_from(table).where(or_(*conditions))
+                )
+            )
+            if record_ids:
+                targets[table.name] = record_ids
+        return targets
 
     def delete(self, business_id: str, confirmation: str, reason: str) -> None:
         business = self._business(business_id)
         if confirmation.strip() != business.display_name:
             raise ValidationError("Confirmation must exactly match the business name")
-        dependencies = self.delete_dependencies(business_id)
-        if dependencies:
-            raise ConflictError(
-                "Permanent deletion is blocked because related records exist. Archive the business instead.",
-                {"dependencies": dependencies},
-            )
-        before = _business_dict(business)
-        self._audit("delete", business.id, reason, before, None)
-        self.session.delete(business)
+        self._purge_business(business, reason)
         self.session.commit()
+
+    def bulk_delete(
+        self,
+        business_ids: list[str],
+        confirmation: str,
+        reason: str,
+    ) -> dict[str, int]:
+        unique_ids = list(dict.fromkeys(business_ids))
+        expected = f"DELETE {len(unique_ids)} BUSINESSES"
+        if confirmation.strip() != expected:
+            raise ValidationError(f'Confirmation must exactly match "{expected}"')
+        businesses = [self._business(business_id) for business_id in unique_ids]
+        for business in businesses:
+            self._purge_business(business, reason)
+        self.session.commit()
+        return {"deleted_businesses": len(businesses)}
+
+    def _purge_business(self, business: BusinessModel, reason: str) -> None:
+        business_id = business.id
+        targets = self._dependent_record_ids(business_id)
+        dependencies = {
+            table_name: len(record_ids)
+            for table_name, record_ids in targets.items()
+            if table_name != "businesses" and record_ids
+        }
+        before = _business_dict(business)
+
+        # This is an explicitly confirmed administrative purge. Delete dependent
+        # rows in reverse FK order so a false business entity does not leave facts,
+        # observations, memberships, or workflow state behind.
+        for table in reversed(Base.metadata.sorted_tables):
+            if table.name in {"businesses", "admin_audit_events"}:
+                continue
+            record_ids = targets.get(table.name)
+            primary_keys = list(table.primary_key.columns)
+            if record_ids and len(primary_keys) == 1:
+                self.session.execute(
+                    sql_delete(table).where(primary_keys[0].in_(record_ids))
+                )
+
+        self._audit(
+            "delete",
+            business.id,
+            reason,
+            before,
+            {"deleted_dependencies": dependencies},
+        )
+        self.session.delete(business)
 
     def _business(self, business_id: str) -> BusinessModel:
         business = self.session.get(BusinessModel, business_id)
@@ -2176,17 +2234,50 @@ def _attribute_data_quality_score(
         else "poor"
     )
     limitations = []
+    quality_reasons = []
     for component in validation_components:
+        component_key = str(component["key"]).upper()
         if component["status"] == "passed":
+            quality_reasons.append(
+                {
+                    "code": f"{component_key}_PASSED",
+                    "impact": "positive",
+                    "severity": "info",
+                    "check": component["key"],
+                    "score": component["score"],
+                    "message": (
+                        f'{component["label"]} passed'
+                        + (
+                            f' with {component["confidence"]}% confidence.'
+                            if component["confidence"] is not None
+                            else "."
+                        )
+                    ),
+                }
+            )
             continue
         if component["status"] == "refresh_required":
-            limitations.append(f'{component["label"]} evidence requires refresh')
+            message = f'{component["label"]} evidence requires refresh.'
+            limitations.append(message.removesuffix("."))
+            severity = "warning"
         elif component["status"] == "missing":
-            limitations.append(f'{component["label"]} evidence is missing')
+            message = f'{component["label"]} evidence is missing.'
+            limitations.append(message.removesuffix("."))
+            severity = "critical"
         else:
-            limitations.append(
-                f'{component["label"]} validation is {component["status"]}'
-            )
+            message = f'{component["label"]} validation is {component["status"]}.'
+            limitations.append(message.removesuffix("."))
+            severity = "critical" if component["status"] == "failed" else "warning"
+        quality_reasons.append(
+            {
+                "code": f'{component_key}_{str(component["status"]).upper()}',
+                "impact": "negative",
+                "severity": severity,
+                "check": component["key"],
+                "score": component["score"],
+                "message": message,
+            }
+        )
     limitations.extend(
         f'{item["label"]} evidence is {item["evidence_state"]}'
         for item in fact_attributes
@@ -2203,6 +2294,7 @@ def _attribute_data_quality_score(
             ),
             "fact_count": len(fact_attributes),
             "limitations": limitations,
+            "quality_reasons": quality_reasons,
         },
     }
 

@@ -53,7 +53,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [dialog, setDialog] = useState<"add" | "edit" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"add" | "edit" | "bulk-delete" | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
@@ -260,6 +260,14 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         >
           <Download size={14} /> {exporting ? "Preparing…" : `Export JSON ${selectedCount || ""}`}
         </button>
+        <button
+          className="admin-bulk-delete-button"
+          disabled={!selectedCount}
+          type="button"
+          onClick={() => setDialog("bulk-delete")}
+        >
+          <Trash2 size={14} /> Delete {selectedCount || ""}
+        </button>
         <button className="admin-icon-button" title="Refresh" type="button" onClick={() => void load()}>
           <RefreshCw size={15} />
         </button>
@@ -308,7 +316,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
 
       {dialog === "add" ? <BusinessForm api={api} mode="add" onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
       {dialog === "edit" && detail ? <BusinessForm api={api} mode="edit" detail={detail} onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
-      {dialog === "delete" && detail ? <DeleteDialog api={api} detail={detail} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); setSelectedId(""); void load(); }} /> : null}
+      {dialog === "bulk-delete" ? <BulkDeleteDialog api={api} businesses={Object.values(selectedBusinesses)} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); setSelectedBusinesses({}); setSelectedId(""); void load(); }} /> : null}
     </section>
   );
 }
@@ -486,6 +494,7 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
       score: detail.data_quality_score,
       label: detail.data_quality_label,
       required_checks: detail.data_quality_breakdown.validation_scores,
+      reasons: detail.data_quality_breakdown.quality_reasons,
       limitations: detail.data_quality_breakdown.limitations,
     },
     attributes,
@@ -542,6 +551,7 @@ function BusinessAttributeRecord({
 
   return (
     <div className="admin-inspector-content admin-business-record">
+      <QualityReasons detail={detail} />
       {groups.map((group) => <AttributeSection title={group.label} key={group.key}>
         {group.definitions.map((definition) => {
           const fact = factsByKey.get(definition.key);
@@ -560,6 +570,19 @@ function BusinessAttributeRecord({
       </AttributeSection>)}
     </div>
   );
+}
+
+function QualityReasons({ detail }: { detail: AdminBusinessDetail }) {
+  const reasons = detail.data_quality_breakdown.quality_reasons || [];
+  return <section className="admin-record-quality-reasons">
+    <header>
+      <div><strong>Why this quality score</strong><span>{detail.data_quality_score ?? "Not scored"} · {humanizeKey(detail.data_quality_label)}</span></div>
+    </header>
+    {reasons.length ? <ul>{reasons.map((reason) => <li className={`is-${reason.impact}`} key={reason.code}>
+      <span aria-hidden="true">{reason.impact === "positive" ? "✓" : "!"}</span>
+      <div><strong>{reason.message}</strong><small>{reason.score == null ? "No score" : `${reason.score}/100`} · {humanizeKey(reason.check)}</small></div>
+    </li>)}</ul> : <p>No quality explanation is available.</p>}
+  </section>;
 }
 
 function AttributeSection({ title, children }: { title: string; children: ReactNode }) {
@@ -680,10 +703,9 @@ function BusinessForm({ api, mode, detail, onClose, onSaved }: { api: ApiClient;
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
 
-function DeleteDialog({ api, detail, onClose, onDeleted }: { api: ApiClient; detail: AdminBusinessDetail; onClose: () => void; onDeleted: () => void }) {
-  const [confirmation, setConfirmation] = useState(""); const [reason, setReason] = useState(""); const [error, setError] = useState(""); const [dependencyMap, setDependencyMap] = useState<Record<string, number> | null>(null);
-  useEffect(() => { void api.getAdminBusinessDeleteDependencies(detail.id).then(setDependencyMap).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))); }, [api, detail.id]);
-  const dependencies = useMemo(() => Object.entries(dependencyMap || {}), [dependencyMap]);
-  const remove = async () => { try { await api.deleteAdminBusiness(detail.id, confirmation, reason); onDeleted(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } };
-  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-delete-dialog" role="dialog" aria-modal="true"><header><div><h2>Delete business permanently</h2><p>Use Archive for records that have evidence or workflow history.</p></div><button className="admin-icon-button" type="button" onClick={onClose}><X size={16} /></button></header>{dependencyMap === null ? <div className="admin-dependency-warning"><RefreshCw className="sl-spin-icon" size={16} /><div><strong>Checking related records</strong></div></div> : dependencies.length ? <div className="admin-dependency-warning"><CircleAlert size={16} /><div><strong>Permanent deletion is blocked</strong><p>{dependencies.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></div></div> : null}<Field label={`Type “${detail.display_name}”`} value={confirmation} onChange={setConfirmation} /><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-danger-button" disabled={dependencyMap === null || Boolean(dependencies.length) || confirmation !== detail.display_name || !reason.trim()} type="button" onClick={() => void remove()}><Trash2 size={14} /> Delete permanently</button></footer></div></div>;
+function BulkDeleteDialog({ api, businesses, onClose, onDeleted }: { api: ApiClient; businesses: AdminBusinessSummary[]; onClose: () => void; onDeleted: () => void }) {
+  const [confirmation, setConfirmation] = useState(""); const [reason, setReason] = useState(""); const [error, setError] = useState(""); const [deleting, setDeleting] = useState(false);
+  const expected = `DELETE ${businesses.length} BUSINESSES`;
+  const remove = async () => { setDeleting(true); setError(""); try { await api.bulkDeleteAdminBusinesses(businesses.map((business) => business.id), confirmation, reason); onDeleted(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setDeleting(false); } };
+  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-delete-dialog" role="dialog" aria-modal="true"><header><div><h2>Delete {businesses.length} businesses permanently</h2><p>This removes the selected businesses and all attached facts, observations, memberships, and workflow records. Audit entries are retained.</p></div><button className="admin-icon-button" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-bulk-delete-list">{businesses.slice(0, 8).map((business) => <span key={business.id}>{business.display_name}</span>)}{businesses.length > 8 ? <span>+ {businesses.length - 8} more</span> : null}</div><Field label={`Type “${expected}”`} value={confirmation} onChange={setConfirmation} /><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-danger-button" disabled={deleting || confirmation !== expected || !reason.trim()} type="button" onClick={() => void remove()}><Trash2 size={14} /> {deleting ? "Deleting…" : `Delete ${businesses.length} businesses`}</button></footer></div></div>;
 }

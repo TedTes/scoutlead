@@ -136,6 +136,13 @@ export class ApiClient {
     });
   }
 
+  bulkDeleteAdminBusinesses(businessIds: string[], confirmation: string, reason: string) {
+    return this.request<{ deleted_businesses: number }>("/admin/businesses/bulk-delete", {
+      method: "POST",
+      body: { business_ids: businessIds, confirmation, reason },
+    });
+  }
+
   getAdminDataSegments() {
     return this.request<AdminDataSegment[]>("/admin/data-jobs/segments");
   }

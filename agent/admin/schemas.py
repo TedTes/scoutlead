@@ -54,6 +54,12 @@ class AdminDeleteRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
+class AdminBulkDeleteRequest(BaseModel):
+    business_ids: list[str] = Field(min_length=1, max_length=500)
+    confirmation: str
+    reason: str = Field(min_length=3, max_length=1000)
+
+
 class AdminDataJobCreate(BaseModel):
     segment_id: str
     processing_mode: Literal["automatic", "review_first"] = "review_first"

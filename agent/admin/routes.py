@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, Response
 
 from admin.schemas import (
+    AdminBulkDeleteRequest,
     AdminBusinessExportRequest,
     AdminActionReason,
     AdminBusinessCreate,
@@ -396,6 +397,19 @@ def business_delete_dependencies(
     auth: AdminAuth,
 ):
     return _service(session, auth).delete_dependencies(business_id)
+
+
+@router.post("/businesses/bulk-delete")
+def bulk_delete_businesses(
+    data: AdminBulkDeleteRequest,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).bulk_delete(
+        data.business_ids,
+        data.confirmation,
+        data.reason,
+    )
 
 
 @router.delete("/businesses/{business_id}", status_code=204)

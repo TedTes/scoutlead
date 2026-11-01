@@ -987,7 +987,7 @@ export type AdminBusinessSummary = {
     validation_scores?: Array<{
       key: string;
       label: string;
-      score: number;
+      score: number | null;
       status: string;
       confidence: number | null;
     }>;
@@ -1009,6 +1009,14 @@ export type AdminBusinessSummary = {
     scored_attribute_count: number;
     fact_count: number;
     limitations: string[];
+    quality_reasons: Array<{
+      code: string;
+      impact: "positive" | "negative";
+      severity: "info" | "warning" | "critical";
+      check: string;
+      score: number | null;
+      message: string;
+    }>;
   };
   website_url?: string | null;
   domain?: string | null;

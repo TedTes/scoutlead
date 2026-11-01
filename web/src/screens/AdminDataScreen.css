@@ -65,6 +65,54 @@
   gap: 6px;
 }
 
+.admin-bulk-delete-button {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid #efb7b7;
+  border-radius: 5px;
+  background: #fff;
+  color: #b32b2b;
+  font-size: 8px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.admin-bulk-delete-list {
+  max-height: 132px;
+  display: grid;
+  gap: 4px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid #e2e6ec;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
+.admin-bulk-delete-list span { color: #4e5968; font-size: 9px; }
+
+.admin-record-quality-reasons {
+  padding: 12px 13px;
+  border-bottom: 1px solid #dfe3e9;
+  background: #fff;
+}
+
+.admin-record-quality-reasons header strong,
+.admin-record-quality-reasons header span { display: block; }
+.admin-record-quality-reasons header strong { color: #20242a; font-size: 10px; }
+.admin-record-quality-reasons header span { margin-top: 2px; color: #7b8695; font-size: 8px; }
+.admin-record-quality-reasons ul { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none; }
+.admin-record-quality-reasons li { display: flex; align-items: flex-start; gap: 7px; color: #586474; }
+.admin-record-quality-reasons li > span { width: 15px; height: 15px; display: inline-grid; flex: 0 0 auto; place-items: center; border-radius: 999px; font-size: 8px; font-weight: 900; }
+.admin-record-quality-reasons li.is-positive > span { background: #e7f7ef; color: #087c51; }
+.admin-record-quality-reasons li.is-negative > span { background: #fff0f0; color: #b32b2b; }
+.admin-record-quality-reasons li strong,
+.admin-record-quality-reasons li small { display: block; }
+.admin-record-quality-reasons li strong { color: #343a42; font-size: 8px; line-height: 1.35; }
+.admin-record-quality-reasons li small { margin-top: 2px; color: #8a94a3; font-size: 7px; }
+
 .admin-json-copy {
   display: inline-flex;
   align-items: center;

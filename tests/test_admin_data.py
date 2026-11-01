@@ -29,6 +29,7 @@ from db.models import (
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     SourceItemModel,
+    SourceItemDecisionModel,
     SourceObservationModel,
     ValidationResultModel,
 )
@@ -384,6 +385,10 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
             ("Example Painting", 100),
         ]
         assert rows[0]["data_quality_label"] == "missing_evidence"
+        assert {
+            reason["code"]
+            for reason in rows[0]["data_quality_breakdown"]["quality_reasons"]
+        } >= {"BUSINESS_IDENTITY_MISSING", "BUSINESS_OPERATIONAL_MISSING"}
         assert [row["id"] for row in reliable_rows] == [reliable.id]
         assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 2
         attribute_scores = {
@@ -407,6 +412,10 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
             "trade": 100,
             "location": 100,
         }
+        assert all(
+            reason["impact"] == "positive"
+            for reason in reliable_rows[0]["data_quality_breakdown"]["quality_reasons"]
+        )
 
         fact = session.scalar(
             select(BusinessFactModel).where(
@@ -446,6 +455,86 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         assert "Operational status evidence requires refresh" in refresh_required[
             "data_quality_breakdown"
         ]["limitations"]
+
+
+def test_delete_business_purges_dependencies_and_retains_audit() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, niche = _business(session)
+        membership = BusinessNicheMembershipModel(
+            id=new_id("membership"),
+            business_id=business.id,
+            niche_id=niche.id,
+            market_key="toronto",
+            confidence=1.0,
+            evidence=[],
+            source_observation_id=None,
+            seed_batch_id=None,
+            first_seen_at=utcnow(),
+            last_seen_at=utcnow(),
+        )
+        session.add(membership)
+        session.commit()
+        _add_operational_fact(session, business)
+        session.commit()
+
+        service = _service(session)
+        dependencies = service.delete_dependencies(business.id)
+        assert dependencies["business_facts"] == 1
+        assert dependencies["business_niche_memberships"] == 1
+
+        service.delete(
+            business.id,
+            business.display_name,
+            "Confirmed false business record",
+        )
+
+        assert session.get(BusinessModel, business.id) is None
+        assert session.scalar(
+            select(BusinessFactModel).where(BusinessFactModel.business_id == business.id)
+        ) is None
+        audit = session.scalar(
+            select(AdminAuditEventModel).where(
+                AdminAuditEventModel.entity_id == business.id,
+                AdminAuditEventModel.action == "delete",
+            )
+        )
+        assert audit is not None
+        assert audit.after["deleted_dependencies"]["business_facts"] == 1
+
+
+def test_bulk_delete_businesses_requires_count_confirmation() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        first, _ = _business(session)
+        second = BusinessModel(
+            id=new_id("business"),
+            display_name="False Search Page",
+            normalized_name="false search page",
+            geography="Toronto",
+            market_key="toronto",
+            status="quarantined",
+            first_seen_at=utcnow(),
+            last_seen_at=utcnow(),
+        )
+        session.add(second)
+        session.commit()
+
+        with pytest.raises(ValidationError):
+            _service(session).bulk_delete(
+                [first.id, second.id],
+                "DELETE",
+                "Confirmed false business records",
+            )
+
+        result = _service(session).bulk_delete(
+            [first.id, second.id],
+            "DELETE 2 BUSINESSES",
+            "Confirmed false business records",
+        )
+        assert result == {"deleted_businesses": 2}
+        assert session.get(BusinessModel, first.id) is None
+        assert session.get(BusinessModel, second.id) is None
 
 
 def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:
@@ -608,7 +697,7 @@ def test_admin_revalidation_makes_passed_business_searchable_without_publication
         assert session.scalar(select(QueueJobModel)) is None
 
 
-def test_permanent_delete_is_blocked_when_related_records_exist() -> None:
+def test_permanent_delete_removes_related_records() -> None:
     factory = _session_factory()
     with factory() as session:
         business, niche = _business(session)
@@ -623,23 +712,45 @@ def test_permanent_delete_is_blocked_when_related_records_exist() -> None:
             raw_payload={},
             fetched_at=utcnow(),
         )
+        source_item = SourceItemModel(
+            id=new_id("source_item"),
+            **source_value.model_dump(),
+            content_hash=source_item_content_hash(source_value),
+            state="eligible",
+            business_id=business.id,
+        )
+        session.add(source_item)
+        session.flush()
         session.add(
-            SourceItemModel(
-                id=new_id("source_item"),
-                **source_value.model_dump(),
-                content_hash=source_item_content_hash(source_value),
-                state="eligible",
-                business_id=business.id,
+            SourceItemDecisionModel(
+                id=new_id("source_decision"),
+                source_item_id=source_item.id,
+                stage="identity",
+                decision="reject",
+                reason="Search-result page",
+                confidence=100,
+                details={},
+                actor_type="admin",
+                actor_id="user_admin",
             )
         )
         session.commit()
 
-        with pytest.raises(ConflictError):
-            _service(session).delete(
-                business.id,
-                confirmation=business.display_name,
-                reason="Duplicate record",
+        _service(session).delete(
+            business.id,
+            confirmation=business.display_name,
+            reason="Duplicate record",
+        )
+
+        assert session.get(BusinessModel, business.id) is None
+        assert session.scalar(
+            select(SourceItemModel).where(SourceItemModel.business_id == business.id)
+        ) is None
+        assert session.scalar(
+            select(SourceItemDecisionModel).where(
+                SourceItemDecisionModel.source_item_id == source_item.id
             )
+        ) is None
 
 
 def test_admin_can_queue_review_first_data_job() -> None:
