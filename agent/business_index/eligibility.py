@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import aliased
 
 from db.models import (
     BusinessModel,
+    BusinessFactModel,
     BusinessNicheMembershipModel,
     ValidationResultModel,
 )
@@ -25,6 +26,23 @@ def searchable_business_conditions(*, now: datetime | None = None) -> list:
     """Require current validation before a scoped membership is searchable."""
     current_time = now or utcnow()
     conditions = [BusinessModel.status == "active"]
+    operational = aliased(BusinessFactModel, name="searchable_business_operational")
+    conditions.append(
+        exists(
+            select(operational.id).where(
+                operational.business_id == BusinessModel.id,
+                operational.fact_key == "business_operational",
+                operational.value_type == "boolean",
+                operational.value_boolean.is_(True),
+                operational.quality_state == "published",
+                operational.resolution_state == "confirmed",
+                operational.confidence >= 85,
+                operational.source_observation_id.is_not(None),
+                operational.expires_at.is_not(None),
+                operational.expires_at > current_time,
+            )
+        )
+    )
     for dimension, minimum_confidence in REQUIRED_VALIDATIONS.items():
         validation = aliased(
             ValidationResultModel,

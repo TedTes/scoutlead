@@ -2548,6 +2548,7 @@ def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances
             source="google_places",
             raw={
                 "id": "places/overlap-painter",
+                    "businessStatus": "OPERATIONAL",
                 "formattedAddress": "123 Kingston Rd, Scarborough, ON",
                 "location": {"latitude": 43.75, "longitude": -79.28},
                 "source_request_intent": {

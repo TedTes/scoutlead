@@ -331,7 +331,30 @@ class BusinessValidationService:
             distance = haversine_distance_km(
                 center[0], center[1], business.latitude, business.longitude
             )
-        address = _normalized(" ".join([business.address or "", business.geography or ""]))
+        payload = item.raw_payload or {}
+        provider_payload = payload.get("raw") if isinstance(payload.get("raw"), dict) else payload
+        service_area_evidence = {
+            key: provider_payload.get(key)
+            for key in (
+                "serviceArea",
+                "service_area",
+                "city",
+                "locality",
+                "vicinity",
+                "formattedAddress",
+                "formatted_address",
+            )
+            if provider_payload.get(key)
+        }
+        address = _normalized(
+            " ".join(
+                [
+                    business.address or "",
+                    business.geography or "",
+                    json.dumps(service_area_evidence, default=str),
+                ]
+            )
+        )
         location_matches, matched_market_terms = market_matches_location(
             segment.market_label,
             address,
@@ -347,15 +370,16 @@ class BusinessValidationService:
             "location",
             "passed" if supported else "uncertain",
             95 if distance is not None and distance <= 75 else 85 if supported else 30,
-            "Coordinates or address support the requested market."
+            "Address, coordinates, or service-area evidence supports the requested market."
             if supported
-            else "Location could not be independently confirmed for the requested market.",
+            else "Market coverage could not be independently confirmed.",
             observed_at,
             expires_at,
             evidence=[
                 {
                     "distance_km": round(distance, 2) if distance is not None else None,
                     "matched_market_terms": matched_market_terms,
+                    "service_area_evidence": service_area_evidence,
                 }
             ],
         )

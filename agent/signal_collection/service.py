@@ -631,7 +631,7 @@ def _operational_value(payload: dict[str, Any]) -> bool | None:
     normalized = str(value or "").strip().upper()
     if normalized == "OPERATIONAL":
         return True
-    if normalized in {"CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY"}:
+    if normalized == "CLOSED_PERMANENTLY":
         return False
     return None
 

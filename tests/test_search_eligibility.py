@@ -5,9 +5,11 @@ from sqlalchemy.orm import sessionmaker
 
 from business_index.eligibility import searchable_business_conditions
 from db.models import (
+    BusinessFactModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     NicheModel,
+    SourceObservationModel,
     ValidationResultModel,
 )
 from db.session import create_database
@@ -94,6 +96,40 @@ def _add_passed_validations(session, business, niche, observed_at) -> None:
                 expires_at=observed_at + timedelta(days=30),
             )
         )
+    observation = SourceObservationModel(
+        id=new_id("observation"),
+        business_id=business.id,
+        source="google_places",
+        external_id=f"place-{business.id}",
+        query_signature=None,
+        content_hash="a" * 64,
+        source_url=f"https://maps.example/{business.id}",
+        raw_payload={"businessStatus": "OPERATIONAL"},
+        observed_at=observed_at,
+    )
+    session.add(observation)
+    session.flush()
+    session.add(
+        BusinessFactModel(
+            id=new_id("fact"),
+            business_id=business.id,
+            fact_key="business_operational",
+            value_type="boolean",
+            value_boolean=True,
+            confidence=100,
+            attribute_score=100,
+            score_version=1,
+            score_reason="present",
+            resolution_state="confirmed",
+            supporting_claim_ids=[],
+            quality_state="published",
+            quality_policy_version=1,
+            observed_at=observed_at,
+            expires_at=observed_at + timedelta(days=14),
+            source_observation_id=observation.id,
+            resolver_version=1,
+        )
+    )
     session.commit()
 
 

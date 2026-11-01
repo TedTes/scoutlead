@@ -953,17 +953,19 @@ class AdminDataService:
         if validation:
             rows = [row for row in rows if row["validation_state"] == validation]
         if quality == "reliable":
-            rows = [row for row in rows if row["data_quality_score"] >= 85]
+            rows = [row for row in rows if row["data_quality_score"] is not None and row["data_quality_score"] >= 85]
         elif quality == "review":
-            rows = [row for row in rows if 65 <= row["data_quality_score"] < 85]
+            rows = [row for row in rows if row["data_quality_score"] is not None and 65 <= row["data_quality_score"] < 85]
         elif quality == "poor":
-            rows = [row for row in rows if row["data_quality_score"] < 65]
+            rows = [row for row in rows if row["data_quality_score"] is not None and row["data_quality_score"] < 65]
+        elif quality == "pending":
+            rows = [row for row in rows if row["data_quality_score"] is None]
         elif quality:
             raise ValidationError("Unknown data quality filter", {"quality": quality})
         if sort == "score_asc":
-            rows.sort(key=lambda row: (row["data_quality_score"], row["display_name"].lower()))
+            rows.sort(key=lambda row: (row["data_quality_score"] is not None, row["data_quality_score"] or 0, row["display_name"].lower()))
         elif sort == "score_desc":
-            rows.sort(key=lambda row: (-row["data_quality_score"], row["display_name"].lower()))
+            rows.sort(key=lambda row: (row["data_quality_score"] is None, -(row["data_quality_score"] or 0), row["display_name"].lower()))
         elif sort == "name":
             rows.sort(key=lambda row: row["display_name"].lower())
         else:
@@ -1298,6 +1300,108 @@ class AdminDataService:
                 }
                 for observation in observations
             ],
+        }
+
+    def business_json(self, business_id: str) -> dict[str, Any]:
+        detail = self.detail(business_id)
+        lineage = self.fact_lineage(business_id)
+        facts_by_key = {fact["key"]: fact for fact in lineage["facts"]}
+        observations_by_id = {
+            observation["id"]: observation for observation in lineage["observations"]
+        }
+        fallback_values = {
+            "business_name": detail["display_name"],
+            "trade_category": detail.get("niche_label") or detail.get("niche_slug"),
+            "address": detail.get("address"),
+            "phone": detail.get("phone"),
+            "website_url": detail.get("website_url"),
+            "domain": detail.get("domain"),
+            "latitude": detail.get("latitude"),
+            "longitude": detail.get("longitude"),
+            "is_directory": detail.get("is_directory"),
+            "is_chain": detail.get("is_chain"),
+            "is_franchise": detail.get("is_franchise"),
+        }
+        attributes: dict[str, dict[str, Any]] = {}
+        for definition in lineage["attribute_definitions"]:
+            key = definition["key"]
+            fact = facts_by_key.get(key)
+            observation = (
+                observations_by_id.get(fact.get("source_observation_id"))
+                if fact and fact.get("source_observation_id")
+                else None
+            )
+            value = fact.get("value") if fact is not None else fallback_values.get(key)
+            attributes[key] = {
+                "label": definition["label"],
+                "category": definition["category"],
+                "observed": value is not None and value != "",
+                "value": value,
+                "footprint_score": fact.get("attribute_score") if fact else None,
+                "score_reason": fact.get("score_reason") if fact else None,
+                "evidence_confidence": fact.get("evidence_confidence") if fact else None,
+                "resolution_state": fact.get("resolution_state") if fact else None,
+                "quality_state": fact.get("quality_state") if fact else None,
+                "observed_at": fact.get("observed_at") if fact else None,
+                "expires_at": fact.get("expires_at") if fact else None,
+                "source": (
+                    {
+                        "observation_id": observation["id"],
+                        "provider": observation["source"],
+                        "url": observation.get("source_url"),
+                    }
+                    if observation is not None
+                    else None
+                ),
+            }
+        return {
+            "business": {
+                "id": detail["id"],
+                "name": detail["display_name"],
+                "state": detail["status"],
+                "trade": detail.get("niche_label"),
+                "market": detail.get("market_key"),
+                "address": detail.get("address"),
+                "coordinates": {
+                    "latitude": detail.get("latitude"),
+                    "longitude": detail.get("longitude"),
+                },
+                "website_url": detail.get("website_url"),
+                "domain": detail.get("domain"),
+                "phone": detail.get("phone"),
+                "first_seen_at": detail.get("first_seen_at"),
+                "last_seen_at": detail.get("last_seen_at"),
+            },
+            "record_quality": {
+                "score": detail["data_quality_score"],
+                "label": detail["data_quality_label"],
+                "required_checks": detail["data_quality_breakdown"].get(
+                    "validation_scores", []
+                ),
+                "limitations": detail["data_quality_breakdown"].get(
+                    "limitations", []
+                ),
+            },
+            "attributes": attributes,
+            "contacts": detail.get("contacts", []),
+            "evidence": {
+                "facts": lineage["facts"],
+                "claims": lineage["claims"],
+                "observations": lineage["observations"],
+            },
+        }
+
+    def export_businesses_json(self, business_ids: list[str]) -> dict[str, Any]:
+        unique_ids = list(dict.fromkeys(business_ids))
+        if len(unique_ids) > 500:
+            raise ValidationError(
+                "Too many businesses selected",
+                {"maximum": 500, "selected": len(unique_ids)},
+            )
+        return {
+            "exported_at": utcnow(),
+            "business_count": len(unique_ids),
+            "businesses": [self.business_json(business_id) for business_id in unique_ids],
         }
 
     def create(self, data: AdminBusinessCreate) -> dict[str, Any]:
@@ -1963,11 +2067,70 @@ def _attribute_data_quality_score(
     # Footprint scores answer whether an observed digital capability is strong
     # or weak. Combining the two produced misleading averages and duplicated
     # canonical fields that also existed as business facts.
+    identity_rows = [validations.get("identity"), validations.get("business_identity")]
+    identity_status = (
+        "missing"
+        if any(row is None for row in identity_rows)
+        else "passed"
+        if all(row.status == "passed" for row in identity_rows if row is not None)
+        else "failed"
+        if any(row.status == "failed" for row in identity_rows if row is not None)
+        else "uncertain"
+    )
+    identity_score = min(_validation_score(row) for row in identity_rows)
+    operational_fact = next(
+        (item for item in fact_attributes if item["key"] == "business_operational"),
+        None,
+    )
+    operational_status = (
+        "missing"
+        if operational_fact is None
+        else "passed"
+        if operational_fact["value"] is True
+        and operational_fact["evidence_state"] == "usable"
+        else "failed"
+        if operational_fact["value"] is False
+        and operational_fact["evidence_state"] == "usable"
+        else "uncertain"
+    )
+    operational_score = (
+        100
+        if operational_status == "passed"
+        else 0
+        if operational_status == "failed"
+        else None
+    )
     validation_components = [
+        {
+            "key": "business_identity",
+            "label": "Business identity",
+            "score": identity_score if identity_status != "missing" else None,
+            "status": identity_status,
+            "confidence": min(
+                (row.confidence for row in identity_rows if row is not None),
+                default=None,
+            ),
+        },
+        {
+            "key": "business_operational",
+            "label": "Operational status",
+            "score": operational_score,
+            "status": operational_status,
+            "confidence": (
+                operational_fact["evidence_confidence"]
+                if operational_fact is not None
+                else None
+            ),
+        },
+        *[
         {
             "key": key,
             "label": label,
-            "score": _validation_score(validations.get(key)),
+            "score": (
+                _validation_score(validations.get(key))
+                if validations.get(key) is not None
+                else None
+            ),
             "status": (
                 validations[key].status if validations.get(key) is not None else "missing"
             ),
@@ -1976,18 +2139,31 @@ def _attribute_data_quality_score(
             ),
         }
         for key, label in (
-            ("identity", "Identity"),
-            ("business_identity", "Business record"),
             ("trade", "Trade/category"),
-            ("location", "Location"),
+            ("location", "Market coverage"),
         )
+        ],
     ]
-    score = round(
-        sum(component["score"] for component in validation_components)
-        / len(validation_components)
+    pending = any(component["score"] is None for component in validation_components)
+    score = (
+        None
+        if pending
+        else round(
+            sum(int(component["score"]) for component in validation_components)
+            / len(validation_components)
+        )
     )
-    score = min(max(score, 0), 100)
-    label = "reliable" if score >= 85 else "review" if score >= 65 else "poor"
+    if score is not None:
+        score = min(max(score, 0), 100)
+    label = (
+        "pending"
+        if score is None
+        else "reliable"
+        if score >= 85
+        else "review"
+        if score >= 65
+        else "poor"
+    )
     limitations = [
         f'{component["label"]} validation is {component["status"]}'
         for component in validation_components
@@ -2103,6 +2279,7 @@ def _fact_attribute_component(
     )
     component.update(
         {
+            "value": _fact_value(fact),
             "evidence_confidence": confidence,
             "evidence_state": evidence_state,
             "resolution_state": fact.resolution_state,

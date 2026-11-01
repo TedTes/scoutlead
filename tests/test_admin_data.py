@@ -94,6 +94,45 @@ def _segment(session, niche):
     return segment
 
 
+def _add_operational_fact(session, business, *, confidence: int = 95):
+    now = utcnow()
+    observation = SourceObservationModel(
+        id=new_id("observation"),
+        business_id=business.id,
+        source="google_places",
+        external_id=f"place-{business.id}",
+        query_signature=None,
+        content_hash=(business.id.replace("_", "") + "o" * 64)[:64],
+        source_url=f"https://maps.example/{business.id}",
+        raw_payload={"businessStatus": "OPERATIONAL"},
+        observed_at=now,
+    )
+    session.add(observation)
+    session.flush()
+    session.add(
+        BusinessFactModel(
+            id=new_id("fact"),
+            business_id=business.id,
+            fact_key="business_operational",
+            value_type="boolean",
+            value_boolean=True,
+            confidence=confidence,
+            attribute_score=100,
+            score_version=1,
+            score_reason="present",
+            resolution_state="confirmed",
+            supporting_claim_ids=[],
+            quality_state="published",
+            quality_policy_version=1,
+            observed_at=now,
+            expires_at=now + timedelta(days=14),
+            source_observation_id=observation.id,
+            resolver_version=1,
+        )
+    )
+    return observation
+
+
 def test_edit_quarantines_business_and_audits() -> None:
     factory = _session_factory()
     with factory() as session:
@@ -147,6 +186,24 @@ def test_admin_business_detail_includes_collected_contacts() -> None:
         assert detail["contacts"][0]["verification_score"] == 98
 
 
+def test_admin_business_json_includes_attributes_and_source_evidence() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, _ = _business(session)
+        _add_operational_fact(session, business)
+        session.commit()
+
+        payload = _service(session).business_json(business.id)
+        exported = _service(session).export_businesses_json([business.id, business.id])
+
+        assert payload["business"]["id"] == business.id
+        assert payload["attributes"]["business_operational"]["value"] is True
+        assert payload["attributes"]["business_operational"]["source"]["provider"] == "google_places"
+        assert payload["evidence"]["observations"][0]["raw_payload"]["businessStatus"] == "OPERATIONAL"
+        assert exported["business_count"] == 1
+        assert exported["businesses"][0]["business"]["id"] == business.id
+
+
 def test_expired_validation_is_reported_as_incomplete() -> None:
     factory = _session_factory()
     with factory() as session:
@@ -169,6 +226,7 @@ def test_expired_validation_is_reported_as_incomplete() -> None:
                     expires_at=now - timedelta(days=10),
                 )
             )
+        _add_operational_fact(session, business)
         session.commit()
 
         overview = _service(session).overview()
@@ -214,6 +272,7 @@ def test_admin_reports_validated_membership_as_searchable() -> None:
                     expires_at=now + timedelta(days=30),
                 )
             )
+        _add_operational_fact(session, business)
         session.commit()
 
         overview = _service(session).overview()
@@ -284,6 +343,7 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
                     expires_at=now + timedelta(days=30),
                 )
             )
+        _add_operational_fact(session, reliable, confidence=100)
         session.add(
             BusinessFactModel(
                 id=new_id("fact"),
@@ -320,11 +380,11 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         )["items"]
 
         assert [(row["display_name"], row["data_quality_score"]) for row in rows] == [
-            ("Needs Review Painting", 0),
+            ("Needs Review Painting", None),
             ("Example Painting", 100),
         ]
         assert [row["id"] for row in reliable_rows] == [reliable.id]
-        assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 1
+        assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 2
         attribute_scores = {
             component["key"]: component
             for component in reliable_rows[0]["data_quality_breakdown"][
@@ -341,14 +401,17 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
                 "validation_scores"
             ]
         } == {
-            "identity": 100,
             "business_identity": 100,
+            "business_operational": 100,
             "trade": 100,
             "location": 100,
         }
 
         fact = session.scalar(
-            select(BusinessFactModel).where(BusinessFactModel.business_id == reliable.id)
+            select(BusinessFactModel).where(
+                BusinessFactModel.business_id == reliable.id,
+                BusinessFactModel.fact_key == "website_status",
+            )
         )
         fact.expires_at = now - timedelta(days=1)
         session.commit()

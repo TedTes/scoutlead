@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from business_facts.repository import BusinessFactRepository, BusinessFactValue, fact_value
+from business_facts.operational import assess_business_operational
 from canonical.normalization import external_id_from_raw, first_raw_text, nested_raw
 from db.models import (
     BusinessFactModel,
@@ -54,6 +55,14 @@ def sync_observed_business_attributes(
         "is_chain": business.is_chain,
         "is_franchise": business.is_franchise,
     }
+
+    operational = assess_business_operational(
+        session,
+        business=business,
+        observation=observation,
+    )
+    if operational is not None:
+        values["business_operational"] = operational.value
 
     # Presence is only asserted when a Google provider observation exists. The
     # absence of such an observation is unknown, not false.
@@ -119,20 +128,26 @@ def sync_observed_business_attributes(
     for key, value in values.items():
         if key not in defined_keys or value is None or value == "":
             continue
+        fact_confidence = operational.confidence if key == "business_operational" and operational else confidence
+        fact_source_observation_id = (
+            operational.source_observation_id
+            if key == "business_operational" and operational
+            else observation.id
+        )
         repository.upsert(
             business.id,
             BusinessFactValue(
                 key=key,
                 value=value,
                 observed_at=observation.observed_at,
-                source_observation_id=observation.id,
-                confidence=confidence,
+                source_observation_id=fact_source_observation_id,
+                confidence=fact_confidence,
                 resolution_state="confirmed",
                 # Core identity attributes are available for targeting and
                 # scoring immediately, but are not opportunity evidence. Keep
                 # them staged so the opportunity publication policy does not
                 # mistake them for validated negative findings.
-                quality_state="staged",
+                quality_state=("published" if key == "business_operational" else "staged"),
             ),
             track_change=track_changes,
         )

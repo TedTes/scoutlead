@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, Response
 
 from admin.schemas import (
+    AdminBusinessExportRequest,
     AdminActionReason,
     AdminBusinessCreate,
     AdminBusinessStateChange,
@@ -329,6 +330,15 @@ def list_businesses(
     )
 
 
+@router.post("/businesses/export")
+def export_businesses_json(
+    data: AdminBusinessExportRequest,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).export_businesses_json(data.business_ids)
+
+
 @router.post("/businesses")
 def create_business(data: AdminBusinessCreate, session: DbSession, auth: AdminAuth):
     return _service(session, auth).create(data)
@@ -342,6 +352,11 @@ def business_detail(business_id: str, session: DbSession, auth: AdminAuth):
 @router.get("/businesses/{business_id}/fact-lineage")
 def business_fact_lineage(business_id: str, session: DbSession, auth: AdminAuth):
     return _service(session, auth).fact_lineage(business_id)
+
+
+@router.get("/businesses/{business_id}/json")
+def business_json(business_id: str, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).business_json(business_id)
 
 
 @router.patch("/businesses/{business_id}")

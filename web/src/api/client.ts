@@ -92,6 +92,17 @@ export class ApiClient {
     return this.request<AdminFactLineage>(`/admin/businesses/${id}/fact-lineage`);
   }
 
+  getAdminBusinessJson(id: string) {
+    return this.request<Record<string, unknown>>(`/admin/businesses/${id}/json`);
+  }
+
+  exportAdminBusinessesJson(businessIds: string[]) {
+    return this.request<Record<string, unknown>>("/admin/businesses/export", {
+      method: "POST",
+      body: { business_ids: businessIds },
+    });
+  }
+
   createAdminBusiness(body: Record<string, unknown>) {
     return this.request<AdminBusinessDetail>("/admin/businesses", { method: "POST", body });
   }

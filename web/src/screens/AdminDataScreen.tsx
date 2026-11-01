@@ -2,6 +2,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Copy,
   Download,
   ExternalLink,
   Plus,
@@ -53,6 +54,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<"add" | "edit" | "delete" | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,6 +142,19 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       return next;
     });
   };
+  const exportSelectedJson = async () => {
+    if (!selectedCount) return;
+    setExporting(true);
+    setError("");
+    try {
+      const payload = await api.exportAdminBusinessesJson(Object.keys(selectedBusinesses));
+      downloadJson(payload, `scoutlead-businesses-${new Date().toISOString().slice(0, 10)}.json`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (allowed === false) {
     return (
@@ -203,6 +218,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         </label>
         <select aria-label="Record quality" value={quality} onChange={(event) => { setQuality(event.target.value); setPage(1); }}>
           <option value="">All quality</option>
+          <option value="pending">Pending validation</option>
           <option value="poor">Poor · 0–64</option>
           <option value="review">Review · 65–84</option>
           <option value="reliable">Reliable · 85–100</option>
@@ -220,11 +236,11 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         </select>
         <button
           className="admin-export-button"
-          disabled={!selectedCount}
+          disabled={!selectedCount || exporting}
           type="button"
-          onClick={() => exportBusinessesCsv(Object.values(selectedBusinesses))}
+          onClick={() => void exportSelectedJson()}
         >
-          <Download size={14} /> Export {selectedCount || ""}
+          <Download size={14} /> {exporting ? "Preparing…" : `Export JSON ${selectedCount || ""}`}
         </button>
         <button className="admin-icon-button" title="Refresh" type="button" onClick={() => void load()}>
           <RefreshCw size={15} />
@@ -299,48 +315,18 @@ function QualityScore({ row }: { row: AdminBusinessSummary }) {
   ].join(" · ");
   return (
     <span className={`admin-quality-score is-${row.data_quality_label}`} title={title}>
-      <strong>{row.data_quality_score}</strong>
+      <strong>{row.data_quality_score ?? "—"}</strong>
       <small>{row.data_quality_label}</small>
     </span>
   );
 }
 
-function exportBusinessesCsv(rows: AdminBusinessSummary[]) {
-  const headers = [
-    "Business ID", "Business", "Trade", "Market", "Address", "Website", "Phone",
-    "State", "Record quality score", "Record quality label", "Required validations",
-    "Footprint attribute scores", "Evidence confidence", "Fact states", "Fact count",
-    "Quality limitations", "Last seen",
-  ];
-  const values = rows.map((row) => {
-    const quality = row.data_quality_breakdown;
-    const attributeScores = quality.attribute_scores || [];
-    return [
-      row.id, row.display_name, row.niche_label, row.market_key, row.address || row.geography,
-      row.website_url || row.domain, row.phone, row.status, row.data_quality_score,
-      row.data_quality_label,
-      (quality.validation_scores || [])
-        .map((validation) => `${validation.label}: ${validation.status} (${validation.score})`)
-        .join("; "),
-      attributeScores
-        .filter((attribute) => attribute.score != null)
-        .map((attribute) => `${attribute.label}: ${attribute.score}`)
-        .join("; "),
-      attributeScores
-        .map((attribute) => `${attribute.label}: ${attribute.evidence_confidence ?? "unknown"}`)
-        .join("; "),
-      attributeScores
-        .map((attribute) => `${attribute.label}: ${attribute.evidence_state || attribute.quality_state || "unknown"}`)
-        .join("; "),
-      quality.fact_count, quality.limitations.join("; "), row.last_seen_at,
-    ];
-  });
-  const quote = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const csv = [headers, ...values].map((row) => row.map(quote).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+function downloadJson(payload: unknown, filename: string) {
+  const json = JSON.stringify(payload, null, 2);
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `scoutlead-businesses-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -353,17 +339,25 @@ function BusinessInspector({
   detail: AdminBusinessDetail | null;
 }) {
   const [lineage, setLineage] = useState<AdminFactLineage | null>(null);
+  const [jsonPayload, setJsonPayload] = useState<Record<string, unknown> | null>(null);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [lineageError, setLineageError] = useState("");
+  const [copied, setCopied] = useState(false);
   const loadLineage = useCallback(async () => {
     if (!detail?.id) {
       setLineage(null);
+      setJsonPayload(null);
       return;
     }
     setLineageLoading(true);
     setLineageError("");
     try {
-      setLineage(await api.getAdminBusinessFactLineage(detail.id));
+      const [nextLineage, nextJson] = await Promise.all([
+        api.getAdminBusinessFactLineage(detail.id),
+        api.getAdminBusinessJson(detail.id),
+      ]);
+      setLineage(nextLineage);
+      setJsonPayload(nextJson);
     } catch (cause) {
       setLineageError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -373,20 +367,34 @@ function BusinessInspector({
   useEffect(() => {
     void loadLineage();
   }, [loadLineage]);
+  const copyJson = async () => {
+    if (!jsonPayload) return;
+    await navigator.clipboard.writeText(JSON.stringify(jsonPayload, null, 2));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
   if (!detail) return <aside className="admin-inspector is-empty">Select a business to view its attributes.</aside>;
 
   return (
     <aside className="admin-inspector">
       <header>
-        <div><h2>{detail.display_name}</h2><p>Business attributes</p></div>
-        <AttributeCoverage lineage={lineage} />
+        <div><h2>{detail.display_name}</h2><p>Business JSON</p></div>
+        <div className="admin-json-actions">
+          <AttributeCoverage lineage={lineage} />
+          <button className="admin-json-copy" disabled={!jsonPayload} type="button" onClick={() => void copyJson()}>
+            <Copy size={12} /> {copied ? "Copied" : "Copy JSON"}
+          </button>
+        </div>
       </header>
-      <BusinessAttributeRecord
-        detail={detail}
-        error={lineageError}
-        lineage={lineage}
-        loading={lineageLoading}
-      />
+      <div className="admin-inspector-content admin-json-inspector">
+        {lineageLoading && !jsonPayload ? <p className="admin-record-empty">Preparing JSON…</p> : null}
+        {lineageError && !jsonPayload ? <p className="admin-record-empty">Business JSON is unavailable.</p> : null}
+        {jsonPayload ? <pre>{JSON.stringify(jsonPayload, null, 2)}</pre> : null}
+        {jsonPayload ? <details>
+          <summary>Readable attribute view</summary>
+          <BusinessAttributeRecord detail={detail} error={lineageError} lineage={lineage} loading={lineageLoading} />
+        </details> : null}
+      </div>
     </aside>
   );
 }

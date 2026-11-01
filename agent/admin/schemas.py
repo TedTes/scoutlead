@@ -45,6 +45,10 @@ class AdminActionReason(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
+class AdminBusinessExportRequest(BaseModel):
+    business_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class AdminDeleteRequest(BaseModel):
     confirmation: str
     reason: str = Field(min_length=3, max_length=1000)
