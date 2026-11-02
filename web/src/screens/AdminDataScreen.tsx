@@ -492,7 +492,7 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
       category: definition.category,
       observed: value !== null && value !== "",
       value,
-      footprint_score: fact?.attribute_score ?? null,
+      opportunity_score: fact?.opportunity_score ?? null,
       score_reason: fact?.score_reason ?? null,
       evidence_confidence: fact?.evidence_confidence ?? null,
       resolution_state: fact?.resolution_state ?? null,

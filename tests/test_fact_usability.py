@@ -173,4 +173,4 @@ def test_cleanup_deletes_rejected_fact_even_when_evidence_is_intact() -> None:
 
 def test_domain_age_is_scored_as_supporting_footprint_context() -> None:
     assert score_attribute("domain_age_days", 0).score == 0
-    assert score_attribute("domain_age_days", 3650).score == 100
+    assert score_attribute("domain_age_days", 3650).score == 0

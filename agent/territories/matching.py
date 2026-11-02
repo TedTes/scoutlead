@@ -485,7 +485,7 @@ class ProfileMatchService:
                 "matched": _signal_match_confidence(spec, fact) is not None,
                 "confidence": _signal_match_confidence(spec, fact),
                 "evidence_confidence": fact.confidence if fact is not None else None,
-                "attribute_score": fact.attribute_score if fact is not None else None,
+                "opportunity_score": fact.attribute_score if fact is not None else None,
             }
             if fact_observation is not None:
                 evidence.update(
@@ -504,7 +504,7 @@ class ProfileMatchService:
                 "value": evidence["value"],
                 "confidence": evidence["confidence"],
                 "evidence_confidence": evidence["evidence_confidence"],
-                "attribute_score": evidence["attribute_score"],
+                "opportunity_score": evidence["opportunity_score"],
                 **(
                     {
                         "source_observation_id": evidence["source_observation_id"],
@@ -756,7 +756,7 @@ def _candidate_score(
     for spec in signal_specs:
         evidence = signal_evidence[spec.key]
         fact = facts.get(spec.fact_key)
-        attribute_score = evidence.get("attribute_score")
+        opportunity_score = evidence.get("opportunity_score")
         components.append(
             CandidateComponent(
                 key=spec.fact_key,
@@ -764,8 +764,8 @@ def _candidate_score(
                 group="opportunity",
                 weight=signal_weight,
                 match_value=(
-                    max(0.0, min(1.0, (100.0 - float(attribute_score)) / 100.0))
-                    if evidence.get("matched") and attribute_score is not None
+                    max(0.0, min(1.0, float(opportunity_score) / 100.0))
+                    if evidence.get("matched") and opportunity_score is not None
                     else 0.0 if fact is not None
                     else None
                 ),
@@ -773,8 +773,8 @@ def _candidate_score(
                 freshness=_fact_freshness(fact, max_age_days),
                 status="matched" if evidence.get("matched") else "not_matched",
                 reason=(
-                    f"Observed attribute score {float(attribute_score):g}/100"
-                    if attribute_score is not None
+                    f"Opportunity score {float(opportunity_score):g}/100"
+                    if opportunity_score is not None
                     else "No usable attribute evidence"
                 ),
             )
@@ -818,11 +818,11 @@ def _fact_freshness(fact: BusinessFactModel | None, max_age_days: int) -> float:
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
     evidence = _usable_evidence_condition(spec, fact)
-    maximum_score = float(spec.config.get("audience_max_score", 49.999))
+    minimum_score = float(spec.config.get("audience_min_score", 50.001))
     return and_(
         evidence,
         fact.attribute_score.is_not(None),
-        fact.attribute_score <= maximum_score,
+        fact.attribute_score >= minimum_score,
     )
 
 
@@ -859,10 +859,10 @@ def _signal_match_confidence(
     ):
         return None
     evidence_confidence = "confirmed"
-    maximum_score = float(spec.config.get("audience_max_score", 49.999))
+    minimum_score = float(spec.config.get("audience_min_score", 50.001))
     return (
         evidence_confidence
-        if fact.attribute_score is not None and fact.attribute_score <= maximum_score
+        if fact.attribute_score is not None and fact.attribute_score >= minimum_score
         else None
     )
 
@@ -909,12 +909,11 @@ def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
 def _signal_severity(
     spec: SignalMatchSpec,
     service_specs: list[ServiceMatchSpec],
-    attribute_score: float | None,
+    opportunity_score: float | None,
 ) -> float:
-    # The gap itself drives severity: a score of 0 is a severe opportunity;
-    # a score just below the matching threshold is a weaker one.
-    if attribute_score is not None:
-        return round(1.0 + 4.0 * (1.0 - max(0.0, min(100.0, attribute_score)) / 100.0), 2)
+    # Opportunity severity uses the same direction as every other consumer.
+    if opportunity_score is not None:
+        return round(1.0 + 4.0 * max(0.0, min(100.0, opportunity_score)) / 100.0, 2)
     configured = spec.config.get("opportunity_severity")
     if isinstance(configured, (int, float)):
         return round(max(1.0, min(5.0, float(configured))), 2)

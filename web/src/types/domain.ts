@@ -1019,13 +1019,13 @@ export type AdminBusinessSummary = {
       status: string;
       confidence: number | null;
     }>;
-    attribute_scores: Array<{
+    opportunity_scores: Array<{
       key: string;
       label: string;
       score: number | null;
       weight: number;
       basis: string;
-      label_state: "reliable" | "review" | "poor" | "unknown";
+      label_state: "strong" | "moderate" | "low" | "unscored";
       evidence_confidence?: number | null;
       evidence_state?: string;
       resolution_state?: string;
@@ -1154,7 +1154,7 @@ export type AdminFactLineageFact = {
   key: string;
   value: unknown;
   value_type: string;
-  attribute_score?: number | null;
+  opportunity_score?: number | null;
   score_version?: number | null;
   score_reason?: string | null;
   evidence_confidence?: number | null;

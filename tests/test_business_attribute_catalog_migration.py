@@ -84,8 +84,8 @@ def test_attribute_catalog_backfills_only_observed_business_values(monkeypatch) 
                 )
             )
         }
-        assert facts["business_name"].attribute_score == 100
-        assert facts["website_url"].attribute_score == 100
+        assert facts["business_name"].attribute_score == 0
+        assert facts["website_url"].attribute_score == 0
         assert facts["city"].value_text == "Toronto"
         assert facts["google_business_profile_present"].value_boolean is True
         assert "is_chain" not in facts

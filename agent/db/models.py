@@ -318,8 +318,8 @@ class BusinessFactModel(TimestampMixin, Base):
     value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
     value_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    # The footprint score describes the observed business condition.  It is
-    # intentionally separate from confidence, which describes the evidence.
+    # Legacy column name: this stores opportunity severity (0=no opportunity,
+    # 100=strong opportunity). Confidence separately describes the evidence.
     attribute_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
     score_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     score_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

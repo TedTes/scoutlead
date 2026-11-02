@@ -391,16 +391,17 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         } >= {"BUSINESS_IDENTITY_MISSING", "BUSINESS_OPERATIONAL_MISSING"}
         assert [row["id"] for row in reliable_rows] == [reliable.id]
         assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 2
-        attribute_scores = {
+        opportunity_scores = {
             component["key"]: component
             for component in reliable_rows[0]["data_quality_breakdown"][
-                "attribute_scores"
+                "opportunity_scores"
             ]
         }
-        assert attribute_scores["website_status"]["score"] == 100
-        assert attribute_scores["website_status"]["evidence_confidence"] == 100
-        assert attribute_scores["website_status"]["evidence_state"] == "usable"
-        assert "source linked" in attribute_scores["website_status"]["basis"]
+        assert opportunity_scores["website_status"]["score"] == 0
+        assert opportunity_scores["website_status"]["label_state"] == "low"
+        assert opportunity_scores["website_status"]["evidence_confidence"] == 100
+        assert opportunity_scores["website_status"]["evidence_state"] == "usable"
+        assert "source linked" in opportunity_scores["website_status"]["basis"]
         assert {
             component["key"]: component["score"]
             for component in reliable_rows[0]["data_quality_breakdown"][
@@ -506,8 +507,8 @@ def test_admin_businesses_filter_by_the_same_attribute_gate_as_audiences() -> No
             )
         )
         for business, present, score in (
-            (missing_form, False, 0),
-            (has_form, True, 100),
+            (missing_form, False, 100),
+            (has_form, True, 0),
         ):
             observation = SourceObservationModel(
                 id=new_id("observation"),

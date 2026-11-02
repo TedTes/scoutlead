@@ -263,8 +263,8 @@ def test_canonical_business_attributes_are_materialized_and_scored() -> None:
         assert fact_value(facts["region"]) == "Ontario"
         assert fact_value(facts["postal_code"]) == "M5V 1A1"
         assert fact_value(facts["google_business_profile_present"]) is True
-        assert facts["business_name"].attribute_score == 100
-        assert facts["google_business_profile_present"].attribute_score == 100
+        assert facts["business_name"].attribute_score == 0
+        assert facts["google_business_profile_present"].attribute_score == 0
         assert facts["business_name"].confidence == 95
 
 
@@ -454,7 +454,7 @@ def test_completed_independent_search_resolves_missing_website_fact() -> None:
         facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
         website = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
         assert fact_value(website) == "missing"
-        assert website.attribute_score == 0
+        assert website.attribute_score == 100
 
 
 def test_unverified_no_website_found_remains_listing_gap() -> None:
@@ -472,7 +472,7 @@ def test_unverified_no_website_found_remains_listing_gap() -> None:
         facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
         website = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
         assert fact_value(website) == "not_listed"
-        assert website.attribute_score == 55
+        assert website.attribute_score is None
 
 
 def test_verified_website_enrichment_promotes_canonical_url() -> None:

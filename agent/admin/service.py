@@ -991,7 +991,7 @@ class AdminDataService:
                 match_definition.opportunity_direction,
                 match_definition.config,
             )
-            maximum_score = float(config.get("audience_max_score", 49.999))
+            minimum_score = float(config.get("audience_min_score", 50.001))
             fact_conditions = [
                 BusinessFactModel.business_id == BusinessModel.id,
                 BusinessFactModel.signal_definition_id == match_definition.id,
@@ -1006,7 +1006,7 @@ class AdminDataService:
                     require_validation=False,
                 ),
                 BusinessFactModel.attribute_score.is_not(None),
-                BusinessFactModel.attribute_score <= maximum_score,
+                BusinessFactModel.attribute_score >= minimum_score,
             ]
             # A listing without a URL is not proof that a website is absent.
             # The explicit admin option only returns verified missing websites.
@@ -1483,7 +1483,7 @@ class AdminDataService:
                 "category": definition["category"],
                 "observed": value is not None and value != "",
                 "value": value,
-                "footprint_score": fact.get("attribute_score") if fact else None,
+                "opportunity_score": fact.get("opportunity_score") if fact else None,
                 "score_reason": fact.get("score_reason") if fact else None,
                 "evidence_confidence": fact.get("evidence_confidence") if fact else None,
                 "resolution_state": fact.get("resolution_state") if fact else None,
@@ -2375,24 +2375,24 @@ def _admin_candidate_score(
             definition.opportunity_direction,
             definition.config,
         )
-        maximum_score = float(config.get("audience_max_score", 49.999))
-        attribute_score = opportunity.get("score") if opportunity else None
+        minimum_score = float(config.get("audience_min_score", 50.001))
+        opportunity_score = opportunity.get("score") if opportunity else None
         matched = bool(
             opportunity
             and opportunity.get("evidence_state") == "usable"
-            and attribute_score is not None
-            and float(attribute_score) <= maximum_score
+            and opportunity_score is not None
+            and float(opportunity_score) >= minimum_score
             and not (
                 definition.key == "website_status"
                 and opportunity.get("value") != "missing"
             )
         )
-        if matched and opportunity is not None and attribute_score is not None:
-            strength = max(0.0, min(1.0, (100.0 - float(attribute_score)) / 100.0))
+        if matched and opportunity is not None and opportunity_score is not None:
+            strength = max(0.0, min(1.0, float(opportunity_score) / 100.0))
             confidence = float(opportunity.get("evidence_confidence") or 0.0) / 100.0
             opportunity_candidates.append((strength * confidence, definition, opportunity, strength))
-        elif opportunity is not None and attribute_score is not None:
-            observed_non_matches.append((definition, opportunity, float(attribute_score)))
+        elif opportunity is not None and opportunity_score is not None:
+            observed_non_matches.append((definition, opportunity, float(opportunity_score)))
 
     chosen_definition: SignalDefinitionModel | None = None
     chosen_opportunity: dict[str, Any] | None = None
@@ -2413,7 +2413,7 @@ def _admin_candidate_score(
         )
 
     if chosen_definition is not None:
-        attribute_score = chosen_opportunity.get("score") if chosen_opportunity else None
+        opportunity_score = chosen_opportunity.get("score") if chosen_opportunity else None
         components.append(
             CandidateComponent(
                 key=chosen_definition.key,
@@ -2441,8 +2441,8 @@ def _admin_candidate_score(
                 ),
                 status="matched" if opportunity_matched else "not_matched" if chosen_opportunity else "missing",
                 reason=(
-                    f"Observed attribute score {float(attribute_score):g}/100"
-                    if attribute_score is not None
+                    f"Opportunity score {float(opportunity_score):g}/100"
+                    if opportunity_score is not None
                     else "No usable attribute evidence"
                 ),
             )
@@ -2529,9 +2529,8 @@ def _attribute_data_quality_score(
     fact_attributes: list[dict[str, Any]],
 ) -> dict[str, Any]:
     # Record quality answers whether this is a trustworthy business identity.
-    # Footprint scores answer whether an observed digital capability is strong
-    # or weak. Combining the two produced misleading averages and duplicated
-    # canonical fields that also existed as business facts.
+    # Opportunity scores answer whether an observed digital capability contains
+    # a sellable gap. They remain separate from record/evidence quality.
     identity_rows = [validations.get("identity"), validations.get("business_identity")]
     identity_status = (
         "missing"
@@ -2691,7 +2690,7 @@ def _attribute_data_quality_score(
         "data_quality_label": label,
         "data_quality_breakdown": {
             "validation_scores": validation_components,
-            "attribute_scores": fact_attributes,
+            "opportunity_scores": fact_attributes,
             "scored_attribute_count": sum(
                 item["score"] is not None for item in fact_attributes
             ),
@@ -2717,10 +2716,10 @@ def _attribute_component(
         "weight": weight,
         "basis": basis,
         "label_state": (
-            "unknown" if bounded is None
-            else "reliable" if bounded >= 85
-            else "review" if bounded >= 65
-            else "poor"
+            "unscored" if bounded is None
+            else "strong" if bounded >= 80
+            else "moderate" if bounded >= 50
+            else "low"
         ),
     }
 
@@ -2775,7 +2774,7 @@ def _fact_attribute_component(
     )
     basis = ", ".join(
         [
-            fact.score_reason or "footprint score",
+            fact.score_reason or "opportunity score",
             f"{confidence}% evidence confidence",
             "source linked" if has_source else "source missing",
             "fresh" if is_fresh else "expired",
@@ -2944,7 +2943,7 @@ def _fact_lineage_dict(
         "key": fact.fact_key,
         "value": value,
         "value_type": fact.value_type,
-        "attribute_score": fact.attribute_score,
+        "opportunity_score": fact.attribute_score,
         "score_version": fact.score_version,
         "score_reason": fact.score_reason,
         "evidence_confidence": fact.confidence,
@@ -3019,7 +3018,6 @@ def _fact_matches_opportunity(
     if direction == "missing_is_opportunity":
         values = config.get("opportunity_values") or [
             "missing",
-            "not_listed",
             "unavailable",
             "parked",
         ]
