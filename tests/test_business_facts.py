@@ -418,6 +418,63 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
         assert [change.current_value for change in changes] == ["not_listed", "present"]
 
 
+def test_completed_independent_search_resolves_missing_website_fact() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="Verified Missing Painter",
+            geography="Toronto",
+            source="google_places",
+            raw=_source_payload("no_website_listed"),
+        )
+
+        canonical.record_business_evidence(
+            business=session.get(
+                SourceObservationModel, link.source_observation_id
+            ).business,
+            source="website_presence_check",
+            raw={
+                "website_presence": {
+                    "status": "no_website_found",
+                    "confirmation_attempted": True,
+                    "confirmation_checks": [
+                        {
+                            "provider": "configured_search",
+                            "status": "completed",
+                            "query": '"Verified Missing Painter" Toronto',
+                            "result_count": 0,
+                        }
+                    ],
+                }
+            },
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
+        website = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
+        assert fact_value(website) == "missing"
+        assert website.attribute_score == 0
+
+
+def test_unverified_no_website_found_remains_listing_gap() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        link = canonical.upsert_from_discovery_result(
+            company_name="Unverified Missing Painter",
+            geography="Toronto",
+            source="google_places",
+            raw={"website_presence": {"status": "no_website_found"}},
+        )
+
+        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
+        website = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
+        assert fact_value(website) == "not_listed"
+        assert website.attribute_score == 55
+
+
 def test_verified_website_enrichment_promotes_canonical_url() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

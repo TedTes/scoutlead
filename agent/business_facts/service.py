@@ -31,7 +31,7 @@ from seeding.batches import observation_is_quarantined
 from shared.utils import normalize_url, utcnow
 
 
-RESOLVER_VERSION = 3
+RESOLVER_VERSION = 4
 GOOGLE_REPUTATION_SOURCES = frozenset({"google_places", "google_places_seed"})
 
 
@@ -349,6 +349,8 @@ def _website_status_fact(
 def _website_status_from_payload(payload: dict[str, Any]) -> tuple[str | None, int]:
     presence = payload.get("website_presence")
     if isinstance(presence, dict):
+        if _verified_missing_website(presence):
+            return "missing", 95
         mapped = _map_website_status(str(presence.get("status") or ""))
         if mapped:
             return mapped
@@ -399,6 +401,31 @@ def _map_website_status(value: str) -> tuple[str, int] | None:
         "not_checked": ("unknown", 0),
     }
     return mapping.get(normalized)
+
+
+def _verified_missing_website(presence: dict[str, Any]) -> bool:
+    """Distinguish a completed negative search from a listing omission.
+
+    ``no_website_found`` historically covered both meanings.  New opportunity
+    audits include their provider checks, so only a completed independent web
+    search is strong enough to resolve the canonical status to ``missing``.
+    Google omitting its website field remains ``not_listed`` and an incomplete
+    check remains unknown.
+    """
+
+    if str(presence.get("status") or "").strip().lower() != "no_website_found":
+        return False
+    if not presence.get("confirmation_attempted"):
+        return False
+    checks = presence.get("confirmation_checks")
+    if not isinstance(checks, list):
+        return False
+    return any(
+        isinstance(check, dict)
+        and str(check.get("provider") or "").strip().lower() == "configured_search"
+        and str(check.get("status") or "").strip().lower() == "completed"
+        for check in checks
+    )
 
 
 def _quote_form_fact(
