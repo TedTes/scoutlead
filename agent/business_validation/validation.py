@@ -26,7 +26,7 @@ from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
 
 
-VALIDATOR_VERSION = 3
+VALIDATOR_VERSION = 4
 BLOCKED_HOSTS = BLOCKED_WEBSITE_HOSTS
 GENERIC_TITLES = {
     "renovation",
@@ -228,11 +228,39 @@ class BusinessValidationService:
     def _business_type(self, business, item, observed_at, expires_at) -> ValidationResult:
         host = urlparse(item.source_url or "").netloc.lower().removeprefix("www.")
         title = _normalized(item.title or business.display_name)
+        canonical_title = _normalized(business.display_name)
         provider_id = str(getattr(item, "provider_id", None) or "").strip().lower()
-        blocked = any(host == value or host.endswith(f".{value}") for value in BLOCKED_HOSTS)
-        generic = _is_generic_business_title(title)
-        directory = business.is_directory is True
         verification_only = provider_id == "configured_search"
+        structured_provider_identity = bool(
+            provider_id
+            in {
+                "google_places",
+                "google_places_seed",
+                "openstreetmap",
+                "openstreetmap_seed",
+            }
+            and getattr(item, "external_id", None)
+        )
+        corroborated_identity = bool(
+            not verification_only
+            and (getattr(business, "phone", None) or getattr(business, "domain", None))
+        )
+        blocked = bool(
+            not structured_provider_identity
+            and any(host == value or host.endswith(f".{value}") for value in BLOCKED_HOSTS)
+        )
+        explicitly_generic = title in GENERIC_TITLES or canonical_title in GENERIC_TITLES
+        generic = bool(
+            explicitly_generic
+            or (
+                (
+                    _is_generic_business_title(title)
+                    or _is_generic_business_title(canonical_title)
+                )
+                and not (structured_provider_identity or corroborated_identity)
+            )
+        )
+        directory = business.is_directory is True
         passed = not (blocked or generic or directory or verification_only)
         reason = (
             "Candidate is a business record rather than an ad, directory, or generic service title."
@@ -256,6 +284,8 @@ class BusinessValidationService:
                     "provider_id": provider_id,
                     "blocked_host": blocked,
                     "generic_title": generic,
+                    "structured_provider_identity": structured_provider_identity,
+                    "corroborated_identity": corroborated_identity,
                     "directory": directory,
                     "verification_only_provider": verification_only,
                 }

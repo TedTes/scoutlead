@@ -93,6 +93,32 @@ def test_configured_search_is_verification_only_not_business_identity() -> None:
     assert result.evidence[0]["verification_only_provider"] is True
 
 
+def test_structured_provider_identity_is_not_rejected_for_a_generic_sounding_name() -> None:
+    now = utcnow()
+    result = BusinessValidationService(None)._business_type(
+        SimpleNamespace(
+            id="business_1",
+            display_name="Home Electrical Services",
+            is_directory=False,
+            phone="4165550101",
+            domain=None,
+        ),
+        SimpleNamespace(
+            id="source_1",
+            source_observation_id="observation_1",
+            provider_id="google_places",
+            external_id="places/home-electrical-services",
+            title="Home Electrical Services",
+            source_url="https://maps.google.com/example",
+        ),
+        now,
+        now,
+    )
+
+    assert result.status == "passed"
+    assert result.evidence[0]["structured_provider_identity"] is True
+
+
 def test_observation_validation_accepts_structured_google_display_name() -> None:
     now = utcnow()
     results = BusinessValidationService(None).evaluate_observation(
