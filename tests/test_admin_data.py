@@ -387,6 +387,12 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
             "page_size": 50,
         }
         rows = service.list_businesses(**params, quality=None, sort="score_asc")["items"]
+        not_evaluated = service.list_businesses(
+            **params,
+            quality=None,
+            sort="score_asc",
+            evaluation_state="not_evaluated",
+        )
         reliable_rows = service.list_businesses(
             **params, quality="reliable", sort="score_desc"
         )["items"]
@@ -396,6 +402,15 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
             ("Example Painting", 100),
         ]
         assert rows[0]["data_quality_label"] == "missing_evidence"
+        assert rows[0]["evaluation_state"] == "not_evaluated"
+        assert rows[1]["evaluation_state"] == "validated"
+        assert [row["id"] for row in not_evaluated["items"]] == [poor.id]
+        assert not_evaluated["evaluation_state_counts"] == {
+            "validated": 1,
+            "not_evaluated": 1,
+            "not_validated": 0,
+            "not_valid": 0,
+        }
         assert {
             reason["code"]
             for reason in rows[0]["data_quality_breakdown"]["quality_reasons"]

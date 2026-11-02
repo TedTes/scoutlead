@@ -958,6 +958,7 @@ class AdminDataService:
         market_key: str | None,
         page: int,
         page_size: int,
+        evaluation_state: str | None = None,
         match_attribute: str | None = None,
         match_state: str | None = None,
     ) -> dict[str, Any]:
@@ -1030,6 +1031,27 @@ class AdminDataService:
             )
             for business in businesses
         ]
+        evaluation_state_counts = {
+            state: 0
+            for state in (
+                "validated",
+                "not_evaluated",
+                "not_validated",
+                "not_valid",
+            )
+        }
+        evaluation_state_counts.update(
+            Counter(row["evaluation_state"] for row in rows)
+        )
+        if evaluation_state not in {None, "", "all"}:
+            if evaluation_state not in evaluation_state_counts:
+                raise ValidationError(
+                    "Unknown evaluation state",
+                    {"evaluation_state": evaluation_state},
+                )
+            rows = [
+                row for row in rows if row["evaluation_state"] == evaluation_state
+            ]
         match_state_counts = {
             state: 0
             for state in (
@@ -1093,6 +1115,7 @@ class AdminDataService:
             "page": page,
             "page_size": page_size,
             "match_state_counts": match_state_counts,
+            "evaluation_state_counts": evaluation_state_counts,
         }
 
     def _match_attribute_definitions(self) -> list[SignalDefinitionModel]:
@@ -2179,6 +2202,15 @@ class AdminDataService:
             )
             result[business_id] = {
                 "state": state,
+                "evaluation_state": (
+                    "not_evaluated"
+                    if not any(row is not None for row in required.values())
+                    else "not_validated"
+                    if any(row is None for row in required.values())
+                    else "validated"
+                    if statuses == {"passed"}
+                    else "not_valid"
+                ),
                 "_validation_map": validations,
                 "_fact_attributes": fact_attributes.get(business_id, []),
                 "validations": [
@@ -2253,6 +2285,7 @@ class AdminDataService:
             "display_name": business.display_name,
             "status": business.status,
             "validation_state": state["state"],
+            "evaluation_state": state["evaluation_state"],
             **quality,
             "candidate_score": candidate["score"],
             "candidate_state": candidate["state"],
