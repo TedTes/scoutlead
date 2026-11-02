@@ -961,6 +961,7 @@ class AdminDataService:
         match_attribute: str | None = None,
     ) -> dict[str, Any]:
         statement = select(BusinessModel)
+        membership_joined = False
         all_match_definitions = self._match_attribute_definitions()
         match_definition: SignalDefinitionModel | None = None
         if query:
@@ -976,6 +977,11 @@ class AdminDataService:
         if status:
             statement = statement.where(BusinessModel.status == status)
         if match_attribute:
+            statement = statement.join(
+                BusinessNicheMembershipModel,
+                BusinessNicheMembershipModel.business_id == BusinessModel.id,
+            ).join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
+            membership_joined = True
             definitions = {
                 definition.key: definition
                 for definition in all_match_definitions
@@ -1013,13 +1019,15 @@ class AdminDataService:
             if match_definition.key == "website_status":
                 fact_conditions.append(BusinessFactModel.value_text == "missing")
             statement = statement.where(
-                exists(select(BusinessFactModel.id).where(and_(*fact_conditions)))
+                exists(select(BusinessFactModel.id).where(and_(*fact_conditions))),
+                *searchable_business_conditions(),
             )
         if niche_slug or market_key:
-            statement = statement.join(
-                BusinessNicheMembershipModel,
-                BusinessNicheMembershipModel.business_id == BusinessModel.id,
-            ).join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
+            if not membership_joined:
+                statement = statement.join(
+                    BusinessNicheMembershipModel,
+                    BusinessNicheMembershipModel.business_id == BusinessModel.id,
+                ).join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
             if niche_slug:
                 statement = statement.where(NicheModel.slug == niche_slug)
             if market_key:

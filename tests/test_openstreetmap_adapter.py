@@ -94,6 +94,43 @@ def test_openstreetmap_adapter_rejects_transit_stop_with_trade_word_in_name(
     assert result.data == []
 
 
+def test_openstreetmap_adapter_rejects_partial_trade_word_on_unrelated_business(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "tools.discovery.openstreetmap.httpx.get",
+        lambda *args, **kwargs: FakeResponse(
+            [{"boundingbox": ["43.55", "43.90", "-79.70", "-79.10"]}]
+        ),
+    )
+    monkeypatch.setattr(
+        "tools.discovery.openstreetmap.httpx.post",
+        lambda *args, **kwargs: FakeResponse(
+            {
+                "elements": [
+                    {
+                        "type": "node",
+                        "id": 6594592560,
+                        "lat": 43.7669,
+                        "lon": -79.2276,
+                        "tags": {
+                            "name": "Painted Post Convenience",
+                            "shop": "convenience",
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+
+    result = OpenStreetMapDiscoveryAdapter(timeout_seconds=1).run(
+        _source(),
+        {"campaign": _campaign()},
+    )
+
+    assert result.data == []
+
+
 def test_openstreetmap_query_uses_category_tag_and_name_pattern() -> None:
     query = build_overpass_query("residential painters", bbox=(43.5, -79.7, 43.9, -79.1))
 

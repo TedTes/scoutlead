@@ -118,7 +118,7 @@ def _add_operational_fact(session, business, *, confidence: int = 95):
             value_type="boolean",
             value_boolean=True,
             confidence=confidence,
-            attribute_score=100,
+            attribute_score=0,
             score_version=1,
             score_reason="present",
             resolution_state="confirmed",
@@ -510,6 +510,47 @@ def test_admin_businesses_filter_by_the_same_attribute_gate_as_audiences() -> No
             (missing_form, False, 100),
             (has_form, True, 0),
         ):
+            session.add(
+                BusinessNicheMembershipModel(
+                    id=new_id("membership"),
+                    business_id=business.id,
+                    niche_id=niche.id,
+                    market_key="toronto",
+                    confidence=1.0,
+                    evidence=[],
+                    source_observation_id=None,
+                    seed_batch_id=None,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+            for validation_type, confidence in (
+                ("identity", 100),
+                ("business_identity", 90),
+                ("trade", 95),
+                ("location", 95),
+            ):
+                session.add(
+                    ValidationResultModel(
+                        id=new_id("validation"),
+                        idempotency_key=f"{business.id}:{validation_type}",
+                        business_id=business.id,
+                        source_item_id=None,
+                        source_observation_id=None,
+                        niche_id=niche.id,
+                        market_key="toronto",
+                        validation_type=validation_type,
+                        status="passed",
+                        confidence=confidence,
+                        reason="test evidence supports eligibility",
+                        evidence=[],
+                        validator="test",
+                        validator_version=1,
+                        observed_at=now,
+                        expires_at=now + timedelta(days=30),
+                    )
+                )
+            _add_operational_fact(session, business)
             observation = SourceObservationModel(
                 id=new_id("observation"),
                 business_id=business.id,

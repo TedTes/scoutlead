@@ -247,6 +247,43 @@ def test_secondary_provider_category_does_not_override_primary_trade() -> None:
     assert result.evidence[0]["decisive_excluded_terms"] == []
 
 
+def test_partial_trade_word_and_conflicting_provider_category_fail_trade() -> None:
+    now = utcnow()
+    result = BusinessValidationService(None)._trade(
+        SimpleNamespace(id="business_convenience"),
+        SimpleNamespace(
+            id="source_convenience",
+            source_observation_id="observation_convenience",
+            provider_id="google_places",
+            external_id="places/convenience",
+            title="Painted Post Convenience",
+            raw_payload={
+                "types": ["convenience_store", "store", "establishment"],
+                "displayName": {"text": "Painted Post Convenience"},
+            },
+        ),
+        SimpleNamespace(
+            niche_id="niche_painting",
+            market_key="toronto",
+            niche=SimpleNamespace(
+                slug="home_service_painting",
+                label="Painting",
+                category="painting contractor",
+                search_config={
+                    "include_terms": ["paint", "painter", "painting"],
+                    "exclude_terms": [],
+                },
+            ),
+        ),
+        now,
+        now,
+    )
+
+    assert result.status == "failed"
+    assert result.evidence[0]["matched_terms"] == []
+    assert "convenience_store" in result.evidence[0]["structured_categories"]
+
+
 def test_excluded_trade_in_business_title_remains_a_failure() -> None:
     now = utcnow()
     result = BusinessValidationService(None)._trade(

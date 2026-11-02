@@ -27,7 +27,7 @@ from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
 
 
-VALIDATOR_VERSION = 5
+VALIDATOR_VERSION = 6
 BLOCKED_HOSTS = BLOCKED_WEBSITE_HOSTS
 GENERIC_TITLES = {
     "renovation",
@@ -346,7 +346,7 @@ class BusinessValidationService:
         slug = segment.niche.slug if segment.niche else ""
         terms = _trade_terms(segment.niche)
         payload = item.raw_payload or {}
-        provider_payload = payload.get("raw") if isinstance(payload.get("raw"), dict) else payload
+        provider_payload = nested_raw(payload)
         provider_id = str(getattr(item, "provider_id", None) or "").strip().lower()
         entity = assess_provider_business_entity(
             source=provider_id,
@@ -356,6 +356,23 @@ class BusinessValidationService:
             entity.is_business is None
             and (getattr(business, "phone", None) or getattr(business, "domain", None))
         )
+        tags = (
+            provider_payload.get("tags")
+            if isinstance(provider_payload.get("tags"), dict)
+            else {}
+        )
+        structured_categories = [
+            value
+            for value in (
+                payload.get("category"),
+                provider_payload.get("primaryType"),
+                provider_payload.get("primaryTypeDisplayName"),
+                *(provider_payload.get("types") or []),
+                *(provider_payload.get("categories") or []),
+                *(tags.get(key) for key in ("craft", "office", "shop", "amenity")),
+            )
+            if value not in (None, "", [])
+        ]
         independent_fields = {
             "title": item.title,
             "snippet": payload.get("snippet"),
@@ -364,13 +381,14 @@ class BusinessValidationService:
             "primary_type": provider_payload.get("primaryTypeDisplayName"),
             "types": provider_payload.get("types"),
             "categories": provider_payload.get("categories"),
+            "structured_categories": structured_categories,
         }
         text = _normalized(json.dumps(independent_fields, default=str))
-        matched = sorted(term for term in terms if term in text)
+        matched = sorted(term for term in terms if _contains_trade_term(text, term))
         config = getattr(segment.niche, "search_config", {}) or search_config_for_slug(slug)
         excluded_terms = set(config.get("exclude_terms") or [])
         excluded = sorted(
-            term for term in excluded_terms if term in text
+            term for term in excluded_terms if _contains_trade_term(text, term, allow_suffix=True)
         )
         decisive_text = _normalized(
             " ".join(
@@ -385,11 +403,18 @@ class BusinessValidationService:
         decisive_exclusions = sorted(
             term
             for term in excluded_terms
-            if term in decisive_text
+            if _contains_trade_term(decisive_text, term, allow_suffix=True)
+        )
+        structured_text = _normalized(json.dumps(structured_categories, default=str))
+        structured_present = bool(structured_text)
+        structured_matches = sorted(
+            term for term in terms if _contains_trade_term(structured_text, term)
         )
         status = (
             "failed"
             if decisive_exclusions or entity.is_business is False
+            else "failed"
+            if structured_present and not structured_matches
             else "uncertain"
             if provider_id
             in {
@@ -424,7 +449,7 @@ class BusinessValidationService:
             and entity.is_business is not True
             and not legacy_entity_corroborated
             else "Independent source fields conflict with the requested trade."
-            if decisive_exclusions
+            if decisive_exclusions or (structured_present and not structured_matches)
             else "Independent source fields support the requested trade."
             if matched
             else "The discovery query is not independent evidence of the business trade.",
@@ -433,6 +458,8 @@ class BusinessValidationService:
             evidence=[
                 {
                     "matched_terms": matched,
+                    "structured_categories": structured_categories,
+                    "structured_matched_terms": structured_matches,
                     "excluded_terms": excluded,
                     "decisive_excluded_terms": decisive_exclusions,
                     "niche": slug,
@@ -535,6 +562,26 @@ def _result(
 
 def _normalized(value: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+
+
+def _contains_trade_term(text: str, term: str, *, allow_suffix: bool = False) -> bool:
+    """Match a complete normalized trade word or phrase, never a substring.
+
+    For example, ``paint`` must not classify ``Painted Post Convenience`` as a
+    painting contractor. The configured catalog already contains the intended
+    variants (paint, painter, painting; plumber, plumbing; and so on).
+    """
+
+    normalized_text = _normalized(text)
+    normalized_term = _normalized(term)
+    if not normalized_text or not normalized_term:
+        return False
+    escaped = re.escape(normalized_term)
+    suffix = r"(?:s|er|ers|ing|ed)?" if allow_suffix else ""
+    return re.search(
+        rf"(?<![a-z0-9]){escaped}{suffix}(?![a-z0-9])",
+        normalized_text,
+    ) is not None
 
 
 def _is_generic_business_title(title: str) -> bool:

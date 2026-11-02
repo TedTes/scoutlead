@@ -168,7 +168,7 @@ def result_from_osm_element(
         return None
     tag, pattern = _category_rule(category)
     tag_match = bool(tag and normalize_text(tags.get(tag[0])).lower() == tag[1])
-    if not tag_match and re.search(pattern, name, flags=re.IGNORECASE) is None:
+    if not tag_match and not _name_matches_category(name, category, fallback_pattern=pattern):
         return None
     website = normalize_url(tags.get("contact:website") or tags.get("website") or tags.get("url"))
     phone = normalize_text(tags.get("contact:phone") or tags.get("phone"))
@@ -234,6 +234,35 @@ def _category_rule(category: str) -> tuple[tuple[str, str] | None, str]:
         if len(word) >= 4 and word not in {"business", "service", "services", "company"}
     ]
     return None, "|".join(words[:5]) or re.escape(normalized)
+
+
+def _name_matches_category(
+    name: str,
+    category: str,
+    *,
+    fallback_pattern: str,
+) -> bool:
+    normalized_category = re.sub(r"[^a-z0-9]+", " ", category.lower()).strip()
+    niche_slug = niche_slug_for_category(normalized_category)
+    templates = _SOURCE_REGISTRY.templates(
+        provider_id="openstreetmap",
+        niche_slug=niche_slug,
+    )
+    terms = (
+        tuple(templates[0].metadata.get("required_name_terms") or ())
+        if templates
+        else tuple(fallback_pattern.split("|"))
+    )
+    normalized_name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return any(
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(term.strip().lower())}(?![a-z0-9])",
+            normalized_name,
+        )
+        is not None
+        for term in terms
+        if term and term.strip()
+    )
 
 
 def _matches_website_policy(result: SearchResult, website_policy: str) -> bool:
