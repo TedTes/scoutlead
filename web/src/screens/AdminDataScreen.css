@@ -32,32 +32,21 @@
   font-style: italic;
 }
 
-.admin-footprint-score {
-  min-width: 48px;
+.admin-attribute-evidence {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: baseline;
   justify-content: flex-end;
   gap: 2px;
   color: #5f6978;
-  font-size: 9px;
+  font-size: 8px;
+  white-space: nowrap;
 }
 
-.admin-footprint-score strong {
-  font-size: 11px;
-}
-
-.admin-footprint-score small {
-  font-size: 7px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.admin-footprint-score.is-strong { color: #14805e; }
-.admin-footprint-score.is-fair { color: #607181; }
-.admin-footprint-score.is-weak { color: #9c620d; }
-.admin-footprint-score.is-gap { color: #c33535; }
-.admin-footprint-score.is-unscored { color: #98a1ae; }
+.admin-attribute-evidence.is-published { color: #14805e; }
+.admin-attribute-evidence.is-rejected,
+.admin-attribute-evidence.is-quarantined { color: #c33535; }
+.admin-attribute-evidence.is-missing { color: #98a1ae; }
 
 .admin-json-actions {
   display: flex;

@@ -444,7 +444,7 @@ function BusinessInspector({
           <AttributeCoverage lineage={lineage} />
         </div>
       </header>
-      {detail.candidate_state !== "not_scoped" ? <CandidateScorePanel detail={detail} /> : null}
+      <CandidateScorePanel detail={detail} />
       <nav className="admin-inspector-tabs" aria-label="Business detail views">
         <button className={activeTab === "attributes" ? "is-active" : ""} type="button" onClick={() => setActiveTab("attributes")}>Attributes</button>
         <button className={activeTab === "json" ? "is-active" : ""} type="button" onClick={() => setActiveTab("json")}>JSON</button>
@@ -467,14 +467,19 @@ function BusinessInspector({
 
 function CandidateScorePanel({ detail }: { detail: AdminBusinessDetail }) {
   const score = detail.candidate_score_breakdown;
+  const scoped = score.state !== "not_scoped";
   return (
     <section className="admin-candidate-score-panel">
-      <header><strong>Audience candidate score</strong><span>{score.score ?? "—"} / 100 · {score.state.replace(/_/g, " ")}</span></header>
-      <p>{score.formula}</p>
+      <header><strong>Potential lead score</strong><span>{scoped ? `${score.score ?? "—"} / 100 · ${score.state.replace(/_/g, " ")}` : "Select an opportunity"}</span></header>
+      <p>{scoped ? score.formula : "Eligibility can be checked now; an opportunity is required for a complete lead score."}</p>
       <div>
         {score.components.map((component) => (
           <div className="admin-candidate-component" key={`${component.group}:${component.key}`}>
-            <span><strong>{component.label}</strong><small>{component.reason}</small></span>
+            <span>
+              <strong>{component.label}</strong>
+              <small>{component.reason}</small>
+              <small>{component.match_value == null ? "Match unknown" : `Match ${component.match_value}%`} · {component.confidence == null ? "confidence unknown" : `confidence ${component.confidence}%`} · freshness {component.freshness}%</small>
+            </span>
             <span>{component.contribution ?? "—"} / {component.weight}</span>
           </div>
         ))}
@@ -606,7 +611,6 @@ function BusinessAttributeRecord({
 
   return (
     <div className="admin-inspector-content admin-business-record">
-      <QualityReasons detail={detail} />
       {groups.map((group) => <AttributeSection title={group.label} key={group.key}>
         {group.definitions.map((definition) => {
           const fact = factsByKey.get(definition.key);
@@ -625,19 +629,6 @@ function BusinessAttributeRecord({
       </AttributeSection>)}
     </div>
   );
-}
-
-function QualityReasons({ detail }: { detail: AdminBusinessDetail }) {
-  const reasons = detail.data_quality_breakdown.quality_reasons || [];
-  return <section className="admin-record-quality-reasons">
-    <header>
-      <div><strong>Why this quality score</strong><span>{detail.data_quality_score ?? "Not scored"} · {humanizeKey(detail.data_quality_label)}</span></div>
-    </header>
-    {reasons.length ? <ul>{reasons.map((reason) => <li className={`is-${reason.impact}`} key={reason.code}>
-      <span aria-hidden="true">{reason.impact === "positive" ? "✓" : "!"}</span>
-      <div><strong>{reason.message}</strong><small>{reason.score == null ? "No score" : `${reason.score}/100`} · {humanizeKey(reason.check)}</small></div>
-    </li>)}</ul> : <p>No quality explanation is available.</p>}
-  </section>;
 }
 
 function AttributeSection({ title, children }: { title: string; children: ReactNode }) {
@@ -671,21 +662,21 @@ function TrackedAttributeRow({
   return <article className={`admin-business-attribute tracked-attribute${observed ? "" : " is-unobserved"}`}>
     <div>
       <span><strong>{definition.label}</strong><code>{definition.key}</code></span>
-      <FootprintScore score={fact?.attribute_score} reason={fact?.score_reason} />
+      <AttributeEvidenceBadge confidence={confidence} observed={observed} qualityState={fact?.quality_state} />
     </div>
     <p>{observed ? formatAttributeValue(definition.key, value) : "Not observed"}</p>
     <small>
       {fact
-        ? <>{confidence != null ? `Evidence ${confidence}%` : "Confidence unavailable"} · {humanizeKey(fact.quality_state)}{source ? ` · ${humanizeKey(source)}` : ""}</>
-        : definition.status === "not_configured" ? "Attribute is not configured in this deployment" : "No observation collected"}
+        ? <>{humanizeKey(fact.quality_state)}{source ? ` · ${humanizeKey(source)}` : ""}{fact.score_reason ? ` · ${fact.score_reason}` : ""}</>
+        : observed ? "Stored on the business record; no linked fact evidence" : definition.status === "not_configured" ? "Attribute is not configured in this deployment" : "No observation collected"}
     </small>
   </article>;
 }
 
-function FootprintScore({ score, reason }: { score?: number | null; reason?: string | null }) {
-  if (score == null) return <span className="admin-footprint-score is-unscored">— <small>unscored</small></span>;
-  const state = score >= 85 ? "strong" : score >= 65 ? "fair" : score >= 40 ? "weak" : "gap";
-  return <span className={`admin-footprint-score is-${state}`} title={reason || undefined}><strong>{score}</strong><small>{state}</small></span>;
+function AttributeEvidenceBadge({ confidence, observed, qualityState }: { confidence?: number | null; observed: boolean; qualityState?: string }) {
+  if (!observed) return <span className="admin-attribute-evidence is-missing">Not observed</span>;
+  if (confidence == null) return <span className="admin-attribute-evidence">Stored</span>;
+  return <span className={`admin-attribute-evidence is-${qualityState || "observed"}`}><strong>{confidence}%</strong> evidence</span>;
 }
 
 function formatAttributeValue(key: string, value: unknown) {
