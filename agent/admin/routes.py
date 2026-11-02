@@ -348,8 +348,16 @@ def create_business(data: AdminBusinessCreate, session: DbSession, auth: AdminAu
 
 
 @router.get("/businesses/{business_id}")
-def business_detail(business_id: str, session: DbSession, auth: AdminAuth):
-    return _service(session, auth).detail(business_id)
+def business_detail(
+    business_id: str,
+    session: DbSession,
+    auth: AdminAuth,
+    match_attribute: str | None = None,
+):
+    return _service(session, auth).detail(
+        business_id,
+        match_attribute=match_attribute,
+    )
 
 
 @router.get("/businesses/{business_id}/fact-lineage")

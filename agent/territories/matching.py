@@ -31,12 +31,14 @@ from db.models import (
     ServiceSignalMappingModel,
     SignalDefinitionModel,
     SourceObservationModel,
+    ValidationResultModel,
 )
 from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adjustment
 from shared.errors import ConflictError
 from shared.geospatial import haversine_distance_km_expression
 from shared.utils import utcnow
 from seeding.batches import active_membership_condition, observation_is_quarantined
+from scoring import CandidateComponent, candidate_score
 
 
 SIGNAL_FACTS = {
@@ -589,6 +591,24 @@ class ProfileMatchService:
             now=utcnow(),
             max_age_days=profile.evidence_max_age_days,
         )
+        validations: dict[str, ValidationResultModel] = {}
+        for validation in self.session.scalars(
+            select(ValidationResultModel)
+            .where(ValidationResultModel.business_id == business_id)
+            .order_by(ValidationResultModel.observed_at.desc())
+        ):
+            validations.setdefault(validation.validation_type, validation)
+        candidate = _candidate_score(
+            business=business,
+            facts=facts,
+            validations=validations,
+            signal_specs=signal_specs,
+            signal_evidence=signal_evidence,
+            contact=contact,
+            distance_km=distance_km,
+            radius_km=float(profile.radius_km),
+            max_age_days=profile.evidence_max_age_days,
+        )
         raw = {
             **(observation.raw_payload if observation else {}),
             "match_origin": "profile_sql",
@@ -603,6 +623,8 @@ class ProfileMatchService:
                 "service_score": round(weighted_match_score, 2),
                 "opportunity_score": opportunity_score,
                 "score_breakdown": score_breakdown,
+                "candidate_score": candidate["score"],
+                "candidate_score_breakdown": candidate,
                 "selected_signal_count": len(signal_evidence),
                 "matched_signal_count": matched_signal_count,
                 "confirmed_signal_count": confirmed_signal_count,
@@ -620,8 +642,8 @@ class ProfileMatchService:
             "search_match": {
                 "status": "matched",
                 "reason": (
-                    "Matched the audience using published facts scored by "
-                    "opportunity severity, confidence, and freshness."
+                    "Matched the audience using hard eligibility gates and published "
+                    "attributes weighted by match value, confidence, and freshness."
                 ),
             },
         }
@@ -634,6 +656,164 @@ class ProfileMatchService:
             "source": observation.source if observation else "business_index",
             "raw": raw,
         }
+
+
+def _candidate_score(
+    *,
+    business: BusinessModel,
+    facts: dict[str, BusinessFactModel],
+    validations: dict[str, ValidationResultModel],
+    signal_specs: list[SignalMatchSpec],
+    signal_evidence: dict[str, dict[str, Any]],
+    contact: ContactModel | None,
+    distance_km: float | None,
+    radius_km: float,
+    max_age_days: int,
+) -> dict[str, Any]:
+    components: list[CandidateComponent] = []
+    for key, label, weight in (
+        ("identity", "Stable business identity", 7.5),
+        ("business_identity", "Real business record", 7.5),
+        ("trade", "Selected trade/category", 20.0),
+        ("location", "Audience market/radius", 10.0),
+    ):
+        validation = validations.get(key)
+        passed = validation is not None and validation.status == "passed"
+        failed = validation is not None and validation.status == "failed"
+        components.append(
+            CandidateComponent(
+                key=key,
+                label=label,
+                group="eligibility",
+                weight=weight,
+                match_value=1.0 if passed else 0.0 if failed else None,
+                confidence=validation.confidence if validation is not None else None,
+                hard_gate=True,
+                status="passed" if passed else "failed" if failed else "missing",
+                reason=(validation.reason if validation is not None else f"{label} is unverified"),
+            )
+        )
+    operational = facts.get("business_operational")
+    operational_value = fact_value(operational)
+    operational_eligible = fact_is_eligible(
+        operational,
+        minimum_confidence=85,
+        require_provenance=True,
+    )
+    components.insert(
+        2,
+        CandidateComponent(
+            key="business_operational",
+            label="Business operational",
+            group="eligibility",
+            weight=15.0,
+            match_value=(
+                1.0 if operational_eligible and operational_value is True
+                else 0.0 if operational_eligible and operational_value is False
+                else None
+            ),
+            confidence=operational.confidence if operational is not None else None,
+            freshness=_fact_freshness(operational, max_age_days),
+            hard_gate=True,
+            status=(
+                "passed" if operational_eligible and operational_value is True
+                else "failed" if operational_eligible and operational_value is False
+                else "missing"
+            ),
+            reason=(
+                "Business is active"
+                if operational_value is True
+                else "Business is confirmed inactive"
+                if operational_value is False
+                else "Operational status is unverified"
+            ),
+        ),
+    )
+    # Location validation is necessary, but the actual audience radius is the
+    # value being matched. Preserve both pieces in the component explanation.
+    location = next(item for item in components if item.key == "location")
+    location_index = components.index(location)
+    components[location_index] = CandidateComponent(
+        **{
+            **location.__dict__,
+            "match_value": (
+                1.0
+                if location.match_value == 1.0
+                and distance_km is not None
+                and distance_km <= radius_km
+                else 0.0 if distance_km is not None and distance_km > radius_km
+                else location.match_value
+            ),
+            "reason": (
+                f"{distance_km:.1f} km from the audience center (limit {radius_km:g} km)"
+                if distance_km is not None
+                else location.reason
+            ),
+        }
+    )
+
+    signal_weight = 30.0 / len(signal_specs) if signal_specs else 0.0
+    for spec in signal_specs:
+        evidence = signal_evidence[spec.key]
+        fact = facts.get(spec.fact_key)
+        attribute_score = evidence.get("attribute_score")
+        components.append(
+            CandidateComponent(
+                key=spec.fact_key,
+                label=spec.fact_key.replace("_", " ").title(),
+                group="opportunity",
+                weight=signal_weight,
+                match_value=(
+                    max(0.0, min(1.0, (100.0 - float(attribute_score)) / 100.0))
+                    if evidence.get("matched") and attribute_score is not None
+                    else 0.0 if fact is not None
+                    else None
+                ),
+                confidence=fact.confidence if fact is not None else None,
+                freshness=_fact_freshness(fact, max_age_days),
+                status="matched" if evidence.get("matched") else "not_matched",
+                reason=(
+                    f"Observed attribute score {float(attribute_score):g}/100"
+                    if attribute_score is not None
+                    else "No usable attribute evidence"
+                ),
+            )
+        )
+
+    phone_present = bool((contact and contact.phone) or business.phone)
+    email_present = bool(contact and contact.email)
+    for key, label, present in (
+        ("public_phone_present", "Reachable phone", phone_present),
+        ("public_email_present", "Reachable email", email_present),
+    ):
+        components.append(
+            CandidateComponent(
+                key=key,
+                label=label,
+                group="contactability",
+                weight=5.0,
+                match_value=1.0 if present else 0.0,
+                confidence=(contact.verification_score if contact and contact.verification_score is not None else 100.0),
+                status="present" if present else "missing",
+                reason=f"{label} {'is available' if present else 'is not available'}",
+            )
+        )
+    return candidate_score(
+        components,
+        opportunity_scoped=bool(signal_specs),
+        opportunity_matched=any(evidence.get("matched") for evidence in signal_evidence.values()),
+    )
+
+
+def _fact_freshness(fact: BusinessFactModel | None, max_age_days: int) -> float:
+    if fact is None:
+        return 0.0
+    observed_at = fact.observed_at
+    now = utcnow()
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=now.tzinfo)
+    age_days = max(0.0, (now - observed_at).total_seconds() / 86400.0)
+    return max(0.0, 1.0 - age_days / max(1, max_age_days))
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
@@ -716,7 +896,7 @@ def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
     profile_match = result["raw"]["profile_match"]
     distance = profile_match.get("distance_km")
     return (
-        -float(profile_match.get("opportunity_score") or 0.0),
+        -float(profile_match.get("candidate_score") or 0.0),
         -int(profile_match.get("confirmed_signal_count") or 0),
         -int(profile_match.get("matched_signal_count") or 0),
         -float(profile_match.get("outcome_adjustment") or 0.0),

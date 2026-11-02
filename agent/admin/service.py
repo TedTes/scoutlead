@@ -56,6 +56,7 @@ from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, normalize_url, utcnow
 from service_definitions.repository import ServiceDefinitionRepository
 from seeding.batches import active_membership_condition
+from scoring import CandidateComponent, candidate_score
 from signal_definitions.repository import SignalDefinitionRepository
 from source_items.repository import SourceItemRepository, source_item_content_hash
 from source_items.schemas import (
@@ -960,6 +961,7 @@ class AdminDataService:
         match_attribute: str | None = None,
     ) -> dict[str, Any]:
         statement = select(BusinessModel)
+        match_definition: SignalDefinitionModel | None = None
         if query:
             pattern = f"%{query.strip()}%"
             statement = statement.where(
@@ -977,21 +979,21 @@ class AdminDataService:
                 definition.key: definition
                 for definition in self._match_attribute_definitions()
             }
-            definition = definitions.get(match_attribute)
-            if definition is None:
+            match_definition = definitions.get(match_attribute)
+            if match_definition is None:
                 raise ValidationError(
                     "Unknown audience-match attribute",
                     {"match_attribute": match_attribute},
                 )
             config = audience_match_config(
-                definition.key,
-                definition.opportunity_direction,
-                definition.config,
+                match_definition.key,
+                match_definition.opportunity_direction,
+                match_definition.config,
             )
             maximum_score = float(config.get("audience_max_score", 49.999))
             fact_conditions = [
                 BusinessFactModel.business_id == BusinessModel.id,
-                BusinessFactModel.signal_definition_id == definition.id,
+                BusinessFactModel.signal_definition_id == match_definition.id,
                 eligible_fact_condition(
                     BusinessFactModel,
                     minimum_confidence=int(
@@ -1007,7 +1009,7 @@ class AdminDataService:
             ]
             # A listing without a URL is not proof that a website is absent.
             # The explicit admin option only returns verified missing websites.
-            if definition.key == "website_status":
+            if match_definition.key == "website_status":
                 fact_conditions.append(BusinessFactModel.value_text == "missing")
             statement = statement.where(
                 exists(select(BusinessFactModel.id).where(and_(*fact_conditions)))
@@ -1027,7 +1029,12 @@ class AdminDataService:
         states = self._validation_states([business.id for business in businesses])
         memberships = self._primary_memberships([business.id for business in businesses])
         rows = [
-            self._business_summary(business, states[business.id], memberships.get(business.id))
+            self._business_summary(
+                business,
+                states[business.id],
+                memberships.get(business.id),
+                match_definition=match_definition,
+            )
             for business in businesses
         ]
         if validation:
@@ -1046,10 +1053,11 @@ class AdminDataService:
             rows = [row for row in rows if row["data_quality_score"] is None]
         elif quality:
             raise ValidationError("Unknown data quality filter", {"quality": quality})
+        score_key = "candidate_score" if match_definition is not None else "data_quality_score"
         if sort == "score_asc":
-            rows.sort(key=lambda row: (row["data_quality_score"] is not None, row["data_quality_score"] or 0, row["display_name"].lower()))
+            rows.sort(key=lambda row: (row[score_key] is not None, row[score_key] or 0, row["display_name"].lower()))
         elif sort == "score_desc":
-            rows.sort(key=lambda row: (row["data_quality_score"] is None, -(row["data_quality_score"] or 0), row["display_name"].lower()))
+            rows.sort(key=lambda row: (row[score_key] is None, -(row[score_key] or 0), row["display_name"].lower()))
         elif sort == "name":
             rows.sort(key=lambda row: row["display_name"].lower())
         else:
@@ -1087,7 +1095,12 @@ class AdminDataService:
         ).unique()
         return list(rows)
 
-    def detail(self, business_id: str) -> dict[str, Any]:
+    def detail(
+        self,
+        business_id: str,
+        *,
+        match_attribute: str | None = None,
+    ) -> dict[str, Any]:
         business = self._business(business_id)
         state = self._validation_states([business_id])[business_id]
         memberships = list(
@@ -1137,8 +1150,26 @@ class AdminDataService:
                 .limit(50)
             )
         )
+        match_definition = next(
+            (
+                definition
+                for definition in self._match_attribute_definitions()
+                if definition.key == match_attribute
+            ),
+            None,
+        )
+        if match_attribute and match_definition is None:
+            raise ValidationError(
+                "Unknown audience-match attribute",
+                {"match_attribute": match_attribute},
+            )
         return {
-            **self._business_summary(business, state, memberships[0] if memberships else None),
+            **self._business_summary(
+                business,
+                state,
+                memberships[0] if memberships else None,
+                match_definition=match_definition,
+            ),
             "normalized_name": business.normalized_name,
             "latitude": business.latitude,
             "longitude": business.longitude,
@@ -2163,10 +2194,18 @@ class AdminDataService:
         business: BusinessModel,
         state: dict[str, Any],
         membership=None,
+        *,
+        match_definition: SignalDefinitionModel | None = None,
     ) -> dict[str, Any]:
         quality = _attribute_data_quality_score(
             state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
+        )
+        candidate = _admin_candidate_score(
+            business,
+            state.get("_validation_map", {}),
+            state.get("_fact_attributes", []),
+            match_definition,
         )
         return {
             "id": business.id,
@@ -2174,6 +2213,9 @@ class AdminDataService:
             "status": business.status,
             "validation_state": state["state"],
             **quality,
+            "candidate_score": candidate["score"],
+            "candidate_state": candidate["state"],
+            "candidate_score_breakdown": candidate,
             "website_url": business.website_url,
             "domain": business.domain,
             "phone": business.phone,
@@ -2223,6 +2265,142 @@ class AdminDataService:
                 after=after,
             )
         )
+
+
+def _admin_candidate_score(
+    business: BusinessModel,
+    validations: dict[str, ValidationResultModel],
+    fact_attributes: list[dict[str, Any]],
+    match_definition: SignalDefinitionModel | None,
+) -> dict[str, Any]:
+    facts = {item["key"]: item for item in fact_attributes}
+    components: list[CandidateComponent] = []
+    for key, label, weight in (
+        ("identity", "Stable business identity", 7.5),
+        ("business_identity", "Real business record", 7.5),
+        ("trade", "Selected trade/category", 20.0),
+        ("location", "Market/service area", 10.0),
+    ):
+        validation = validations.get(key)
+        passed = validation is not None and validation.status == "passed"
+        failed = validation is not None and validation.status == "failed"
+        components.append(
+            CandidateComponent(
+                key=key,
+                label=label,
+                group="eligibility",
+                weight=weight,
+                match_value=1.0 if passed else 0.0 if failed else None,
+                confidence=validation.confidence if validation is not None else None,
+                hard_gate=True,
+                status="passed" if passed else "failed" if failed else "missing",
+                reason=(validation.reason if validation is not None else f"{label} is unverified"),
+            )
+        )
+    operational = facts.get("business_operational")
+    operational_usable = operational is not None and operational.get("evidence_state") == "usable"
+    operational_value = operational.get("value") if operational else None
+    components.insert(
+        2,
+        CandidateComponent(
+            key="business_operational",
+            label="Business operational",
+            group="eligibility",
+            weight=15.0,
+            match_value=(
+                1.0 if operational_usable and operational_value is True
+                else 0.0 if operational_usable and operational_value is False
+                else None
+            ),
+            confidence=operational.get("evidence_confidence") if operational else None,
+            freshness=1.0 if operational_usable else 0.0,
+            hard_gate=True,
+            status=(
+                "passed" if operational_usable and operational_value is True
+                else "failed" if operational_usable and operational_value is False
+                else "missing"
+            ),
+            reason=(
+                "Business is active"
+                if operational_value is True
+                else "Business is confirmed inactive"
+                if operational_value is False
+                else "Operational status is unverified"
+            ),
+        ),
+    )
+
+    opportunity_matched: bool | None = None
+    if match_definition is not None:
+        opportunity = facts.get(match_definition.key)
+        config = audience_match_config(
+            match_definition.key,
+            match_definition.opportunity_direction,
+            match_definition.config,
+        )
+        maximum_score = float(config.get("audience_max_score", 49.999))
+        attribute_score = opportunity.get("score") if opportunity else None
+        opportunity_matched = bool(
+            opportunity
+            and opportunity.get("evidence_state") == "usable"
+            and attribute_score is not None
+            and float(attribute_score) <= maximum_score
+            and not (
+                match_definition.key == "website_status"
+                and opportunity.get("value") != "missing"
+            )
+        )
+        components.append(
+            CandidateComponent(
+                key=match_definition.key,
+                label=match_definition.label,
+                group="opportunity",
+                weight=30.0,
+                match_value=(
+                    max(0.0, min(1.0, (100.0 - float(attribute_score)) / 100.0))
+                    if opportunity_matched and attribute_score is not None
+                    else 0.0 if opportunity is not None
+                    else None
+                ),
+                confidence=(opportunity.get("evidence_confidence") if opportunity else None),
+                freshness=(1.0 if opportunity and opportunity.get("evidence_state") == "usable" else 0.0),
+                status="matched" if opportunity_matched else "not_matched" if opportunity else "missing",
+                reason=(
+                    f"Observed attribute score {float(attribute_score):g}/100"
+                    if attribute_score is not None
+                    else "No usable attribute evidence"
+                ),
+            )
+        )
+
+    public_phone = facts.get("public_phone_present")
+    public_email = facts.get("public_email_present")
+    phone_present = (
+        public_phone.get("value") is True if public_phone is not None else bool(business.phone)
+    )
+    email_present = public_email.get("value") is True if public_email is not None else False
+    for key, label, present, evidence in (
+        ("public_phone_present", "Reachable phone", phone_present, public_phone),
+        ("public_email_present", "Reachable email", email_present, public_email),
+    ):
+        components.append(
+            CandidateComponent(
+                key=key,
+                label=label,
+                group="contactability",
+                weight=5.0,
+                match_value=1.0 if present else 0.0,
+                confidence=(evidence.get("evidence_confidence") if evidence else 80.0),
+                freshness=(1.0 if evidence is None or evidence.get("evidence_state") == "usable" else 0.0),
+                status="present" if present else "missing",
+                reason=f"{label} {'is available' if present else 'is not available'}",
+            )
+        )
+    return candidate_score(
+        components,
+        opportunity_scoped=match_definition is not None,
+        opportunity_matched=opportunity_matched,
+    )
 
 
 def _attribute_data_quality_score(
