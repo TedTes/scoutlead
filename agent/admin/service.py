@@ -961,6 +961,7 @@ class AdminDataService:
         match_attribute: str | None = None,
     ) -> dict[str, Any]:
         statement = select(BusinessModel)
+        all_match_definitions = self._match_attribute_definitions()
         match_definition: SignalDefinitionModel | None = None
         if query:
             pattern = f"%{query.strip()}%"
@@ -977,7 +978,7 @@ class AdminDataService:
         if match_attribute:
             definitions = {
                 definition.key: definition
-                for definition in self._match_attribute_definitions()
+                for definition in all_match_definitions
             }
             match_definition = definitions.get(match_attribute)
             if match_definition is None:
@@ -1034,6 +1035,7 @@ class AdminDataService:
                 states[business.id],
                 memberships.get(business.id),
                 match_definition=match_definition,
+                match_definitions=all_match_definitions,
             )
             for business in businesses
         ]
@@ -1053,11 +1055,14 @@ class AdminDataService:
             rows = [row for row in rows if row["data_quality_score"] is None]
         elif quality:
             raise ValidationError("Unknown data quality filter", {"quality": quality})
-        score_key = "candidate_score" if match_definition is not None else "data_quality_score"
-        if sort == "score_asc":
-            rows.sort(key=lambda row: (row[score_key] is not None, row[score_key] or 0, row["display_name"].lower()))
+        if sort == "candidate_asc":
+            rows.sort(key=lambda row: (row["candidate_score"] is not None, row["candidate_score"] or 0, row["display_name"].lower()))
+        elif sort == "candidate_desc":
+            rows.sort(key=lambda row: (row["candidate_score"] is None, -(row["candidate_score"] or 0), row["display_name"].lower()))
+        elif sort == "score_asc":
+            rows.sort(key=lambda row: (row["data_quality_score"] is not None, row["data_quality_score"] or 0, row["display_name"].lower()))
         elif sort == "score_desc":
-            rows.sort(key=lambda row: (row[score_key] is None, -(row[score_key] or 0), row["display_name"].lower()))
+            rows.sort(key=lambda row: (row["data_quality_score"] is None, -(row["data_quality_score"] or 0), row["display_name"].lower()))
         elif sort == "name":
             rows.sort(key=lambda row: row["display_name"].lower())
         else:
@@ -1150,10 +1155,11 @@ class AdminDataService:
                 .limit(50)
             )
         )
+        all_match_definitions = self._match_attribute_definitions()
         match_definition = next(
             (
                 definition
-                for definition in self._match_attribute_definitions()
+                for definition in all_match_definitions
                 if definition.key == match_attribute
             ),
             None,
@@ -1169,6 +1175,7 @@ class AdminDataService:
                 state,
                 memberships[0] if memberships else None,
                 match_definition=match_definition,
+                match_definitions=all_match_definitions,
             ),
             "normalized_name": business.normalized_name,
             "latitude": business.latitude,
@@ -2196,6 +2203,7 @@ class AdminDataService:
         membership=None,
         *,
         match_definition: SignalDefinitionModel | None = None,
+        match_definitions: list[SignalDefinitionModel] | None = None,
     ) -> dict[str, Any]:
         quality = _attribute_data_quality_score(
             state.get("_validation_map", {}),
@@ -2206,6 +2214,7 @@ class AdminDataService:
             state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
             match_definition,
+            match_definitions or [],
         )
         return {
             "id": business.id,
@@ -2272,6 +2281,7 @@ def _admin_candidate_score(
     validations: dict[str, ValidationResultModel],
     fact_attributes: list[dict[str, Any]],
     match_definition: SignalDefinitionModel | None,
+    match_definitions: list[SignalDefinitionModel],
 ) -> dict[str, Any]:
     facts = {item["key"]: item for item in fact_attributes}
     components: list[CandidateComponent] = []
@@ -2292,6 +2302,10 @@ def _admin_candidate_score(
                 weight=weight,
                 match_value=1.0 if passed else 0.0 if failed else None,
                 confidence=validation.confidence if validation is not None else None,
+                freshness=_admin_evidence_freshness(
+                    validation.observed_at if validation is not None else None,
+                    validation.expires_at if validation is not None else None,
+                ),
                 hard_gate=True,
                 status="passed" if passed else "failed" if failed else "missing",
                 reason=(validation.reason if validation is not None else f"{label} is unverified"),
@@ -2313,7 +2327,14 @@ def _admin_candidate_score(
                 else None
             ),
             confidence=operational.get("evidence_confidence") if operational else None,
-            freshness=1.0 if operational_usable else 0.0,
+            freshness=(
+                _admin_evidence_freshness(
+                    operational.get("observed_at"),
+                    operational.get("expires_at"),
+                )
+                if operational_usable and operational is not None
+                else 0.0
+            ),
             hard_gate=True,
             status=(
                 "passed" if operational_usable and operational_value is True
@@ -2330,46 +2351,101 @@ def _admin_candidate_score(
         ),
     )
 
-    opportunity_matched: bool | None = None
-    if match_definition is not None:
-        opportunity = facts.get(match_definition.key)
+    opportunity_matched = False
+    scoped_definitions = [match_definition] if match_definition is not None else match_definitions
+    opportunity_candidates: list[tuple[float, SignalDefinitionModel, dict[str, Any], float]] = []
+    observed_non_matches: list[tuple[SignalDefinitionModel, dict[str, Any], float]] = []
+    for definition in scoped_definitions:
+        opportunity = facts.get(definition.key)
         config = audience_match_config(
-            match_definition.key,
-            match_definition.opportunity_direction,
-            match_definition.config,
+            definition.key,
+            definition.opportunity_direction,
+            definition.config,
         )
         maximum_score = float(config.get("audience_max_score", 49.999))
         attribute_score = opportunity.get("score") if opportunity else None
-        opportunity_matched = bool(
+        matched = bool(
             opportunity
             and opportunity.get("evidence_state") == "usable"
             and attribute_score is not None
             and float(attribute_score) <= maximum_score
             and not (
-                match_definition.key == "website_status"
+                definition.key == "website_status"
                 and opportunity.get("value") != "missing"
             )
         )
+        if matched and opportunity is not None and attribute_score is not None:
+            strength = max(0.0, min(1.0, (100.0 - float(attribute_score)) / 100.0))
+            confidence = float(opportunity.get("evidence_confidence") or 0.0) / 100.0
+            opportunity_candidates.append((strength * confidence, definition, opportunity, strength))
+        elif opportunity is not None and attribute_score is not None:
+            observed_non_matches.append((definition, opportunity, float(attribute_score)))
+
+    chosen_definition: SignalDefinitionModel | None = None
+    chosen_opportunity: dict[str, Any] | None = None
+    chosen_strength: float | None = None
+    if opportunity_candidates:
+        _, chosen_definition, chosen_opportunity, chosen_strength = max(
+            opportunity_candidates,
+            key=lambda item: item[0],
+        )
+        opportunity_matched = True
+    elif match_definition is not None:
+        chosen_definition = match_definition
+        chosen_opportunity = facts.get(match_definition.key)
+    elif observed_non_matches:
+        chosen_definition, chosen_opportunity, _ = max(
+            observed_non_matches,
+            key=lambda item: float(item[1].get("evidence_confidence") or 0.0),
+        )
+
+    if chosen_definition is not None:
+        attribute_score = chosen_opportunity.get("score") if chosen_opportunity else None
         components.append(
             CandidateComponent(
-                key=match_definition.key,
-                label=match_definition.label,
+                key=chosen_definition.key,
+                label=(
+                    chosen_definition.label
+                    if match_definition is not None
+                    else f"Best verified opportunity: {chosen_definition.label}"
+                ),
                 group="opportunity",
                 weight=30.0,
                 match_value=(
-                    max(0.0, min(1.0, (100.0 - float(attribute_score)) / 100.0))
-                    if opportunity_matched and attribute_score is not None
-                    else 0.0 if opportunity is not None
+                    chosen_strength
+                    if opportunity_matched
+                    else 0.0 if chosen_opportunity is not None
                     else None
                 ),
-                confidence=(opportunity.get("evidence_confidence") if opportunity else None),
-                freshness=(1.0 if opportunity and opportunity.get("evidence_state") == "usable" else 0.0),
-                status="matched" if opportunity_matched else "not_matched" if opportunity else "missing",
+                confidence=(chosen_opportunity.get("evidence_confidence") if chosen_opportunity else None),
+                freshness=(
+                    _admin_evidence_freshness(
+                        chosen_opportunity.get("observed_at"),
+                        chosen_opportunity.get("expires_at"),
+                    )
+                    if chosen_opportunity and chosen_opportunity.get("evidence_state") == "usable"
+                    else 0.0
+                ),
+                status="matched" if opportunity_matched else "not_matched" if chosen_opportunity else "missing",
                 reason=(
                     f"Observed attribute score {float(attribute_score):g}/100"
                     if attribute_score is not None
                     else "No usable attribute evidence"
                 ),
+            )
+        )
+    else:
+        components.append(
+            CandidateComponent(
+                key="verified_opportunity",
+                label="Verified opportunity",
+                group="opportunity",
+                weight=30.0,
+                match_value=None,
+                confidence=None,
+                freshness=0.0,
+                status="missing",
+                reason="No usable opportunity attributes were found",
             )
         )
 
@@ -2391,16 +2467,48 @@ def _admin_candidate_score(
                 weight=5.0,
                 match_value=1.0 if present else 0.0,
                 confidence=(evidence.get("evidence_confidence") if evidence else 80.0),
-                freshness=(1.0 if evidence is None or evidence.get("evidence_state") == "usable" else 0.0),
+                freshness=(
+                    1.0
+                    if evidence is None
+                    else _admin_evidence_freshness(
+                        evidence.get("observed_at"),
+                        evidence.get("expires_at"),
+                    )
+                    if evidence.get("evidence_state") == "usable"
+                    else 0.0
+                ),
                 status="present" if present else "missing",
                 reason=f"{label} {'is available' if present else 'is not available'}",
             )
         )
     return candidate_score(
         components,
-        opportunity_scoped=match_definition is not None,
+        opportunity_scoped=bool(scoped_definitions),
         opportunity_matched=opportunity_matched,
     )
+
+
+def _admin_evidence_freshness(observed_at, expires_at) -> float:
+    if expires_at is None:
+        return 1.0
+    now = utcnow()
+    observed = observed_at
+    expiry = expires_at
+    if isinstance(observed, str):
+        observed = datetime.fromisoformat(observed)
+    if isinstance(expiry, str):
+        expiry = datetime.fromisoformat(expiry)
+    if observed is not None and observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    if expiry <= now:
+        return 0.0
+    if observed is None or expiry <= observed:
+        return 1.0
+    lifetime = (expiry - observed).total_seconds()
+    remaining = (expiry - now).total_seconds()
+    return max(0.0, min(1.0, remaining / lifetime))
 
 
 def _attribute_data_quality_score(

@@ -45,8 +45,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [quality, setQuality] = useState("");
-  const [sort, setSort] = useState("score_asc");
+  const [sort, setSort] = useState("candidate_desc");
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
   const [matchAttribute, setMatchAttribute] = useState("");
@@ -72,7 +71,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       if (selectedNiche !== nicheSlug) setNicheSlug(selectedNiche);
       const businessPage = await api.getAdminBusinesses({
         q: search,
-        quality,
         sort,
         status,
         niche_slug: selectedNiche,
@@ -102,7 +100,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, matchAttribute, nicheSlug, page, quality, search, sort, status]);
+  }, [api, matchAttribute, nicheSlug, page, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -239,7 +237,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
           const value = event.target.value;
           setMatchAttribute(value);
-          setSort(value ? "score_desc" : "score_asc");
+          setSort("candidate_desc");
           setPage(1);
         }}>
           <option value="">All match attributes</option>
@@ -251,14 +249,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             </optgroup>
           ))}
         </select>
-        <select aria-label="Record quality" value={quality} onChange={(event) => { setQuality(event.target.value); setPage(1); }}>
-          <option value="">All quality</option>
-          <option value="refresh_required">Refresh required</option>
-          <option value="missing_evidence">Missing evidence</option>
-          <option value="poor">Poor · 0–64</option>
-          <option value="review">Review · 65–84</option>
-          <option value="reliable">Reliable · 85–100</option>
-        </select>
         <select aria-label="Business state" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
           <option value="">All states</option>
           <option value="active">Active</option>
@@ -266,8 +256,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <option value="archived">Archived</option>
         </select>
         <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
-          <option value="score_asc">Lowest {matchAttribute ? "candidate score" : "record quality"} first</option>
-          <option value="score_desc">Highest {matchAttribute ? "candidate score" : "record quality"} first</option>
+          <option value="candidate_desc">Highest potential first</option>
+          <option value="candidate_asc">Lowest potential first</option>
           <option value="name">Name A–Z</option>
         </select>
         <button
@@ -305,7 +295,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                 type="checkbox"
                 onChange={toggleVisibleSelection}
               /></th>
-              <th>Business</th><th>Market</th><th>{matchAttribute ? "Candidate score" : "Record quality"}</th><th>State</th>
+              <th>Business</th><th>Market</th><th>Potential lead</th><th>State</th>
             </tr></thead>
             <tbody>
               {rows.map((row) => (
@@ -313,7 +303,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                   <td className="admin-select-column"><input aria-label={`Select ${row.display_name}`} checked={Boolean(selectedBusinesses[row.id])} type="checkbox" onClick={(event) => event.stopPropagation()} onChange={() => toggleBusinessSelection(row)} /></td>
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
-                  <td>{matchAttribute ? <CandidateScore row={row} /> : <QualityScore row={row} />}</td>
+                  <td><CandidateScore row={row} /></td>
                   <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
@@ -345,24 +335,6 @@ function Metric({ label, value, tone = "" }: { label: string; value: number; ton
 
 function StatusPill({ value }: { value: string }) {
   return <span className={`admin-status-pill is-${value.replace(/_/g, "-")}`}>{value.replace(/_/g, " ")}</span>;
-}
-
-function QualityScore({ row }: { row: AdminBusinessSummary }) {
-  const breakdown = row.data_quality_breakdown;
-  const validationScores = breakdown.validation_scores || [];
-  const title = [
-    validationScores.length
-      ? "Required business-record validations"
-      : "Validation details are not available from the running API",
-    ...validationScores.map((validation) => `${validation.label}: ${validation.status} (${validation.score})`),
-    ...(breakdown.limitations || []),
-  ].join(" · ");
-  return (
-    <span className={`admin-quality-score is-${row.data_quality_label}`} title={title}>
-      <strong>{row.data_quality_score ?? "—"}</strong>
-      <small>{row.data_quality_label.replace(/_/g, " ")}</small>
-    </span>
-  );
 }
 
 function CandidateScore({ row }: { row: AdminBusinessSummary }) {
