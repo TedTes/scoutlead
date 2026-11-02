@@ -581,6 +581,14 @@ class BusinessIndexPipelineService:
                 )
             )
         }
+        businesses_without_urls = set(
+            self.session.scalars(
+                select(BusinessModel.id).where(
+                    BusinessModel.id.in_(business_ids),
+                    BusinessModel.website_url.is_(None),
+                )
+            )
+        )
         fact_observation_ids = {
             fact.source_observation_id
             for fact in current.values()
@@ -598,6 +606,10 @@ class BusinessIndexPipelineService:
             business_id
             for business_id in business_ids
             if business_id not in current
+            or (
+                business_id in businesses_without_urls
+                and current[business_id].value_text == "present"
+            )
             or _aware(current[business_id].observed_at) < _aware(freshness_cutoff)
             or current[business_id].value_text in {"unknown", "not_listed"}
             or _unverified_missing_fact(

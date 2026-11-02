@@ -16,6 +16,7 @@ from audience_runs.schemas import (
 from db.models import (
     AudienceResultModel,
     AudienceRunModel,
+    BusinessIndexSegmentModel,
     BusinessFactModel,
     BusinessModel,
     BusinessNicheMembershipModel,
@@ -221,7 +222,13 @@ class AudienceRunService:
         )
         fact = aliased(BusinessFactModel, name="required_attribute_fact")
         statement = (
-            select(SignalDefinitionModel, BusinessModel.id)
+            select(
+                SignalDefinitionModel,
+                BusinessModel.id,
+                BusinessModel.website_url,
+                BusinessNicheMembershipModel.niche_id,
+                BusinessNicheMembershipModel.market_key,
+            )
             .select_from(SignalDefinitionModel)
             .join(BusinessModel, true())
             .outerjoin(
@@ -265,8 +272,42 @@ class AudienceRunService:
                     BusinessModel.customer_kind.is_(None),
                 )
             )
+        segment_ids = {
+            (segment.niche_id, segment.market_key): segment.id
+            for segment in self.session.scalars(
+                select(BusinessIndexSegmentModel).where(
+                    BusinessIndexSegmentModel.niche_id.in_(
+                        [niche.id for niche in niches]
+                    )
+                )
+            )
+        }
         by_definition: dict[str, tuple[SignalDefinitionModel, list[str]]] = {}
-        for definition, business_id in self.session.execute(statement).unique():
+        queued_website_audits: set[tuple[str, str]] = set()
+        queue = QueueService(self.session)
+        for (
+            definition,
+            business_id,
+            website_url,
+            niche_id,
+            market_key,
+        ) in self.session.execute(statement).unique():
+            if definition.key == "website_status" and not website_url:
+                segment_id = segment_ids.get((niche_id, market_key))
+                if segment_id is not None:
+                    audit_key = (segment_id, business_id)
+                    if audit_key not in queued_website_audits:
+                        queue.enqueue_business_opportunity_audit(
+                            source_item_id=None,
+                            segment_id=segment_id,
+                            business_id=business_id,
+                            commit=False,
+                        )
+                        queued_website_audits.add(audit_key)
+                    # Website absence must be discovered by the provider/search
+                    # audit. The HTTP collector cannot inspect a URL that is not
+                    # known and would only produce another unknown observation.
+                    continue
             _, business_ids = by_definition.setdefault(
                 definition.id,
                 (definition, []),
@@ -275,7 +316,6 @@ class AudienceRunService:
                 business_ids.append(business_id)
 
         queued = 0
-        queue = QueueService(self.session)
         for definition, business_ids in by_definition.values():
             for batch_number, business_id in enumerate(business_ids, start=1):
                 queue.enqueue_signal_collection(
@@ -288,7 +328,7 @@ class AudienceRunService:
                     commit=False,
                 )
                 queued += 1
-        return queued
+        return queued + len(queued_website_audits)
 
     def get_read(self, run_id: str) -> AudienceRunRead:
         run = self._run(run_id)

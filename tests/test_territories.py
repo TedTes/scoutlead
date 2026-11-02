@@ -1749,6 +1749,52 @@ def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
 
         assert rows == []
 
+        session.add(
+            BusinessIndexSegmentModel(
+                id=new_id("index_segment"),
+                niche_id=profile.niche_id,
+                market_key=profile.market_key,
+                market_label=profile.city,
+                status="active",
+                demand_count=1,
+                target_business_count=25,
+                source_plan=[],
+                source_state={},
+            )
+        )
+        session.commit()
+        run = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).create(profile.id)
+        processed, _ = AudienceRunService(
+            session,
+            workspace_id="workspace:first",
+        ).process(run.id)
+        audit_jobs = list(
+            session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type
+                    == JobType.BUSINESS_OPPORTUNITY_AUDIT.value
+                )
+            )
+        )
+        website_collection_jobs = list(
+            session.scalars(
+                select(QueueJobModel).where(
+                    QueueJobModel.type == JobType.SIGNAL_COLLECTION.value,
+                    QueueJobModel.payload["signal_definition_id"].as_string()
+                    == definition.id,
+                )
+            )
+        )
+
+        assert processed.state == "waiting_validation"
+        assert {job.payload["business_id"] for job in audit_jobs} == {
+            row.id for row in session.scalars(select(BusinessModel))
+        }
+        assert website_collection_jobs == []
+
 
 def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
     session_factory = _session_factory()
