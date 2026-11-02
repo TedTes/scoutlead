@@ -181,6 +181,63 @@
   background: #f4f6f8 !important;
   color: #667085 !important;
 }
+
+.admin-match-state-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -3px 0 10px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.admin-match-state-filters button {
+  min-height: 29px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid #d1d8e0;
+  border-radius: 999px;
+  background: #fff;
+  color: #5f6b7a;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.admin-match-state-filters button strong {
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #f0f3f5;
+  color: #667085;
+  font-size: 8px;
+  text-align: center;
+}
+
+.admin-match-state-filters button.active {
+  border-color: #85d2ad;
+  background: #eaf8f1;
+  color: #087a50;
+}
+
+.admin-match-state-filters button.active strong {
+  background: #d5f0e2;
+  color: #087a50;
+}
+
+.admin-quality-score.is-not_evaluated strong,
+.admin-quality-score.is-not_validated strong {
+  color: #a65f09;
+}
+
+.admin-quality-score.is-not_qualified strong,
+.admin-quality-score.is-does_not_match strong {
+  color: #b83232;
+}
 .admin-candidate-score-panel {
   border-bottom: 1px solid var(--admin-border, #dbe2ea);
   background: #f8fbfa;

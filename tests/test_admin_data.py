@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from admin.service import AdminDataService
+from admin.service import AdminDataService, _admin_match_state
 from admin.schemas import (
     AdminBusinessUpdate,
     AdminDataJobCreate,
@@ -75,6 +75,17 @@ def _service(session):
         session,
         AuthContext(user_id="user_admin", email="admin@example.com"),
     )
+
+
+def test_admin_match_states_separate_coverage_from_eligibility() -> None:
+    definition = SignalDefinitionModel(key="website_status")
+    usable = [{"key": "website_status", "evidence_state": "usable", "score": 100}]
+
+    assert _admin_match_state({"state": "eligible"}, usable, definition) == "matched"
+    assert _admin_match_state({"state": "not_matched"}, [], definition) == "not_evaluated"
+    assert _admin_match_state({"state": "pending"}, usable, definition) == "not_validated"
+    assert _admin_match_state({"state": "not_matched"}, usable, definition) == "does_not_match"
+    assert _admin_match_state({"state": "disqualified"}, usable, definition) == "not_qualified"
 
 
 def _segment(session, niche):
@@ -600,9 +611,35 @@ def test_admin_businesses_filter_by_the_same_attribute_gate_as_audiences() -> No
             page_size=50,
             match_attribute="contact_form_present",
         )
+        all_states = _service(session).list_businesses(
+            query=None,
+            validation=None,
+            quality=None,
+            sort="name",
+            status=None,
+            niche_slug=None,
+            market_key=None,
+            page=1,
+            page_size=50,
+            match_attribute="contact_form_present",
+            match_state="all",
+        )
         overview = _service(session).overview()
 
         assert [row["id"] for row in result["items"]] == [missing_form.id]
+        assert {
+            row["id"]: row["match_state"] for row in all_states["items"]
+        } == {
+            missing_form.id: "matched",
+            has_form.id: "does_not_match",
+        }
+        assert all_states["match_state_counts"] == {
+            "matched": 1,
+            "not_evaluated": 0,
+            "not_validated": 0,
+            "does_not_match": 1,
+            "not_qualified": 0,
+        }
         assert overview["match_attributes"] == [
             {
                 "key": "contact_form_present",

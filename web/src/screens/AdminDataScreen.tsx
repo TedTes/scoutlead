@@ -38,6 +38,22 @@ const emptyOverview: AdminOverview = {
   match_attributes: [],
 };
 
+const emptyMatchStateCounts = {
+  matched: 0,
+  not_evaluated: 0,
+  not_validated: 0,
+  does_not_match: 0,
+  not_qualified: 0,
+};
+
+const matchStateLabels = {
+  matched: "Matched",
+  not_evaluated: "Not evaluated",
+  not_validated: "Not validated",
+  does_not_match: "Does not match",
+  not_qualified: "Not qualified",
+} as const;
+
 export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [overview, setOverview] = useState(emptyOverview);
@@ -49,6 +65,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
   const [matchAttribute, setMatchAttribute] = useState("");
+  const [matchState, setMatchState] = useState("");
+  const [matchStateCounts, setMatchStateCounts] = useState(emptyMatchStateCounts);
   const [selectedId, setSelectedId] = useState("");
   const [selectedBusinesses, setSelectedBusinesses] = useState<Record<string, AdminBusinessSummary>>({});
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
@@ -75,6 +93,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         status,
         niche_slug: selectedNiche,
         match_attribute: matchAttribute,
+        match_state: matchState,
         page,
         page_size: 50,
       });
@@ -88,6 +107,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
+      setMatchStateCounts(businessPage.match_state_counts || emptyMatchStateCounts);
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
           ? current
@@ -100,7 +120,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, matchAttribute, nicheSlug, page, search, sort, status]);
+  }, [api, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -237,6 +257,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
           const value = event.target.value;
           setMatchAttribute(value);
+          setMatchState(value ? "matched" : "");
           setSort("candidate_desc");
           setPage(1);
         }}>
@@ -280,6 +301,19 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <RefreshCw size={15} />
         </button>
       </div>
+
+      {matchAttribute ? (
+        <nav className="admin-match-state-filters" aria-label="Selected opportunity coverage">
+          <button className={matchState === "all" ? "active" : ""} type="button" onClick={() => { setMatchState("all"); setPage(1); }}>
+            <span>All</span><strong>{Object.values(matchStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()}</strong>
+          </button>
+          {Object.entries(matchStateLabels).map(([value, label]) => (
+            <button className={matchState === value ? "active" : ""} key={value} type="button" onClick={() => { setMatchState(value); setPage(1); }}>
+              <span>{label}</span><strong>{matchStateCounts[value as keyof typeof matchStateCounts].toLocaleString()}</strong>
+            </button>
+          ))}
+        </nav>
+      ) : null}
 
       {error ? <div className="admin-error"><CircleAlert size={15} /> {error}</div> : null}
 
@@ -339,15 +373,19 @@ function StatusPill({ value }: { value: string }) {
 
 function CandidateScore({ row }: { row: AdminBusinessSummary }) {
   const score = row.candidate_score_breakdown;
+  const stateLabel = row.match_state === "not_scoped"
+    ? score.state.replace(/_/g, " ")
+    : row.match_state.replace(/_/g, " ");
+  const stateClass = row.match_state === "not_scoped" ? score.state : row.match_state;
   const title = [
     ...score.components.map((component) => `${component.label}: ${component.contribution ?? "—"}/${component.weight}`),
     ...score.disqualifiers,
     ...score.pending_reasons,
   ].join(" · ");
   return (
-    <span className={`admin-quality-score is-${score.state}`} title={title}>
+    <span className={`admin-quality-score is-${stateClass}`} title={title}>
       <strong>{score.score ?? "—"}</strong>
-      <small>{score.state.replace(/_/g, " ")}</small>
+      <small>{stateLabel}</small>
     </span>
   );
 }

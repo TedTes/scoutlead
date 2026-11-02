@@ -990,6 +990,7 @@ export type AdminBusinessSummary = {
   data_quality_label: "reliable" | "review" | "poor" | "refresh_required" | "missing_evidence";
   candidate_score: number | null;
   candidate_state: "eligible" | "disqualified" | "pending" | "not_matched" | "not_scoped";
+  match_state: "matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified" | "not_scoped";
   candidate_score_breakdown: {
     score: number | null;
     state: string;
@@ -1217,6 +1218,7 @@ export type AdminBusinessPage = {
   total: number;
   page: number;
   page_size: number;
+  match_state_counts: Record<"matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified", number>;
 };
 
 export type AdminDataSegment = {

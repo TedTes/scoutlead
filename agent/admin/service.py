@@ -959,6 +959,7 @@ class AdminDataService:
         page: int,
         page_size: int,
         match_attribute: str | None = None,
+        match_state: str | None = None,
     ) -> dict[str, Any]:
         statement = select(BusinessModel)
         membership_joined = False
@@ -992,36 +993,6 @@ class AdminDataService:
                     "Unknown audience-match attribute",
                     {"match_attribute": match_attribute},
                 )
-            config = audience_match_config(
-                match_definition.key,
-                match_definition.opportunity_direction,
-                match_definition.config,
-            )
-            minimum_score = float(config.get("audience_min_score", 50.001))
-            fact_conditions = [
-                BusinessFactModel.business_id == BusinessModel.id,
-                BusinessFactModel.signal_definition_id == match_definition.id,
-                eligible_fact_condition(
-                    BusinessFactModel,
-                    minimum_confidence=int(
-                        config.get(
-                            "minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE
-                        )
-                    ),
-                    require_provenance=True,
-                    require_validation=False,
-                ),
-                BusinessFactModel.attribute_score.is_not(None),
-                BusinessFactModel.attribute_score >= minimum_score,
-            ]
-            # A listing without a URL is not proof that a website is absent.
-            # The explicit admin option only returns verified missing websites.
-            if match_definition.key == "website_status":
-                fact_conditions.append(BusinessFactModel.value_text == "missing")
-            statement = statement.where(
-                exists(select(BusinessFactModel.id).where(and_(*fact_conditions))),
-                *searchable_business_conditions(),
-            )
         if niche_slug or market_key:
             if not membership_joined:
                 statement = statement.join(
@@ -1035,8 +1006,20 @@ class AdminDataService:
         businesses = list(
             self.session.scalars(statement.distinct().order_by(BusinessModel.display_name))
         )
-        states = self._validation_states([business.id for business in businesses])
-        memberships = self._primary_memberships([business.id for business in businesses])
+        business_ids = [business.id for business in businesses]
+        memberships = self._primary_memberships(
+            business_ids,
+            niche_slug=niche_slug,
+            market_key=market_key,
+        )
+        validation_scopes = {
+            business_id: (membership.niche_id, membership.market_key)
+            for business_id, (membership, _niche) in memberships.items()
+        }
+        states = self._validation_states(
+            business_ids,
+            validation_scopes=validation_scopes,
+        )
         rows = [
             self._business_summary(
                 business,
@@ -1047,6 +1030,33 @@ class AdminDataService:
             )
             for business in businesses
         ]
+        match_state_counts = {
+            state: 0
+            for state in (
+                "matched",
+                "not_evaluated",
+                "not_validated",
+                "does_not_match",
+                "not_qualified",
+            )
+        }
+        if match_definition is not None:
+            match_state_counts.update(Counter(row["match_state"] for row in rows))
+            selected_match_state = match_state or "matched"
+            if selected_match_state != "all":
+                if selected_match_state not in match_state_counts:
+                    raise ValidationError(
+                        "Unknown match state",
+                        {"match_state": selected_match_state},
+                    )
+                rows = [
+                    row for row in rows if row["match_state"] == selected_match_state
+                ]
+        elif match_state not in {None, "", "all"}:
+            raise ValidationError(
+                "Match state requires a selected match attribute",
+                {"match_state": match_state},
+            )
         if validation:
             rows = [row for row in rows if row["validation_state"] == validation]
         if quality == "reliable":
@@ -1082,6 +1092,7 @@ class AdminDataService:
             "total": total,
             "page": page,
             "page_size": page_size,
+            "match_state_counts": match_state_counts,
         }
 
     def _match_attribute_definitions(self) -> list[SignalDefinitionModel]:
@@ -2130,6 +2141,7 @@ class AdminDataService:
         business_ids: list[str],
         *,
         include_quality: bool = True,
+        validation_scopes: dict[str, tuple[str, str]] | None = None,
     ) -> dict[str, dict[str, Any]]:
         grouped: dict[str, dict[str, ValidationResultModel]] = defaultdict(dict)
         if business_ids:
@@ -2144,6 +2156,13 @@ class AdminDataService:
                 )
             )
             for row in rows:
+                scope = (validation_scopes or {}).get(row.business_id)
+                if scope is not None:
+                    niche_id, market_key = scope
+                    if row.niche_id not in {None, niche_id}:
+                        continue
+                    if row.market_key not in {None, market_key}:
+                        continue
                 grouped[row.business_id].setdefault(row.validation_type, row)
         fact_attributes = self._fact_attribute_scores(business_ids) if include_quality else {}
         result: dict[str, dict[str, Any]] = {}
@@ -2224,6 +2243,11 @@ class AdminDataService:
             match_definition,
             match_definitions or [],
         )
+        match_state = _admin_match_state(
+            candidate,
+            state.get("_fact_attributes", []),
+            match_definition,
+        )
         return {
             "id": business.id,
             "display_name": business.display_name,
@@ -2233,6 +2257,7 @@ class AdminDataService:
             "candidate_score": candidate["score"],
             "candidate_state": candidate["state"],
             "candidate_score_breakdown": candidate,
+            "match_state": match_state,
             "website_url": business.website_url,
             "domain": business.domain,
             "phone": business.phone,
@@ -2245,16 +2270,29 @@ class AdminDataService:
             "last_seen_at": business.last_seen_at,
         }
 
-    def _primary_memberships(self, business_ids: list[str]) -> dict[str, Any]:
+    def _primary_memberships(
+        self,
+        business_ids: list[str],
+        *,
+        niche_slug: str | None = None,
+        market_key: str | None = None,
+    ) -> dict[str, Any]:
         result: dict[str, Any] = {}
         if not business_ids:
             return result
-        rows = self.session.execute(
+        statement = (
             select(BusinessNicheMembershipModel, NicheModel)
             .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
             .where(BusinessNicheMembershipModel.business_id.in_(business_ids))
             .order_by(BusinessNicheMembershipModel.confidence.desc())
         )
+        if niche_slug:
+            statement = statement.where(NicheModel.slug == niche_slug)
+        if market_key:
+            statement = statement.where(
+                BusinessNicheMembershipModel.market_key == market_key
+            )
+        rows = self.session.execute(statement)
         for membership, niche in rows:
             result.setdefault(membership.business_id, (membership, niche))
         return result
@@ -2282,6 +2320,32 @@ class AdminDataService:
                 after=after,
             )
         )
+
+
+def _admin_match_state(
+    candidate: dict[str, Any],
+    fact_attributes: list[dict[str, Any]],
+    match_definition: SignalDefinitionModel | None,
+) -> str:
+    if match_definition is None:
+        return "not_scoped"
+    if candidate["state"] == "disqualified":
+        return "not_qualified"
+    if candidate["state"] == "pending":
+        return "not_validated"
+    opportunity = next(
+        (item for item in fact_attributes if item["key"] == match_definition.key),
+        None,
+    )
+    if (
+        opportunity is None
+        or opportunity.get("evidence_state") != "usable"
+        or opportunity.get("score") is None
+    ):
+        return "not_evaluated"
+    if candidate["state"] == "eligible":
+        return "matched"
+    return "does_not_match"
 
 
 def _admin_candidate_score(
