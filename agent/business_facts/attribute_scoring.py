@@ -175,6 +175,10 @@ def score_attribute(
         return AttributeScore(_clamp(100 * log1p(count) / log1p(500)), "log-scaled review count")
     if key == "review_recency_days":
         return _numeric(value, 0.0, float(config.get("score_max") or 365), higher_is_better=False)
+    if key == "domain_age_days":
+        # Domain age is supporting footprint context, not proof of business
+        # quality. Cap the gradual strength score at ten years.
+        return _numeric(value, 0.0, 3650.0, higher_is_better=True)
 
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         minimum = config.get("score_min")

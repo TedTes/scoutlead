@@ -357,7 +357,7 @@ class SignalCollectionService:
             if not requires_validation and bool(config.get("auto_publish"))
             else "staged"
         )
-        BusinessFactRepository(self.session).upsert(
+        fact = BusinessFactRepository(self.session).upsert(
             business_id,
             BusinessFactValue(
                 key=definition.key,
@@ -372,6 +372,9 @@ class SignalCollectionService:
                 resolver_version=RESOLVER_VERSION,
             ),
         )
+        from quality.fact_policy import FactQualityPolicyService
+
+        FactQualityPolicyService(self.session).evaluate(fact, commit=False)
         business = self.session.get(BusinessModel, business_id)
         observation = self.session.get(SourceObservationModel, newest.source_observation_id)
         if business is not None and observation is not None:

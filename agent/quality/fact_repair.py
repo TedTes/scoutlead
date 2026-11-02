@@ -15,7 +15,7 @@ from db.models import (
     SourceObservationModel,
 )
 from shared.utils import utcnow
-from signal_validation.service import COLLECTOR_SOURCES
+from source_observations.contracts import expected_sources_for
 from source_observations.integrity import evaluate_observation_integrity
 
 
@@ -103,7 +103,10 @@ def repair_current_facts(
         definition = definitions_by_key.get(fact.fact_key)
         current_value = fact_value(fact)
         expected_sources = (
-            COLLECTOR_SOURCES.get(definition.collector_key or "")
+            expected_sources_for(
+                fact_key=fact.fact_key,
+                collector_key=definition.collector_key,
+            )
             if definition is not None
             else None
         )

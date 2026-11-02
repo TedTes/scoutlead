@@ -4,6 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.models import BusinessFactModel, SignalDefinitionModel
+from quality.fact_usability import (
+    FACT_USABILITY_POLICY_VERSION,
+    assess_fact_usability,
+)
 
 
 FACT_DIMENSIONS = {
@@ -38,22 +42,49 @@ class FactQualityPolicyService:
             if fact.signal_definition_id
             else None
         )
-        config = (definition.config or {}) if definition is not None else {}
-        if bool(config.get("auto_publish")) and not bool(
-            config.get("requires_validation", True)
-        ):
-            fact.quality_state = "published"
-            fact.quality_policy_version = POLICY_VERSION
+        # ``business_operational`` predates the attribute-definition catalog and
+        # is also used by lightweight/test databases. Preserve its canonical
+        # eligibility role when the catalog row has not been installed yet.
+        if definition is None and fact.fact_key == "business_operational":
+            fact.quality_state = (
+                "published"
+                if fact.resolution_state == "confirmed"
+                and fact.source_observation_id is not None
+                and fact.attribute_score is not None
+                else "staged"
+            )
+            fact.quality_policy_version = FACT_USABILITY_POLICY_VERSION
             return self._finish(fact, commit)
-        dimension = FACT_DIMENSIONS.get(fact.fact_key)
-        if dimension is None:
+        observation = fact.source_observation
+        validation = None
+        if definition is not None and bool((definition.config or {}).get("requires_validation", True)):
+            from db.models import ValidationResultModel
+
+            validation = self.session.scalar(
+                select(ValidationResultModel)
+                .where(
+                    ValidationResultModel.business_id == fact.business_id,
+                    ValidationResultModel.validation_type == f"signal:{fact.fact_key}",
+                )
+                .order_by(
+                    ValidationResultModel.observed_at.desc(),
+                    ValidationResultModel.created_at.desc(),
+                    ValidationResultModel.id.desc(),
+                )
+                .limit(1)
+            )
+        decision = assess_fact_usability(
+            fact,
+            definition=definition,
+            observation=observation,
+            validation=validation,
+        )
+        if decision.useful:
             fact.quality_state = "published"
-            fact.quality_policy_version = POLICY_VERSION
+            fact.quality_policy_version = FACT_USABILITY_POLICY_VERSION
             return self._finish(fact, commit)
-        # Opportunity claims stay staged until the explicit signal-validation
-        # workflow publishes them. Population metrics are no longer persisted.
         fact.quality_state = "staged"
-        fact.quality_policy_version = POLICY_VERSION
+        fact.quality_policy_version = FACT_USABILITY_POLICY_VERSION
         return self._finish(fact, commit)
 
     def reevaluate_dimension(self, dimension: str) -> int:

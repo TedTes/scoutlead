@@ -23,7 +23,10 @@ from business_facts.catalog import (
     TRACKED_ATTRIBUTE_KEYS,
 )
 from business_facts.attribute_scoring import audience_match_config, score_attribute
-from business_facts.eligibility import eligible_fact_condition
+from business_facts.eligibility import (
+    DEFAULT_MINIMUM_FACT_CONFIDENCE,
+    eligible_fact_condition,
+)
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from db.base import Base
@@ -991,7 +994,11 @@ class AdminDataService:
                 BusinessFactModel.signal_definition_id == definition.id,
                 eligible_fact_condition(
                     BusinessFactModel,
-                    minimum_confidence=int(config.get("minimum_confidence", 90)),
+                    minimum_confidence=int(
+                        config.get(
+                            "minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE
+                        )
+                    ),
                     require_provenance=True,
                     require_validation=False,
                 ),
@@ -2611,7 +2618,11 @@ def _fact_lineage_dict(
         definition is not None and _fact_matches_opportunity(definition, value)
     )
     minimum_confidence = int(
-        ((definition.config or {}).get("minimum_confidence", 90))
+        (
+            (definition.config or {}).get(
+                "minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE
+            )
+        )
         if definition is not None
         else 90
     )

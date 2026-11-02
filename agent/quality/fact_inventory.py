@@ -16,7 +16,7 @@ from db.models import (
     ValidationResultModel,
 )
 from shared.utils import utcnow
-from signal_validation.service import COLLECTOR_SOURCES
+from source_observations.contracts import expected_sources_for
 
 
 UNKNOWN_VALUES = frozenset({"", "unknown", "not_checked", "not_verified"})
@@ -118,7 +118,10 @@ def audit_fact_inventory(
         if observation is None:
             issues.append("missing_source_observation")
         elif definition is not None:
-            expected_sources = COLLECTOR_SOURCES.get(definition.collector_key or "")
+            expected_sources = expected_sources_for(
+                fact_key=fact.fact_key,
+                collector_key=definition.collector_key,
+            )
             if expected_sources and observation.source not in expected_sources:
                 issues.append("source_contract_mismatch")
 

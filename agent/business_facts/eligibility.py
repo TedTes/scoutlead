@@ -11,6 +11,7 @@ from shared.utils import utcnow
 
 
 UNKNOWN_TEXT_VALUES = frozenset({"", "unknown", "not_checked", "not_verified"})
+DEFAULT_MINIMUM_FACT_CONFIDENCE = 85
 
 
 def eligible_fact_condition(

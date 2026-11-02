@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from business_facts.repository import BusinessFactRepository, BusinessFactValue, fact_value
 from business_facts.operational import assess_business_operational
+from quality.fact_policy import FactQualityPolicyService
 from canonical.normalization import external_id_from_raw, first_raw_text, nested_raw
 from db.models import (
     BusinessFactModel,
@@ -134,7 +135,7 @@ def sync_observed_business_attributes(
             if key == "business_operational" and operational
             else observation.id
         )
-        repository.upsert(
+        model = repository.upsert(
             business.id,
             BusinessFactValue(
                 key=key,
@@ -143,14 +144,12 @@ def sync_observed_business_attributes(
                 source_observation_id=fact_source_observation_id,
                 confidence=fact_confidence,
                 resolution_state="confirmed",
-                # Core identity attributes are available for targeting and
-                # scoring immediately, but are not opportunity evidence. Keep
-                # them staged so the opportunity publication policy does not
-                # mistake them for validated negative findings.
                 quality_state=("published" if key == "business_operational" else "staged"),
             ),
             track_change=track_changes,
         )
+        if model.signal_definition_id is not None:
+            FactQualityPolicyService(session).evaluate(model, commit=False)
         written += 1
     return written
 

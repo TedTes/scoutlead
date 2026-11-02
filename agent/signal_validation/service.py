@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from business_facts.repository import fact_value
+from business_facts.eligibility import DEFAULT_MINIMUM_FACT_CONFIDENCE
 from db.models import (
     BusinessFactModel,
     FactClaimModel,
@@ -21,17 +22,10 @@ from shared.errors import ConflictError, NotFoundError
 from shared.utils import utcnow
 from signal_collection.service import extract_signal_value
 from source_observations.integrity import evaluate_observation_integrity
+from source_observations.contracts import expected_sources_for
 
 
 VALIDATOR_VERSION = 3
-GOOGLE_SOURCES = {"google_places", "google_places_seed"}
-COLLECTOR_SOURCES = {
-    "website_http": {"company_website_signal"},
-    "website_dom": {"company_website_signal"},
-    "pagespeed_mobile": {"pagespeed_mobile"},
-    "domain_rdap": {"domain_rdap"},
-    "google_places": GOOGLE_SOURCES,
-}
 SCORE_KEYS = {
     "mobile_performance_score",
     "accessibility_score",
@@ -182,7 +176,10 @@ class SignalValidationService:
             if not passed:
                 failures.append(detail)
 
-        expected_sources = COLLECTOR_SOURCES.get(definition.collector_key or "")
+        expected_sources = expected_sources_for(
+            fact_key=fact.fact_key,
+            collector_key=definition.collector_key,
+        )
         integrity = evaluate_observation_integrity(
             observation,
             expected_business_id=claim.business_id,
@@ -231,7 +228,11 @@ class SignalValidationService:
         now = utcnow()
         if _aware(claim.expires_at) < _aware(now):
             review_reasons.append("Claim evidence is stale.")
-        minimum_confidence = int((definition.config or {}).get("minimum_confidence", 90))
+        minimum_confidence = int(
+            (definition.config or {}).get(
+                "minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE
+            )
+        )
         if claim.confidence < minimum_confidence:
             review_reasons.append(
                 f"Claim confidence {claim.confidence}% is below {minimum_confidence}%."

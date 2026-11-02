@@ -7,7 +7,11 @@ from typing import Any
 from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from business_facts.eligibility import eligible_fact_condition, fact_is_eligible
+from business_facts.eligibility import (
+    DEFAULT_MINIMUM_FACT_CONFIDENCE,
+    eligible_fact_condition,
+    fact_is_eligible,
+)
 from business_facts.attribute_scoring import audience_match_config
 from business_facts.repository import fact_value
 from business_index.eligibility import searchable_business_conditions
@@ -652,7 +656,9 @@ def _usable_evidence_condition(
 ) -> Any:
     return eligible_fact_condition(
         fact,
-        minimum_confidence=int(spec.config.get("minimum_confidence", 90)),
+        minimum_confidence=int(
+            spec.config.get("minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE)
+        ),
         require_provenance=True,
         # Publication is the eligibility stamp. Requiring a second validation
         # row here duplicated that decision and hid otherwise publishable facts.
@@ -666,7 +672,9 @@ def _signal_match_confidence(
 ) -> str | None:
     if not fact_is_eligible(
         fact,
-        minimum_confidence=int(spec.config.get("minimum_confidence", 90)),
+        minimum_confidence=int(
+            spec.config.get("minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE)
+        ),
         require_provenance=True,
     ):
         return None

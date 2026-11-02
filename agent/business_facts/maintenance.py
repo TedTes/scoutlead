@@ -6,7 +6,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_facts.eligibility import fact_is_eligible
+from business_facts.eligibility import (
+    DEFAULT_MINIMUM_FACT_CONFIDENCE,
+    fact_is_eligible,
+)
 from business_facts.freshness import fact_is_current
 from business_facts.repository import fact_value
 from db.models import BusinessFactModel, SignalDefinitionModel, ValidationResultModel
@@ -46,7 +49,9 @@ def enforce_fact_publication_invariants(
         summary["checked"] += 1
         definition = definitions.get(fact.signal_definition_id or "")
         config = (definition.config or {}) if definition is not None else {}
-        minimum_confidence = int(config.get("minimum_confidence", 90))
+        minimum_confidence = int(
+            config.get("minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE)
+        )
         requires_validation = bool(config.get("requires_validation", True))
         fact_eligible = fact_is_eligible(
             fact,
