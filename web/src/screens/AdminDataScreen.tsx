@@ -51,7 +51,21 @@ const matchStateLabels = {
   not_evaluated: "Not evaluated",
   not_validated: "Not validated",
   does_not_match: "Does not match",
-  not_qualified: "Not qualified",
+  not_qualified: "Not valid",
+} as const;
+
+const emptyEvaluationStateCounts = {
+  validated: 0,
+  not_evaluated: 0,
+  not_validated: 0,
+  not_valid: 0,
+};
+
+const evaluationStateLabels = {
+  validated: "Validated",
+  not_evaluated: "Not evaluated",
+  not_validated: "Not validated",
+  not_valid: "Not valid",
 } as const;
 
 export function AdminDataScreen({ api }: { api: ApiClient }) {
@@ -64,8 +78,10 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [sort, setSort] = useState("candidate_desc");
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
+  const [evaluationState, setEvaluationState] = useState("all");
+  const [evaluationStateCounts, setEvaluationStateCounts] = useState(emptyEvaluationStateCounts);
   const [matchAttribute, setMatchAttribute] = useState("");
-  const [matchState, setMatchState] = useState("");
+  const [matchState, setMatchState] = useState("all");
   const [matchStateCounts, setMatchStateCounts] = useState(emptyMatchStateCounts);
   const [selectedId, setSelectedId] = useState("");
   const [selectedBusinesses, setSelectedBusinesses] = useState<Record<string, AdminBusinessSummary>>({});
@@ -92,6 +108,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         sort,
         status,
         niche_slug: selectedNiche,
+        evaluation_state: evaluationState,
         match_attribute: matchAttribute,
         match_state: matchState,
         page,
@@ -107,6 +124,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
+      setEvaluationStateCounts(businessPage.evaluation_state_counts || emptyEvaluationStateCounts);
       setMatchStateCounts(businessPage.match_state_counts || emptyMatchStateCounts);
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
@@ -120,7 +138,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
+  }, [api, evaluationState, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -254,10 +272,22 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
         </label>
+        <select
+          aria-label="Business evaluation status"
+          value={evaluationState}
+          onChange={(event) => { setEvaluationState(event.target.value); setPage(1); }}
+        >
+          <option value="all">
+            All evaluation statuses ({Object.values(evaluationStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
+          </option>
+          {Object.entries(evaluationStateLabels).map(([value, label]) => (
+            <option key={value} value={value}>{label} ({evaluationStateCounts[value as keyof typeof evaluationStateCounts].toLocaleString()})</option>
+          ))}
+        </select>
         <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
           const value = event.target.value;
           setMatchAttribute(value);
-          setMatchState(value ? "matched" : "");
+          setMatchState("all");
           setSort("candidate_desc");
           setPage(1);
         }}>
@@ -270,6 +300,21 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             </optgroup>
           ))}
         </select>
+        {matchAttribute ? (
+          <select
+            aria-label="Attribute match result"
+            title="Filter the selected attribute's result"
+            value={matchState}
+            onChange={(event) => { setMatchState(event.target.value); setPage(1); }}
+          >
+            <option value="all">
+              All attribute results ({Object.values(matchStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
+            </option>
+            {Object.entries(matchStateLabels).map(([value, label]) => (
+              <option key={value} value={value}>{label} ({matchStateCounts[value as keyof typeof matchStateCounts].toLocaleString()})</option>
+            ))}
+          </select>
+        ) : null}
         <select aria-label="Business state" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
           <option value="">All states</option>
           <option value="active">Active</option>
@@ -301,19 +346,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <RefreshCw size={15} />
         </button>
       </div>
-
-      {matchAttribute ? (
-        <nav className="admin-match-state-filters" aria-label="Selected opportunity coverage">
-          <button className={matchState === "all" ? "active" : ""} type="button" onClick={() => { setMatchState("all"); setPage(1); }}>
-            <span>All</span><strong>{Object.values(matchStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()}</strong>
-          </button>
-          {Object.entries(matchStateLabels).map(([value, label]) => (
-            <button className={matchState === value ? "active" : ""} key={value} type="button" onClick={() => { setMatchState(value); setPage(1); }}>
-              <span>{label}</span><strong>{matchStateCounts[value as keyof typeof matchStateCounts].toLocaleString()}</strong>
-            </button>
-          ))}
-        </nav>
-      ) : null}
 
       {error ? <div className="admin-error"><CircleAlert size={15} /> {error}</div> : null}
 
@@ -373,18 +405,19 @@ function StatusPill({ value }: { value: string }) {
 
 function CandidateScore({ row }: { row: AdminBusinessSummary }) {
   const score = row.candidate_score_breakdown;
-  const stateLabel = row.match_state === "not_scoped"
-    ? score.state.replace(/_/g, " ")
-    : row.match_state.replace(/_/g, " ");
-  const stateClass = row.match_state === "not_scoped" ? score.state : row.match_state;
+  const matchState = row.match_state || "not_scoped";
+  const scoreState = score?.state || row.candidate_state || "not_scoped";
+  const displayState = matchState === "not_scoped" ? scoreState : matchState;
+  const stateLabel = displayState.replace(/_/g, " ");
+  const stateClass = displayState;
   const title = [
-    ...score.components.map((component) => `${component.label}: ${component.contribution ?? "—"}/${component.weight}`),
-    ...score.disqualifiers,
-    ...score.pending_reasons,
+    ...(score?.components || []).map((component) => `${component.label}: ${component.contribution ?? "—"}/${component.weight}`),
+    ...(score?.disqualifiers || []),
+    ...(score?.pending_reasons || []),
   ].join(" · ");
   return (
     <span className={`admin-quality-score is-${stateClass}`} title={title}>
-      <strong>{score.score ?? "—"}</strong>
+      <strong>{score?.score ?? row.candidate_score ?? "—"}</strong>
       <small>{stateLabel}</small>
     </span>
   );

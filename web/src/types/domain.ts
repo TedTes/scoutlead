@@ -986,11 +986,12 @@ export type AdminBusinessSummary = {
   display_name: string;
   status: string;
   validation_state: "passed" | "attention" | "incomplete";
+  evaluation_state?: "validated" | "not_evaluated" | "not_validated" | "not_valid";
   data_quality_score: number | null;
   data_quality_label: "reliable" | "review" | "poor" | "refresh_required" | "missing_evidence";
   candidate_score: number | null;
   candidate_state: "eligible" | "disqualified" | "pending" | "not_matched" | "not_scoped";
-  match_state: "matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified" | "not_scoped";
+  match_state?: "matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified" | "not_scoped";
   candidate_score_breakdown: {
     score: number | null;
     state: string;
@@ -1219,6 +1220,7 @@ export type AdminBusinessPage = {
   page: number;
   page_size: number;
   match_state_counts: Record<"matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified", number>;
+  evaluation_state_counts?: Record<"validated" | "not_evaluated" | "not_validated" | "not_valid", number>;
 };
 
 export type AdminDataSegment = {
