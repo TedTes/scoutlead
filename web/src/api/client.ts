@@ -84,8 +84,9 @@ export class ApiClient {
     return this.request<AdminBusinessPage>(`/admin/businesses?${query.toString()}`);
   }
 
-  getAdminBusiness(id: string) {
-    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}`);
+  getAdminBusiness(id: string, matchAttribute = "") {
+    const query = matchAttribute ? `?match_attribute=${encodeURIComponent(matchAttribute)}` : "";
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}${query}`);
   }
 
   getAdminBusinessFactLineage(id: string) {

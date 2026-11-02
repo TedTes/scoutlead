@@ -175,6 +175,12 @@
   overflow-wrap: anywhere;
 }
 
+.admin-signal-inspector .admin-signals-json {
+  min-height: 0;
+  max-height: none;
+  flex: 1;
+}
+
 .admin-quality-score.is-refresh_required {
   border-color: #efd19d !important;
   background: #fff7e8 !important;
@@ -185,4 +191,69 @@
   border-color: #cfd6df !important;
   background: #f4f6f8 !important;
   color: #667085 !important;
+}
+.admin-candidate-score-panel {
+  border-bottom: 1px solid var(--admin-border, #dbe2ea);
+  background: #f8fbfa;
+  padding: 12px 14px;
+}
+
+.admin-candidate-score-panel > header,
+.admin-candidate-component {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-candidate-score-panel > header span {
+  color: #087a55;
+  font-weight: 700;
+}
+
+.admin-candidate-score-panel > p {
+  margin: 4px 0 8px;
+  color: #758195;
+  font-size: 10px;
+}
+
+.admin-candidate-score-panel > div {
+  max-height: 154px;
+  overflow-y: auto;
+  border-top: 1px solid #e3e8ee;
+}
+
+.admin-candidate-component {
+  padding: 7px 0;
+  border-bottom: 1px solid #e8edf1;
+  font-size: 11px;
+}
+
+.admin-candidate-component > span:first-child {
+  display: grid;
+  min-width: 0;
+}
+
+.admin-candidate-component small {
+  overflow: hidden;
+  color: #7d8999;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-candidate-warning {
+  color: #a65f09 !important;
+}
+
+.admin-quality-score.is-eligible strong {
+  color: #087a55;
+}
+
+.admin-quality-score.is-disqualified strong,
+.admin-quality-score.is-not-matched strong {
+  color: #c83232;
+}
+
+.admin-quality-score.is-pending strong {
+  color: #a65f09;
 }

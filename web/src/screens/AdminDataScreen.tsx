@@ -114,10 +114,10 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       setDetail(null);
       return;
     }
-    void api.getAdminBusiness(selectedId).then(setDetail).catch((cause) => {
+    void api.getAdminBusiness(selectedId, matchAttribute).then(setDetail).catch((cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
-  }, [allowed, api, selectedId]);
+  }, [allowed, api, matchAttribute, selectedId]);
 
   const refreshDetail = async (result?: AdminBusinessDetail) => {
     if (result) {
@@ -156,7 +156,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         const batch = businessIds.slice(index, index + 5);
         const batchPayloads = await Promise.all(batch.map(async (businessId) => {
           const [businessDetail, businessLineage] = await Promise.all([
-            api.getAdminBusiness(businessId),
+            api.getAdminBusiness(businessId, matchAttribute),
             api.getAdminBusinessFactLineage(businessId),
           ]);
           return buildBusinessJsonPayload(businessDetail, businessLineage);
@@ -236,7 +236,12 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
         </label>
-        <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => { setMatchAttribute(event.target.value); setPage(1); }}>
+        <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
+          const value = event.target.value;
+          setMatchAttribute(value);
+          setSort(value ? "score_desc" : "score_asc");
+          setPage(1);
+        }}>
           <option value="">All match attributes</option>
           {Array.from(new Set((overview.match_attributes || []).map((attribute) => attribute.category))).map((category) => (
             <optgroup key={category} label={category.replace(/_/g, " ")}>
@@ -261,8 +266,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <option value="archived">Archived</option>
         </select>
         <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
-          <option value="score_asc">Lowest record quality first</option>
-          <option value="score_desc">Highest record quality first</option>
+          <option value="score_asc">Lowest {matchAttribute ? "candidate score" : "record quality"} first</option>
+          <option value="score_desc">Highest {matchAttribute ? "candidate score" : "record quality"} first</option>
           <option value="name">Name A–Z</option>
         </select>
         <button
@@ -300,7 +305,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                 type="checkbox"
                 onChange={toggleVisibleSelection}
               /></th>
-              <th>Business</th><th>Market</th><th>Record quality</th><th>State</th>
+              <th>Business</th><th>Market</th><th>{matchAttribute ? "Candidate score" : "Record quality"}</th><th>State</th>
             </tr></thead>
             <tbody>
               {rows.map((row) => (
@@ -308,7 +313,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                   <td className="admin-select-column"><input aria-label={`Select ${row.display_name}`} checked={Boolean(selectedBusinesses[row.id])} type="checkbox" onClick={(event) => event.stopPropagation()} onChange={() => toggleBusinessSelection(row)} /></td>
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
-                  <td><QualityScore row={row} /></td>
+                  <td>{matchAttribute ? <CandidateScore row={row} /> : <QualityScore row={row} />}</td>
                   <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
@@ -356,6 +361,21 @@ function QualityScore({ row }: { row: AdminBusinessSummary }) {
     <span className={`admin-quality-score is-${row.data_quality_label}`} title={title}>
       <strong>{row.data_quality_score ?? "—"}</strong>
       <small>{row.data_quality_label.replace(/_/g, " ")}</small>
+    </span>
+  );
+}
+
+function CandidateScore({ row }: { row: AdminBusinessSummary }) {
+  const score = row.candidate_score_breakdown;
+  const title = [
+    ...score.components.map((component) => `${component.label}: ${component.contribution ?? "—"}/${component.weight}`),
+    ...score.disqualifiers,
+    ...score.pending_reasons,
+  ].join(" · ");
+  return (
+    <span className={`admin-quality-score is-${score.state}`} title={title}>
+      <strong>{score.score ?? "—"}</strong>
+      <small>{score.state.replace(/_/g, " ")}</small>
     </span>
   );
 }
@@ -424,6 +444,7 @@ function BusinessInspector({
           <AttributeCoverage lineage={lineage} />
         </div>
       </header>
+      {detail.candidate_state !== "not_scoped" ? <CandidateScorePanel detail={detail} /> : null}
       <nav className="admin-inspector-tabs" aria-label="Business detail views">
         <button className={activeTab === "attributes" ? "is-active" : ""} type="button" onClick={() => setActiveTab("attributes")}>Attributes</button>
         <button className={activeTab === "json" ? "is-active" : ""} type="button" onClick={() => setActiveTab("json")}>JSON</button>
@@ -441,6 +462,26 @@ function BusinessInspector({
         </div>
       )}
     </aside>
+  );
+}
+
+function CandidateScorePanel({ detail }: { detail: AdminBusinessDetail }) {
+  const score = detail.candidate_score_breakdown;
+  return (
+    <section className="admin-candidate-score-panel">
+      <header><strong>Audience candidate score</strong><span>{score.score ?? "—"} / 100 · {score.state.replace(/_/g, " ")}</span></header>
+      <p>{score.formula}</p>
+      <div>
+        {score.components.map((component) => (
+          <div className="admin-candidate-component" key={`${component.group}:${component.key}`}>
+            <span><strong>{component.label}</strong><small>{component.reason}</small></span>
+            <span>{component.contribution ?? "—"} / {component.weight}</span>
+          </div>
+        ))}
+      </div>
+      {score.disqualifiers.map((reason) => <p className="admin-candidate-warning" key={reason}>{reason}</p>)}
+      {score.pending_reasons.map((reason) => <p className="admin-candidate-warning" key={reason}>{reason}</p>)}
+    </section>
   );
 }
 
@@ -510,6 +551,7 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
       reasons: detail.data_quality_breakdown.quality_reasons,
       limitations: detail.data_quality_breakdown.limitations,
     },
+    audience_candidate_score: detail.candidate_score_breakdown,
     attributes,
     contacts: detail.contacts,
     evidence: {

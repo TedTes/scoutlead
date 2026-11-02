@@ -988,6 +988,29 @@ export type AdminBusinessSummary = {
   validation_state: "passed" | "attention" | "incomplete";
   data_quality_score: number | null;
   data_quality_label: "reliable" | "review" | "poor" | "refresh_required" | "missing_evidence";
+  candidate_score: number | null;
+  candidate_state: "eligible" | "disqualified" | "pending" | "not_matched" | "not_scoped";
+  candidate_score_breakdown: {
+    score: number | null;
+    state: string;
+    total_weight: number;
+    formula: string;
+    disqualifiers: string[];
+    pending_reasons: string[];
+    components: Array<{
+      key: string;
+      label: string;
+      group: string;
+      weight: number;
+      match_value: number | null;
+      confidence: number | null;
+      freshness: number;
+      contribution: number | null;
+      hard_gate: boolean;
+      status: string;
+      reason: string;
+    }>;
+  };
   data_quality_breakdown: {
     validation_scores?: Array<{
       key: string;

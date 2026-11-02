@@ -1,7 +1,8 @@
-import { Activity, CheckCircle2, CircleAlert, Pause, Play, Plus, RefreshCw, X } from "lucide-react";
+import { Activity, CheckCircle2, CircleAlert, Copy, Pause, Play, Plus, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { AdminSignalDefinition, AdminSignalDefinitionInput } from "../types/domain";
+import "./AdminDataScreen.css";
 
 export function AdminSignalsScreen({ api }: { api: ApiClient }) {
   const [signals, setSignals] = useState<AdminSignalDefinition[]>([]);
@@ -10,6 +11,8 @@ export function AdminSignalsScreen({ api }: { api: ApiClient }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<"definition" | "json">("definition");
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -31,6 +34,13 @@ export function AdminSignalsScreen({ api }: { api: ApiClient }) {
     active: signals.filter((signal) => signal.status === "active").length,
     draft: signals.filter((signal) => signal.status === "draft").length,
   }), [signals]);
+  const signalsJson = useMemo(() => buildSignalsJsonPayload(signals), [signals]);
+
+  const copySignalsJson = async () => {
+    await navigator.clipboard.writeText(JSON.stringify(signalsJson, null, 2));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
 
   const changeStatus = async (status: "active" | "inactive") => {
     if (!selected) return;
@@ -97,26 +107,65 @@ export function AdminSignalsScreen({ api }: { api: ApiClient }) {
       </div>
       <aside className={`admin-inspector admin-signal-inspector${selected ? "" : " is-empty"}`}>
         {selected ? <>
-          <header><div><h2>{selected.label}</h2><p>{selected.key} · version {selected.version}</p></div><Status value={selected.status} /></header>
-          <div className="admin-inspector-actions">
-            {selected.status === "active" ? <button disabled={busy} type="button" onClick={() => void collect()}><Activity size={14} /> Collect all</button> : <button disabled={busy || !selected.collector_key || !selected.extractor_key} type="button" onClick={() => void changeStatus("active")}><Play size={14} /> Activate and collect</button>}
-            {selected.status === "active" ? <button disabled={busy} type="button" onClick={() => void validateStaged()}><CheckCircle2 size={14} /> Approve staged</button> : null}
-            {selected.status === "active" ? <button disabled={busy} type="button" onClick={() => void changeStatus("inactive")}><Pause size={14} /> Deactivate</button> : null}
-          </div>
-          <dl className="admin-signal-details">
-            <Detail label="Category" value={selected.category} />
-            <Detail label="Value type" value={`${selected.value_type}${selected.unit ? ` (${selected.unit})` : ""}`} />
-            <Detail label="Collector" value={selected.collector_key || "Not assigned"} />
-            <Detail label="Extractor" value={selected.extractor_key || "Not assigned"} />
-            <Detail label="Freshness" value={`${selected.freshness_days} days`} />
-            <Detail label="Opportunity" value={selected.opportunity_direction.replace(/_/g, " ")} />
-          </dl>
-          {selected.description ? <p className="admin-signal-description">{selected.description}</p> : null}
+          <header><div><h2>{inspectorTab === "json" ? "All signal definitions" : selected.label}</h2><p>{inspectorTab === "json" ? `${signals.length} definitions · copyable JSON` : `${selected.key} · version ${selected.version}`}</p></div>{inspectorTab === "definition" ? <Status value={selected.status} /> : null}</header>
+          <nav className="admin-inspector-tabs" aria-label="Signal detail views">
+            <button className={inspectorTab === "definition" ? "is-active" : ""} type="button" onClick={() => setInspectorTab("definition")}>Definition</button>
+            <button className={inspectorTab === "json" ? "is-active" : ""} type="button" onClick={() => setInspectorTab("json")}>JSON</button>
+            {inspectorTab === "json" ? <button className="admin-json-copy" disabled={!signals.length} type="button" onClick={() => void copySignalsJson()}><Copy size={12} /> {copied ? "Copied" : "Copy all JSON"}</button> : null}
+          </nav>
+          {inspectorTab === "definition" ? <>
+            <div className="admin-inspector-actions">
+              {selected.status === "active" ? <button disabled={busy} type="button" onClick={() => void collect()}><Activity size={14} /> Collect all</button> : <button disabled={busy || !selected.collector_key || !selected.extractor_key} type="button" onClick={() => void changeStatus("active")}><Play size={14} /> Activate and collect</button>}
+              {selected.status === "active" ? <button disabled={busy} type="button" onClick={() => void validateStaged()}><CheckCircle2 size={14} /> Approve staged</button> : null}
+              {selected.status === "active" ? <button disabled={busy} type="button" onClick={() => void changeStatus("inactive")}><Pause size={14} /> Deactivate</button> : null}
+            </div>
+            <dl className="admin-signal-details">
+              <Detail label="Category" value={selected.category} />
+              <Detail label="Value type" value={`${selected.value_type}${selected.unit ? ` (${selected.unit})` : ""}`} />
+              <Detail label="Collector" value={selected.collector_key || "Not assigned"} />
+              <Detail label="Extractor" value={selected.extractor_key || "Not assigned"} />
+              <Detail label="Freshness" value={`${selected.freshness_days} days`} />
+              <Detail label="Opportunity" value={selected.opportunity_direction.replace(/_/g, " ")} />
+            </dl>
+            {selected.description ? <p className="admin-signal-description">{selected.description}</p> : null}
+          </> : <div className="admin-inspector-content admin-json-inspector admin-signals-json"><pre>{JSON.stringify(signalsJson, null, 2)}</pre></div>}
         </> : null}
       </aside>
     </div>
     {showCreate ? <CreateSignalDialog api={api} onClose={() => setShowCreate(false)} onCreated={(signal) => { setShowCreate(false); setSelectedId(signal.id); void load(); }} /> : null}
   </section>;
+}
+
+function buildSignalsJsonPayload(signals: AdminSignalDefinition[]) {
+  return {
+    schema_version: 1,
+    exported_at: new Date().toISOString(),
+    signal_count: signals.length,
+    signals: signals.map((signal) => ({
+      id: signal.id,
+      key: signal.key,
+      label: signal.label,
+      description: signal.description ?? null,
+      status: signal.status,
+      value: {
+        type: signal.value_type,
+        unit: signal.unit ?? null,
+      },
+      category: signal.category,
+      collection: {
+        collector_key: signal.collector_key ?? null,
+        extractor_key: signal.extractor_key ?? null,
+        freshness_days: signal.freshness_days,
+      },
+      opportunity: {
+        direction: signal.opportunity_direction,
+        config: signal.config,
+      },
+      version: signal.version,
+      created_at: signal.created_at,
+      updated_at: signal.updated_at,
+    })),
+  };
 }
 
 function Metric({ label, value, tone = "" }: { label: string; value: number; tone?: string }) {
