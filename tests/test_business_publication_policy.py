@@ -110,6 +110,7 @@ def test_structured_provider_identity_is_not_rejected_for_a_generic_sounding_nam
             external_id="places/home-electrical-services",
             title="Home Electrical Services",
             source_url="https://maps.google.com/example",
+            raw_payload={"types": ["electrician", "establishment"]},
         ),
         now,
         now,
@@ -165,6 +166,52 @@ def test_observation_validation_accepts_structured_google_display_name() -> None
     )
     assert business_identity.status == "passed"
     assert business_identity.evidence[0]["title"] == "certapro painters of north york"
+
+
+def test_google_intersection_cannot_validate_as_a_business_or_trade() -> None:
+    now = utcnow()
+    results = BusinessValidationService(None).evaluate_observation(
+        business=SimpleNamespace(
+            id="business_intersection",
+            display_name="Bellamy Rd N at Painted Post Dr",
+            phone=None,
+            domain=None,
+            website_url=None,
+            is_directory=False,
+            address="Toronto",
+            geography="Toronto",
+            latitude=43.7607,
+            longitude=-79.2364,
+        ),
+        observation=SimpleNamespace(
+            id="observation_intersection",
+            source="google_places",
+            external_id="places/intersection",
+            source_url="https://maps.google.com/intersection",
+            observed_at=now,
+            raw_payload={
+                "displayName": {"text": "Bellamy Road North & Painted Post Drive"},
+                "types": ["intersection"],
+                "formattedAddress": "Scarborough, ON",
+            },
+        ),
+        segment=SimpleNamespace(
+            niche_id="niche_painting",
+            market_key="toronto",
+            market_label="Toronto",
+            niche=SimpleNamespace(
+                slug="home_service_painting",
+                label="Painting",
+                category="painting contractor",
+                search_config={},
+            ),
+        ),
+    )
+
+    statuses = {result.validation_type: result.status for result in results}
+    assert statuses["identity"] == "failed"
+    assert statuses["business_identity"] == "failed"
+    assert statuses["trade"] == "failed"
 
 
 def test_secondary_provider_category_does_not_override_primary_trade() -> None:

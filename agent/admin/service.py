@@ -2292,8 +2292,15 @@ def _admin_candidate_score(
         ("location", "Market/service area", 10.0),
     ):
         validation = validations.get(key)
-        passed = validation is not None and validation.status == "passed"
-        failed = validation is not None and validation.status == "failed"
+        inactive_record = key == "business_identity" and business.status != "active"
+        passed = (
+            validation is not None
+            and validation.status == "passed"
+            and not inactive_record
+        )
+        failed = (
+            validation is not None and validation.status == "failed"
+        ) or inactive_record
         components.append(
             CandidateComponent(
                 key=key,
@@ -2308,7 +2315,13 @@ def _admin_candidate_score(
                 ),
                 hard_gate=True,
                 status="passed" if passed else "failed" if failed else "missing",
-                reason=(validation.reason if validation is not None else f"{label} is unverified"),
+                reason=(
+                    f"Business record is {business.status}"
+                    if inactive_record
+                    else validation.reason
+                    if validation is not None
+                    else f"{label} is unverified"
+                ),
             )
         )
     operational = facts.get("business_operational")

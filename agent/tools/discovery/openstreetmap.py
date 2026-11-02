@@ -8,6 +8,7 @@ import httpx
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignRead
 from canonical.normalization import normalize_business_name, normalize_phone
+from canonical.business_entity import osm_element_is_non_business
 from shared.errors import ConfigurationError
 from shared.geospatial import coordinates_are_valid
 from shared.utils import normalize_text, normalize_url
@@ -158,6 +159,8 @@ def result_from_osm_element(
     location: str,
 ) -> SearchResult | None:
     tags = element.get("tags") if isinstance(element.get("tags"), dict) else {}
+    if osm_element_is_non_business(tags):
+        return None
     name = normalize_text(tags.get("name"))
     element_type = normalize_text(element.get("type"))
     element_id = element.get("id")

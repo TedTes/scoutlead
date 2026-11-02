@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 import httpx
 
+from canonical.business_entity import google_place_is_business_profile
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from seeding.schemas import BusinessSeedInput
 from shared.geospatial import haversine_distance_km
@@ -322,6 +323,8 @@ def seed_from_place(
     *,
     query: GooglePlacesSeedQuery,
 ) -> BusinessSeedInput | None:
+    if not google_place_is_business_profile(place):
+        return None
     if place.get("businessStatus") == "CLOSED_PERMANENTLY":
         return None
     display_name = place.get("displayName") or {}

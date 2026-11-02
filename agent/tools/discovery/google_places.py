@@ -7,6 +7,7 @@ import httpx
 
 from campaign_sources.schemas import CampaignSourceRead
 from campaigns.schemas import CampaignRead
+from canonical.business_entity import google_place_is_business_profile
 from canonical.normalization import normalize_business_name, normalize_phone
 from products.schemas import ProductRead
 from shared.errors import ConfigurationError
@@ -85,8 +86,9 @@ class GooglePlacesDiscoveryAdapter:
         response.raise_for_status()
         return [
             self._to_search_result(place=place, query=normalized_query)
-            for place in response.json().get("places", [])[:limit]
-        ]
+            for place in response.json().get("places", [])
+            if google_place_is_business_profile(place)
+        ][:limit]
 
     def run(self, source: CampaignSourceRead, context: dict[str, Any]) -> ToolResult:
         if not self.is_configured:
@@ -164,6 +166,8 @@ class GooglePlacesDiscoveryAdapter:
                 response.raise_for_status()
                 payload = response.json()
                 for place in payload.get("places", []):
+                    if not google_place_is_business_profile(place):
+                        continue
                     if not self._matches_website_policy(place, website_policy):
                         continue
                     place_keys = self._place_keys(place)

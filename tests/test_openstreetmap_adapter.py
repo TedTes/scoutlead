@@ -55,6 +55,45 @@ def test_openstreetmap_adapter_geocodes_fetches_and_normalizes(monkeypatch) -> N
     assert result.data[0]["raw"]["website_presence_status"] == "no_website_listed"
 
 
+def test_openstreetmap_adapter_rejects_transit_stop_with_trade_word_in_name(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "tools.discovery.openstreetmap.httpx.get",
+        lambda *args, **kwargs: FakeResponse(
+            [{"boundingbox": ["43.55", "43.90", "-79.70", "-79.10"]}]
+        ),
+    )
+    monkeypatch.setattr(
+        "tools.discovery.openstreetmap.httpx.post",
+        lambda *args, **kwargs: FakeResponse(
+            {
+                "elements": [
+                    {
+                        "type": "node",
+                        "id": 3329168015,
+                        "lat": 43.7607,
+                        "lon": -79.2364,
+                        "tags": {
+                            "name": "Bellamy Rd N at Painted Post Dr",
+                            "highway": "bus_stop",
+                            "public_transport": "platform",
+                            "network": "TTC",
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+
+    result = OpenStreetMapDiscoveryAdapter(timeout_seconds=1).run(
+        _source(),
+        {"campaign": _campaign()},
+    )
+
+    assert result.data == []
+
+
 def test_openstreetmap_query_uses_category_tag_and_name_pattern() -> None:
     query = build_overpass_query("residential painters", bbox=(43.5, -79.7, 43.9, -79.1))
 

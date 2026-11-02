@@ -127,6 +127,46 @@ def test_google_places_adapter_supports_exact_business_lookup(monkeypatch) -> No
     assert results[0].url == "https://cedarpainting.example"
 
 
+def test_google_places_adapter_rejects_intersections_and_transit_entities(
+    monkeypatch,
+) -> None:
+    class NonBusinessResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "places": [
+                    {
+                        "id": "place_intersection",
+                        "displayName": {
+                            "text": "Bellamy Road North & Painted Post Drive"
+                        },
+                        "formattedAddress": "Scarborough, ON",
+                        "types": ["intersection"],
+                    },
+                    {
+                        "id": "place_painter",
+                        "displayName": {"text": "Independent Painting Co."},
+                        "formattedAddress": "Scarborough, ON",
+                        "types": ["painter", "establishment"],
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(
+        "tools.discovery.google_places.httpx.post",
+        lambda *args, **kwargs: NonBusinessResponse(),
+    )
+
+    results = GooglePlacesDiscoveryAdapter(api_key="test-key").lookup(
+        "painters in Scarborough ON",
+        limit=5,
+    )
+
+    assert [result.title for result in results] == ["Independent Painting Co."]
+
+
 def test_google_places_adapter_paginates_up_to_source_limit(monkeypatch) -> None:
     calls = []
 
@@ -145,12 +185,18 @@ def test_google_places_adapter_paginates_up_to_source_limit(monkeypatch) -> None
             "id": f"place_{index}",
             "displayName": {"text": f"Business {index}"},
             "formattedAddress": "Toronto, ON",
+            "types": ["painter", "establishment"],
         }
 
     def fake_post(url, *, timeout, headers, json):
         calls.append(json)
         if len(calls) == 1:
-            return PageResponse({"places": [place(index) for index in range(20)], "nextPageToken": "page-2"})
+            return PageResponse(
+                {
+                    "places": [place(index) for index in range(20)],
+                    "nextPageToken": "page-2",
+                }
+            )
         return PageResponse({"places": [place(index) for index in range(20, 25)]})
 
     monkeypatch.setattr("tools.discovery.google_places.httpx.post", fake_post)

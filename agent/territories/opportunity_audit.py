@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from canonical.business_entity import google_place_is_business_profile
 from canonical.normalization import normalize_business_name, normalize_domain
 from canonical.repository import CanonicalRepository
 from canonical.website_evidence import trusted_website_evidence
@@ -945,6 +946,8 @@ def _google_place_matches_business(
     result: SearchResult,
     business: BusinessModel,
 ) -> bool:
+    if not google_place_is_business_profile(result.raw or {}):
+        return False
     expected_name = normalize_business_name(business.display_name)
     result_name = normalize_business_name(result.title)
     if not expected_name or not result_name:

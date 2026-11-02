@@ -6,6 +6,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from canonical.business_entity import assess_provider_business_entity
 from canonical.normalization import first_raw_text, nested_raw
 from db.models import BusinessModel, ContactModel, SourceObservationModel, ValidationResultModel
 from shared.utils import utcnow
@@ -45,6 +46,16 @@ def assess_business_operational(
     business by itself.
     """
 
+    entity = assess_provider_business_entity(
+        source=observation.source,
+        payload={**(observation.raw_payload or {}), "id": observation.external_id},
+    )
+    if (
+        observation.source
+        in {"google_places", "google_places_seed", "openstreetmap", "openstreetmap_seed"}
+        and entity.is_business is not True
+    ):
+        return None
     explicit = _explicit_status(observation.raw_payload or {})
     if explicit == "operational":
         return OperationalAssessment(

@@ -13,6 +13,7 @@ from canonical.website_evidence import (
     assess_website_ownership,
 )
 from canonical.normalization import first_raw_text, nested_raw
+from canonical.business_entity import assess_provider_business_entity
 from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
@@ -26,7 +27,7 @@ from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
 
 
-VALIDATOR_VERSION = 4
+VALIDATOR_VERSION = 5
 BLOCKED_HOSTS = BLOCKED_WEBSITE_HOSTS
 GENERIC_TITLES = {
     "renovation",
@@ -210,6 +211,27 @@ class BusinessValidationService:
         )
 
     def _identity(self, business, item, observed_at, expires_at) -> ValidationResult:
+        provider_id = str(getattr(item, "provider_id", None) or "").strip().lower()
+        entity = assess_provider_business_entity(
+            source=provider_id,
+            payload={
+                **(getattr(item, "raw_payload", None) or {}),
+                "id": getattr(item, "external_id", None),
+            },
+        )
+        if entity.is_business is False:
+            return _result(
+                business,
+                item,
+                None,
+                "identity",
+                "failed",
+                100,
+                entity.reason,
+                observed_at,
+                expires_at,
+                evidence=[entity.evidence],
+            )
         supported = bool(business.phone or business.domain or item.external_id or item.source_url)
         return _result(
             business,
@@ -230,6 +252,13 @@ class BusinessValidationService:
         title = _normalized(item.title or business.display_name)
         canonical_title = _normalized(business.display_name)
         provider_id = str(getattr(item, "provider_id", None) or "").strip().lower()
+        entity = assess_provider_business_entity(
+            source=provider_id,
+            payload={
+                **(getattr(item, "raw_payload", None) or {}),
+                "id": getattr(item, "external_id", None),
+            },
+        )
         verification_only = provider_id == "configured_search"
         structured_provider_identity = bool(
             provider_id
@@ -240,6 +269,7 @@ class BusinessValidationService:
                 "openstreetmap_seed",
             }
             and getattr(item, "external_id", None)
+            and entity.is_business is True
         )
         corroborated_identity = bool(
             not verification_only
@@ -261,10 +291,29 @@ class BusinessValidationService:
             )
         )
         directory = business.is_directory is True
-        passed = not (blocked or generic or directory or verification_only)
+        structured_entity_unverified = bool(
+            provider_id
+            in {
+                "google_places",
+                "google_places_seed",
+                "openstreetmap",
+                "openstreetmap_seed",
+            }
+            and entity.is_business is not True
+            and not corroborated_identity
+        )
+        passed = not (
+            blocked
+            or generic
+            or directory
+            or verification_only
+            or structured_entity_unverified
+        )
         reason = (
             "Candidate is a business record rather than an ad, directory, or generic service title."
             if passed
+            else entity.reason
+            if structured_entity_unverified
             else "Candidate is a marketplace, directory, or generic service listing."
         )
         return _result(
@@ -288,6 +337,7 @@ class BusinessValidationService:
                     "corroborated_identity": corroborated_identity,
                     "directory": directory,
                     "verification_only_provider": verification_only,
+                    "provider_entity": entity.evidence,
                 }
             ],
         )
@@ -297,6 +347,15 @@ class BusinessValidationService:
         terms = _trade_terms(segment.niche)
         payload = item.raw_payload or {}
         provider_payload = payload.get("raw") if isinstance(payload.get("raw"), dict) else payload
+        provider_id = str(getattr(item, "provider_id", None) or "").strip().lower()
+        entity = assess_provider_business_entity(
+            source=provider_id,
+            payload={**payload, "id": getattr(item, "external_id", None)},
+        )
+        legacy_entity_corroborated = bool(
+            entity.is_business is None
+            and (getattr(business, "phone", None) or getattr(business, "domain", None))
+        )
         independent_fields = {
             "title": item.title,
             "snippet": payload.get("snippet"),
@@ -330,7 +389,17 @@ class BusinessValidationService:
         )
         status = (
             "failed"
-            if decisive_exclusions
+            if decisive_exclusions or entity.is_business is False
+            else "uncertain"
+            if provider_id
+            in {
+                "google_places",
+                "google_places_seed",
+                "openstreetmap",
+                "openstreetmap_seed",
+            }
+            and entity.is_business is not True
+            and not legacy_entity_corroborated
             else "passed"
             if matched
             else "uncertain"
@@ -342,7 +411,19 @@ class BusinessValidationService:
             "trade",
             status,
             95 if decisive_exclusions else 95 if matched else 35,
-            "Independent source fields conflict with the requested trade."
+            entity.reason
+            if entity.is_business is False
+            else "The provider entity type does not establish that this is a business."
+            if provider_id
+            in {
+                "google_places",
+                "google_places_seed",
+                "openstreetmap",
+                "openstreetmap_seed",
+            }
+            and entity.is_business is not True
+            and not legacy_entity_corroborated
+            else "Independent source fields conflict with the requested trade."
             if decisive_exclusions
             else "Independent source fields support the requested trade."
             if matched
@@ -355,6 +436,7 @@ class BusinessValidationService:
                     "excluded_terms": excluded,
                     "decisive_excluded_terms": decisive_exclusions,
                     "niche": slug,
+                    "provider_entity": entity.evidence,
                 }
             ],
         )
