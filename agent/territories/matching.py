@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from business_facts.eligibility import eligible_fact_condition, fact_is_eligible
-from business_facts.attribute_scoring import score_attribute
+from business_facts.attribute_scoring import audience_match_config
 from business_facts.repository import fact_value
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import (
@@ -307,7 +307,7 @@ class ProfileMatchService:
                         key=key,
                         fact_key=SIGNAL_FACTS[key],
                         opportunity_direction="legacy",
-                        config=_attribute_match_config(
+                        config=audience_match_config(
                             SIGNAL_FACTS[key],
                             "lower_is_opportunity" if key == "reviews_under_15" else "legacy",
                             LEGACY_SIGNAL_CONFIG.get(key, {}),
@@ -322,7 +322,7 @@ class ProfileMatchService:
                         key=key,
                         fact_key=definition.key,
                         opportunity_direction=definition.opportunity_direction,
-                        config=_attribute_match_config(
+                        config=audience_match_config(
                             definition.key,
                             definition.opportunity_direction,
                             definition.config or {},
@@ -780,27 +780,3 @@ def _opportunity_score(
 def literal_column_nulls_last(name: str):
     return literal_column(name).asc().nulls_last()
 
-
-def _attribute_match_config(
-    fact_key: str,
-    opportunity_direction: str,
-    config: dict[str, Any],
-) -> dict[str, Any]:
-    """Translate an old opportunity threshold into the attribute-score scale."""
-
-    result = dict(config)
-    if isinstance(result.get("audience_max_score"), (int, float)):
-        return result
-    threshold = result.get("opportunity_threshold")
-    if opportunity_direction in {"lower_is_opportunity", "higher_is_opportunity"} and isinstance(
-        threshold, (int, float)
-    ):
-        normalized = score_attribute(
-            fact_key,
-            threshold,
-            opportunity_direction=opportunity_direction,
-            config=result,
-        ).score
-        if normalized is not None:
-            result["audience_max_score"] = max(0.0, normalized - 0.001)
-    return result

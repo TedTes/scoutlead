@@ -457,6 +457,119 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         ]["limitations"]
 
 
+def test_admin_businesses_filter_by_the_same_attribute_gate_as_audiences() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        missing_form, niche = _business(session)
+        now = utcnow()
+        has_form = BusinessModel(
+            id=new_id("business"),
+            display_name="Has Form Painting",
+            normalized_name="has form painting",
+            geography="Toronto",
+            market_key="toronto",
+            status="active",
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            key="contact_form_present",
+            label="Contact form present",
+            value_type="boolean",
+            category="conversion",
+            status="active",
+            collector_key="website_dom",
+            extractor_key="contact_form",
+            freshness_days=30,
+            opportunity_direction="false_is_opportunity",
+            config={"minimum_confidence": 90},
+            version=1,
+        )
+        service_definition = ServiceDefinitionModel(
+            id=new_id("service"),
+            key="lead_capture",
+            label="Lead capture",
+            status="active",
+            sort_order=10,
+            version=1,
+        )
+        session.add_all([has_form, definition, service_definition])
+        session.flush()
+        session.add(
+            ServiceSignalMappingModel(
+                id=new_id("mapping"),
+                service_definition_id=service_definition.id,
+                signal_definition_id=definition.id,
+                weight=1,
+                sort_order=0,
+            )
+        )
+        for business, present, score in (
+            (missing_form, False, 0),
+            (has_form, True, 100),
+        ):
+            observation = SourceObservationModel(
+                id=new_id("observation"),
+                business_id=business.id,
+                source="website_dom",
+                external_id=f"website-{business.id}",
+                query_signature=None,
+                content_hash=(business.id.replace("_", "") + "f" * 64)[:64],
+                source_url="https://example.test",
+                raw_payload={"contact_form_present": present},
+                observed_at=now,
+            )
+            session.add(observation)
+            session.flush()
+            session.add(
+                BusinessFactModel(
+                    id=new_id("fact"),
+                    business_id=business.id,
+                    fact_key=definition.key,
+                    signal_definition_id=definition.id,
+                    value_type="boolean",
+                    value_boolean=present,
+                    confidence=95,
+                    attribute_score=score,
+                    score_version=1,
+                    score_reason="present" if present else "missing",
+                    resolution_state="confirmed",
+                    supporting_claim_ids=[],
+                    quality_state="published",
+                    quality_policy_version=1,
+                    observed_at=now,
+                    expires_at=now + timedelta(days=30),
+                    source_observation_id=observation.id,
+                    resolver_version=1,
+                )
+            )
+        session.commit()
+
+        result = _service(session).list_businesses(
+            query=None,
+            validation=None,
+            quality=None,
+            sort="name",
+            status=None,
+            niche_slug=None,
+            market_key=None,
+            page=1,
+            page_size=50,
+            match_attribute="contact_form_present",
+        )
+        overview = _service(session).overview()
+
+        assert [row["id"] for row in result["items"]] == [missing_form.id]
+        assert overview["match_attributes"] == [
+            {
+                "key": "contact_form_present",
+                "label": "No contact form",
+                "category": "conversion",
+            }
+        ]
+
+
 def test_delete_business_purges_dependencies_and_retains_audit() -> None:
     factory = _session_factory()
     with factory() as session:

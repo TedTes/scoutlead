@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete as sql_delete, func, or_, select
+from sqlalchemy import and_, delete as sql_delete, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from admin.schemas import (
@@ -22,7 +22,8 @@ from business_facts.catalog import (
     ATTRIBUTE_SORT_ORDER,
     TRACKED_ATTRIBUTE_KEYS,
 )
-from business_facts.attribute_scoring import score_attribute
+from business_facts.attribute_scoring import audience_match_config, score_attribute
+from business_facts.eligibility import eligible_fact_condition
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from db.base import Base
@@ -72,6 +73,30 @@ SOURCE_PRIORITY = {
     "configured_search": 4,
     "website_presence_check": 5,
     "admin_manual": 6,
+}
+
+MATCH_ATTRIBUTE_LABELS = {
+    "website_status": "No website",
+    "http_status": "Website unavailable",
+    "uses_https": "No HTTPS",
+    "mobile_viewport_present": "No mobile viewport",
+    "website_quality_score": "Low website quality",
+    "performance_score": "Low PageSpeed performance",
+    "accessibility_score": "Low accessibility score",
+    "best_practices_score": "Low best-practices score",
+    "contact_form_present": "No contact form",
+    "quote_or_booking_form_present": "No quote or booking flow",
+    "primary_cta_present": "No primary call to action",
+    "click_to_call_present": "No click-to-call",
+    "public_email_present": "No public email",
+    "public_phone_present": "No public phone",
+    "google_rating": "Low Google rating",
+    "google_review_count": "Low review count",
+    "review_recency_days": "Stale reviews",
+    "google_business_profile_present": "No Google Business Profile",
+    "local_business_schema_present": "No local-business schema",
+    "service_area_content_present": "No service-area content",
+    "title_and_meta_present": "Missing title or meta description",
 }
 
 
@@ -904,6 +929,17 @@ class AdminDataService:
                 {"slug": slug, "label": label, "count": business_count}
                 for slug, label, business_count in trade_rows
             ],
+            "match_attributes": [
+                {
+                    "key": definition.key,
+                    "label": MATCH_ATTRIBUTE_LABELS.get(
+                        definition.key,
+                        f"Opportunity: {definition.label}",
+                    ),
+                    "category": definition.category,
+                }
+                for definition in self._match_attribute_definitions()
+            ],
         }
 
     def list_businesses(
@@ -918,6 +954,7 @@ class AdminDataService:
         market_key: str | None,
         page: int,
         page_size: int,
+        match_attribute: str | None = None,
     ) -> dict[str, Any]:
         statement = select(BusinessModel)
         if query:
@@ -932,6 +969,42 @@ class AdminDataService:
             )
         if status:
             statement = statement.where(BusinessModel.status == status)
+        if match_attribute:
+            definitions = {
+                definition.key: definition
+                for definition in self._match_attribute_definitions()
+            }
+            definition = definitions.get(match_attribute)
+            if definition is None:
+                raise ValidationError(
+                    "Unknown audience-match attribute",
+                    {"match_attribute": match_attribute},
+                )
+            config = audience_match_config(
+                definition.key,
+                definition.opportunity_direction,
+                definition.config,
+            )
+            maximum_score = float(config.get("audience_max_score", 49.999))
+            fact_conditions = [
+                BusinessFactModel.business_id == BusinessModel.id,
+                BusinessFactModel.signal_definition_id == definition.id,
+                eligible_fact_condition(
+                    BusinessFactModel,
+                    minimum_confidence=int(config.get("minimum_confidence", 90)),
+                    require_provenance=True,
+                    require_validation=False,
+                ),
+                BusinessFactModel.attribute_score.is_not(None),
+                BusinessFactModel.attribute_score <= maximum_score,
+            ]
+            # A listing without a URL is not proof that a website is absent.
+            # The explicit admin option only returns verified missing websites.
+            if definition.key == "website_status":
+                fact_conditions.append(BusinessFactModel.value_text == "missing")
+            statement = statement.where(
+                exists(select(BusinessFactModel.id).where(and_(*fact_conditions)))
+            )
         if niche_slug or market_key:
             statement = statement.join(
                 BusinessNicheMembershipModel,
@@ -982,6 +1055,30 @@ class AdminDataService:
             "page": page,
             "page_size": page_size,
         }
+
+    def _match_attribute_definitions(self) -> list[SignalDefinitionModel]:
+        rows = self.session.scalars(
+            select(SignalDefinitionModel)
+            .join(
+                ServiceSignalMappingModel,
+                ServiceSignalMappingModel.signal_definition_id == SignalDefinitionModel.id,
+            )
+            .join(
+                ServiceDefinitionModel,
+                ServiceDefinitionModel.id == ServiceSignalMappingModel.service_definition_id,
+            )
+            .where(
+                ServiceDefinitionModel.status == "active",
+                SignalDefinitionModel.status == "active",
+                SignalDefinitionModel.opportunity_direction != "none",
+            )
+            .order_by(
+                ServiceDefinitionModel.sort_order,
+                ServiceSignalMappingModel.sort_order,
+                SignalDefinitionModel.label,
+            )
+        ).unique()
+        return list(rows)
 
     def detail(self, business_id: str) -> dict[str, Any]:
         business = self._business(business_id)

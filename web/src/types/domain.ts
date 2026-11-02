@@ -974,6 +974,11 @@ export type AdminOverview = {
     label: string;
     count: number;
   }>;
+  match_attributes?: Array<{
+    key: string;
+    label: string;
+    category: string;
+  }>;
 };
 
 export type AdminBusinessSummary = {

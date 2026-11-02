@@ -202,6 +202,31 @@ def is_opportunity_score(score: float | None, *, maximum_score: float = 49.999) 
     return score is not None and score <= maximum_score
 
 
+def audience_match_config(
+    key: str,
+    opportunity_direction: str,
+    config: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return the attribute-score cutoff used by audience matching."""
+
+    result = dict(config or {})
+    if isinstance(result.get("audience_max_score"), (int, float)):
+        return result
+    threshold = result.get("opportunity_threshold")
+    if opportunity_direction in {"lower_is_opportunity", "higher_is_opportunity"} and isinstance(
+        threshold, (int, float)
+    ):
+        normalized = score_attribute(
+            key,
+            threshold,
+            opportunity_direction=opportunity_direction,
+            config=result,
+        ).score
+        if normalized is not None:
+            result["audience_max_score"] = max(0.0, normalized - 0.001)
+    return result
+
+
 def _unknown(value: Any) -> bool:
     return value is None or (
         isinstance(value, str) and value.strip().lower() in UNKNOWN_TEXT_VALUES

@@ -315,6 +315,7 @@ def list_businesses(
     status: str | None = None,
     niche_slug: str | None = None,
     market_key: str | None = None,
+    match_attribute: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=10, le=200),
 ):
@@ -328,6 +329,7 @@ def list_businesses(
         market_key=market_key,
         page=page,
         page_size=page_size,
+        match_attribute=match_attribute,
     )
 
 

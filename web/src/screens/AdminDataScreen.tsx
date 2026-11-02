@@ -35,6 +35,7 @@ const emptyOverview: AdminOverview = {
   incomplete: 0,
   searchable: 0,
   trade_groups: [],
+  match_attributes: [],
 };
 
 export function AdminDataScreen({ api }: { api: ApiClient }) {
@@ -48,6 +49,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [sort, setSort] = useState("score_asc");
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
+  const [matchAttribute, setMatchAttribute] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [selectedBusinesses, setSelectedBusinesses] = useState<Record<string, AdminBusinessSummary>>({});
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
@@ -74,6 +76,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         sort,
         status,
         niche_slug: selectedNiche,
+        match_attribute: matchAttribute,
         page,
         page_size: 50,
       });
@@ -99,7 +102,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, nicheSlug, page, quality, search, sort, status]);
+  }, [api, matchAttribute, nicheSlug, page, quality, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -233,6 +236,16 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
         </label>
+        <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => { setMatchAttribute(event.target.value); setPage(1); }}>
+          <option value="">All match attributes</option>
+          {Array.from(new Set((overview.match_attributes || []).map((attribute) => attribute.category))).map((category) => (
+            <optgroup key={category} label={category.replace(/_/g, " ")}>
+              {(overview.match_attributes || []).filter((attribute) => attribute.category === category).map((attribute) => (
+                <option key={attribute.key} value={attribute.key}>{attribute.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
         <select aria-label="Record quality" value={quality} onChange={(event) => { setQuality(event.target.value); setPage(1); }}>
           <option value="">All quality</option>
           <option value="refresh_required">Refresh required</option>
