@@ -164,7 +164,7 @@ def test_lead_assessment_separates_business_eligibility_from_website_opportunity
         group["key"]: group["state"]
         for group in assessment["opportunity_groups"]
     } == {
-        "website_unavailable": "no_gap",
+        "website_missing": "no_gap",
         "website_upgrade": "verified",
     }
 

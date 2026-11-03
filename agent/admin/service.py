@@ -79,10 +79,10 @@ SOURCE_PRIORITY = {
 }
 
 MATCH_ATTRIBUTE_LABELS = {
-    "website_status": "No website",
+    "website_status": "Website missing",
     "http_status": "Website unavailable",
     "mobile_viewport_present": "No mobile viewport",
-    "website_quality_score": "Low website quality",
+    "website_quality_score": "Website needs upgrade",
     "performance_score": "Low PageSpeed performance",
     "accessibility_score": "Low accessibility score",
     "best_practices_score": "Low best-practices score",
@@ -102,13 +102,13 @@ MATCH_ATTRIBUTE_LABELS = {
 }
 
 OPPORTUNITY_GROUPS = {
-    "website_status": ("website_unavailable", "Website unavailable"),
-    "http_status": ("website_upgrade", "Website needs upgrading"),
-    "mobile_viewport_present": ("website_upgrade", "Website needs upgrading"),
-    "website_quality_score": ("website_upgrade", "Website needs upgrading"),
-    "performance_score": ("website_upgrade", "Website needs upgrading"),
-    "accessibility_score": ("website_upgrade", "Website needs upgrading"),
-    "best_practices_score": ("website_upgrade", "Website needs upgrading"),
+    "website_status": ("website_missing", "Website missing"),
+    "http_status": ("website_upgrade", "Website needs upgrade"),
+    "mobile_viewport_present": ("website_upgrade", "Website needs upgrade"),
+    "website_quality_score": ("website_upgrade", "Website needs upgrade"),
+    "performance_score": ("website_upgrade", "Website needs upgrade"),
+    "accessibility_score": ("website_upgrade", "Website needs upgrade"),
+    "best_practices_score": ("website_upgrade", "Website needs upgrade"),
     "contact_form_present": ("lead_capture", "Lead-capture gap"),
     "quote_or_booking_form_present": ("lead_capture", "Lead-capture gap"),
     "primary_cta_present": ("lead_capture", "Lead-capture gap"),

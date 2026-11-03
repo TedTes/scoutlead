@@ -424,9 +424,7 @@ function LeadAssessmentBadge({ row }: { row: AdminBusinessSummary }) {
   const assessment = row.lead_assessment;
   const selected = assessment.selected_opportunity;
   const verifiedOpportunities = assessment.opportunities.filter((item) => item.state === "verified");
-  // Prefer the exact verified finding over a broad group label
-  // like "Website needs upgrading", which a single failed check can trigger
-  // even when most of that group's checks were never evaluated.
+  // Prefer the exact verified website outcome over a broad group label.
   const label = selected
     ? selected.state === "verified" ? selected.label : selected.state.replace(/_/g, " ")
     : verifiedOpportunities[0]?.label || assessment.lead_state.replace(/_/g, " ");
@@ -552,10 +550,8 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
           </div>
         ) : verifiedGroups.length ? (
           verifiedGroups.map((group) => (
-            // A group label like "Website needs upgrading" can be driven by
-            // a single failed check while the rest of the group was never
-            // measured. Show the coverage, not just the label, so this
-            // doesn't read as a broader verdict than the evidence supports.
+            // Show the measured coverage beside the website outcome so the
+            // admin never reads a partial grade as a complete assessment.
             <div className="admin-candidate-component" key={group.key}>
               <span>
                 <strong>{group.label}</strong>
@@ -572,8 +568,8 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
         ) : (
           <div className="admin-candidate-component">
             <span>
-              <strong>Verified opportunities</strong>
-              <small>No verified opportunity yet.</small>
+              <strong>Website opportunity</strong>
+              <small>Neither a missing website nor an upgrade need is verified yet.</small>
             </span>
             <span>{assessment.verified_opportunity_count}</span>
           </div>
@@ -581,7 +577,7 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
         <div className="admin-candidate-component">
           <span>
             <strong>Evidence coverage</strong>
-            <small>{assessment.evidence_coverage.evaluated} of {assessment.evidence_coverage.required} opportunity checks evaluated.</small>
+            <small>{assessment.evidence_coverage.evaluated} of {assessment.evidence_coverage.required} website opportunity checks evaluated.</small>
           </span>
           <span>{assessment.evidence_coverage.state}</span>
         </div>
