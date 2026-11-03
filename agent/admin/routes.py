@@ -311,11 +311,12 @@ def list_businesses(
     q: str | None = None,
     validation: str | None = None,
     quality: str | None = None,
-    sort: str = "score_asc",
+    sort: str = "lead_desc",
     status: str | None = None,
     niche_slug: str | None = None,
     market_key: str | None = None,
     evaluation_state: str | None = None,
+    eligibility_state: str | None = None,
     match_attribute: str | None = None,
     match_state: str | None = None,
     page: int = Query(default=1, ge=1),
@@ -330,6 +331,7 @@ def list_businesses(
         niche_slug=niche_slug,
         market_key=market_key,
         evaluation_state=evaluation_state,
+        eligibility_state=eligibility_state,
         page=page,
         page_size=page_size,
         match_attribute=match_attribute,
@@ -357,10 +359,12 @@ def business_detail(
     session: DbSession,
     auth: AdminAuth,
     match_attribute: str | None = None,
+    niche_slug: str | None = None,
 ):
     return _service(session, auth).detail(
         business_id,
         match_attribute=match_attribute,
+        niche_slug=niche_slug,
     )
 
 

@@ -4,7 +4,11 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from admin.service import AdminDataService, _admin_match_state
+from admin.service import (
+    AdminDataService,
+    _admin_lead_assessment,
+    _admin_match_state,
+)
 from admin.schemas import (
     AdminBusinessUpdate,
     AdminDataJobCreate,
@@ -79,13 +83,173 @@ def _service(session):
 
 def test_admin_match_states_separate_coverage_from_eligibility() -> None:
     definition = SignalDefinitionModel(key="website_status")
-    usable = [{"key": "website_status", "evidence_state": "usable", "score": 100}]
+    def assessment(eligibility: str, opportunity: str) -> dict:
+        return {
+            "eligibility": {"state": eligibility},
+            "selected_opportunity": {"state": opportunity},
+        }
 
-    assert _admin_match_state({"state": "eligible"}, usable, definition) == "matched"
-    assert _admin_match_state({"state": "not_matched"}, [], definition) == "not_evaluated"
-    assert _admin_match_state({"state": "pending"}, usable, definition) == "not_validated"
-    assert _admin_match_state({"state": "not_matched"}, usable, definition) == "does_not_match"
-    assert _admin_match_state({"state": "disqualified"}, usable, definition) == "not_qualified"
+    assert _admin_match_state(assessment("target", "verified"), definition) == "matched"
+    assert _admin_match_state(assessment("target", "not_evaluated"), definition) == "not_evaluated"
+    assert _admin_match_state(assessment("needs_review", "verified"), definition) == "not_validated"
+    assert _admin_match_state(assessment("target", "no_gap"), definition) == "does_not_match"
+    assert _admin_match_state(assessment("excluded", "verified"), definition) == "not_qualified"
+
+
+def test_lead_assessment_separates_business_eligibility_from_website_opportunity() -> None:
+    now = utcnow()
+    business = BusinessModel(
+        id="business_assessment",
+        display_name="Upgrade Candidate Painting",
+        normalized_name="upgrade candidate painting",
+        status="active",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    validations = {
+        key: ValidationResultModel(
+            validation_type=key,
+            status="passed",
+            confidence=95,
+            reason="Verified.",
+        )
+        for key in ("identity", "business_identity", "trade", "location")
+    }
+    definitions = [
+        SignalDefinitionModel(
+            key="website_status",
+            label="Website status",
+            opportunity_direction="categorical",
+            config={"audience_min_score": 50.001},
+        ),
+        SignalDefinitionModel(
+            key="uses_https",
+            label="HTTPS enabled",
+            opportunity_direction="false_is_opportunity",
+            config={"audience_min_score": 50.001},
+        ),
+    ]
+    facts = [
+        {
+            "key": "website_status",
+            "value": "present",
+            "score": 0,
+            "basis": "Verified website is present.",
+            "evidence_state": "usable",
+            "evidence_confidence": 95,
+            "source_observation_id": "website-observation",
+        },
+        {
+            "key": "uses_https",
+            "value": False,
+            "score": 100,
+            "basis": "Verified website does not use HTTPS.",
+            "evidence_state": "usable",
+            "evidence_confidence": 100,
+            "source_observation_id": "https-observation",
+        },
+    ]
+
+    assessment = _admin_lead_assessment(
+        business,
+        validations,
+        facts,
+        None,
+        definitions,
+    )
+
+    assert assessment["eligibility"]["state"] == "target"
+    assert assessment["lead_state"] == "qualified"
+    assert {
+        group["key"]: group["state"]
+        for group in assessment["opportunity_groups"]
+    } == {
+        "website_unavailable": "no_gap",
+        "website_upgrade": "verified",
+    }
+
+
+def test_missing_business_validation_requires_review_instead_of_exclusion() -> None:
+    now = utcnow()
+    business = BusinessModel(
+        id="business_review",
+        display_name="Review Painting",
+        normalized_name="review painting",
+        status="active",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    validations = {
+        key: ValidationResultModel(
+            validation_type=key,
+            status="passed",
+            confidence=95,
+            reason="Verified.",
+        )
+        for key in ("identity", "business_identity", "trade")
+    }
+
+    assessment = _admin_lead_assessment(business, validations, [], None, [])
+
+    assert assessment["eligibility"]["state"] == "needs_review"
+    assert assessment["lead_state"] == "needs_review"
+
+
+def test_admin_detail_uses_the_same_selected_trade_scope_as_the_list() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, painting = _business(session)
+        now = utcnow()
+        electrical = NicheModel(
+            id=new_id("niche"),
+            slug="home_service_electrical",
+            label="Electrical",
+            active=True,
+            signal_vocabulary=[],
+        )
+        session.add(electrical)
+        session.flush()
+        for niche, confidence in ((painting, 1.0), (electrical, 0.9)):
+            session.add(
+                BusinessNicheMembershipModel(
+                    id=new_id("membership"),
+                    business_id=business.id,
+                    niche_id=niche.id,
+                    market_key="toronto",
+                    confidence=confidence,
+                    evidence=[],
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+        for validation_type in ("identity", "business_identity", "trade", "location"):
+            session.add(
+                ValidationResultModel(
+                    id=new_id("validation"),
+                    idempotency_key=f"{business.id}:{validation_type}:electrical",
+                    business_id=business.id,
+                    niche_id=electrical.id,
+                    market_key="toronto",
+                    validation_type=validation_type,
+                    status="passed",
+                    confidence=95,
+                    reason="Selected trade evidence passed.",
+                    evidence=[],
+                    validator="test",
+                    validator_version=1,
+                    observed_at=now,
+                    expires_at=now + timedelta(days=30),
+                )
+            )
+        session.commit()
+
+        detail = _service(session).detail(
+            business.id,
+            niche_slug=electrical.slug,
+        )
+
+        assert detail["niche_slug"] == electrical.slug
+        assert detail["eligibility_state"] == "target"
 
 
 def _segment(session, niche):

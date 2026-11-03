@@ -56,7 +56,6 @@ from shared.errors import ConflictError, NotFoundError, ValidationError
 from shared.utils import new_id, normalize_url, utcnow
 from service_definitions.repository import ServiceDefinitionRepository
 from seeding.batches import active_membership_condition
-from scoring import CandidateComponent, candidate_score
 from signal_definitions.repository import SignalDefinitionRepository
 from source_items.repository import SourceItemRepository, source_item_content_hash
 from source_items.schemas import (
@@ -101,6 +100,23 @@ MATCH_ATTRIBUTE_LABELS = {
     "local_business_schema_present": "No local-business schema",
     "service_area_content_present": "No service-area content",
     "title_and_meta_present": "Missing title or meta description",
+}
+
+OPPORTUNITY_GROUPS = {
+    "website_status": ("website_unavailable", "Website unavailable"),
+    "http_status": ("website_upgrade", "Website needs upgrading"),
+    "uses_https": ("website_upgrade", "Website needs upgrading"),
+    "mobile_viewport_present": ("website_upgrade", "Website needs upgrading"),
+    "website_quality_score": ("website_upgrade", "Website needs upgrading"),
+    "performance_score": ("website_upgrade", "Website needs upgrading"),
+    "accessibility_score": ("website_upgrade", "Website needs upgrading"),
+    "best_practices_score": ("website_upgrade", "Website needs upgrading"),
+    "contact_form_present": ("lead_capture", "Lead-capture gap"),
+    "quote_or_booking_form_present": ("lead_capture", "Lead-capture gap"),
+    "primary_cta_present": ("lead_capture", "Lead-capture gap"),
+    "click_to_call_present": ("lead_capture", "Lead-capture gap"),
+    "google_rating": ("reputation", "Reputation gap"),
+    "google_review_count": ("reputation", "Reputation gap"),
 }
 
 
@@ -959,6 +975,7 @@ class AdminDataService:
         page: int,
         page_size: int,
         evaluation_state: str | None = None,
+        eligibility_state: str | None = None,
         match_attribute: str | None = None,
         match_state: str | None = None,
     ) -> dict[str, Any]:
@@ -1043,6 +1060,21 @@ class AdminDataService:
         evaluation_state_counts.update(
             Counter(row["evaluation_state"] for row in rows)
         )
+        eligibility_state_counts = {
+            state: 0 for state in ("target", "needs_review", "excluded")
+        }
+        eligibility_state_counts.update(
+            Counter(row["eligibility_state"] for row in rows)
+        )
+        if eligibility_state not in {None, "", "all"}:
+            if eligibility_state not in eligibility_state_counts:
+                raise ValidationError(
+                    "Unknown business eligibility state",
+                    {"eligibility_state": eligibility_state},
+                )
+            rows = [
+                row for row in rows if row["eligibility_state"] == eligibility_state
+            ]
         if evaluation_state not in {None, "", "all"}:
             if evaluation_state not in evaluation_state_counts:
                 raise ValidationError(
@@ -1095,10 +1127,22 @@ class AdminDataService:
             rows = [row for row in rows if row["data_quality_score"] is None]
         elif quality:
             raise ValidationError("Unknown data quality filter", {"quality": quality})
-        if sort == "candidate_asc":
-            rows.sort(key=lambda row: (row["candidate_score"] is not None, row["candidate_score"] or 0, row["display_name"].lower()))
-        elif sort == "candidate_desc":
-            rows.sort(key=lambda row: (row["candidate_score"] is None, -(row["candidate_score"] or 0), row["display_name"].lower()))
+        if sort in {"candidate_asc", "lead_asc"}:
+            rows.sort(
+                key=lambda row: (
+                    -_lead_sort_rank(row),
+                    row["verified_opportunity_count"],
+                    row["display_name"].lower(),
+                )
+            )
+        elif sort in {"candidate_desc", "lead_desc"}:
+            rows.sort(
+                key=lambda row: (
+                    _lead_sort_rank(row),
+                    -row["verified_opportunity_count"],
+                    row["display_name"].lower(),
+                )
+            )
         elif sort == "score_asc":
             rows.sort(key=lambda row: (row["data_quality_score"] is not None, row["data_quality_score"] or 0, row["display_name"].lower()))
         elif sort == "score_desc":
@@ -1116,6 +1160,7 @@ class AdminDataService:
             "page_size": page_size,
             "match_state_counts": match_state_counts,
             "evaluation_state_counts": evaluation_state_counts,
+            "eligibility_state_counts": eligibility_state_counts,
         }
 
     def _match_attribute_definitions(self) -> list[SignalDefinitionModel]:
@@ -1147,16 +1192,39 @@ class AdminDataService:
         business_id: str,
         *,
         match_attribute: str | None = None,
+        niche_slug: str | None = None,
     ) -> dict[str, Any]:
         business = self._business(business_id)
-        state = self._validation_states([business_id])[business_id]
         memberships = list(
             self.session.execute(
                 select(BusinessNicheMembershipModel, NicheModel)
                 .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
                 .where(BusinessNicheMembershipModel.business_id == business_id)
+                .order_by(BusinessNicheMembershipModel.confidence.desc())
             )
         )
+        primary_membership = next(
+            (
+                membership
+                for membership in memberships
+                if niche_slug is not None and membership[1].slug == niche_slug
+            ),
+            memberships[0] if memberships else None,
+        )
+        validation_scopes = (
+            {
+                business_id: (
+                    primary_membership[0].niche_id,
+                    primary_membership[0].market_key,
+                )
+            }
+            if primary_membership is not None
+            else None
+        )
+        state = self._validation_states(
+            [business_id],
+            validation_scopes=validation_scopes,
+        )[business_id]
         facts = list(
             self.session.scalars(
                 select(BusinessFactModel)
@@ -1215,7 +1283,7 @@ class AdminDataService:
             **self._business_summary(
                 business,
                 state,
-                memberships[0] if memberships else None,
+                primary_membership,
                 match_definition=match_definition,
                 match_definitions=all_match_definitions,
             ),
@@ -1560,22 +1628,7 @@ class AdminDataService:
                 "first_seen_at": detail.get("first_seen_at"),
                 "last_seen_at": detail.get("last_seen_at"),
             },
-            "record_quality": {
-                "score": detail["data_quality_score"],
-                "label": detail["data_quality_label"],
-                "required_checks": detail["data_quality_breakdown"].get(
-                    "validation_scores", []
-                ),
-                "informational_checks": detail["data_quality_breakdown"].get(
-                    "informational_checks", []
-                ),
-                "reasons": detail["data_quality_breakdown"].get(
-                    "quality_reasons", []
-                ),
-                "limitations": detail["data_quality_breakdown"].get(
-                    "limitations", []
-                ),
-            },
+            "lead_assessment": detail["lead_assessment"],
             "attributes": attributes,
             "contacts": detail.get("contacts", []),
             "evidence": {
@@ -2271,7 +2324,7 @@ class AdminDataService:
             state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
         )
-        candidate = _admin_candidate_score(
+        assessment = _admin_lead_assessment(
             business,
             state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
@@ -2279,8 +2332,7 @@ class AdminDataService:
             match_definitions or [],
         )
         match_state = _admin_match_state(
-            candidate,
-            state.get("_fact_attributes", []),
+            assessment,
             match_definition,
         )
         return {
@@ -2290,10 +2342,11 @@ class AdminDataService:
             "validation_state": state["state"],
             "evaluation_state": state["evaluation_state"],
             **quality,
-            "candidate_score": candidate["score"],
-            "candidate_state": candidate["state"],
-            "candidate_score_breakdown": candidate,
             "match_state": match_state,
+            "lead_assessment": assessment,
+            "eligibility_state": assessment["eligibility"]["state"],
+            "evidence_coverage_state": assessment["evidence_coverage"]["state"],
+            "verified_opportunity_count": assessment["verified_opportunity_count"],
             "website_url": business.website_url,
             "domain": business.domain,
             "phone": business.phone,
@@ -2358,257 +2411,285 @@ class AdminDataService:
         )
 
 
+def _lead_sort_rank(row: dict[str, Any]) -> int:
+    return {
+        "qualified": 0,
+        "no_opportunity": 1,
+        "not_evaluated": 2,
+        "needs_review": 3,
+        "excluded": 4,
+    }.get(row["lead_assessment"]["lead_state"], 5)
+
+
 def _admin_match_state(
-    candidate: dict[str, Any],
-    fact_attributes: list[dict[str, Any]],
+    assessment: dict[str, Any],
     match_definition: SignalDefinitionModel | None,
 ) -> str:
     if match_definition is None:
         return "not_scoped"
-    if candidate["state"] == "disqualified":
+    eligibility = assessment["eligibility"]["state"]
+    if eligibility == "excluded":
         return "not_qualified"
-    if candidate["state"] == "pending":
+    if eligibility == "needs_review":
         return "not_validated"
-    opportunity = next(
-        (item for item in fact_attributes if item["key"] == match_definition.key),
-        None,
-    )
-    if (
-        opportunity is None
-        or opportunity.get("evidence_state") != "usable"
-        or opportunity.get("score") is None
-    ):
+    opportunity = assessment.get("selected_opportunity")
+    if opportunity is None or opportunity["state"] == "not_evaluated":
         return "not_evaluated"
-    if candidate["state"] == "eligible":
+    if opportunity["state"] == "verified":
         return "matched"
     return "does_not_match"
 
 
-def _admin_candidate_score(
+def _admin_lead_assessment(
     business: BusinessModel,
     validations: dict[str, ValidationResultModel],
     fact_attributes: list[dict[str, Any]],
     match_definition: SignalDefinitionModel | None,
     match_definitions: list[SignalDefinitionModel],
 ) -> dict[str, Any]:
+    """Return explicit decisions without combining them into one score."""
+
     facts = {item["key"]: item for item in fact_attributes}
-    components: list[CandidateComponent] = []
-    for key, label, weight in (
-        ("identity", "Stable business identity", 7.5),
-        ("business_identity", "Real business record", 7.5),
-        ("trade", "Selected trade/category", 20.0),
-        ("location", "Market/service area", 10.0),
-    ):
-        validation = validations.get(key)
-        inactive_record = key == "business_identity" and business.status != "active"
-        passed = (
-            validation is not None
-            and validation.status == "passed"
-            and not inactive_record
-        )
-        failed = (
-            validation is not None and validation.status == "failed"
-        ) or inactive_record
-        components.append(
-            CandidateComponent(
-                key=key,
-                label=label,
-                group="eligibility",
-                weight=weight,
-                match_value=1.0 if passed else 0.0 if failed else None,
-                confidence=validation.confidence if validation is not None else None,
-                freshness=_admin_evidence_freshness(
-                    validation.observed_at if validation is not None else None,
-                    validation.expires_at if validation is not None else None,
-                ),
-                hard_gate=True,
-                status="passed" if passed else "failed" if failed else "missing",
-                reason=(
-                    f"Business record is {business.status}"
-                    if inactive_record
-                    else validation.reason
-                    if validation is not None
-                    else f"{label} is unverified"
-                ),
-            )
-        )
+    identity_rows = [validations.get("identity"), validations.get("business_identity")]
+    identity_check = _eligibility_check(
+        key="identity",
+        label="Business identity",
+        rows=identity_rows,
+        missing_reason="Business identity has not been fully verified.",
+    )
+    trade_check = _eligibility_check(
+        key="trade",
+        label="Trade/category",
+        rows=[validations.get("trade")],
+        missing_reason="Trade/category has not been verified.",
+    )
+    location_check = _eligibility_check(
+        key="location",
+        label="Market coverage",
+        rows=[validations.get("location")],
+        missing_reason="Market or service-area coverage has not been verified.",
+    )
     operational = facts.get("business_operational")
-    operational_usable = operational is not None and operational.get("evidence_state") == "usable"
+    operational_usable = bool(
+        operational and operational.get("evidence_state") == "usable"
+    )
     operational_value = operational.get("value") if operational else None
-    components.insert(
-        2,
-        CandidateComponent(
-            key="business_operational",
-            label="Business operational",
-            group="eligibility",
-            weight=15.0,
-            match_value=(
-                1.0 if operational_usable and operational_value is True
-                else 0.0 if operational_usable and operational_value is False
-                else None
-            ),
-            confidence=operational.get("evidence_confidence") if operational else None,
-            freshness=(
-                _admin_evidence_freshness(
-                    operational.get("observed_at"),
-                    operational.get("expires_at"),
-                )
-                if operational_usable and operational is not None
-                else 0.0
-            ),
-            # Missing operational evidence is not evidence that the business is
-            # closed. Only a current, explicit inactive fact is a hard veto.
-            hard_gate=bool(operational_usable and operational_value is False),
-            status=(
-                "passed" if operational_usable and operational_value is True
-                else "failed" if operational_usable and operational_value is False
-                else "unknown"
-            ),
-            reason=(
-                "Business is active"
-                if operational_usable and operational_value is True
-                else "Business is confirmed inactive"
-                if operational_usable and operational_value is False
-                else "Operational status is unverified; no closure was reported"
-            ),
+    operational_check = {
+        "key": "business_operational",
+        "label": "Operational status",
+        "state": (
+            "failed"
+            if operational_usable and operational_value is False
+            else "passed"
+            if operational_usable and operational_value is True
+            else "unknown"
         ),
+        "required": False,
+        "reason": (
+            "Business is confirmed closed."
+            if operational_usable and operational_value is False
+            else "Business is confirmed operational."
+            if operational_usable and operational_value is True
+            else "Operational status is unknown; no closure was reported."
+        ),
+    }
+    checks = [identity_check, trade_check, location_check, operational_check]
+    excluded_reasons = []
+    if business.status != "active":
+        excluded_reasons.append(f"Business record is {business.status}.")
+    excluded_reasons.extend(
+        check["reason"]
+        for check in checks
+        if check["state"] == "failed"
+    )
+    review_reasons = [
+        check["reason"]
+        for check in checks
+        if check.get("required", True) and check["state"] == "unknown"
+    ]
+    eligibility_state = (
+        "excluded"
+        if excluded_reasons
+        else "needs_review"
+        if review_reasons
+        else "target"
     )
 
-    opportunity_matched = False
-    scoped_definitions = [match_definition] if match_definition is not None else match_definitions
-    opportunity_candidates: list[tuple[float, SignalDefinitionModel, dict[str, Any], float]] = []
-    observed_non_matches: list[tuple[SignalDefinitionModel, dict[str, Any], float]] = []
-    for definition in scoped_definitions:
-        opportunity = facts.get(definition.key)
-        config = audience_match_config(
-            definition.key,
-            definition.opportunity_direction,
-            definition.config,
-        )
-        minimum_score = float(config.get("audience_min_score", 50.001))
-        opportunity_score = opportunity.get("score") if opportunity else None
-        matched = bool(
-            opportunity
-            and opportunity.get("evidence_state") == "usable"
-            and opportunity_score is not None
-            and float(opportunity_score) >= minimum_score
-            and not (
-                definition.key == "website_status"
-                and opportunity.get("value") != "missing"
-            )
-        )
-        if matched and opportunity is not None and opportunity_score is not None:
-            strength = max(0.0, min(1.0, float(opportunity_score) / 100.0))
-            confidence = float(opportunity.get("evidence_confidence") or 0.0) / 100.0
-            opportunity_candidates.append((strength * confidence, definition, opportunity, strength))
-        elif opportunity is not None and opportunity_score is not None:
-            observed_non_matches.append((definition, opportunity, float(opportunity_score)))
-
-    chosen_definition: SignalDefinitionModel | None = None
-    chosen_opportunity: dict[str, Any] | None = None
-    chosen_strength: float | None = None
-    if opportunity_candidates:
-        _, chosen_definition, chosen_opportunity, chosen_strength = max(
-            opportunity_candidates,
-            key=lambda item: item[0],
-        )
-        opportunity_matched = True
-    elif match_definition is not None:
-        chosen_definition = match_definition
-        chosen_opportunity = facts.get(match_definition.key)
-    elif observed_non_matches:
-        chosen_definition, chosen_opportunity, _ = max(
-            observed_non_matches,
-            key=lambda item: float(item[1].get("evidence_confidence") or 0.0),
-        )
-
-    if chosen_definition is not None:
-        opportunity_score = chosen_opportunity.get("score") if chosen_opportunity else None
-        components.append(
-            CandidateComponent(
-                key=chosen_definition.key,
-                label=(
-                    chosen_definition.label
-                    if match_definition is not None
-                    else f"Best verified opportunity: {chosen_definition.label}"
-                ),
-                group="opportunity",
-                weight=30.0,
-                match_value=(
-                    chosen_strength
-                    if opportunity_matched
-                    else 0.0 if chosen_opportunity is not None
-                    else None
-                ),
-                confidence=(chosen_opportunity.get("evidence_confidence") if chosen_opportunity else None),
-                freshness=(
-                    _admin_evidence_freshness(
-                        chosen_opportunity.get("observed_at"),
-                        chosen_opportunity.get("expires_at"),
-                    )
-                    if chosen_opportunity and chosen_opportunity.get("evidence_state") == "usable"
-                    else 0.0
-                ),
-                status="matched" if opportunity_matched else "not_matched" if chosen_opportunity else "missing",
-                reason=(
-                    f"Opportunity score {float(opportunity_score):g}/100"
-                    if opportunity_score is not None
-                    else "No usable attribute evidence"
-                ),
-            )
-        )
-    else:
-        components.append(
-            CandidateComponent(
-                key="verified_opportunity",
-                label="Verified opportunity",
-                group="opportunity",
-                weight=30.0,
-                match_value=None,
-                confidence=None,
-                freshness=0.0,
-                status="missing",
-                reason="No usable opportunity attributes were found",
-            )
-        )
-
-    public_phone = facts.get("public_phone_present")
-    public_email = facts.get("public_email_present")
-    phone_present = (
-        public_phone.get("value") is True if public_phone is not None else bool(business.phone)
+    definitions = (
+        [match_definition]
+        if match_definition is not None
+        else list(match_definitions)
     )
-    email_present = public_email.get("value") is True if public_email is not None else False
-    for key, label, present, evidence in (
-        ("public_phone_present", "Reachable phone", phone_present, public_phone),
-        ("public_email_present", "Reachable email", email_present, public_email),
+    opportunities = [
+        _opportunity_assessment(definition, facts.get(definition.key))
+        for definition in definitions
+    ]
+    opportunity_groups = _opportunity_groups(opportunities)
+    selected_opportunity = opportunities[0] if match_definition is not None else None
+    verified = [item for item in opportunities if item["state"] == "verified"]
+    evaluated_count = sum(
+        item["state"] != "not_evaluated" for item in opportunities
+    )
+    required_count = len(opportunities)
+    coverage_state = (
+        "missing"
+        if evaluated_count == 0
+        else "complete"
+        if evaluated_count == required_count
+        else "partial"
+    )
+    considered_opportunities = (
+        [selected_opportunity] if selected_opportunity is not None else opportunities
+    )
+    lead_state = (
+        "excluded"
+        if eligibility_state == "excluded"
+        else "needs_review"
+        if eligibility_state == "needs_review"
+        else "qualified"
+        if any(item["state"] == "verified" for item in considered_opportunities)
+        else "not_evaluated"
+        if not considered_opportunities
+        or all(item["state"] == "not_evaluated" for item in considered_opportunities)
+        else "no_opportunity"
+    )
+    return {
+        "lead_state": lead_state,
+        "eligibility": {
+            "state": eligibility_state,
+            "checks": checks,
+            "reasons": excluded_reasons or review_reasons,
+        },
+        "opportunities": opportunities,
+        "opportunity_groups": opportunity_groups,
+        "selected_opportunity": selected_opportunity,
+        "verified_opportunity_count": len(verified),
+        "evidence_coverage": {
+            "state": coverage_state,
+            "evaluated": evaluated_count,
+            "required": required_count,
+            "missing": [
+                item["key"]
+                for item in opportunities
+                if item["state"] == "not_evaluated"
+            ],
+        },
+    }
+
+
+def _eligibility_check(
+    *,
+    key: str,
+    label: str,
+    rows: list[ValidationResultModel | None],
+    missing_reason: str,
+) -> dict[str, Any]:
+    observed = [row for row in rows if row is not None]
+    if any(row.status == "failed" for row in observed):
+        failed = next(row for row in observed if row.status == "failed")
+        return {
+            "key": key,
+            "label": label,
+            "state": "failed",
+            "required": True,
+            "reason": failed.reason,
+        }
+    if len(observed) != len(rows) or any(row.status != "passed" for row in observed):
+        return {
+            "key": key,
+            "label": label,
+            "state": "unknown",
+            "required": True,
+            "reason": missing_reason,
+        }
+    return {
+        "key": key,
+        "label": label,
+        "state": "passed",
+        "required": True,
+        "reason": "Verified.",
+    }
+
+
+def _opportunity_assessment(
+    definition: SignalDefinitionModel,
+    fact: dict[str, Any] | None,
+) -> dict[str, Any]:
+    label = MATCH_ATTRIBUTE_LABELS.get(definition.key, definition.label)
+    if (
+        fact is None
+        or fact.get("evidence_state") != "usable"
+        or fact.get("score") is None
     ):
-        components.append(
-            CandidateComponent(
-                key=key,
-                label=label,
-                group="contactability",
-                weight=5.0,
-                match_value=1.0 if present else 0.0,
-                confidence=(evidence.get("evidence_confidence") if evidence else 80.0),
-                freshness=(
-                    1.0
-                    if evidence is None
-                    else _admin_evidence_freshness(
-                        evidence.get("observed_at"),
-                        evidence.get("expires_at"),
-                    )
-                    if evidence.get("evidence_state") == "usable"
-                    else 0.0
-                ),
-                status="present" if present else "missing",
-                reason=f"{label} {'is available' if present else 'is not available'}",
-            )
-        )
-    return candidate_score(
-        components,
-        opportunity_scoped=bool(scoped_definitions),
-        opportunity_matched=opportunity_matched,
+        return {
+            "key": definition.key,
+            "label": label,
+            "state": "not_evaluated",
+            "reason": "Required evidence has not been collected or resolved.",
+            "value": fact.get("value") if fact else None,
+            "evidence_confidence": fact.get("evidence_confidence") if fact else None,
+        }
+    config = audience_match_config(
+        definition.key,
+        definition.opportunity_direction,
+        definition.config,
     )
+    minimum_score = float(config.get("audience_min_score", 50.001))
+    matched = float(fact["score"]) >= minimum_score
+    if definition.key == "website_status":
+        matched = matched and fact.get("value") == "missing"
+    return {
+        "key": definition.key,
+        "label": label,
+        "state": "verified" if matched else "no_gap",
+        "reason": fact.get("basis") or fact.get("score_reason") or (
+            "Verified opportunity." if matched else "No opportunity found."
+        ),
+        "value": fact.get("value"),
+        "evidence_confidence": fact.get("evidence_confidence"),
+        "source_observation_id": fact.get("source_observation_id"),
+    }
+
+
+def _opportunity_groups(opportunities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for opportunity in opportunities:
+        group_key, group_label = OPPORTUNITY_GROUPS.get(
+            opportunity["key"],
+            (opportunity["key"], opportunity["label"]),
+        )
+        group = grouped.setdefault(
+            group_key,
+            {
+                "key": group_key,
+                "label": group_label,
+                "attributes": [],
+            },
+        )
+        group["attributes"].append(opportunity)
+    result = []
+    for group in grouped.values():
+        attributes = group["attributes"]
+        verified = [item for item in attributes if item["state"] == "verified"]
+        not_evaluated = [
+            item for item in attributes if item["state"] == "not_evaluated"
+        ]
+        state = (
+            "verified"
+            if verified
+            else "not_evaluated"
+            if not_evaluated
+            else "no_gap"
+        )
+        result.append(
+            {
+                **group,
+                "state": state,
+                "reasons": [item["label"] for item in verified]
+                or [item["label"] for item in not_evaluated],
+            }
+        )
+    return result
 
 
 def _admin_evidence_freshness(observed_at, expires_at) -> float:
