@@ -282,10 +282,12 @@ export function ResultsScreen({
         .toLowerCase()
         .includes(needle);
     })
-    .sort((a, b) =>
-      contactOpportunityAssessment(b).score - contactOpportunityAssessment(a).score
-      || contactScore(b) - contactScore(a),
-    );
+    .sort((a, b) => {
+      const opportunityDifference = contactOpportunityReasons(b).length
+        - contactOpportunityReasons(a).length;
+      if (opportunityDifference) return opportunityDifference;
+      return (a.company_name || "").localeCompare(b.company_name || "");
+    });
   const displayedLeadTotal = isGlobalView
     ? workspaceLeadPage?.total ?? workflowContacts.length
     : workflowContacts.length;
@@ -4010,21 +4012,6 @@ function clampScore(value: number | null | undefined) {
   return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
 }
 
-function legacyFitScore(contact: DiscoveryResult) {
-  const qualification = contact.qualification;
-  let score = clampScore(qualification?.score ?? contact.research?.confidence ?? 0);
-  if (!qualification?.score_breakdown && legacyMissingProblemEvidence(contact)) {
-    score = Math.min(score, 74);
-  }
-  if (!qualification?.score_breakdown && qualification?.fit_status === "maybe") {
-    score = Math.min(score, 79);
-  }
-  if (!qualification?.score_breakdown && qualification?.fit_status === "not_fit") {
-    score = Math.min(score, 49);
-  }
-  return score;
-}
-
 function legacyAdjustedFitStatus(contact: DiscoveryResult, status: AgentFitStatus): AgentFitStatus {
   if (contact.qualification?.score_breakdown || status !== "good_fit") return status;
   return legacyMissingProblemEvidence(contact) ? "maybe" : status;
@@ -4723,11 +4710,6 @@ function contactOpportunityReasons(contact: DiscoveryResult) {
 
   const evidence = contactListEvidenceLine(contact).trim();
   return evidence ? [evidence] : [];
-}
-
-function contactScore(contact: DiscoveryResult) {
-  if (contact.qualification?.score_breakdown) return clampScore(contact.qualification.score);
-  return legacyFitScore(contact);
 }
 
 function contactSignals(contact: DiscoveryResult) {

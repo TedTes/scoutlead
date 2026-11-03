@@ -981,6 +981,55 @@ export type AdminOverview = {
   }>;
 };
 
+export type AdminLeadOpportunity = {
+  key: string;
+  label: string;
+  state: "verified" | "no_gap" | "not_evaluated";
+  reason: string;
+  value: unknown;
+  evidence_confidence?: number | null;
+  source_observation_id?: string | null;
+};
+
+export type AdminLeadAssessment = {
+  lead_state: "qualified" | "needs_review" | "excluded" | "no_opportunity" | "not_evaluated";
+  eligibility: {
+    state: "target" | "needs_review" | "excluded";
+    checks: Array<{
+      key: string;
+      label: string;
+      state: "passed" | "failed" | "unknown";
+      required: boolean;
+      reason: string;
+    }>;
+    reasons: string[];
+  };
+  opportunities: AdminLeadOpportunity[];
+  opportunity_groups: Array<{
+    key: string;
+    label: string;
+    state: "verified" | "no_gap" | "not_evaluated";
+    reasons: string[];
+    attributes: AdminLeadOpportunity[];
+  }>;
+  selected_opportunity?: {
+    key: string;
+    label: string;
+    state: "verified" | "no_gap" | "not_evaluated";
+    reason: string;
+    value: unknown;
+    evidence_confidence?: number | null;
+    source_observation_id?: string | null;
+  } | null;
+  verified_opportunity_count: number;
+  evidence_coverage: {
+    state: "complete" | "partial" | "missing";
+    evaluated: number;
+    required: number;
+    missing: string[];
+  };
+};
+
 export type AdminBusinessSummary = {
   id: string;
   display_name: string;
@@ -989,30 +1038,11 @@ export type AdminBusinessSummary = {
   evaluation_state?: "validated" | "not_evaluated" | "not_validated" | "not_valid";
   data_quality_score: number | null;
   data_quality_label: "reliable" | "review" | "poor" | "refresh_required" | "missing_evidence";
-  candidate_score: number | null;
-  candidate_state: "eligible" | "disqualified" | "pending" | "not_matched" | "not_scoped";
   match_state?: "matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified" | "not_scoped";
-  candidate_score_breakdown: {
-    score: number | null;
-    state: string;
-    total_weight: number;
-    formula: string;
-    disqualifiers: string[];
-    pending_reasons: string[];
-    components: Array<{
-      key: string;
-      label: string;
-      group: string;
-      weight: number;
-      match_value: number | null;
-      confidence: number | null;
-      freshness: number;
-      contribution: number | null;
-      hard_gate: boolean;
-      status: string;
-      reason: string;
-    }>;
-  };
+  lead_assessment: AdminLeadAssessment;
+  eligibility_state: "target" | "needs_review" | "excluded";
+  evidence_coverage_state: "complete" | "partial" | "missing";
+  verified_opportunity_count: number;
   data_quality_breakdown: {
     validation_scores?: Array<{
       key: string;
@@ -1229,6 +1259,7 @@ export type AdminBusinessPage = {
   page_size: number;
   match_state_counts: Record<"matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified", number>;
   evaluation_state_counts?: Record<"validated" | "not_evaluated" | "not_validated" | "not_valid", number>;
+  eligibility_state_counts?: Record<"target" | "needs_review" | "excluded", number>;
 };
 
 export type AdminDataSegment = {

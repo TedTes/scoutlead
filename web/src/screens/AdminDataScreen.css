@@ -256,3 +256,28 @@
 .admin-quality-score.is-pending strong {
   color: #a65f09;
 }
+
+.admin-quality-score.is-qualified {
+  border-color: #a9e1c5 !important;
+  background: #eaf8f1 !important;
+  color: #087a55 !important;
+}
+
+.admin-quality-score.is-needs_review,
+.admin-quality-score.is-not_evaluated {
+  border-color: #efd19d !important;
+  background: #fff7e8 !important;
+  color: #9a620b !important;
+}
+
+.admin-quality-score.is-excluded {
+  border-color: #efb7b7 !important;
+  background: #fff0f0 !important;
+  color: #b83232 !important;
+}
+
+.admin-quality-score.is-no_opportunity {
+  border-color: #cfd6df !important;
+  background: #f4f6f8 !important;
+  color: #667085 !important;
+}

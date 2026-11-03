@@ -84,9 +84,12 @@ export class ApiClient {
     return this.request<AdminBusinessPage>(`/admin/businesses?${query.toString()}`);
   }
 
-  getAdminBusiness(id: string, matchAttribute = "") {
-    const query = matchAttribute ? `?match_attribute=${encodeURIComponent(matchAttribute)}` : "";
-    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}${query}`);
+  getAdminBusiness(id: string, matchAttribute = "", nicheSlug = "") {
+    const query = new URLSearchParams();
+    if (matchAttribute) query.set("match_attribute", matchAttribute);
+    if (nicheSlug) query.set("niche_slug", nicheSlug);
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}${suffix}`);
   }
 
   getAdminBusinessFactLineage(id: string) {

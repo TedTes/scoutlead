@@ -47,25 +47,23 @@ const emptyMatchStateCounts = {
 };
 
 const matchStateLabels = {
-  matched: "Matched",
+  matched: "Verified opportunity",
   not_evaluated: "Not evaluated",
-  not_validated: "Not validated",
-  does_not_match: "Does not match",
-  not_qualified: "Not valid",
+  not_validated: "Business needs review",
+  does_not_match: "No verified gap",
+  not_qualified: "Business excluded",
 } as const;
 
-const emptyEvaluationStateCounts = {
-  validated: 0,
-  not_evaluated: 0,
-  not_validated: 0,
-  not_valid: 0,
+const emptyEligibilityStateCounts = {
+  target: 0,
+  needs_review: 0,
+  excluded: 0,
 };
 
-const evaluationStateLabels = {
-  validated: "Validated",
-  not_evaluated: "Not evaluated",
-  not_validated: "Not validated",
-  not_valid: "Not valid",
+const eligibilityStateLabels = {
+  target: "Target businesses",
+  needs_review: "Needs review",
+  excluded: "Excluded",
 } as const;
 
 export function AdminDataScreen({ api }: { api: ApiClient }) {
@@ -75,11 +73,11 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState("candidate_desc");
+  const [sort, setSort] = useState("lead_desc");
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
-  const [evaluationState, setEvaluationState] = useState("all");
-  const [evaluationStateCounts, setEvaluationStateCounts] = useState(emptyEvaluationStateCounts);
+  const [eligibilityState, setEligibilityState] = useState("all");
+  const [eligibilityStateCounts, setEligibilityStateCounts] = useState(emptyEligibilityStateCounts);
   const [matchAttribute, setMatchAttribute] = useState("");
   const [matchState, setMatchState] = useState("all");
   const [matchStateCounts, setMatchStateCounts] = useState(emptyMatchStateCounts);
@@ -108,7 +106,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         sort,
         status,
         niche_slug: selectedNiche,
-        evaluation_state: evaluationState,
+        eligibility_state: eligibilityState,
         match_attribute: matchAttribute,
         match_state: matchState,
         page,
@@ -124,7 +122,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
-      setEvaluationStateCounts(businessPage.evaluation_state_counts || emptyEvaluationStateCounts);
+      setEligibilityStateCounts(businessPage.eligibility_state_counts || emptyEligibilityStateCounts);
       setMatchStateCounts(businessPage.match_state_counts || emptyMatchStateCounts);
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
@@ -138,7 +136,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, evaluationState, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
+  }, [api, eligibilityState, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -150,10 +148,10 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       setDetail(null);
       return;
     }
-    void api.getAdminBusiness(selectedId, matchAttribute).then(setDetail).catch((cause) => {
+    void api.getAdminBusiness(selectedId, matchAttribute, nicheSlug).then(setDetail).catch((cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
-  }, [allowed, api, matchAttribute, selectedId]);
+  }, [allowed, api, matchAttribute, nicheSlug, selectedId]);
 
   const refreshDetail = async (result?: AdminBusinessDetail) => {
     if (result) {
@@ -192,7 +190,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         const batch = businessIds.slice(index, index + 5);
         const batchPayloads = await Promise.all(batch.map(async (businessId) => {
           const [businessDetail, businessLineage] = await Promise.all([
-            api.getAdminBusiness(businessId, matchAttribute),
+            api.getAdminBusiness(businessId, matchAttribute, nicheSlug),
             api.getAdminBusinessFactLineage(businessId),
           ]);
           return buildBusinessJsonPayload(businessDetail, businessLineage);
@@ -231,10 +229,10 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       {pageHeader ? createPortal(<div className="admin-business-header">
         <div className="admin-metrics admin-business-metrics" aria-label="Business quality overview">
           <Metric label="Businesses" value={overview.total} />
-          <Metric label="Validated" value={overview.fully_validated} tone="good" />
-          <Metric label="Needs attention" value={overview.needs_attention} tone="warn" />
-          <Metric label="Incomplete" value={overview.incomplete} />
-          <Metric label="Searchable" value={overview.searchable} />
+          <Metric label="Checks passed" value={overview.fully_validated} tone="good" />
+          <Metric label="Needs review" value={overview.needs_attention} tone="warn" />
+          <Metric label="Evidence incomplete" value={overview.incomplete} />
+          <Metric label="Audience-eligible" value={overview.searchable} />
         </div>
         <button className="admin-primary-button" type="button" onClick={() => setDialog("add")}>
           <Plus size={15} /> Add business
@@ -273,22 +271,22 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           />
         </label>
         <select
-          aria-label="Business evaluation status"
-          value={evaluationState}
-          onChange={(event) => { setEvaluationState(event.target.value); setPage(1); }}
+          aria-label="Business eligibility"
+          value={eligibilityState}
+          onChange={(event) => { setEligibilityState(event.target.value); setPage(1); }}
         >
           <option value="all">
-            All evaluation statuses ({Object.values(evaluationStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
+            All business eligibility ({Object.values(eligibilityStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
           </option>
-          {Object.entries(evaluationStateLabels).map(([value, label]) => (
-            <option key={value} value={value}>{label} ({evaluationStateCounts[value as keyof typeof evaluationStateCounts].toLocaleString()})</option>
+          {Object.entries(eligibilityStateLabels).map(([value, label]) => (
+            <option key={value} value={value}>{label} ({eligibilityStateCounts[value as keyof typeof eligibilityStateCounts].toLocaleString()})</option>
           ))}
         </select>
         <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
           const value = event.target.value;
           setMatchAttribute(value);
           setMatchState("all");
-          setSort("candidate_desc");
+          setSort("lead_desc");
           setPage(1);
         }}>
           <option value="">All match attributes</option>
@@ -322,8 +320,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           <option value="archived">Archived</option>
         </select>
         <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
-          <option value="candidate_desc">Highest potential first</option>
-          <option value="candidate_asc">Lowest potential first</option>
+          <option value="lead_desc">Lead candidates first</option>
+          <option value="lead_asc">Review and exclusions first</option>
           <option value="name">Name A–Z</option>
         </select>
         <button
@@ -361,7 +359,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                 type="checkbox"
                 onChange={toggleVisibleSelection}
               /></th>
-              <th>Business</th><th>Market</th><th>Potential lead</th><th>State</th>
+              <th>Business</th><th>Market</th><th>Lead assessment</th><th>State</th>
             </tr></thead>
             <tbody>
               {rows.map((row) => (
@@ -369,7 +367,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                   <td className="admin-select-column"><input aria-label={`Select ${row.display_name}`} checked={Boolean(selectedBusinesses[row.id])} type="checkbox" onClick={(event) => event.stopPropagation()} onChange={() => toggleBusinessSelection(row)} /></td>
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
-                  <td><CandidateScore row={row} /></td>
+                  <td><LeadAssessmentBadge row={row} /></td>
                   <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
@@ -403,22 +401,21 @@ function StatusPill({ value }: { value: string }) {
   return <span className={`admin-status-pill is-${value.replace(/_/g, "-")}`}>{value.replace(/_/g, " ")}</span>;
 }
 
-function CandidateScore({ row }: { row: AdminBusinessSummary }) {
-  const score = row.candidate_score_breakdown;
-  const matchState = row.match_state || "not_scoped";
-  const scoreState = score?.state || row.candidate_state || "not_scoped";
-  const displayState = matchState === "not_scoped" ? scoreState : matchState;
-  const stateLabel = displayState.replace(/_/g, " ");
-  const stateClass = displayState;
-  const title = [
-    ...(score?.components || []).map((component) => `${component.label}: ${component.contribution ?? "—"}/${component.weight}`),
-    ...(score?.disqualifiers || []),
-    ...(score?.pending_reasons || []),
-  ].join(" · ");
+function LeadAssessmentBadge({ row }: { row: AdminBusinessSummary }) {
+  const assessment = row.lead_assessment;
+  const selected = assessment.selected_opportunity;
+  const verifiedGroups = assessment.opportunity_groups.filter((group) => group.state === "verified");
+  const label = selected
+    ? selected.state === "verified" ? selected.label : selected.state.replace(/_/g, " ")
+    : verifiedGroups[0]?.label || assessment.lead_state.replace(/_/g, " ");
+  const title = assessment.eligibility.reasons.join(" · ") || assessment.opportunities
+    .filter((opportunity) => opportunity.state === "verified")
+    .map((opportunity) => opportunity.label)
+    .join(" · ");
   return (
-    <span className={`admin-quality-score is-${stateClass}`} title={title}>
-      <strong>{score?.score ?? row.candidate_score ?? "—"}</strong>
-      <small>{stateLabel}</small>
+    <span className={`admin-quality-score is-${assessment.lead_state}`} title={title}>
+      <strong>{label}</strong>
+      <small>{assessment.eligibility.state.replace(/_/g, " ")}</small>
     </span>
   );
 }
@@ -487,7 +484,7 @@ function BusinessInspector({
           <AttributeCoverage lineage={lineage} />
         </div>
       </header>
-      <CandidateScorePanel detail={detail} />
+      <LeadAssessmentPanel detail={detail} />
       <nav className="admin-inspector-tabs" aria-label="Business detail views">
         <button className={activeTab === "attributes" ? "is-active" : ""} type="button" onClick={() => setActiveTab("attributes")}>Attributes</button>
         <button className={activeTab === "json" ? "is-active" : ""} type="button" onClick={() => setActiveTab("json")}>JSON</button>
@@ -508,27 +505,47 @@ function BusinessInspector({
   );
 }
 
-function CandidateScorePanel({ detail }: { detail: AdminBusinessDetail }) {
-  const score = detail.candidate_score_breakdown;
-  const scoped = score.state !== "not_scoped";
+function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
+  const assessment = detail.lead_assessment;
+  const opportunity = assessment.selected_opportunity;
+  const verifiedGroups = assessment.opportunity_groups.filter((group) => group.state === "verified");
   return (
     <section className="admin-candidate-score-panel">
-      <header><strong>Potential lead score</strong><span>{scoped ? `${score.score ?? "—"} / 100 · ${score.state.replace(/_/g, " ")}` : "Select an opportunity"}</span></header>
-      <p>{scoped ? score.formula : "Eligibility can be checked now; an opportunity is required for a complete lead score."}</p>
+      <header><strong>Lead assessment</strong><span>{assessment.lead_state.replace(/_/g, " ")}</span></header>
+      <p>Eligibility, opportunity, and evidence are evaluated separately.</p>
       <div>
-        {score.components.map((component) => (
-          <div className="admin-candidate-component" key={`${component.group}:${component.key}`}>
+        <div className="admin-candidate-component">
+          <span>
+            <strong>Business eligibility</strong>
+            <small>{assessment.eligibility.state.replace(/_/g, " ")}</small>
+            <small>{assessment.eligibility.reasons.join(" · ") || "Identity, trade, and market checks passed."}</small>
+          </span>
+          <span>{assessment.eligibility.state === "target" ? "Target" : assessment.eligibility.state === "excluded" ? "Exclude" : "Review"}</span>
+        </div>
+        <div className="admin-candidate-component">
+          <span>
+            <strong>{opportunity?.label || "Verified opportunities"}</strong>
+            <small>{opportunity?.reason || verifiedGroups.map((group) => group.label).join(" · ") || "No verified opportunity yet."}</small>
+          </span>
+          <span>{opportunity?.state.replace(/_/g, " ") || assessment.verified_opportunity_count}</span>
+        </div>
+        <div className="admin-candidate-component">
+          <span>
+            <strong>Evidence coverage</strong>
+            <small>{assessment.evidence_coverage.evaluated} of {assessment.evidence_coverage.required} opportunity checks evaluated.</small>
+          </span>
+          <span>{assessment.evidence_coverage.state}</span>
+        </div>
+        {assessment.eligibility.checks.map((check) => (
+          <div className="admin-candidate-component" key={check.key}>
             <span>
-              <strong>{component.label}</strong>
-              <small>{component.reason}</small>
-              <small>{component.match_value == null ? "Match unknown" : `Match ${component.match_value}%`} · {component.confidence == null ? "confidence unknown" : `confidence ${component.confidence}%`} · freshness {component.freshness}%</small>
+              <strong>{check.label}</strong>
+              <small>{check.reason}</small>
             </span>
-            <span>{component.contribution ?? "—"} / {component.weight}</span>
+            <span>{check.state}</span>
           </div>
         ))}
       </div>
-      {score.disqualifiers.map((reason) => <p className="admin-candidate-warning" key={reason}>{reason}</p>)}
-      {score.pending_reasons.map((reason) => <p className="admin-candidate-warning" key={reason}>{reason}</p>)}
     </section>
   );
 }
@@ -592,15 +609,7 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
       first_seen_at: detail.first_seen_at,
       last_seen_at: detail.last_seen_at,
     },
-    record_quality: {
-      score: detail.data_quality_score,
-      label: detail.data_quality_label,
-      required_checks: detail.data_quality_breakdown.validation_scores,
-      informational_checks: detail.data_quality_breakdown.informational_checks || [],
-      reasons: detail.data_quality_breakdown.quality_reasons,
-      limitations: detail.data_quality_breakdown.limitations,
-    },
-    audience_candidate_score: detail.candidate_score_breakdown,
+    lead_assessment: detail.lead_assessment,
     attributes,
     contacts: detail.contacts,
     evidence: {
