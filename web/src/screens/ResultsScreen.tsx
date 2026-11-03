@@ -574,7 +574,7 @@ export function ResultsScreen({
       }
       await refreshAll({ showLoading: false });
       setScheduleDialogOpen(false);
-      showToast({ title: selectedTerritory ? "Audience updated" : "Audience schedule created", tone: "green" });
+      showToast({ title: selectedTerritory ? "Saved search updated" : "Saved search created", tone: "green" });
     } catch (err) {
       showToast({
         title: "Schedule update failed",
@@ -594,7 +594,7 @@ export function ResultsScreen({
       await territoryApi.updateTerritory(selectedTerritory.id, { status });
       await refreshAll({ showLoading: false });
       setRunMenuOpen(false);
-      showToast({ title: status === "active" ? "Audience resumed" : "Audience paused", tone: "green" });
+      showToast({ title: status === "active" ? "Saved search resumed" : "Saved search paused", tone: "green" });
     } catch (err) {
       showToast({ title: "Schedule update failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
     } finally {
@@ -686,13 +686,13 @@ export function ResultsScreen({
       await refillProfile(activeProfile.id);
       setRunMenuOpen(false);
       showToast({
-        title: "Audience queued",
+        title: "Saved search queued",
         message: "ScoutLead is checking the published business index for the next batch.",
         tone: "blue",
       });
     } catch (err) {
       showToast({
-        title: "Audience could not run",
+        title: "Saved search could not run",
         message: err instanceof Error ? err.message : String(err),
         tone: "red",
       });
@@ -740,8 +740,8 @@ export function ResultsScreen({
     <section className={detailContact ? "results-workspace has-detail" : "results-workspace"}>
       <div className="results-controlbar">
         {activeProfile ? (
-          <nav aria-label="Audience context" className="results-breadcrumb">
-            <span>Audiences</span>
+          <nav aria-label="Saved search context" className="results-breadcrumb">
+            <span>Saved searches</span>
             <span aria-hidden="true">/</span>
             <button type="button" onClick={() => setProfileDetailsOpen(true)}>
               {activeProfile.label}
@@ -749,20 +749,20 @@ export function ResultsScreen({
           </nav>
         ) : (
           <nav aria-label="Lead context" className="results-breadcrumb">
-            <strong>All audiences</strong>
+            <strong>All saved searches</strong>
           </nav>
         )}
         <div className="results-control-actions">
           {onCreateAudience ? (
             <button
-              aria-label="New audience"
+              aria-label="Find leads"
               className="secondary results-new-audience-button"
-              title="New audience"
+              title="Find leads"
               type="button"
               onClick={() => onCreateAudience()}
             >
               <Plus size={14} />
-              <span>New audience</span>
+              <span>Find leads</span>
             </button>
           ) : null}
           <div className="results-menu-control" ref={runMenuRef}>
@@ -812,7 +812,7 @@ export function ResultsScreen({
                       }}
                     >
                       <CalendarClock size={14} />
-                      Audience details
+                      Search details
                     </button>
                     <div className="action-menu-divider" />
                   </>
@@ -828,11 +828,11 @@ export function ResultsScreen({
                     </button>
                     <button type="button" disabled={scheduleBusy} onClick={() => void toggleSchedule()}>
                       {selectedTerritory.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-                      {selectedTerritory.status === "active" ? "Pause audience" : "Resume audience"}
+                      {selectedTerritory.status === "active" ? "Pause search" : "Resume search"}
                     </button>
                     <button type="button" disabled={scheduleBusy} onClick={() => void openScheduleDialog()}>
                       <CalendarClock size={14} />
-                      Audience settings
+                      Search settings
                     </button>
                     <div className="action-menu-divider" />
                   </>
@@ -840,7 +840,7 @@ export function ResultsScreen({
                   <>
                     <button type="button" disabled={scheduleBusy || !runPrompt.trim()} onClick={() => void openScheduleDialog()}>
                       <CalendarClock size={14} />
-                      {scheduleBusy ? "Checking search..." : "Create audience schedule"}
+                      {scheduleBusy ? "Checking search..." : "Save this search"}
                     </button>
                     <div className="action-menu-divider" />
                   </>
@@ -1036,7 +1036,7 @@ export function ResultsScreen({
           ) : (
             <section className="result-empty-card">
               <strong>{isGlobalView ? "No leads in this view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).title}</strong>
-              <p>{isGlobalView ? "Create an audience or choose another workflow view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
+              <p>{isGlobalView ? "Create a lead search or choose another workflow view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
               {!isGlobalView && visibleProfileBatch && ["scoring", "retrying"].includes(visibleProfileBatch.state) ? (
                 <button
                   className="result-refresh-button"
@@ -2082,10 +2082,12 @@ function audienceSignalStatement(
 }
 
 function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {
-  const signalLabels = profile.signal_keys.map((key) => profileSignalLabel(key));
+  const opportunityLabels = profile.service_keys.length
+    ? profile.service_keys.map((key) => profileServiceLabel(key))
+    : profile.signal_keys.map((key) => profileSignalLabel(key));
   const exclusionLabels = profile.exclusion_keys.map((key) => profileExclusionLabel(key));
   return (
-    <Modal title="Audience profile" onClose={onClose}>
+    <Modal title="Saved search details" onClose={onClose}>
       <div className="audience-profile-details">
         <header>
           <strong>{profile.label}</strong>
@@ -2098,8 +2100,8 @@ function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClo
           <div><dt>Refill</dt><dd>{refillPolicyLabel(profile.refill_policy)}</dd></div>
         </dl>
         <section>
-          <span>Opportunity signals</span>
-          <p>{signalLabels.join(", ") || "No opportunity signal required"}</p>
+          <span>Website opportunity</span>
+          <p>{opportunityLabels.join(", ") || "No website opportunity selected"}</p>
         </section>
         <section>
           <span>Excluded businesses</span>
@@ -2184,11 +2186,11 @@ function ScheduleSearchDialog({
   const [minFit, setMinFit] = useState<Territory["min_fit"]>(territory?.min_fit || "maybe");
   const [refillPolicy, setRefillPolicy] = useState<Territory["refill_policy"]>(territory?.refill_policy || "weekly");
   const label = territory?.label || (
-    resolution ? `${resolution.niche_label} · ${resolution.market_label}` : "Audience"
+    resolution ? `${resolution.niche_label} · ${resolution.market_label}` : "Saved search"
   );
 
   return (
-    <Modal title={territory ? "Audience settings" : "Schedule audience"} onClose={onClose}>
+    <Modal title={territory ? "Search settings" : "Save this search"} onClose={onClose}>
       <form
         className="schedule-search-form"
         onSubmit={(event) => {
@@ -2200,7 +2202,7 @@ function ScheduleSearchDialog({
           <CalendarClock size={17} />
           <span>
             <strong>{label}</strong>
-            <small>Each batch excludes businesses already delivered to this audience.</small>
+            <small>Each batch excludes businesses already delivered to this saved search.</small>
           </span>
         </div>
         <div className="schedule-search-fields">
@@ -2786,7 +2788,7 @@ function ContactCard({
               <strong>{contact.company_name}</strong>
             </span>
             {needsVerification ? (
-              <span className="contact-evidence-line is-unverified">Not yet verified against the audience criteria</span>
+              <span className="contact-evidence-line is-unverified">Not yet verified against the saved-search criteria</span>
             ) : opportunityReason ? (
               <span className="contact-evidence-line">{opportunityReason}</span>
             ) : null}
@@ -3264,20 +3266,20 @@ function ContactDrawer({
 
             {!contact.territory_id && !contact.id.startsWith("audience_result_") ? (
               <label className="drawer-audience-assignment">
-                <span>Audience</span>
+                <span>Saved search</span>
                 <select
-                  aria-label="Assign lead to an audience"
+                  aria-label="Assign lead to a saved search"
                   defaultValue=""
                   disabled={savingReview}
                   onChange={(event) => {
                     if (!event.target.value) return;
                     void saveLeadUpdate(
                       { territory_id: event.target.value },
-                      "Lead assigned to audience",
+                      "Lead assigned to saved search",
                     );
                   }}
                 >
-                  <option value="">Unassigned — choose an audience</option>
+                  <option value="">Unassigned — choose a saved search</option>
                   {audiences.map((audience) => <option key={audience.id} value={audience.id}>{audience.label}</option>)}
                 </select>
               </label>
@@ -4379,14 +4381,14 @@ function emptyBatchCopy(
   }
   if (state === "scoring") {
     return {
-      title: "Building this audience.",
+      title: "Building this saved search.",
       detail: "ScoutLead is collecting businesses and evaluating their signals. You can leave this page while it finishes.",
     };
   }
   if (state === "setup") {
     return {
       title: "No lead batch has been generated yet.",
-      detail: "Run this audience to evaluate indexed businesses against its current criteria.",
+      detail: "Run this saved search to evaluate indexed businesses against its current criteria.",
     };
   }
   if (state === "failed") {
@@ -4394,7 +4396,7 @@ function emptyBatchCopy(
       ? "The scoring worker hit a provider rate limit."
       : failureClass === "quota"
         ? "The scoring worker has no remaining provider quota."
-        : "Audience matching stopped before completion.";
+        : "Saved-search matching stopped before completion.";
     return {
       title: "This lead batch could not be completed.",
       detail: `${cause} Check the worker logs before trying again.`,
@@ -4402,7 +4404,7 @@ function emptyBatchCopy(
   }
   return {
     title: "No eligible leads in this batch.",
-    detail: "No indexed business passed the audience criteria for this delivery.",
+    detail: "No indexed business passed the saved-search criteria for this delivery.",
   };
 }
 
@@ -4430,6 +4432,12 @@ function refillPolicyLabel(value: Territory["refill_policy"]) {
   if (value === "when_depleted") return "Refill when depleted";
   if (value === "biweekly") return "Every two weeks";
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function profileServiceLabel(value: string) {
+  if (value === "website_availability") return "No website";
+  if (value === "website_upgrade") return "Website needs improvement";
+  return profileValueLabel(value);
 }
 
 function profileSignalLabel(value: string) {

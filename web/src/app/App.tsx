@@ -62,12 +62,6 @@ type AppViewMode = "auto" | Screen;
 const RAIL_WIDTH_DEFAULT = 244;
 const RAIL_WIDTH_MIN = 220;
 const RAIL_WIDTH_MAX = 420;
-const WORKFLOW_HEIGHT_DEFAULT = 230;
-const WORKFLOW_HEIGHT_MIN = 220;
-const WORKFLOW_HEIGHT_MAX = 260;
-const MANAGE_HEIGHT_DEFAULT = 151;
-const MANAGE_HEIGHT_MIN = 112;
-const RAIL_FIXED_HEIGHT_BUDGET = 330;
 
 export function App({ getAuthToken, accountSlot, accountId, approverLabel }: AppProps = {}) {
   return (
@@ -112,18 +106,6 @@ function AppShell({
   const [railWidth, setRailWidth] = useState(() =>
     readStoredDimension("scoutlead:rail-width", RAIL_WIDTH_DEFAULT, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX),
   );
-  const [workflowSectionHeight, setWorkflowSectionHeight] = useState(() =>
-    readStoredDimension(
-      "scoutlead:workflow-height",
-      WORKFLOW_HEIGHT_DEFAULT,
-      WORKFLOW_HEIGHT_MIN,
-      WORKFLOW_HEIGHT_MAX,
-    ),
-  );
-  const [manageSectionHeight, setManageSectionHeight] = useState(() =>
-    readStoredDimension("scoutlead:manage-height", MANAGE_HEIGHT_DEFAULT, MANAGE_HEIGHT_MIN, 280),
-  );
-  const railRef = useRef<HTMLElement | null>(null);
   const { showToast } = useToast();
   const onboardingStorageKey = `scoutlead:product-onboarding:${accountId || "local"}`;
   const {
@@ -211,12 +193,6 @@ function AppShell({
     if (!selected || recent.some((profile) => profile.id === selected.id)) return recent;
     return [...recent.slice(0, 4), selected];
   }, [productProfiles, selectedProfileId]);
-  const availableResizableHeight = () =>
-    Math.max(
-      WORKFLOW_HEIGHT_MIN + MANAGE_HEIGHT_MIN,
-      (railRef.current?.getBoundingClientRect().height || window.innerHeight) - RAIL_FIXED_HEIGHT_BUDGET,
-    );
-
   const openWorkflowView = (nextView: LeadWorkflowView) => {
     setLeadWorkflowView(nextView);
     setLeadListRequestId((requestId) => requestId + 1);
@@ -241,7 +217,7 @@ function AppShell({
     void selectProfile(profile.id)
       .then(() => setViewMode("auto"))
       .catch((cause) => showToast({
-        title: "Audience could not be opened",
+        title: "Saved search could not be opened",
         message: cause instanceof Error ? cause.message : String(cause),
         tone: "red",
       }));
@@ -273,7 +249,7 @@ function AppShell({
   const handleRenameAudience = async (profile: Territory, label: string) => {
     await renameProfile(profile.id, label);
     setRenameAudience(null);
-    showToast({ title: "Audience renamed", tone: "green" });
+    showToast({ title: "Search renamed", tone: "green" });
   };
 
   const handleDeleteAudience = async (profile: Territory) => {
@@ -285,7 +261,7 @@ function AppShell({
       setViewMode("audiences");
     }
     showToast({
-      title: "Audience deleted",
+      title: "Search deleted",
       message: `${profile.label} was removed.`,
       tone: "green",
     });
@@ -366,24 +342,8 @@ function AppShell({
     writeStoredDimension("scoutlead:rail-width", railWidth);
   }, [railWidth]);
 
-  useEffect(() => {
-    setWorkflowSectionHeight((current) =>
-      Math.min(WORKFLOW_HEIGHT_MAX, Math.max(WORKFLOW_HEIGHT_MIN, current)),
-    );
-  }, []);
-
-  useEffect(() => {
-    writeStoredDimension("scoutlead:workflow-height", workflowSectionHeight);
-  }, [workflowSectionHeight]);
-
-  useEffect(() => {
-    writeStoredDimension("scoutlead:manage-height", manageSectionHeight);
-  }, [manageSectionHeight]);
-
   const railStyle = {
     "--rail-width": `${railWidth}px`,
-    "--workflow-section-height": `${workflowSectionHeight}px`,
-    "--manage-section-height": `${manageSectionHeight}px`,
   } as CSSProperties;
 
   return (
@@ -422,7 +382,7 @@ function AppShell({
         <Menu size={18} />
       </button>
 
-      <aside className="rail" ref={railRef} style={railStyle}>
+      <aside className="rail" style={railStyle}>
         <div className="brand">
           <span className="brand-mark">S</span>
           <div className="brand-copy">
@@ -433,15 +393,15 @@ function AppShell({
 
         <button className="rail-new-audience" type="button" onClick={() => startNewAudience()}>
           <Plus size={16} />
-          <span>New audience</span>
+          <span>Find leads</span>
         </button>
 
         <nav className="lead-workflow-nav" aria-label="Lead workflow">
           <div className="lead-workflow-links">
             <button
               className={activeScreen === "audiences" ? "active" : ""}
-              aria-label={`Overview, ${productProfiles.length} audiences`}
-              title={`Overview (${productProfiles.length} audiences)`}
+              aria-label={`Overview, ${productProfiles.length} saved searches`}
+              title={`Overview (${productProfiles.length} saved searches)`}
               type="button"
               onClick={openAudienceOverview}
             >
@@ -464,22 +424,8 @@ function AppShell({
               </button>
             ))}
           </div>
-          <ResizeHandle
-            ariaLabel="Resize lead workflow section"
-            axis="y"
-            defaultValue={WORKFLOW_HEIGHT_DEFAULT}
-            max={() =>
-              Math.min(
-                WORKFLOW_HEIGHT_MAX,
-                Math.max(WORKFLOW_HEIGHT_MIN, availableResizableHeight() - manageSectionHeight),
-              )
-            }
-            min={WORKFLOW_HEIGHT_MIN}
-            onChange={setWorkflowSectionHeight}
-            value={workflowSectionHeight}
-          />
           <div className="lead-workspace-heading">
-            <span>Audiences</span>
+            <span>Saved searches</span>
             <button className="audience-new-folder" aria-label="New folder" title="New folder" type="button" onClick={() => setEditFolder("new")}><Plus size={15} /></button>
           </div>
           <div className="lead-workspace-list">
@@ -495,9 +441,9 @@ function AppShell({
                         <ChevronDown className="audience-folder-chevron" size={13} />
                         {open ? <FolderOpen size={15} /> : <Folder size={15} />}<span>{folder.name}</span><em>{profiles.length}</em>
                       </button>
-                      <div className="audience-folder-actions"><button aria-expanded={folderMenuId === folder.id} aria-label={`Actions for ${folder.name}`} type="button" onClick={() => { setAudienceMenuId(""); setFolderMenuId((current) => current === folder.id ? "" : folder.id); }}><MoreVertical size={15} /></button>{folderMenuId === folder.id ? <div className="audience-sidebar-menu"><button type="button" onClick={() => { setFolderMenuId(""); startNewAudience(folder.id); }}><Plus size={13} />New</button><button type="button" onClick={() => { setFolderMenuId(""); setEditFolder(folder); }}><Pencil size={13} />Rename</button><button className="is-danger" type="button" onClick={() => { setFolderMenuId(""); setDeleteFolder(folder); }}><Trash2 size={13} />Delete</button></div> : null}</div>
+                      <div className="audience-folder-actions"><button aria-expanded={folderMenuId === folder.id} aria-label={`Actions for ${folder.name}`} type="button" onClick={() => { setAudienceMenuId(""); setFolderMenuId((current) => current === folder.id ? "" : folder.id); }}><MoreVertical size={15} /></button>{folderMenuId === folder.id ? <div className="audience-sidebar-menu"><button type="button" onClick={() => { setFolderMenuId(""); startNewAudience(folder.id); }}><Plus size={13} />New search</button><button type="button" onClick={() => { setFolderMenuId(""); setEditFolder(folder); }}><Pencil size={13} />Rename</button><button className="is-danger" type="button" onClick={() => { setFolderMenuId(""); setDeleteFolder(folder); }}><Trash2 size={13} />Delete</button></div> : null}</div>
                     </div>
-                    {open ? <div className="audience-folder-children">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />) : <small className="audience-folder-empty">No audiences</small>}</div> : null}
+                    <div className={open ? "audience-folder-children is-open" : "audience-folder-children"}><div className="audience-folder-children-inner">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />) : <small className="audience-folder-empty">No saved searches</small>}</div></div>
                   </section>;
                 })}
                 {productProfiles.some((profile) => !profile.folder_id) ? <div className="audience-recents-heading"><span>Recents</span><em>{productProfiles.filter((profile) => !profile.folder_id).length}</em></div> : null}
@@ -513,22 +459,11 @@ function AppShell({
               </button>
             ) : null}
             {!productProfiles.length ? (
-              <p className="lead-workspace-empty">Create an audience to start receiving leads.</p>
+              <p className="lead-workspace-empty">Create a lead search to start receiving leads.</p>
             ) : null}
           </div>
         </nav>
 
-        <ResizeHandle
-          ariaLabel="Resize Manage section"
-          axis="y"
-          className="manage-section-resizer"
-          defaultValue={MANAGE_HEIGHT_DEFAULT}
-          direction={-1}
-          max={() => Math.max(MANAGE_HEIGHT_MIN, availableResizableHeight() - workflowSectionHeight)}
-          min={MANAGE_HEIGHT_MIN}
-          onChange={setManageSectionHeight}
-          value={manageSectionHeight}
-        />
         <ProductManagementSection
           activeScreen={activeScreen}
           integrationCount={getEnabledIntegrationCount(selectedProduct, Boolean(gmailConnectionStatus?.connected))}
@@ -562,10 +497,10 @@ function AppShell({
                   <strong>Overview</strong>
                 </div>
               ) : (
-                <nav aria-label="Audience context" className="results-breadcrumb desktop-audience-context">
-                  <span>Audiences</span>
+                <nav aria-label="Saved search context" className="results-breadcrumb desktop-audience-context">
+                  <span>Saved searches</span>
                   <span aria-hidden="true">/</span>
-                  <strong>New audience</strong>
+                  <strong>New search</strong>
                 </nav>
               )
             ) : null}
@@ -627,7 +562,7 @@ function AppShell({
                   void selectProfile(audienceId)
                     .then(() => setViewMode("auto"))
                     .catch((cause) => showToast({
-                      title: "Audience could not be opened",
+                      title: "Saved search could not be opened",
                       message: cause instanceof Error ? cause.message : String(cause),
                       tone: "red",
                     }));
@@ -708,7 +643,7 @@ function AppShell({
           onDelete={async () => {
             await deleteAudienceFolder(deleteFolder.id);
             setDeleteFolder(null);
-            showToast({ title: "Folder deleted", message: "Its audiences are now unfiled.", tone: "green" });
+            showToast({ title: "Folder deleted", message: "Its saved searches are now unfiled.", tone: "green" });
           }}
         />
       ) : null}
@@ -720,7 +655,7 @@ function AppShell({
           onMove={async (folderId) => {
             await updateProfile(moveAudience.id, { folder_id: folderId || null });
             setMoveAudience(null);
-            showToast({ title: folderId ? "Audience moved" : "Audience removed from folder", tone: "green" });
+            showToast({ title: folderId ? "Search moved" : "Search removed from folder", tone: "green" });
           }}
         />
       ) : null}
@@ -995,14 +930,14 @@ function FolderEditorDialog({
 function DeleteFolderDialog({ folder, onClose, onDelete }: { folder: AudienceFolder; onClose: () => void; onDelete: () => Promise<void> }) {
   const [deleting, setDeleting] = useState(false);
   return <Modal title="Delete folder" onClose={onClose}>
-    <div className="audience-delete-dialog"><p>Delete <strong>{folder.name}</strong>? Its audiences will remain available outside folders.</p><div className="dialog-actions audience-dialog-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="danger" disabled={deleting} type="button" onClick={async () => { setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}>{deleting ? "Deleting…" : "Delete folder"}</button></div></div>
+    <div className="audience-delete-dialog"><p>Delete <strong>{folder.name}</strong>? Its saved searches will remain available outside folders.</p><div className="dialog-actions audience-dialog-actions"><button className="secondary" type="button" onClick={onClose}>Cancel</button><button className="danger" disabled={deleting} type="button" onClick={async () => { setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}>{deleting ? "Deleting…" : "Delete folder"}</button></div></div>
   </Modal>;
 }
 
 function MoveAudienceDialog({ audience, folders, onClose, onMove }: { audience: Territory; folders: AudienceFolder[]; onClose: () => void; onMove: (folderId: string) => Promise<void> }) {
   const [folderId, setFolderId] = useState(audience.folder_id || "");
   const [saving, setSaving] = useState(false);
-  return <Modal title="Move audience" onClose={onClose}>
+  return <Modal title="Move search" onClose={onClose}>
     <form className="audience-dialog-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { await onMove(folderId); } finally { setSaving(false); } }}>
       <p>Choose where <strong>{audience.label}</strong> appears in the sidebar.</p>
       <label><span>Folder</span><select value={folderId} onChange={(event) => setFolderId(event.target.value)}><option value="">No folder</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
@@ -1025,7 +960,7 @@ function RenameAudienceDialog({
   const cleanedLabel = label.trim();
 
   return (
-    <Modal title="Rename audience" onClose={onClose}>
+    <Modal title="Rename search" onClose={onClose}>
       <form
         className="audience-dialog-form"
         onSubmit={async (event) => {
@@ -1040,7 +975,7 @@ function RenameAudienceDialog({
         }}
       >
         <label className="field">
-          <span>Audience name</span>
+          <span>Search name</span>
           <input
             autoFocus
             maxLength={255}
@@ -1074,7 +1009,7 @@ function DeleteAudienceDialog({
 }) {
   const [deleting, setDeleting] = useState(false);
   return (
-    <Modal title="Delete audience" onClose={onClose}>
+    <Modal title="Delete search" onClose={onClose}>
       <div className="audience-delete-dialog">
         <p>
           Remove <strong>{audience.label}</strong>? Existing lead history will be retained.
@@ -1096,7 +1031,7 @@ function DeleteAudienceDialog({
             }}
           >
             <Trash2 size={14} />
-            {deleting ? "Deleting..." : "Delete audience"}
+            {deleting ? "Deleting..." : "Delete search"}
           </button>
         </div>
       </div>
@@ -1157,7 +1092,7 @@ function AddProductDialog({
       }
       showToast({
         title: "Setup complete",
-        message: "ScoutLead is ready for its first audience.",
+        message: "ScoutLead is ready for its first saved search.",
         tone: "green",
       });
       onClose();

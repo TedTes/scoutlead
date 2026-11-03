@@ -617,16 +617,16 @@ function AnimatedPreview() {
 
   return (
     <>
-      <div className="landing-hero-chips" aria-label="Audience creation steps">
-        <HeroStepChip active={heroStep === 0} number="01" label="New audience" />
+      <div className="landing-hero-chips" aria-label="Lead search creation steps">
+        <HeroStepChip active={heroStep === 0} number="01" label="Find leads" />
         <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
-        <HeroStepChip active={heroStep === 1} number="02" label="Set profile" />
+        <HeroStepChip active={heroStep === 1} number="02" label="Set criteria" />
         <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
-        <HeroStepChip active={heroStep === 2} number="03" label="Create" />
+        <HeroStepChip active={heroStep === 2} number="03" label="Start search" />
         <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
         <HeroStepChip active={heroStep === 3} number="04" label="Leads" />
       </div>
-      <div className={`landing-preview preview-app landing-workspace-preview is-${screen}`} aria-label="ScoutLead audience workspace preview">
+      <div className={`landing-preview preview-app landing-workspace-preview is-${screen}`} aria-label="ScoutLead saved-search workspace preview">
       <PreviewRail activeManage="" activeRun="Toronto HVAC Low Reviews" shortlistedCount={shortlisted ? 1 : 0} />
       <div className="preview-main-panel">
         <div className="preview-audience-bar">
@@ -634,12 +634,12 @@ function AnimatedPreview() {
             <Menu size={14} />
           </button>
           <div>
-            <span>Audiences</span>
+            <span>Saved searches</span>
             <em>/</em>
-            <strong>{screen === "builder" ? "New audience" : "Toronto HVAC Low Reviews"}</strong>
+            <strong>{screen === "builder" ? "New search" : "Toronto HVAC Low Reviews"}</strong>
           </div>
           <button className={newAudiencePressed ? "is-preview-pressed" : ""} type="button" tabIndex={-1}>
-            <Plus size={13} /> New audience
+            <Plus size={13} /> Find leads
             <PreviewCursor
               className="preview-cursor-actor--new-audience"
               pressed={newAudiencePressed}
@@ -714,12 +714,12 @@ function AudienceBuilderPreview({
   criterionPressed?: boolean;
 }) {
   return (
-    <div className={`audience-builder-preview${compact ? " is-compact" : ""}`} aria-label="Audience profile example">
+    <div className={`audience-builder-preview${compact ? " is-compact" : ""}`} aria-label="Lead search example">
       <div className="audience-builder-head">
         <div>
           <span>Local Service Conversion Growth</span>
-          <strong>New audience</strong>
-          <p>Create a separate lead stream under this product.</p>
+          <strong>Create a lead search</strong>
+          <p>Choose who to find, where to search, and the website opportunity.</p>
         </div>
         <span className={`audience-builder-status${criteriaStep >= 3 ? "" : " is-incomplete"}`}>
           <i /> {criteriaStep >= 3 ? "Ready to create" : "Select required criteria"}
@@ -778,15 +778,13 @@ function AudienceBuilderPreview({
 
       <div className="audience-builder-row audience-builder-row-signals">
         <div className="audience-builder-label">
-          <strong>Opportunity signals</strong>
-          <span>Stored facts that qualify a lead.</span>
+          <strong>Website opportunity</strong>
+          <span>Choose one or both.</span>
         </div>
         <div className="audience-builder-checks">
-          <span><i /> Missing or unavailable website</span>
-          <span><i /> No quote or booking flow</span>
-          <span><i /> No contact form</span>
+          <span><i /> No website</span>
           <span className={criteriaStep >= 3 ? "is-selected" : ""}>
-            <i>{criteriaStep >= 3 ? <CheckCircle2 size={12} /> : null}</i> Reviews under 15
+            <i>{criteriaStep >= 3 ? <CheckCircle2 size={12} /> : null}</i> Website needs improvement
             <PreviewCursor
               className="preview-cursor-actor--criterion"
               pressed={criterionCursor === "signal" && criterionPressed}
@@ -797,9 +795,9 @@ function AudienceBuilderPreview({
       </div>
 
       <div className="audience-builder-footer">
-        <span>Only businesses with a confirmed selected signal are delivered.</span>
+        <span>Only businesses that match a selected website outcome are delivered.</span>
         <button className={createPressed ? "is-preview-pressed" : ""} disabled={criteriaStep < 3} type="button" tabIndex={-1}>
-          Create audience <ArrowRight size={13} />
+          Find leads <ArrowRight size={13} />
           <PreviewCursor
             className="preview-cursor-actor--create-audience"
             pressed={createPressed}
@@ -1155,8 +1153,8 @@ function PreviewRail({
         <PreviewWorkflowRow icon={<CircleX size={14} />} label="Dismissed" count="0" />
       </div>
       <div className="preview-rail-heading">
-        <span>Audiences</span>
-        <button type="button" tabIndex={-1} aria-label="Add preview audience">
+        <span>Saved searches</span>
+        <button type="button" tabIndex={-1} aria-label="Add preview saved search">
           <Plus size={13} />
         </button>
       </div>

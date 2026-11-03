@@ -11,20 +11,20 @@ export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (i
 
   return (
     <section className="audiences-overview">
-      {!workspaceOverview ? <div className="audiences-overview-empty">Loading audiences</div> : null}
-      {workspaceOverview && !rows.length ? <div className="audiences-overview-empty">No audiences yet.</div> : null}
+      {!workspaceOverview ? <div className="audiences-overview-empty">Loading saved searches</div> : null}
+      {workspaceOverview && !rows.length ? <div className="audiences-overview-empty">No saved searches yet.</div> : null}
       {workspaceOverview && rows.length ? (
         <>
           <section className="audiences-overview-metrics" aria-label="Lead funnel">
-            <OverviewMetric label="Leads" value={summary.leads} detail="Unique across all audiences" />
+            <OverviewMetric label="Leads" value={summary.leads} detail="Unique across all saved searches" />
             <OverviewMetric label="Shortlisted" value={summary.shortlisted} detail={formatRate(summary.shortlistRate)} />
             <OverviewMetric label="Contacted" value={summary.contacted} detail={formatRate(summary.contactRate)} />
-            <OverviewMetric label="Ready audiences" value={`${summary.ready} / ${rows.length}`} detail={summary.latestRun ? `Latest collection ${formatRecency(summary.latestRun)}` : "No collection yet"} />
+            <OverviewMetric label="Ready searches" value={`${summary.ready} / ${rows.length}`} detail={summary.latestRun ? `Latest collection ${formatRecency(summary.latestRun)}` : "No collection yet"} />
           </section>
 
-          <section className="audiences-overview-breakdown" aria-label="Audience readiness and coverage">
+          <section className="audiences-overview-breakdown" aria-label="Saved search readiness and coverage">
             <div className="audiences-overview-panel">
-              <header><strong>Audience readiness</strong><span>Where collection stands</span></header>
+              <header><strong>Search readiness</strong><span>Where collection stands</span></header>
               <div className="overview-status-list">
                 <OverviewStatus label="Ready" value={summary.ready} tone="green" />
                 <OverviewStatus label="Building or validating" value={summary.building} tone="amber" />
@@ -32,11 +32,11 @@ export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (i
               </div>
             </div>
             <div className="audiences-overview-panel">
-              <header><strong>Coverage by business type</strong><span>Current audience batches</span></header>
+              <header><strong>Coverage by business type</strong><span>Current saved searches</span></header>
               <div className="overview-coverage-list">
                 {summary.byNiche.slice(0, 5).map((item) => (
                   <div key={item.label}>
-                    <span><strong>{item.label}</strong><small>{item.audiences} {item.audiences === 1 ? "audience" : "audiences"}</small></span>
+                    <span><strong>{item.label}</strong><small>{item.audiences} {item.audiences === 1 ? "search" : "searches"}</small></span>
                     <em>{item.leads} leads</em>
                   </div>
                 ))}
@@ -45,10 +45,10 @@ export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (i
           </section>
 
           <section className="audiences-overview-table-section">
-            <header><strong>Audience performance</strong><span>Select an audience to inspect its leads.</span></header>
+            <header><strong>Saved-search performance</strong><span>Select a search to inspect its leads.</span></header>
             <div className="audiences-overview-list">
               <div className="audiences-overview-columns" aria-hidden="true">
-                <span>Audience</span><span>Leads</span><span>Shortlisted</span><span>Contacted</span><span>Status</span><span />
+                <span>Saved search</span><span>Leads</span><span>Shortlisted</span><span>Contacted</span><span>Status</span><span />
               </div>
               {rows.map((row) => (
                 <button className="audiences-overview-row" key={row.audience_id} type="button" onClick={() => onOpenAudience(row.audience_id)}>

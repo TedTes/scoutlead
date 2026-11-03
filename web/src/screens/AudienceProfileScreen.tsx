@@ -6,6 +6,7 @@ import { useAppData } from "../state/app-data";
 import type { PlaceOption, ProfileCreateInput, ProfileExclusion, ProfileOptions, Territory } from "../types/domain";
 
 const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
+const VISIBLE_OPPORTUNITY_KEYS = new Set(["website_availability", "website_upgrade"]);
 type FormMode = "create" | "edit" | "clone";
 
 export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderId?: string }) {
@@ -29,7 +30,6 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const [folderId, setFolderId] = useState(defaultFolderId);
   const [services, setServices] = useState<string[]>([]);
   const [hoveredService, setHoveredService] = useState<string | null>(null);
-  const [upcomingOpen, setUpcomingOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const submittingRef = useRef(false);
@@ -74,8 +74,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
       : businessTypes;
   }, [businessTypes, showTradeSearch, tradeQuery]);
   const serviceOptions = profileOptions?.services || [];
-  const enabledServices = serviceOptions.filter((service) => service.enabled);
-  const upcomingServices = serviceOptions.filter((service) => !service.enabled);
+  const enabledServices = serviceOptions.filter((service) => service.enabled && VISIBLE_OPPORTUNITY_KEYS.has(service.key));
   const enabledServiceKeys = new Set(enabledServices.map((service) => service.key));
   const activeService = serviceOptions.find((service) => service.key === hoveredService);
   const valid = Boolean(selectedProductId && nicheId && selectedPlace && services.length && services.every((service) => enabledServiceKeys.has(service)));
@@ -100,7 +99,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   if (selectedProfile && !editing) {
     const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
     return <section className="audience-status-screen">
-      <header className="audience-page-heading audience-status-heading"><div><span>Audience</span><h1>{selectedProfile.label}</h1><p>{selectedProfile.niche_label || "Local businesses"} · {selectedProfile.place_label || selectedProfile.city} · {selectedProfile.radius_km} km</p></div><div className="audience-status-actions"><button className="secondary" type="button" onClick={() => beginEdit("clone")}><Copy size={14} /> Clone</button><button className="secondary" type="button" onClick={() => beginEdit("edit")}><Pencil size={14} /> Edit</button></div></header>
+      <header className="audience-page-heading audience-status-heading"><div><span>Saved search</span><h1>{selectedProfile.label}</h1><p>{selectedProfile.niche_label || "Local businesses"} · {selectedProfile.place_label || selectedProfile.city} · {selectedProfile.radius_km} km</p></div><div className="audience-status-actions"><button className="secondary" type="button" onClick={() => beginEdit("clone")}><Copy size={14} /> Copy</button><button className="secondary" type="button" onClick={() => beginEdit("edit")}><Pencil size={14} /> Edit</button></div></header>
       <div className="audience-status-panel"><span className={`audience-state is-${activeBatch?.state || "setup"}`}>{scoring ? <LoaderCircle className="sl-spin" size={15} /> : <Check size={15} />}{batchStateLabel(activeBatch?.state)}</span><strong>{activeBatch?.result_count || 0} leads in the current batch</strong><p>{batchStateCopy(activeBatch)}</p></div>
     </section>;
   }
@@ -115,16 +114,16 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
       if (mode === "edit" && selectedProfile) {
         await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), folder_id: folderId || null, niche_id: nicheId, customer_kind: customerKind, ...market, service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
         setEditing(false);
-        showToast({ title: "Audience updated", message: "New criteria will apply to the next batch.", tone: "green" });
+        showToast({ title: "Search updated", message: "New criteria will apply to the next batch.", tone: "green" });
       } else {
         const input: ProfileCreateInput = { product_id: selectedProductId, folder_id: folderId || null, name: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, customer_kind: customerKind, market, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
         await createProfile(input);
         setEditing(false);
         setMode("create");
-        showToast({ title: mode === "clone" ? "Audience cloned" : "Audience ready", message: "The initial batch is queued.", tone: "green" });
+        showToast({ title: mode === "clone" ? "Search copied" : "Search ready", message: "The initial lead batch is queued.", tone: "green" });
       }
     } catch (error) {
-      showToast({ title: "Audience could not be saved", message: error instanceof Error ? error.message : String(error), tone: "red" });
+      showToast({ title: "Search could not be saved", message: error instanceof Error ? error.message : String(error), tone: "red" });
     } finally {
       submittingRef.current = false;
       setSaving(false);
@@ -133,11 +132,11 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
 
   const formHint = getFormHint(nicheId, selectedPlace, services);
   const generatedName = autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions);
-  const opportunityHelp = activeService?.description
-    || (services.length ? `${services.length} selected — leads must show evidence of at least one.` : "Choose the business gap ScoutLead should verify with evidence.");
+  const opportunityHelp = activeService ? opportunityDescription(activeService.key, activeService.description)
+    : services.length ? `${services.length} selected — leads must match at least one website outcome.` : "Choose whether to find businesses with no website, a website that needs improvement, or both.";
 
   return <section className="audience-setup-screen audience-compact-screen">
-    <header className="audience-page-heading audience-compact-heading"><div><span>{selectedProduct?.product_name || "Product"}</span><h1>{mode === "edit" ? "Edit audience" : mode === "clone" ? "Clone audience" : <>Define your <em>next</em> audience</>}</h1><p>Who to find, where, and the opportunity to verify.</p></div></header>
+    <header className="audience-page-heading audience-compact-heading"><div><span>{selectedProduct?.product_name || "Lead discovery"}</span><h1>{mode === "edit" ? "Edit lead search" : mode === "clone" ? "Copy lead search" : "Create a lead search"}</h1><p>Choose a trade, location, and website opportunity.</p></div></header>
     <form className="audience-compact-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <div className="audience-compact-card">
         <section className="audience-compact-section" aria-labelledby="audience-trade-title">
@@ -173,11 +172,9 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
         </section>
 
         <section className="audience-compact-section" aria-labelledby="audience-signals-title">
-          <header className="audience-section-heading"><span>03</span><h2 id="audience-signals-title">Opportunity to verify</h2><small>Choose one or more</small></header>
-          <div className="audience-opportunity-chips" role="listbox" aria-describedby="audience-opportunity-help" aria-label="Opportunities">
-            {enabledServices.map((service) => { const selected = services.includes(service.key); return <button aria-selected={selected} className={selected ? "is-selected" : ""} key={service.key} role="option" type="button" onBlur={() => setHoveredService(null)} onClick={() => setServices(toggleValue(services, service.key))} onFocus={() => setHoveredService(service.key)} onMouseEnter={() => setHoveredService(service.key)} onMouseLeave={() => setHoveredService(null)}><span className="audience-opportunity-check">{selected ? <Check size={11} /> : null}</span>{service.label}</button>; })}
-            {upcomingServices.length ? <button aria-expanded={upcomingOpen} className="audience-upcoming-toggle" type="button" onClick={() => setUpcomingOpen((open) => !open)}>+{upcomingServices.length} upcoming</button> : null}
-            {upcomingOpen ? upcomingServices.map((service) => <button aria-disabled="true" className="is-upcoming" disabled key={service.key} type="button"><span className="audience-opportunity-check" />{service.label}<em>{service.signals.length ? "Preparing data" : "Coming soon"}</em></button>) : null}
+          <header className="audience-section-heading"><span>03</span><h2 id="audience-signals-title">Website opportunity</h2><small>Choose one or both</small></header>
+          <div className="audience-opportunity-chips" role="listbox" aria-describedby="audience-opportunity-help" aria-label="Website opportunities">
+            {enabledServices.map((service) => { const selected = services.includes(service.key); return <button aria-selected={selected} className={selected ? "is-selected" : ""} key={service.key} role="option" type="button" onBlur={() => setHoveredService(null)} onClick={() => setServices(toggleValue(services, service.key))} onFocus={() => setHoveredService(service.key)} onMouseEnter={() => setHoveredService(service.key)} onMouseLeave={() => setHoveredService(null)}><span className="audience-opportunity-check">{selected ? <Check size={11} /> : null}</span>{opportunityLabel(service.key, service.label)}</button>; })}
           </div>
           <p className="audience-opportunity-help" id="audience-opportunity-help" aria-live="polite">{opportunityHelp}</p>
         </section>
@@ -189,15 +186,17 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
       </div>
 
       <footer className="audience-compact-footer">
-        <label className="audience-footer-name"><span>Audience name</span><input aria-label="Audience name" placeholder={generatedName || "Generated after you choose who, where, and why"} type="text" value={name} onChange={(event) => setName(event.target.value)} /><small>{name.trim() ? "Custom name" : "Auto-generated · editable"}</small></label>
-        <div className="audience-footer-submit"><p aria-live="polite">{formHint}</p><div>{editing ? <button className="secondary" type="button" onClick={() => setEditing(false)}>Cancel</button> : null}<button className="runbtn audience-create-button" disabled={!valid || saving} type="submit">{saving ? <LoaderCircle className="sl-spin" size={15} /> : null}<span>{mode === "edit" ? "Save audience" : mode === "clone" ? "Create copy" : "Create audience"}</span>{!saving ? <ArrowRight size={15} /> : null}</button></div></div>
+        <label className="audience-footer-name"><span>Search name</span><input aria-label="Search name" placeholder={generatedName || "Generated after you choose who, where, and why"} type="text" value={name} onChange={(event) => setName(event.target.value)} /><small>{name.trim() ? "Custom name" : "Auto-generated · editable"}</small></label>
+        <div className="audience-footer-submit"><p aria-live="polite">{formHint}</p><div>{editing ? <button className="secondary" type="button" onClick={() => setEditing(false)}>Cancel</button> : null}<button className="runbtn audience-create-button" disabled={!valid || saving} type="submit">{saving ? <LoaderCircle className="sl-spin" size={15} /> : null}<span>{mode === "edit" ? "Save search" : mode === "clone" ? "Create copy" : "Find leads"}</span>{!saving ? <ArrowRight size={15} /> : null}</button></div></div>
       </footer>
     </form>
   </section>;
 }
 
 function profilePlace(profile: Territory): PlaceOption | null { if (profile.latitude == null || profile.longitude == null) return null; return { label: profile.place_label || profile.city, provider: profile.place_provider || "stored", external_id: profile.place_external_id, country_code: profile.country_code, latitude: profile.latitude, longitude: profile.longitude }; }
-function autoName(nicheLabel: string | undefined, place: PlaceOption | null, radiusKm: number, services: string[], serviceOptions: ProfileOptions["services"]) { const opportunity = serviceOptions.find((service) => service.key === services[0])?.label; return [nicheLabel && place ? `${shortTradeLabel(nicheLabel)} near ${place.label.split(",")[0]}` : nicheLabel ? shortTradeLabel(nicheLabel) : null, place ? `${radiusKm} km` : null, opportunity].filter(Boolean).join(" · "); }
+function autoName(nicheLabel: string | undefined, place: PlaceOption | null, radiusKm: number, services: string[], serviceOptions: ProfileOptions["services"]) { const selected = serviceOptions.filter((service) => services.includes(service.key)); const opportunity = selected.length > 1 ? "Website opportunities" : selected[0] ? opportunityLabel(selected[0].key, selected[0].label) : null; return [nicheLabel && place ? `${shortTradeLabel(nicheLabel)} near ${place.label.split(",")[0]}` : nicheLabel ? shortTradeLabel(nicheLabel) : null, place ? `${radiusKm} km` : null, opportunity].filter(Boolean).join(" · "); }
+function opportunityLabel(key: string, fallback: string) { if (key === "website_availability") return "No website"; if (key === "website_upgrade") return "Website needs improvement"; return fallback; }
+function opportunityDescription(key: string, fallback?: string | null) { if (key === "website_availability") return "Find active businesses without a verified owned website."; if (key === "website_upgrade") return "Find businesses whose measured website quality indicates room for improvement."; return fallback || "Find businesses that match this website opportunity."; }
 function shortTradeLabel(label: string) {
   const shortened = label
     .replace(/^home[ -]services?\s+/i, "")
@@ -206,7 +205,7 @@ function shortTradeLabel(label: string) {
   return shortened.replace(/\bhvac\b/gi, "HVAC");
 }
 function toggleValue<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
-function getFormHint(nicheId: string, place: PlaceOption | null, services: string[]) { if (!nicheId) return "Choose a trade to continue."; if (!place) return "Select and confirm a city to continue."; if (!services.length) return "Choose at least one opportunity to continue."; return "Ready to create."; }
+function getFormHint(nicheId: string, place: PlaceOption | null, services: string[]) { if (!nicheId) return "Choose a trade to continue."; if (!place) return "Select and confirm a city to continue."; if (!services.length) return "Choose a website opportunity to continue."; return "Ready to find leads."; }
 function placeProviderLabel(value: string) { if (value === "google_places") return "Google Places"; if (value === "openstreetmap_nominatim") return "OpenStreetMap"; return "ScoutLead"; }
 function batchStateLabel(state?: string) { if (state === "scoring") return "Building"; if (state === "retrying") return "Retrying"; if (state === "ready") return "Ready"; if (state === "partial") return "Partial"; if (state === "empty") return "No matches"; if (state === "failed") return "Needs attention"; return "Set up"; }
-function batchStateCopy(batch: ReturnType<typeof useAppData>["profileBatch"]) { if (!batch) return "No lead batch has been generated for this audience yet."; if (["scoring", "retrying"].includes(batch.state)) return "ScoutLead is collecting and evaluating businesses. You can leave this page."; if (["ready", "partial"].includes(batch.state)) return `${batch.remaining_count} leads remain for review.`; if (batch.state === "failed") return "The latest batch could not be completed."; return "No indexed businesses matched this audience."; }
+function batchStateCopy(batch: ReturnType<typeof useAppData>["profileBatch"]) { if (!batch) return "No lead batch has been generated for this saved search yet."; if (["scoring", "retrying"].includes(batch.state)) return "ScoutLead is collecting and evaluating businesses. You can leave this page."; if (["ready", "partial"].includes(batch.state)) return `${batch.remaining_count} leads remain for review.`; if (batch.state === "failed") return "The latest batch could not be completed."; return "No indexed businesses matched this search."; }

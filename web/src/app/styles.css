@@ -6046,14 +6046,9 @@ a {
 .lead-workflow-links {
   align-content: start;
   display: grid;
-  flex: 0 0 var(--workflow-section-height, 190px);
+  flex: 0 0 auto;
   gap: 3px;
   grid-auto-rows: 38px;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 20px;
-  scrollbar-color: var(--line-strong) transparent;
-  scrollbar-width: thin;
 }
 
 .lead-workflow-links button,
@@ -6069,6 +6064,7 @@ a {
   min-height: 38px;
   padding: 0 10px;
   text-align: left;
+  transition: background 140ms ease, color 140ms ease;
   width: 100%;
 }
 
@@ -6107,7 +6103,7 @@ a {
   font-weight: 750;
   justify-content: space-between;
   letter-spacing: 0;
-  padding: 19px 14px 10px;
+  padding: 10px 14px 10px;
   text-transform: uppercase;
 }
 
@@ -6120,6 +6116,7 @@ a {
   border-radius: 5px;
   min-height: 28px;
   padding: 5px;
+  transition: background 140ms ease, color 140ms ease;
 }
 
 .lead-workspace-heading button:hover { background: var(--panel-muted); color: var(--green); }
@@ -6213,14 +6210,16 @@ a {
 .audience-folder-main span { font-size: 10.5px; font-weight: 750; letter-spacing: .045em; text-align: left; text-transform: uppercase; }
 .audience-folder-main em,
 .lead-workflow-links button em,
-.audience-recents-heading em { align-items: center; background: var(--panel-muted); border-radius: 999px; color: var(--faint); display: inline-flex; font-family: var(--mono); font-size: 9px; font-style: normal; height: 18px; justify-content: center; min-width: 21px; padding: 0 5px; }
+.audience-recents-heading em { align-items: center; background: var(--panel-muted); border-radius: 999px; color: var(--faint); display: inline-flex; font-family: var(--mono); font-size: 9px; font-style: normal; height: 18px; justify-content: center; min-width: 21px; padding: 0 5px; transition: background 140ms ease, color 140ms ease; }
 .audience-folder-main.is-open em { background: var(--green-bg); color: var(--green); }
 .lead-workflow-links button.active em { background: #e3defa; color: #5d3fd3; }
 .audience-folder-actions { display: flex; grid-column: 2; grid-row: 1; opacity: .65; position: relative; z-index: 4; }
 .audience-folder-row:hover .audience-folder-actions,
 .audience-folder-row:focus-within .audience-folder-actions { opacity: 1; }
 .lead-workspace-list .audience-folder-actions > button { align-items: center; color: var(--faint); display: inline-flex; height: 28px; justify-content: center; min-height: 28px; padding: 0; width: 28px; }
-.audience-folder-children { border-left: 1px solid var(--line); margin-left: 25px; padding-left: 6px; }
+.audience-folder-children { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-slow, 280ms) var(--ease-out, ease); }
+.audience-folder-children.is-open { grid-template-rows: 1fr; }
+.audience-folder-children-inner { border-left: 1px solid var(--line); margin-left: 25px; min-height: 0; overflow: hidden; padding-left: 6px; }
 .audience-folder-empty { color: var(--faint); display: block; padding: 5px 12px 10px 33px; }
 
 .audience-recents-heading { align-items: center; color: var(--faint); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; padding: 12px 19px 5px; }
@@ -6760,8 +6759,8 @@ a {
   --_red: var(--red, #c23b3b);
   --_red-bg: var(--red-bg, #fbeaea);
   --_red-line: var(--red-line, #efc9c9);
-  border-top: 0;
-  flex: 0 0 var(--manage-section-height, 151px);
+  border-top: 1px solid var(--line);
+  flex: 0 0 151px;
   min-height: 0;
   overflow-y: auto;
   padding: 10px 9px 13px;
@@ -6793,24 +6792,6 @@ body.is-resizing-navigation .navigation-resizer::after {
   background: var(--line-strong);
 }
 
-.navigation-resizer.is-horizontal {
-  cursor: row-resize;
-  height: 9px;
-  margin: 0 -10px;
-}
-
-.navigation-resizer.is-horizontal::after {
-  height: 1px;
-  left: 10px;
-  right: 10px;
-  top: 4px;
-}
-
-.navigation-resizer.is-horizontal:hover::after,
-.navigation-resizer.is-horizontal:focus-visible::after {
-  box-shadow: 0 0 0 2px rgba(27, 31, 36, 0.06);
-}
-
 .navigation-resizer.is-vertical {
   bottom: 0;
   cursor: col-resize;
@@ -6832,17 +6813,9 @@ body.is-resizing-navigation .navigation-resizer::after {
   box-shadow: 0 0 0 2px rgba(27, 31, 36, 0.06);
 }
 
-.manage-section-resizer {
-  margin: 0;
-}
-
 body.is-resizing-navigation {
-  cursor: row-resize;
-  user-select: none;
-}
-
-body.is-resizing-navigation:has(.navigation-resizer.is-vertical:hover) {
   cursor: col-resize;
+  user-select: none;
 }
 
 body.is-resizing-navigation .rail {
@@ -14173,24 +14146,6 @@ button.bulk-recipient-select:hover {
 .results-body.has-detail .contact-card-list::-webkit-scrollbar-thumb:hover {
   background: rgba(27, 31, 36, 0.22);
   background-clip: content-box;
-}
-
-@media (max-width: 1159px) {
-  .navigation-resizer.is-horizontal {
-    display: none;
-  }
-
-  .lead-workflow-links {
-    border-bottom: 1px solid var(--line);
-    flex-basis: auto;
-    overflow-y: visible;
-  }
-
-  .mng {
-    border-top: 1px solid var(--line);
-    flex-basis: auto;
-    overflow-y: visible;
-  }
 }
 
 @media (max-width: 900px) {
