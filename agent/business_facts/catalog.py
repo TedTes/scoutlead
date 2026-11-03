@@ -14,7 +14,7 @@ TRACKED_ATTRIBUTE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "website",
-        "Website opportunity",
+        "Website",
         (
             "website_status", "website_ownership", "http_status", "uses_https",
             "mobile_viewport_present", "website_quality_score", "performance_score",
@@ -23,7 +23,7 @@ TRACKED_ATTRIBUTE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "lead_capture",
-        "Lead-capture opportunity",
+        "Lead capture",
         (
             "contact_form_present", "contact_page_url", "quote_or_booking_form_present",
             "booking_url", "primary_cta_present", "click_to_call_present",
@@ -32,12 +32,12 @@ TRACKED_ATTRIBUTE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "reputation",
-        "Reputation opportunity",
+        "Reputation",
         ("google_rating", "google_review_count", "review_recency_days"),
     ),
     (
         "local_visibility",
-        "Local visibility",
+        "Local visibility attributes",
         (
             "google_business_profile_present", "local_business_schema_present",
             "service_area_content_present", "title_and_meta_present",

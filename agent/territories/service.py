@@ -347,6 +347,11 @@ class TerritoryService:
     def profile_service_options(self) -> list[dict]:
         options = []
         for service in self.services.list():
+            # Inactive services are retired catalog entries. Draft services are
+            # still returned as honest "upcoming" options, while retired broad
+            # groupings must not leak back into audience creation.
+            if service.status == "inactive":
+                continue
             signals = [
                 {
                     "key": mapping.signal_definition.key,

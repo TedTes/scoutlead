@@ -116,7 +116,7 @@ def _email_subject(strategy: OutreachStrategy) -> str:
         return "Quick question about your quote process"
     if strategy.service_key == "lead_capture":
         return "Quick question about website inquiries"
-    if strategy.service_key == "performance_accessibility":
+    if strategy.service_key in {"performance_accessibility", "website_upgrade"}:
         return "Quick question about your website experience"
     if strategy.service_key == "local_visibility":
         return "Quick question about local search"

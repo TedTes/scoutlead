@@ -849,7 +849,7 @@ def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:
             if item["key"] == "contact_form_present"
         )
         assert contact_form_definition["category"] == "lead_capture"
-        assert contact_form_definition["category_label"] == "Lead-capture opportunity"
+        assert contact_form_definition["category_label"] == "Lead capture"
         assert len(result["facts"]) == 1
         lineage_fact = result["facts"][0]
         assert lineage_fact["id"] == fact.id

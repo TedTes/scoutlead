@@ -56,7 +56,7 @@ def test_every_catalog_signal_renders_every_channel_safely() -> None:
                 assert len(generation.email.body) <= 1200
                 rendered += 1
 
-    assert rendered == 105
+    assert rendered == 108
 
 
 def test_playbook_variant_is_stable_for_the_same_result() -> None:
@@ -79,6 +79,30 @@ def test_playbook_variant_is_stable_for_the_same_result() -> None:
 
     assert first.selected_variant == second.selected_variant
     assert first.permission == second.permission
+
+
+def test_focused_website_opportunities_reuse_reviewed_website_playbook() -> None:
+    repository = PlaybookRepository(load_playbook_catalog())
+
+    for service_key, signal_key, value in (
+        ("website_availability", "website_status", "missing"),
+        ("website_upgrade", "website_quality_score", 42),
+    ):
+        match = repository.resolve(
+            service_keys=[service_key],
+            matched_services=[],
+            evidence=[
+                OutreachEvidence(
+                    signal_key=signal_key,
+                    label=signal_key,
+                    statement="Stored evidence statement.",
+                    value=value,
+                )
+            ],
+        )
+
+        assert match is not None
+        assert match.playbook.service_key == service_key
 
 
 def test_every_response_path_classifies_for_every_channel() -> None:

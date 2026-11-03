@@ -96,6 +96,15 @@ class PlaybookRepository:
             *service_keys,
         ]))
         playbooks = {item.service_key: item for item in self.catalog.services}
+        website_playbook = playbooks.get("website_modernization")
+        if website_playbook is not None:
+            for service_key in ("website_availability", "website_upgrade"):
+                playbooks.setdefault(
+                    service_key,
+                    website_playbook.model_copy(
+                        update={"service_key": service_key}
+                    ),
+                )
         if not ordered_services:
             for item in evidence:
                 for playbook in self.catalog.services:

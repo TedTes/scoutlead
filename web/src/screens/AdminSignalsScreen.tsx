@@ -83,32 +83,32 @@ export function AdminSignalsScreen({ api }: { api: ApiClient }) {
 
   return <section className="admin-data-screen admin-signals-screen">
     <header className="admin-data-header admin-overview-header">
-      <div className="admin-metrics admin-business-metrics" aria-label="Signal overview">
-        <Metric label="Definitions" value={totals.all} />
+      <div className="admin-metrics admin-business-metrics" aria-label="Attribute overview">
+        <Metric label="Attributes" value={totals.all} />
         <Metric label="Active" value={totals.active} tone="good" />
         <Metric label="Draft" value={totals.draft} />
       </div>
       <div className="admin-header-actions">
         <button disabled={busy || !totals.active} type="button" onClick={() => void collectActive()}><Activity size={15} /> Collect active</button>
-        <button className="admin-primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={15} /> Add signal</button>
+        <button className="admin-primary-button" type="button" onClick={() => setShowCreate(true)}><Plus size={15} /> Add attribute</button>
       </div>
     </header>
     {error ? <div className="admin-error"><CircleAlert size={15} /> {error}</div> : null}
     <div className="admin-workspace admin-signals-workspace">
       <div className="admin-table-pane">
         <table className="admin-business-table admin-signals-table">
-          <thead><tr><th>Signal</th><th>Category</th><th>Collector</th><th>Status</th></tr></thead>
+          <thead><tr><th>Attribute</th><th>Category</th><th>Collector</th><th>Status</th></tr></thead>
           <tbody>
             {signals.map((signal) => <tr className={signal.id === selectedId ? "is-selected" : ""} key={signal.id} onClick={() => setSelectedId(signal.id)}><td><strong>{signal.label}</strong><span>{signal.key}</span></td><td><strong>{signal.category}</strong><span>{signal.value_type}{signal.unit ? ` · ${signal.unit}` : ""}</span></td><td><strong>{signal.collector_key || "Not assigned"}</strong><span>{signal.extractor_key || "No extractor"}</span></td><td><Status value={signal.status} /></td></tr>)}
-            {!loading && !signals.length ? <tr><td className="admin-empty" colSpan={4}>No signal definitions.</td></tr> : null}
+            {!loading && !signals.length ? <tr><td className="admin-empty" colSpan={4}>No attribute definitions.</td></tr> : null}
           </tbody>
         </table>
-        <footer className="admin-pagination"><span>{signals.length} signals</span><button className="admin-icon-button" title="Refresh" type="button" onClick={() => void load()}><RefreshCw size={14} /></button></footer>
+        <footer className="admin-pagination"><span>{signals.length} attributes</span><button className="admin-icon-button" title="Refresh" type="button" onClick={() => void load()}><RefreshCw size={14} /></button></footer>
       </div>
       <aside className={`admin-inspector admin-signal-inspector${selected ? "" : " is-empty"}`}>
         {selected ? <>
-          <header><div><h2>{inspectorTab === "json" ? "All signal definitions" : selected.label}</h2><p>{inspectorTab === "json" ? `${signals.length} definitions · copyable JSON` : `${selected.key} · version ${selected.version}`}</p></div>{inspectorTab === "definition" ? <Status value={selected.status} /> : null}</header>
-          <nav className="admin-inspector-tabs" aria-label="Signal detail views">
+          <header><div><h2>{inspectorTab === "json" ? "All attribute definitions" : selected.label}</h2><p>{inspectorTab === "json" ? `${signals.length} definitions · copyable JSON` : `${selected.key} · version ${selected.version}`}</p></div>{inspectorTab === "definition" ? <Status value={selected.status} /> : null}</header>
+          <nav className="admin-inspector-tabs" aria-label="Attribute detail views">
             <button className={inspectorTab === "definition" ? "is-active" : ""} type="button" onClick={() => setInspectorTab("definition")}>Definition</button>
             <button className={inspectorTab === "json" ? "is-active" : ""} type="button" onClick={() => setInspectorTab("json")}>JSON</button>
             {inspectorTab === "json" ? <button className="admin-json-copy" disabled={!signals.length} type="button" onClick={() => void copySignalsJson()}><Copy size={12} /> {copied ? "Copied" : "Copy all JSON"}</button> : null}
@@ -140,8 +140,8 @@ function buildSignalsJsonPayload(signals: AdminSignalDefinition[]) {
   return {
     schema_version: 1,
     exported_at: new Date().toISOString(),
-    signal_count: signals.length,
-    signals: signals.map((signal) => ({
+    attribute_count: signals.length,
+    attributes: signals.map((signal) => ({
       id: signal.id,
       key: signal.key,
       label: signal.label,
@@ -201,7 +201,7 @@ function CreateSignalDialog({ api, onClose, onCreated }: { api: ApiClient; onClo
   return <div className="admin-dialog-backdrop">
     <div className="admin-dialog admin-signal-dialog" role="dialog" aria-modal="true">
       <header>
-        <div><h2>Add observable signal</h2><p>Create the definition first. Collection starts when it is activated.</p></div>
+        <div><h2>Add observable attribute</h2><p>Create the definition first. Collection starts when it is activated.</p></div>
         <button className="admin-icon-button" title="Close" type="button" onClick={onClose}><X size={16} /></button>
       </header>
       <div className="admin-form-grid">

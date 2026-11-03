@@ -605,7 +605,23 @@ def test_profile_service_options_include_disabled_draft_services() -> None:
             sort_order=30,
             version=1,
         )
-        session.add_all([active, preparing, planned])
+        retired = ServiceDefinitionModel(
+            id=new_id("service"),
+            key="local_visibility",
+            label="Legacy local visibility",
+            status="inactive",
+            sort_order=40,
+            version=1,
+        )
+        retired.signal_mappings.append(
+            ServiceSignalMappingModel(
+                id=new_id("service_signal"),
+                signal_definition=signal,
+                weight=1,
+                sort_order=0,
+            )
+        )
+        session.add_all([active, preparing, planned, retired])
         session.commit()
 
         options = TerritoryService(
