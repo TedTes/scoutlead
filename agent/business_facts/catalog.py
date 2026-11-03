@@ -16,7 +16,7 @@ TRACKED_ATTRIBUTE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "website",
         "Website",
         (
-            "website_status", "website_ownership", "http_status", "uses_https",
+            "website_status", "website_ownership", "http_status",
             "mobile_viewport_present", "website_quality_score", "performance_score",
             "accessibility_score", "best_practices_score",
         ),

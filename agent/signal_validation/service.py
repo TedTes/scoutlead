@@ -46,7 +46,6 @@ WEBSITE_STATUSES = {"present", "missing", "unavailable", "parked", "unknown"}
 WEBSITE_EVIDENCE_KEYS = {
     "contact_form_present",
     "quote_or_booking_form_present",
-    "uses_https",
     "mobile_viewport_present",
     "primary_cta_present",
     "click_to_call_present",

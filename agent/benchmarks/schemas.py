@@ -24,7 +24,6 @@ class BenchmarkObserved(BaseModel):
     website_status: str | None = None
     quote_or_booking_form_present: bool | None = None
     contact_form_present: bool | None = None
-    uses_https: bool | None = None
     mobile_viewport_present: bool | None = None
     primary_cta_present: bool | None = None
     click_to_call_present: bool | None = None
@@ -46,7 +45,6 @@ class BenchmarkLabels(BaseModel):
     website_status: WebsiteTruth = "unknown"
     quote_or_booking_form_present: TruthValue = "unknown"
     contact_form_present: TruthValue = "unknown"
-    uses_https: TruthValue = "unknown"
     mobile_viewport_present: TruthValue = "unknown"
     primary_cta_present: TruthValue = "unknown"
     click_to_call_present: TruthValue = "unknown"

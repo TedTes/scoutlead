@@ -989,6 +989,7 @@ export type AdminLeadOpportunity = {
   value: unknown;
   evidence_confidence?: number | null;
   source_observation_id?: string | null;
+  observed_at?: string | null;
 };
 
 export type AdminLeadAssessment = {
@@ -1011,6 +1012,13 @@ export type AdminLeadAssessment = {
     state: "verified" | "no_gap" | "not_evaluated";
     reasons: string[];
     attributes: AdminLeadOpportunity[];
+    // A group reads "verified" the moment one member check fails; these
+    // fields disclose how much of the group was actually evaluated so a
+    // single failed check isn't mistaken for a comprehensive verdict.
+    evaluated_count?: number;
+    total_count?: number;
+    not_evaluated_reasons?: string[];
+    last_evaluated_at?: string | null;
   }>;
   selected_opportunity?: {
     key: string;

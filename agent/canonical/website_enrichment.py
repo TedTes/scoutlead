@@ -795,7 +795,6 @@ def _process_enrichment(
     else:
         assessment = assess_digital_opportunity(
             website_reachable=bool(enrichment.inspected_urls),
-            uses_https=enrichment.uses_https,
             has_mobile_viewport=enrichment.has_mobile_viewport,
             has_quote_or_booking_form=(enrichment.has_quote_form or enrichment.has_booking_form)
             if enrichment.inspected_urls
@@ -1523,7 +1522,6 @@ def _weak_or_missing_assessment(
         return DigitalOpportunityAssessment(score=0, level="none", signals=())
     return assess_digital_opportunity(
         website_reachable=True,
-        uses_https=enrichment.uses_https,
         has_mobile_viewport=enrichment.has_mobile_viewport,
         has_quote_or_booking_form=enrichment.has_quote_form or enrichment.has_booking_form,
         rating=rating,

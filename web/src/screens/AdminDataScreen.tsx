@@ -23,6 +23,7 @@ import type {
   AdminFactLineage,
   AdminOverview,
 } from "../types/domain";
+import { formatDate } from "../utils/format";
 import "./AdminDataScreen.css";
 
 const emptyOverview: AdminOverview = {
@@ -401,17 +402,36 @@ function StatusPill({ value }: { value: string }) {
   return <span className={`admin-status-pill is-${value.replace(/_/g, "-")}`}>{value.replace(/_/g, " ")}</span>;
 }
 
+function formatGroupCoverage(group: AdminBusinessDetail["lead_assessment"]["opportunity_groups"][number]): string {
+  const attributes = group.attributes ?? [];
+  const notEvaluatedReasons = group.not_evaluated_reasons
+    ?? attributes
+      .filter((item) => item.state === "not_evaluated")
+      .map((item) => item.label);
+  const totalCount = group.total_count ?? attributes.length;
+  const reasons = group.reasons ?? [];
+  const parts = reasons.length > 0 ? [reasons.join(", ")] : [];
+  if (notEvaluatedReasons.length > 0) {
+    parts.push(`${notEvaluatedReasons.length} of ${totalCount} checks not evaluated`);
+  }
+  if (group.last_evaluated_at) {
+    parts.push(`last inspected ${formatDate(group.last_evaluated_at)}`);
+  }
+  return parts.join(" · ") || "Evidence coverage unavailable.";
+}
+
 function LeadAssessmentBadge({ row }: { row: AdminBusinessSummary }) {
   const assessment = row.lead_assessment;
   const selected = assessment.selected_opportunity;
-  const verifiedGroups = assessment.opportunity_groups.filter((group) => group.state === "verified");
+  const verifiedOpportunities = assessment.opportunities.filter((item) => item.state === "verified");
+  // Prefer the exact verified finding over a broad group label
+  // like "Website needs upgrading", which a single failed check can trigger
+  // even when most of that group's checks were never evaluated.
   const label = selected
     ? selected.state === "verified" ? selected.label : selected.state.replace(/_/g, " ")
-    : verifiedGroups[0]?.label || assessment.lead_state.replace(/_/g, " ");
-  const title = assessment.eligibility.reasons.join(" · ") || assessment.opportunities
-    .filter((opportunity) => opportunity.state === "verified")
-    .map((opportunity) => opportunity.label)
-    .join(" · ");
+    : verifiedOpportunities[0]?.label || assessment.lead_state.replace(/_/g, " ");
+  const title = assessment.eligibility.reasons.join(" · ")
+    || verifiedOpportunities.map((opportunity) => opportunity.label).join(" · ");
   return (
     <span className={`admin-quality-score is-${assessment.lead_state}`} title={title}>
       <strong>{label}</strong>
@@ -522,13 +542,42 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
           </span>
           <span>{assessment.eligibility.state === "target" ? "Target" : assessment.eligibility.state === "excluded" ? "Exclude" : "Review"}</span>
         </div>
-        <div className="admin-candidate-component">
-          <span>
-            <strong>{opportunity?.label || "Verified opportunities"}</strong>
-            <small>{opportunity?.reason || verifiedGroups.map((group) => group.label).join(" · ") || "No verified opportunity yet."}</small>
-          </span>
-          <span>{opportunity?.state.replace(/_/g, " ") || assessment.verified_opportunity_count}</span>
-        </div>
+        {opportunity ? (
+          <div className="admin-candidate-component">
+            <span>
+              <strong>{opportunity.label}</strong>
+              <small>{opportunity.reason}</small>
+            </span>
+            <span>{opportunity.state.replace(/_/g, " ")}</span>
+          </div>
+        ) : verifiedGroups.length ? (
+          verifiedGroups.map((group) => (
+            // A group label like "Website needs upgrading" can be driven by
+            // a single failed check while the rest of the group was never
+            // measured. Show the coverage, not just the label, so this
+            // doesn't read as a broader verdict than the evidence supports.
+            <div className="admin-candidate-component" key={group.key}>
+              <span>
+                <strong>{group.label}</strong>
+                <small>{formatGroupCoverage(group)}</small>
+              </span>
+              <span>
+                {group.evaluated_count
+                  ?? (group.attributes ?? []).filter((item) => item.state !== "not_evaluated").length}
+                {" of "}
+                {group.total_count ?? (group.attributes ?? []).length} checks
+              </span>
+            </div>
+          ))
+        ) : (
+          <div className="admin-candidate-component">
+            <span>
+              <strong>Verified opportunities</strong>
+              <small>No verified opportunity yet.</small>
+            </span>
+            <span>{assessment.verified_opportunity_count}</span>
+          </div>
+        )}
         <div className="admin-candidate-component">
           <span>
             <strong>Evidence coverage</strong>
@@ -748,7 +797,7 @@ function humanizeKey(value: string) {
 
 const FALLBACK_ATTRIBUTE_GROUPS: Array<[string, string, string[]]> = [
   ["identity", "Core identity and targeting", ["business_name", "business_operational", "trade_category", "provider_business_id", "address", "city", "region", "postal_code", "latitude", "longitude", "phone", "website_url", "domain", "is_directory", "is_chain", "is_franchise"]],
-  ["website", "Website", ["website_status", "website_ownership", "http_status", "uses_https", "mobile_viewport_present", "website_quality_score", "performance_score", "accessibility_score", "best_practices_score"]],
+  ["website", "Website", ["website_status", "website_ownership", "http_status", "mobile_viewport_present", "website_quality_score", "performance_score", "accessibility_score", "best_practices_score"]],
   ["lead_capture", "Lead capture", ["contact_form_present", "contact_page_url", "quote_or_booking_form_present", "booking_url", "primary_cta_present", "click_to_call_present", "public_email_present", "public_phone_present"]],
   ["reputation", "Reputation", ["google_rating", "google_review_count", "review_recency_days"]],
   ["local_visibility", "Local visibility attributes", ["google_business_profile_present", "local_business_schema_present", "service_area_content_present", "title_and_meta_present"]],

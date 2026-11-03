@@ -81,7 +81,6 @@ SOURCE_PRIORITY = {
 MATCH_ATTRIBUTE_LABELS = {
     "website_status": "No website",
     "http_status": "Website unavailable",
-    "uses_https": "No HTTPS",
     "mobile_viewport_present": "No mobile viewport",
     "website_quality_score": "Low website quality",
     "performance_score": "Low PageSpeed performance",
@@ -105,7 +104,6 @@ MATCH_ATTRIBUTE_LABELS = {
 OPPORTUNITY_GROUPS = {
     "website_status": ("website_unavailable", "Website unavailable"),
     "http_status": ("website_upgrade", "Website needs upgrading"),
-    "uses_https": ("website_upgrade", "Website needs upgrading"),
     "mobile_viewport_present": ("website_upgrade", "Website needs upgrading"),
     "website_quality_score": ("website_upgrade", "Website needs upgrading"),
     "performance_score": ("website_upgrade", "Website needs upgrading"),
@@ -2628,6 +2626,7 @@ def _opportunity_assessment(
             "reason": "Required evidence has not been collected or resolved.",
             "value": fact.get("value") if fact else None,
             "evidence_confidence": fact.get("evidence_confidence") if fact else None,
+            "observed_at": fact.get("observed_at") if fact else None,
         }
     config = audience_match_config(
         definition.key,
@@ -2648,6 +2647,7 @@ def _opportunity_assessment(
         "value": fact.get("value"),
         "evidence_confidence": fact.get("evidence_confidence"),
         "source_observation_id": fact.get("source_observation_id"),
+        "observed_at": fact.get("observed_at"),
     }
 
 
@@ -2681,12 +2681,30 @@ def _opportunity_groups(opportunities: list[dict[str, Any]]) -> list[dict[str, A
             if not_evaluated
             else "no_gap"
         )
+        last_evaluated_at = max(
+            (
+                item["observed_at"]
+                for item in attributes
+                if item.get("observed_at")
+            ),
+            default=None,
+        )
         result.append(
             {
                 **group,
                 "state": state,
                 "reasons": [item["label"] for item in verified]
                 or [item["label"] for item in not_evaluated],
+                # A group reads "verified" the moment any single member check
+                # fails, which is correct for that one finding but does not
+                # mean the whole category was comprehensively assessed. These
+                # fields let callers show the real coverage (e.g. "2 of 6
+                # checks failed, 4 not evaluated") instead of implying a
+                # broad verdict was reached.
+                "evaluated_count": len(attributes) - len(not_evaluated),
+                "total_count": len(attributes),
+                "not_evaluated_reasons": [item["label"] for item in not_evaluated],
+                "last_evaluated_at": last_evaluated_at,
             }
         )
     return result

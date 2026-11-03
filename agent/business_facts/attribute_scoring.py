@@ -26,7 +26,6 @@ class AttributeScore:
 BOOLEAN_POSITIVE_ATTRIBUTES = frozenset(
     {
         "business_operational",
-        "uses_https",
         "mobile_viewport_present",
         "contact_form_present",
         "quote_or_booking_form_present",

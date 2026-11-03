@@ -184,20 +184,6 @@
           "evidence_statement": "The latest website best-practices score was {value}.",
           "observation": "The latest check found some website best-practice issues.",
           "discovery_question": "Has the website been reviewed or updated recently?"
-        },
-        {
-          "signal_key": "uses_https",
-          "match_values": [false],
-          "evidence_statement": "The latest website check did not confirm HTTPS.",
-          "observation": "The latest check found that the website is not using HTTPS.",
-          "discovery_question": "Has anyone reviewed the website's security setup recently?"
-        },
-        {
-          "signal_key": "uses_http",
-          "match_values": [true],
-          "evidence_statement": "The latest website check found that the site is not using HTTPS.",
-          "observation": "The latest check found that the website is not using HTTPS.",
-          "discovery_question": "Has anyone reviewed the website's security setup recently?"
         }
       ]
     },

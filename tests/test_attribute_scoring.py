@@ -19,7 +19,7 @@ def test_unknown_is_not_scored_as_zero() -> None:
 
 
 def test_positive_boolean_has_no_opportunity_score() -> None:
-    scored = score_attribute("uses_https", True)
+    scored = score_attribute("contact_form_present", True)
 
     assert scored.score == 0
 

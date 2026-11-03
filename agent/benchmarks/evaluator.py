@@ -21,7 +21,6 @@ DEFAULT_THRESHOLDS = {
     "website_unavailable": 0.95,
     "no_quote_flow": 0.90,
     "no_contact_form": 0.90,
-    "missing_https": 0.98,
     "missing_mobile_viewport": 0.95,
     "no_primary_cta": 0.90,
     "no_click_to_call": 0.95,
@@ -29,7 +28,6 @@ DEFAULT_THRESHOLDS = {
     "no_service_area_pages": 0.90,
 }
 NEGATIVE_SIGNAL_METRICS = {
-    "missing_https": "uses_https",
     "missing_mobile_viewport": "mobile_viewport_present",
     "no_primary_cta": "primary_cta_present",
     "no_click_to_call": "click_to_call_present",

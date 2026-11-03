@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -44,6 +45,15 @@ class SignalCollectionService:
         pagespeed_api_endpoint: str = (
             "https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed"
         ),
+        # The PageSpeed Insights API enforces a strict per-second quota for
+        # unauthenticated callers. Without a key and without spacing, a batch
+        # of sequential businesses blows through that quota on the second
+        # request and every subsequent call comes back 429. These defaults
+        # keep requests under the anonymous limit and retry transient 429s
+        # instead of recording them as a terminal failure.
+        pagespeed_min_interval_seconds: float = 1.5,
+        pagespeed_max_attempts: int = 3,
+        pagespeed_retry_base_seconds: float = 5.0,
     ) -> None:
         self.session = session
         self.website = WebsiteEnrichmentClient(
@@ -55,6 +65,10 @@ class SignalCollectionService:
         )
         self.pagespeed_api_key = pagespeed_api_key
         self.pagespeed_api_endpoint = pagespeed_api_endpoint
+        self.pagespeed_min_interval_seconds = max(0.0, pagespeed_min_interval_seconds)
+        self.pagespeed_max_attempts = max(1, pagespeed_max_attempts)
+        self.pagespeed_retry_base_seconds = max(0.0, pagespeed_retry_base_seconds)
+        self._pagespeed_last_request_at: float | None = None
 
     def collect(
         self,
@@ -197,6 +211,16 @@ class SignalCollectionService:
             .limit(1)
         )
 
+    def _throttle_pagespeed_request(self) -> None:
+        if self.pagespeed_min_interval_seconds <= 0:
+            return
+        if self._pagespeed_last_request_at is not None:
+            elapsed = time.monotonic() - self._pagespeed_last_request_at
+            remaining = self.pagespeed_min_interval_seconds - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+        self._pagespeed_last_request_at = time.monotonic()
+
     def _pagespeed_observation(
         self,
         definition: SignalDefinitionModel,
@@ -224,20 +248,35 @@ class SignalCollectionService:
         ]
         if self.pagespeed_api_key:
             params.append(("key", self.pagespeed_api_key))
-        try:
-            response = httpx.get(
-                self.pagespeed_api_endpoint,
-                params=params,
-                timeout=max(self.website.timeout_seconds, 60),
-                follow_redirects=True,
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
+        payload: Any = None
+        last_error: Exception | None = None
+        for attempt in range(self.pagespeed_max_attempts):
+            self._throttle_pagespeed_request()
+            try:
+                response = httpx.get(
+                    self.pagespeed_api_endpoint,
+                    params=params,
+                    timeout=max(self.website.timeout_seconds, 60),
+                    follow_redirects=True,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                last_error = None
+                break
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                is_last_attempt = attempt >= self.pagespeed_max_attempts - 1
+                if exc.response.status_code != 429 or is_last_attempt:
+                    break
+                time.sleep(self.pagespeed_retry_base_seconds * (2**attempt))
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
+                break
+        if last_error is not None:
             return self._record_pagespeed_observation(
                 definition,
                 business,
-                {"error": str(exc), "website_url": business.website_url},
+                {"error": str(last_error), "website_url": business.website_url},
             )
         normalized = _normalized_pagespeed_payload(payload)
         if normalized is None:
@@ -442,7 +481,6 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
         "google_business_profile_present": lambda: True,
         "business_operational": lambda: _operational_value(payload),
         "domain_age_days": lambda: _payload_path(payload, "domain_rdap.age_days"),
-        "uses_https": lambda: enrichment.get("uses_https"),
         "mobile_viewport": lambda: enrichment.get("has_mobile_viewport"),
         "primary_cta": lambda: enrichment.get("has_primary_cta"),
         "click_to_call": lambda: enrichment.get("has_click_to_call"),

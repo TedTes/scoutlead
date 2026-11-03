@@ -581,7 +581,6 @@ def _evidence(item: dict[str, Any]) -> OutreachEvidence:
         "no_quote_flow": "No quote or booking flow was found in the latest website check.",
         "no_contact_form": "No contact form was found in the latest website check.",
         "mobile_viewport_missing": "The latest website check did not find a mobile viewport declaration.",
-        "uses_http": "The latest website check found that the site is not using HTTPS.",
     }
     if key == "reviews_under_15":
         statement = f"The business has {int(value or 0)} public reviews in the latest record."
@@ -597,7 +596,6 @@ def _evidence_label(key: str, value: object) -> str:
         "click_to_call_present": ("Click to call present", "Click to call missing"),
         "quote_or_booking_form_present": ("Quote or booking present", "Quote or booking missing"),
         "complete_contact_details": ("Contact details complete", "Contact details incomplete"),
-        "uses_https": ("HTTPS present", "HTTPS missing"),
     }
     if key in boolean_labels and isinstance(value, bool):
         return boolean_labels[key][0 if value else 1]
@@ -606,7 +604,6 @@ def _evidence_label(key: str, value: object) -> str:
         "no_quote_flow": "Quote or booking missing",
         "no_contact_form": "Contact form missing",
         "mobile_viewport_missing": "Mobile setup missing",
-        "uses_http": "HTTPS missing",
         "reviews_under_15": "Low review count",
     }
     return labels.get(key, key.replace("_", " ").strip().capitalize())

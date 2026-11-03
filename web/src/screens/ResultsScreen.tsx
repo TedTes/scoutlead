@@ -1219,7 +1219,6 @@ function outreachEvidenceLabel(evidence: OutreachPackageContent["evidence"][numb
     click_to_call_present: ["Click to call present", "Click to call missing"],
     quote_or_booking_form_present: ["Quote or booking present", "Quote or booking missing"],
     complete_contact_details: ["Contact details complete", "Contact details incomplete"],
-    uses_https: ["HTTPS present", "HTTPS missing"],
   };
   if (typeof evidence.value === "boolean" && booleanLabels[evidence.signal_key]) {
     return booleanLabels[evidence.signal_key][evidence.value ? 0 : 1];
@@ -1229,7 +1228,6 @@ function outreachEvidenceLabel(evidence: OutreachPackageContent["evidence"][numb
     no_quote_flow: "No quote flow",
     no_contact_form: "No contact form",
     mobile_viewport_missing: "Mobile setup missing",
-    uses_http: "HTTPS missing",
     reviews_under_15: "Low review count",
   };
   return labels[evidence.signal_key] || evidence.label;
@@ -2079,9 +2077,6 @@ function audienceSignalStatement(
     if (value === "unavailable") return "The known website was unreachable during the latest check.";
     if (value === "unknown") return "Website presence has not been verified.";
     return `Verified website status: ${value.replace(/_/g, " ")}.`;
-  }
-  if (signalKey === "uses_https" && value === false) {
-    return "The latest website check found that the site is not using HTTPS.";
   }
   return `The latest check found a ${signalKey.replace(/_/g, " ")} opportunity.`;
 }
@@ -4646,7 +4641,6 @@ function profileSignalMessage(signalKey: string, evidence: Record<string, unknow
   }
   if (typeof value === "boolean") {
     const statements: Record<string, [string, string]> = {
-      uses_https: ["Website uses HTTPS.", "Website does not use HTTPS."],
       contact_form_present: ["Contact form found.", "No contact form was found."],
       quote_or_booking_form_present: [
         "Quote or booking form found.",

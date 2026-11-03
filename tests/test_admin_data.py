@@ -123,8 +123,8 @@ def test_lead_assessment_separates_business_eligibility_from_website_opportunity
             config={"audience_min_score": 50.001},
         ),
         SignalDefinitionModel(
-            key="uses_https",
-            label="HTTPS enabled",
+            key="mobile_viewport_present",
+            label="Mobile viewport present",
             opportunity_direction="false_is_opportunity",
             config={"audience_min_score": 50.001},
         ),
@@ -140,13 +140,13 @@ def test_lead_assessment_separates_business_eligibility_from_website_opportunity
             "source_observation_id": "website-observation",
         },
         {
-            "key": "uses_https",
+            "key": "mobile_viewport_present",
             "value": False,
             "score": 100,
-            "basis": "Verified website does not use HTTPS.",
+            "basis": "Verified website is missing a mobile viewport.",
             "evidence_state": "usable",
             "evidence_confidence": 100,
-            "source_observation_id": "https-observation",
+            "source_observation_id": "viewport-observation",
         },
     ]
 
@@ -1021,7 +1021,7 @@ def test_fact_lineage_connects_fact_observation_validation_and_signal() -> None:
         result = _service(session).fact_lineage(business.id)
 
         assert result["business_id"] == business.id
-        assert len(result["attribute_definitions"]) == 44
+        assert len(result["attribute_definitions"]) == 43
         contact_form_definition = next(
             item
             for item in result["attribute_definitions"]
@@ -1354,8 +1354,8 @@ def test_collect_active_signals_queues_each_definition() -> None:
                 version=1,
             )
             for key, label, extractor in (
-                ("uses_https", "HTTPS enabled", "uses_https"),
                 ("mobile_viewport_present", "Mobile viewport present", "mobile_viewport"),
+                ("primary_cta_present", "Primary CTA present", "primary_cta"),
             )
         ]
         session.add_all(definitions)

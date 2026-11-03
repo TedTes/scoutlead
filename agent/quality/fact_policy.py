@@ -15,7 +15,6 @@ FACT_DIMENSIONS = {
     "google_review_count": "reviews_under_15",
     "quote_or_booking_form_present": "no_quote_flow",
     "contact_form_present": "no_contact_form",
-    "uses_https": "missing_https",
     "mobile_viewport_present": "missing_mobile_viewport",
     "primary_cta_present": "no_primary_cta",
     "click_to_call_present": "no_click_to_call",

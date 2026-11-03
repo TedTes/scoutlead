@@ -89,7 +89,6 @@ class DigitalOpportunityAssessment:
 def assess_digital_opportunity(
     *,
     website_reachable: bool,
-    uses_https: bool | None,
     has_mobile_viewport: bool | None,
     has_quote_or_booking_form: bool | None,
     rating: float | None,
@@ -109,15 +108,6 @@ def assess_digital_opportunity(
             )
         )
     else:
-        if uses_https is False:
-            signals.append(
-                OpportunitySignal(
-                    key="missing_https",
-                    message="Website does not use HTTPS.",
-                    points=15,
-                    source_url=website_source_url,
-                )
-            )
         if has_mobile_viewport is False:
             signals.append(
                 OpportunitySignal(
