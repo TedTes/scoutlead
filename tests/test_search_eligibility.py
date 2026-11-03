@@ -71,7 +71,14 @@ def _searchable_ids(session) -> list[str]:
     )
 
 
-def _add_passed_validations(session, business, niche, observed_at) -> None:
+def _add_passed_validations(
+    session,
+    business,
+    niche,
+    observed_at,
+    *,
+    operational: bool | None = True,
+) -> None:
     for validation_type, confidence in {
         "identity": 90,
         "business_identity": 85,
@@ -96,6 +103,9 @@ def _add_passed_validations(session, business, niche, observed_at) -> None:
                 expires_at=observed_at + timedelta(days=30),
             )
         )
+    if operational is None:
+        session.commit()
+        return
     observation = SourceObservationModel(
         id=new_id("observation"),
         business_id=business.id,
@@ -104,7 +114,9 @@ def _add_passed_validations(session, business, niche, observed_at) -> None:
         query_signature=None,
         content_hash="a" * 64,
         source_url=f"https://maps.example/{business.id}",
-        raw_payload={"businessStatus": "OPERATIONAL"},
+        raw_payload={
+            "businessStatus": "OPERATIONAL" if operational else "CLOSED_PERMANENTLY"
+        },
         observed_at=observed_at,
     )
     session.add(observation)
@@ -115,7 +127,7 @@ def _add_passed_validations(session, business, niche, observed_at) -> None:
             business_id=business.id,
             fact_key="business_operational",
             value_type="boolean",
-            value_boolean=True,
+            value_boolean=operational,
             confidence=100,
             attribute_score=100,
             score_version=1,
@@ -125,7 +137,7 @@ def _add_passed_validations(session, business, niche, observed_at) -> None:
             quality_state="published",
             quality_policy_version=1,
             observed_at=observed_at,
-            expires_at=observed_at + timedelta(days=14),
+            expires_at=observed_at + timedelta(days=90),
             source_observation_id=observation.id,
             resolver_version=1,
         )
@@ -148,6 +160,36 @@ def test_active_business_membership_is_searchable_with_current_validations() -> 
         _add_passed_validations(session, business, niche, observed_at)
 
         assert _searchable_ids(session) == [business.id]
+
+
+def test_unverified_operational_status_does_not_block_search() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, niche, observed_at = _eligible_scope(session)
+        _add_passed_validations(
+            session,
+            business,
+            niche,
+            observed_at,
+            operational=None,
+        )
+
+        assert _searchable_ids(session) == [business.id]
+
+
+def test_confirmed_inactive_business_is_not_searchable() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        business, niche, observed_at = _eligible_scope(session)
+        _add_passed_validations(
+            session,
+            business,
+            niche,
+            observed_at,
+            operational=False,
+        )
+
+        assert _searchable_ids(session) == []
 
 
 def test_failed_quality_validation_does_not_remove_membership_from_search() -> None:

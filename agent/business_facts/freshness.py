@@ -9,7 +9,7 @@ FACT_TTL_DAYS = {
     "contact_form_present": 30,
     "google_rating": 14,
     "google_review_count": 14,
-    "business_operational": 14,
+    "business_operational": 90,
 }
 
 

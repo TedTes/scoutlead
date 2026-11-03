@@ -23,17 +23,17 @@ REQUIRED_VALIDATIONS = {
 
 
 def searchable_business_conditions(*, now: datetime | None = None) -> list:
-    """Require current validation before a scoped membership is searchable."""
+    """Require scoped validation and exclude confirmed closed businesses."""
     current_time = now or utcnow()
     conditions = [BusinessModel.status == "active"]
     operational = aliased(BusinessFactModel, name="searchable_business_operational")
     conditions.append(
-        exists(
+        ~exists(
             select(operational.id).where(
                 operational.business_id == BusinessModel.id,
                 operational.fact_key == "business_operational",
                 operational.value_type == "boolean",
-                operational.value_boolean.is_(True),
+                operational.value_boolean.is_(False),
                 operational.quality_state == "published",
                 operational.resolution_state == "confirmed",
                 operational.confidence >= 85,

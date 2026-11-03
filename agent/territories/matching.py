@@ -714,18 +714,20 @@ def _candidate_score(
             ),
             confidence=operational.confidence if operational is not None else None,
             freshness=_fact_freshness(operational, max_age_days),
-            hard_gate=True,
+            # Operational status is a negative veto. A current, confirmed
+            # closure blocks the candidate; missing or stale status is neutral.
+            hard_gate=bool(operational_eligible and operational_value is False),
             status=(
                 "passed" if operational_eligible and operational_value is True
                 else "failed" if operational_eligible and operational_value is False
-                else "missing"
+                else "unknown"
             ),
             reason=(
                 "Business is active"
-                if operational_value is True
+                if operational_eligible and operational_value is True
                 else "Business is confirmed inactive"
-                if operational_value is False
-                else "Operational status is unverified"
+                if operational_eligible and operational_value is False
+                else "Operational status is unverified; no closure was reported"
             ),
         ),
     )
