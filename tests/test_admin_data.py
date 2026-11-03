@@ -89,11 +89,11 @@ def test_admin_match_states_separate_coverage_from_eligibility() -> None:
             "selected_opportunity": {"state": opportunity},
         }
 
-    assert _admin_match_state(assessment("target", "verified"), definition) == "matched"
-    assert _admin_match_state(assessment("target", "not_evaluated"), definition) == "not_evaluated"
-    assert _admin_match_state(assessment("needs_review", "verified"), definition) == "not_validated"
-    assert _admin_match_state(assessment("target", "no_gap"), definition) == "does_not_match"
-    assert _admin_match_state(assessment("excluded", "verified"), definition) == "not_qualified"
+    assert _admin_match_state(assessment("target", "gap"), definition) == "matched"
+    assert _admin_match_state(assessment("target", "review"), definition) == "not_evaluated"
+    assert _admin_match_state(assessment("estimated", "gap"), definition) == "not_validated"
+    assert _admin_match_state(assessment("target", "healthy"), definition) == "does_not_match"
+    assert _admin_match_state(assessment("excluded", "gap"), definition) == "not_qualified"
 
 
 def test_lead_assessment_separates_business_eligibility_from_website_opportunity() -> None:
@@ -159,13 +159,15 @@ def test_lead_assessment_separates_business_eligibility_from_website_opportunity
     )
 
     assert assessment["eligibility"]["state"] == "target"
-    assert assessment["lead_state"] == "qualified"
+    assert assessment["lead_state"] == "candidate"
+    assert assessment["priority_score"] == 100
+    assert assessment["priority_label"] == "No mobile viewport"
     assert {
         group["key"]: group["state"]
         for group in assessment["opportunity_groups"]
     } == {
-        "website_missing": "no_gap",
-        "website_upgrade": "verified",
+        "website_missing": "healthy",
+        "website_upgrade": "gap",
     }
 
 
@@ -191,8 +193,178 @@ def test_missing_business_validation_requires_review_instead_of_exclusion() -> N
 
     assessment = _admin_lead_assessment(business, validations, [], None, [])
 
-    assert assessment["eligibility"]["state"] == "needs_review"
-    assert assessment["lead_state"] == "needs_review"
+    assert assessment["eligibility"]["state"] == "estimated"
+    assert assessment["lead_state"] == "candidate"
+    assert assessment["priority_score"] == 68
+    assert assessment["priority_confidence"] == "estimated"
+
+
+def test_active_google_business_with_missing_website_is_top_priority() -> None:
+    now = utcnow()
+    business = BusinessModel(
+        id="business_missing_website",
+        display_name="Active Electric",
+        normalized_name="active electric",
+        status="active",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    validations = {
+        key: ValidationResultModel(
+            validation_type=key,
+            status="passed",
+            confidence=95,
+            reason="Verified.",
+        )
+        for key in ("identity", "business_identity", "trade", "location")
+    }
+    definition = SignalDefinitionModel(
+        key="website_status",
+        label="Website status",
+        opportunity_direction="categorical",
+        config={"audience_min_score": 70},
+    )
+    facts = [
+        {
+            "key": "business_operational",
+            "value": True,
+            "score": 0,
+            "evidence_state": "usable",
+        },
+        {
+            "key": "google_business_profile_present",
+            "value": True,
+            "score": 0,
+            "evidence_state": "usable",
+        },
+        {
+            "key": "website_status",
+            "value": "missing",
+            "score": 100,
+            "basis": "Website verification completed without finding an owned site.",
+            "evidence_state": "usable",
+            "evidence_confidence": 100,
+            "source_observation_id": "website-check",
+        },
+    ]
+
+    assessment = _admin_lead_assessment(
+        business,
+        validations,
+        facts,
+        None,
+        [definition],
+    )
+
+    assert assessment["lead_state"] == "candidate"
+    assert assessment["priority_score"] == 100
+    assert assessment["priority_label"] == "Website missing"
+    assert assessment["priority_confidence"] == "verified"
+    assert "active Google Business Profile" in assessment["priority_reason"]
+
+
+def test_incomplete_website_measurement_gets_estimated_priority() -> None:
+    now = utcnow()
+    business = BusinessModel(
+        id="business_review_website",
+        display_name="Review Electric",
+        normalized_name="review electric",
+        status="active",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    validations = {
+        key: ValidationResultModel(
+            validation_type=key,
+            status="passed",
+            confidence=95,
+            reason="Verified.",
+        )
+        for key in ("identity", "business_identity", "trade", "location")
+    }
+    definition = SignalDefinitionModel(
+        key="website_quality_score",
+        label="Website quality score",
+        opportunity_direction="lower_is_opportunity",
+        config={"audience_min_score": 50.001},
+    )
+
+    assessment = _admin_lead_assessment(
+        business,
+        validations,
+        [],
+        None,
+        [definition],
+    )
+
+    assert assessment["lead_state"] == "candidate"
+    assert assessment["priority_score"] == 85
+    assert assessment["priority_label"] == "Estimated missing-website potential"
+    assert assessment["priority_confidence"] == "estimated"
+
+
+def test_unverified_attached_website_is_estimated_instead_of_trusted() -> None:
+    now = utcnow()
+    business = BusinessModel(
+        id="business_unverified_website",
+        display_name="Active Electric",
+        normalized_name="active electric",
+        status="active",
+        website_url="https://unverified.example",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    validations = {
+        key: ValidationResultModel(
+            validation_type=key,
+            status="passed",
+            confidence=95,
+            reason="Verified.",
+        )
+        for key in ("identity", "business_identity", "trade", "location")
+    }
+    definitions = [
+        SignalDefinitionModel(
+            key="website_status",
+            label="Website status",
+            opportunity_direction="categorical",
+            config={"audience_min_score": 70},
+        ),
+        SignalDefinitionModel(
+            key="website_quality_score",
+            label="Website quality score",
+            opportunity_direction="lower_is_opportunity",
+            config={"audience_min_score": 50.001},
+        ),
+    ]
+    facts = [
+        {
+            "key": "website_status",
+            "value": "present",
+            "score": 0,
+            "evidence_state": "usable",
+        },
+        {
+            "key": "website_quality_score",
+            "value": 25,
+            "score": 75,
+            "evidence_state": "usable",
+        },
+    ]
+
+    assessment = _admin_lead_assessment(
+        business,
+        validations,
+        facts,
+        None,
+        definitions,
+    )
+
+    assert assessment["lead_state"] == "candidate"
+    assert assessment["priority_score"] == 80
+    assert assessment["priority_label"] == "Estimated website potential"
+    assert assessment["priority_confidence"] == "estimated"
+    assert "not been verified as belonging" in assessment["priority_reason"]
 
 
 def test_admin_detail_uses_the_same_selected_trade_scope_as_the_list() -> None:

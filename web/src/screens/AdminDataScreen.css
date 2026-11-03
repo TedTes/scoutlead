@@ -257,14 +257,13 @@
   color: #a65f09;
 }
 
-.admin-quality-score.is-qualified {
+.admin-quality-score.is-candidate {
   border-color: #a9e1c5 !important;
   background: #eaf8f1 !important;
   color: #087a55 !important;
 }
 
-.admin-quality-score.is-needs_review,
-.admin-quality-score.is-not_evaluated {
+.admin-quality-score.is-human_review {
   border-color: #efd19d !important;
   background: #fff7e8 !important;
   color: #9a620b !important;
@@ -276,7 +275,7 @@
   color: #b83232 !important;
 }
 
-.admin-quality-score.is-no_opportunity {
+.admin-quality-score.is-healthy {
   border-color: #cfd6df !important;
   background: #f4f6f8 !important;
   color: #667085 !important;

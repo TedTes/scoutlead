@@ -984,18 +984,23 @@ export type AdminOverview = {
 export type AdminLeadOpportunity = {
   key: string;
   label: string;
-  state: "verified" | "no_gap" | "not_evaluated";
+  state: "gap" | "healthy" | "review" | "verified" | "no_gap" | "not_evaluated";
   reason: string;
   value: unknown;
+  score?: number | null;
   evidence_confidence?: number | null;
   source_observation_id?: string | null;
   observed_at?: string | null;
 };
 
 export type AdminLeadAssessment = {
-  lead_state: "qualified" | "needs_review" | "excluded" | "no_opportunity" | "not_evaluated";
+  lead_state: "candidate" | "healthy" | "excluded" | "qualified" | "human_review" | "needs_review" | "no_opportunity" | "not_evaluated";
+  priority_score?: number;
+  priority_label?: string;
+  priority_confidence?: "verified" | "estimated" | "provisional" | "measured" | "excluded";
+  priority_reason?: string;
   eligibility: {
-    state: "target" | "needs_review" | "excluded";
+    state: "target" | "estimated" | "needs_review" | "excluded";
     checks: Array<{
       key: string;
       label: string;
@@ -1009,7 +1014,7 @@ export type AdminLeadAssessment = {
   opportunity_groups: Array<{
     key: string;
     label: string;
-    state: "verified" | "no_gap" | "not_evaluated";
+    state: "gap" | "healthy" | "review" | "verified" | "no_gap" | "not_evaluated";
     reasons: string[];
     attributes: AdminLeadOpportunity[];
     // A group reads "verified" the moment one member check fails; these
@@ -1017,15 +1022,16 @@ export type AdminLeadAssessment = {
     // single failed check isn't mistaken for a comprehensive verdict.
     evaluated_count?: number;
     total_count?: number;
-    not_evaluated_reasons?: string[];
+    review_reasons?: string[];
     last_evaluated_at?: string | null;
   }>;
   selected_opportunity?: {
     key: string;
     label: string;
-    state: "verified" | "no_gap" | "not_evaluated";
+    state: "gap" | "healthy" | "review" | "verified" | "no_gap" | "not_evaluated";
     reason: string;
     value: unknown;
+    score?: number | null;
     evidence_confidence?: number | null;
     source_observation_id?: string | null;
   } | null;
@@ -1048,7 +1054,9 @@ export type AdminBusinessSummary = {
   data_quality_label: "reliable" | "review" | "poor" | "refresh_required" | "missing_evidence";
   match_state?: "matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified" | "not_scoped";
   lead_assessment: AdminLeadAssessment;
-  eligibility_state: "target" | "needs_review" | "excluded";
+  lead_priority_score?: number;
+  lead_priority_label?: string;
+  eligibility_state: "target" | "estimated" | "needs_review" | "excluded";
   evidence_coverage_state: "complete" | "partial" | "missing";
   verified_opportunity_count: number;
   data_quality_breakdown: {
@@ -1267,7 +1275,7 @@ export type AdminBusinessPage = {
   page_size: number;
   match_state_counts: Record<"matched" | "not_evaluated" | "not_validated" | "does_not_match" | "not_qualified", number>;
   evaluation_state_counts?: Record<"validated" | "not_evaluated" | "not_validated" | "not_valid", number>;
-  eligibility_state_counts?: Record<"target" | "needs_review" | "excluded", number>;
+  eligibility_state_counts?: Record<"target" | "estimated" | "needs_review" | "excluded", number>;
 };
 
 export type AdminDataSegment = {

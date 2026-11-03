@@ -21,6 +21,7 @@ import type {
   AdminBusinessSummary,
   AdminFactLineageFact,
   AdminFactLineage,
+  AdminLeadOpportunity,
   AdminOverview,
 } from "../types/domain";
 import { formatDate } from "../utils/format";
@@ -49,21 +50,21 @@ const emptyMatchStateCounts = {
 
 const matchStateLabels = {
   matched: "Verified opportunity",
-  not_evaluated: "Not evaluated",
-  not_validated: "Business needs review",
-  does_not_match: "No verified gap",
-  not_qualified: "Business excluded",
+  not_evaluated: "Estimated match",
+  not_validated: "Estimated eligibility",
+  does_not_match: "Measured healthy",
+  not_qualified: "Excluded",
 } as const;
 
 const emptyEligibilityStateCounts = {
   target: 0,
-  needs_review: 0,
+  estimated: 0,
   excluded: 0,
 };
 
 const eligibilityStateLabels = {
   target: "Target businesses",
-  needs_review: "Needs review",
+  estimated: "Estimated eligibility",
   excluded: "Excluded",
 } as const;
 
@@ -123,8 +124,16 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
-      setEligibilityStateCounts(businessPage.eligibility_state_counts || emptyEligibilityStateCounts);
-      setMatchStateCounts(businessPage.match_state_counts || emptyMatchStateCounts);
+      const returnedEligibilityCounts = businessPage.eligibility_state_counts;
+      setEligibilityStateCounts({
+        target: returnedEligibilityCounts?.target ?? 0,
+        estimated: returnedEligibilityCounts?.estimated ?? returnedEligibilityCounts?.needs_review ?? 0,
+        excluded: returnedEligibilityCounts?.excluded ?? 0,
+      });
+      setMatchStateCounts({
+        ...emptyMatchStateCounts,
+        ...(businessPage.match_state_counts || {}),
+      });
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
           ? current
@@ -231,7 +240,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         <div className="admin-metrics admin-business-metrics" aria-label="Business quality overview">
           <Metric label="Businesses" value={overview.total} />
           <Metric label="Checks passed" value={overview.fully_validated} tone="good" />
-          <Metric label="Needs review" value={overview.needs_attention} tone="warn" />
+          <Metric label="Checks unresolved" value={overview.needs_attention} tone="warn" />
           <Metric label="Evidence incomplete" value={overview.incomplete} />
           <Metric label="Audience-eligible" value={overview.searchable} />
         </div>
@@ -280,7 +289,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             All business eligibility ({Object.values(eligibilityStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
           </option>
           {Object.entries(eligibilityStateLabels).map(([value, label]) => (
-            <option key={value} value={value}>{label} ({eligibilityStateCounts[value as keyof typeof eligibilityStateCounts].toLocaleString()})</option>
+            <option key={value} value={value}>{label} ({(eligibilityStateCounts[value as keyof typeof eligibilityStateCounts] ?? 0).toLocaleString()})</option>
           ))}
         </select>
         <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
@@ -322,7 +331,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         </select>
         <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
           <option value="lead_desc">Lead candidates first</option>
-          <option value="lead_asc">Review and exclusions first</option>
+          <option value="lead_asc">Lowest-confidence and exclusions first</option>
           <option value="name">Name A–Z</option>
         </select>
         <button
@@ -402,17 +411,35 @@ function StatusPill({ value }: { value: string }) {
   return <span className={`admin-status-pill is-${value.replace(/_/g, "-")}`}>{value.replace(/_/g, " ")}</span>;
 }
 
+function leadPriority(assessment: AdminBusinessSummary["lead_assessment"]) {
+  const legacyEstimate = assessment.lead_state === "not_evaluated" || assessment.lead_state === "needs_review" || assessment.lead_state === "human_review";
+  const legacyHealthy = assessment.lead_state === "no_opportunity";
+  return {
+    score: assessment.priority_score ?? (legacyHealthy ? 0 : legacyEstimate ? 65 : assessment.lead_state === "excluded" ? 0 : 100),
+    label: assessment.priority_label ?? (legacyHealthy ? "Website appears healthy" : legacyEstimate ? "Estimated website potential" : assessment.lead_state === "excluded" ? "Excluded" : "Website candidate"),
+    confidence: assessment.priority_confidence ?? (legacyHealthy ? "measured" : legacyEstimate ? "estimated" : assessment.lead_state === "excluded" ? "excluded" : "verified"),
+    reason: assessment.priority_reason ?? (assessment.eligibility.reasons.join(" · ") || "Website evidence is available for review."),
+    className: assessment.lead_state === "qualified" || legacyEstimate ? "candidate" : assessment.lead_state === "no_opportunity" ? "healthy" : assessment.lead_state,
+  };
+}
+
+function opportunityStateLabel(state: AdminLeadOpportunity["state"]): string {
+  if (state === "gap" || state === "verified") return "Gap";
+  if (state === "review" || state === "not_evaluated") return "Estimated";
+  return "Healthy";
+}
+
 function formatGroupCoverage(group: AdminBusinessDetail["lead_assessment"]["opportunity_groups"][number]): string {
   const attributes = group.attributes ?? [];
-  const notEvaluatedReasons = group.not_evaluated_reasons
+  const reviewReasons = group.review_reasons
     ?? attributes
-      .filter((item) => item.state === "not_evaluated")
+      .filter((item) => item.state === "review")
       .map((item) => item.label);
   const totalCount = group.total_count ?? attributes.length;
   const reasons = group.reasons ?? [];
   const parts = reasons.length > 0 ? [reasons.join(", ")] : [];
-  if (notEvaluatedReasons.length > 0) {
-    parts.push(`${notEvaluatedReasons.length} of ${totalCount} checks not evaluated`);
+  if (reviewReasons.length > 0) {
+    parts.push(`${reviewReasons.length} of ${totalCount} checks need evidence`);
   }
   if (group.last_evaluated_at) {
     parts.push(`last inspected ${formatDate(group.last_evaluated_at)}`);
@@ -422,18 +449,10 @@ function formatGroupCoverage(group: AdminBusinessDetail["lead_assessment"]["oppo
 
 function LeadAssessmentBadge({ row }: { row: AdminBusinessSummary }) {
   const assessment = row.lead_assessment;
-  const selected = assessment.selected_opportunity;
-  const verifiedOpportunities = assessment.opportunities.filter((item) => item.state === "verified");
-  // Prefer the exact verified website outcome over a broad group label.
-  const label = selected
-    ? selected.state === "verified" ? selected.label : selected.state.replace(/_/g, " ")
-    : verifiedOpportunities[0]?.label || assessment.lead_state.replace(/_/g, " ");
-  const title = assessment.eligibility.reasons.join(" · ")
-    || verifiedOpportunities.map((opportunity) => opportunity.label).join(" · ");
+  const priority = leadPriority(assessment);
   return (
-    <span className={`admin-quality-score is-${assessment.lead_state}`} title={title}>
-      <strong>{label}</strong>
-      <small>{assessment.eligibility.state.replace(/_/g, " ")}</small>
+    <span className={`admin-quality-score is-${priority.className}`} aria-label={`Lead priority score ${Math.round(priority.score)}`}>
+      <strong>{Math.round(priority.score)}</strong>
     </span>
   );
 }
@@ -525,20 +544,28 @@ function BusinessInspector({
 
 function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
   const assessment = detail.lead_assessment;
+  const priority = leadPriority(assessment);
   const opportunity = assessment.selected_opportunity;
-  const verifiedGroups = assessment.opportunity_groups.filter((group) => group.state === "verified");
+  const relevantGroups = assessment.opportunity_groups.filter((group) => group.state !== "healthy" && group.state !== "no_gap");
   return (
     <section className="admin-candidate-score-panel">
-      <header><strong>Lead assessment</strong><span>{assessment.lead_state.replace(/_/g, " ")}</span></header>
-      <p>Eligibility, opportunity, and evidence are evaluated separately.</p>
+      <header><strong>Lead priority</strong><span>{Math.round(priority.score)} / 100</span></header>
+      <p>{priority.label} · {priority.confidence}</p>
       <div>
+        <div className="admin-candidate-component">
+          <span>
+            <strong>{priority.label}</strong>
+            <small>{priority.reason}</small>
+          </span>
+          <span>{Math.round(priority.score)}</span>
+        </div>
         <div className="admin-candidate-component">
           <span>
             <strong>Business eligibility</strong>
             <small>{assessment.eligibility.state.replace(/_/g, " ")}</small>
             <small>{assessment.eligibility.reasons.join(" · ") || "Identity, trade, and market checks passed."}</small>
           </span>
-          <span>{assessment.eligibility.state === "target" ? "Target" : assessment.eligibility.state === "excluded" ? "Exclude" : "Review"}</span>
+            <span>{assessment.eligibility.state === "target" ? "Target" : assessment.eligibility.state === "excluded" ? "Exclude" : "Estimated"}</span>
         </div>
         {opportunity ? (
           <div className="admin-candidate-component">
@@ -546,10 +573,10 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
               <strong>{opportunity.label}</strong>
               <small>{opportunity.reason}</small>
             </span>
-            <span>{opportunity.state.replace(/_/g, " ")}</span>
+            <span>{opportunityStateLabel(opportunity.state)}</span>
           </div>
-        ) : verifiedGroups.length ? (
-          verifiedGroups.map((group) => (
+        ) : relevantGroups.length ? (
+          relevantGroups.map((group) => (
             // Show the measured coverage beside the website outcome so the
             // admin never reads a partial grade as a complete assessment.
             <div className="admin-candidate-component" key={group.key}>
@@ -559,7 +586,7 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
               </span>
               <span>
                 {group.evaluated_count
-                  ?? (group.attributes ?? []).filter((item) => item.state !== "not_evaluated").length}
+                  ?? (group.attributes ?? []).filter((item) => item.state !== "review" && item.state !== "not_evaluated").length}
                 {" of "}
                 {group.total_count ?? (group.attributes ?? []).length} checks
               </span>
@@ -568,16 +595,16 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
         ) : (
           <div className="admin-candidate-component">
             <span>
-              <strong>Website opportunity</strong>
-              <small>Neither a missing website nor an upgrade need is verified yet.</small>
+              <strong>Website assessment</strong>
+              <small>Available website measurements are below the upgrade threshold.</small>
             </span>
-            <span>{assessment.verified_opportunity_count}</span>
+            <span>Healthy</span>
           </div>
         )}
         <div className="admin-candidate-component">
           <span>
             <strong>Evidence coverage</strong>
-            <small>{assessment.evidence_coverage.evaluated} of {assessment.evidence_coverage.required} website opportunity checks evaluated.</small>
+            <small>{assessment.evidence_coverage.evaluated} of {assessment.evidence_coverage.required} website checks have evidence.</small>
           </span>
           <span>{assessment.evidence_coverage.state}</span>
         </div>

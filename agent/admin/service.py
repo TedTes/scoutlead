@@ -117,6 +117,10 @@ OPPORTUNITY_GROUPS = {
     "google_review_count": ("reputation", "Reputation gap"),
 }
 
+ESTIMATED_NO_WEBSITE_SCORE = 85.0
+ESTIMATED_WEBSITE_UPGRADE_SCORE = 65.0
+ESTIMATED_ELIGIBILITY_FACTOR = 0.8
+
 
 class AdminDataService:
     def __init__(self, session: Session, auth: AuthContext) -> None:
@@ -1059,7 +1063,7 @@ class AdminDataService:
             Counter(row["evaluation_state"] for row in rows)
         )
         eligibility_state_counts = {
-            state: 0 for state in ("target", "needs_review", "excluded")
+            state: 0 for state in ("target", "estimated", "excluded")
         }
         eligibility_state_counts.update(
             Counter(row["eligibility_state"] for row in rows)
@@ -1129,7 +1133,7 @@ class AdminDataService:
             rows.sort(
                 key=lambda row: (
                     -_lead_sort_rank(row),
-                    row["verified_opportunity_count"],
+                    row["lead_assessment"]["priority_score"],
                     row["display_name"].lower(),
                 )
             )
@@ -1137,7 +1141,7 @@ class AdminDataService:
             rows.sort(
                 key=lambda row: (
                     _lead_sort_rank(row),
-                    -row["verified_opportunity_count"],
+                    -row["lead_assessment"]["priority_score"],
                     row["display_name"].lower(),
                 )
             )
@@ -2342,6 +2346,8 @@ class AdminDataService:
             **quality,
             "match_state": match_state,
             "lead_assessment": assessment,
+            "lead_priority_score": assessment["priority_score"],
+            "lead_priority_label": assessment["priority_label"],
             "eligibility_state": assessment["eligibility"]["state"],
             "evidence_coverage_state": assessment["evidence_coverage"]["state"],
             "verified_opportunity_count": assessment["verified_opportunity_count"],
@@ -2411,11 +2417,9 @@ class AdminDataService:
 
 def _lead_sort_rank(row: dict[str, Any]) -> int:
     return {
-        "qualified": 0,
-        "no_opportunity": 1,
-        "not_evaluated": 2,
-        "needs_review": 3,
-        "excluded": 4,
+        "candidate": 0,
+        "healthy": 1,
+        "excluded": 2,
     }.get(row["lead_assessment"]["lead_state"], 5)
 
 
@@ -2428,12 +2432,12 @@ def _admin_match_state(
     eligibility = assessment["eligibility"]["state"]
     if eligibility == "excluded":
         return "not_qualified"
-    if eligibility == "needs_review":
+    if eligibility == "estimated":
         return "not_validated"
     opportunity = assessment.get("selected_opportunity")
-    if opportunity is None or opportunity["state"] == "not_evaluated":
+    if opportunity is None or opportunity["state"] == "review":
         return "not_evaluated"
-    if opportunity["state"] == "verified":
+    if opportunity["state"] == "gap":
         return "matched"
     return "does_not_match"
 
@@ -2508,7 +2512,7 @@ def _admin_lead_assessment(
     eligibility_state = (
         "excluded"
         if excluded_reasons
-        else "needs_review"
+        else "estimated"
         if review_reasons
         else "target"
     )
@@ -2524,9 +2528,9 @@ def _admin_lead_assessment(
     ]
     opportunity_groups = _opportunity_groups(opportunities)
     selected_opportunity = opportunities[0] if match_definition is not None else None
-    verified = [item for item in opportunities if item["state"] == "verified"]
+    verified = [item for item in opportunities if item["state"] == "gap"]
     evaluated_count = sum(
-        item["state"] != "not_evaluated" for item in opportunities
+        item["state"] != "review" for item in opportunities
     )
     required_count = len(opportunities)
     coverage_state = (
@@ -2539,20 +2543,19 @@ def _admin_lead_assessment(
     considered_opportunities = (
         [selected_opportunity] if selected_opportunity is not None else opportunities
     )
-    lead_state = (
-        "excluded"
-        if eligibility_state == "excluded"
-        else "needs_review"
-        if eligibility_state == "needs_review"
-        else "qualified"
-        if any(item["state"] == "verified" for item in considered_opportunities)
-        else "not_evaluated"
-        if not considered_opportunities
-        or all(item["state"] == "not_evaluated" for item in considered_opportunities)
-        else "no_opportunity"
+    priority = _website_lead_priority(
+        eligibility_state=eligibility_state,
+        eligibility_reasons=excluded_reasons or review_reasons,
+        facts=facts,
+        opportunities=considered_opportunities,
+        has_website_url=bool(business.website_url),
     )
     return {
-        "lead_state": lead_state,
+        "lead_state": priority["state"],
+        "priority_score": priority["score"],
+        "priority_label": priority["label"],
+        "priority_confidence": priority["confidence"],
+        "priority_reason": priority["reason"],
         "eligibility": {
             "state": eligibility_state,
             "checks": checks,
@@ -2569,7 +2572,7 @@ def _admin_lead_assessment(
             "missing": [
                 item["key"]
                 for item in opportunities
-                if item["state"] == "not_evaluated"
+                if item["state"] == "review"
             ],
         },
     }
@@ -2622,9 +2625,10 @@ def _opportunity_assessment(
         return {
             "key": definition.key,
             "label": label,
-            "state": "not_evaluated",
-            "reason": "Required evidence has not been collected or resolved.",
+            "state": "review",
+            "reason": "Website evidence is incomplete; priority is estimated.",
             "value": fact.get("value") if fact else None,
+            "score": fact.get("score") if fact else None,
             "evidence_confidence": fact.get("evidence_confidence") if fact else None,
             "observed_at": fact.get("observed_at") if fact else None,
         }
@@ -2640,14 +2644,171 @@ def _opportunity_assessment(
     return {
         "key": definition.key,
         "label": label,
-        "state": "verified" if matched else "no_gap",
+        "state": "gap" if matched else "healthy",
         "reason": fact.get("basis") or fact.get("score_reason") or (
-            "Verified opportunity." if matched else "No opportunity found."
+            "Verified website gap." if matched else "Measured website check is healthy."
         ),
         "value": fact.get("value"),
+        "score": round(float(fact["score"]), 1),
         "evidence_confidence": fact.get("evidence_confidence"),
         "source_observation_id": fact.get("source_observation_id"),
         "observed_at": fact.get("observed_at"),
+    }
+
+
+def _website_lead_priority(
+    *,
+    eligibility_state: str,
+    eligibility_reasons: list[str],
+    facts: dict[str, dict[str, Any]],
+    opportunities: list[dict[str, Any] | None],
+    has_website_url: bool,
+) -> dict[str, Any]:
+    """Prioritize verified, measured, and estimated website potential.
+
+    Incomplete evidence receives a confidence-adjusted estimate rather than a
+    dead-end review state. The estimate affects ranking but never rewrites an
+    unknown fact as a verified website defect.
+    """
+
+    considered = [item for item in opportunities if item is not None]
+    if eligibility_state == "excluded":
+        return {
+            "state": "excluded",
+            "score": 0.0,
+            "label": "Excluded",
+            "confidence": "excluded",
+            "reason": " ".join(eligibility_reasons) or "Business is not eligible.",
+        }
+
+    operational = facts.get("business_operational")
+    operational_active = bool(
+        operational
+        and operational.get("evidence_state") == "usable"
+        and operational.get("value") is True
+    )
+    google_profile = facts.get("google_business_profile_present")
+    google_profile_active = bool(
+        google_profile
+        and google_profile.get("evidence_state") == "usable"
+        and google_profile.get("value") is True
+    )
+    website_status = facts.get("website_status")
+    status_value = str(website_status.get("value") or "").strip().lower() if website_status else ""
+    website_ownership = facts.get("website_ownership")
+    ownership_verified = bool(
+        website_ownership
+        and website_ownership.get("evidence_state") == "usable"
+        and str(website_ownership.get("value") or "").strip().lower() == "passed"
+    )
+    eligibility_factor = (
+        1.0 if eligibility_state == "target" else ESTIMATED_ELIGIBILITY_FACTOR
+    )
+
+    def estimated_priority(
+        base_score: float,
+        *,
+        label: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        score = round(base_score * eligibility_factor, 1)
+        eligibility_note = (
+            " " + " ".join(eligibility_reasons)
+            if eligibility_reasons
+            else ""
+        )
+        return {
+            "state": "candidate",
+            "score": score,
+            "label": label,
+            "confidence": "estimated",
+            "reason": f"{reason}{eligibility_note}".strip(),
+        }
+
+    gaps = [item for item in considered if item["state"] == "gap"]
+    missing_gap = next(
+        (item for item in gaps if item["key"] == "website_status"),
+        None,
+    )
+    if missing_gap is not None and operational_active:
+        source = "active Google Business Profile" if google_profile_active else "active business evidence"
+        if eligibility_state == "estimated":
+            return estimated_priority(
+                100.0,
+                label="Website missing",
+                reason=f"No owned website was found for a business supported by {source}.",
+            )
+        return {
+            "state": "candidate",
+            "score": 100.0,
+            "label": "Website missing",
+            "confidence": "verified",
+            "reason": f"No owned website was found for a business supported by {source}.",
+        }
+
+    if status_value == "not_listed" and operational_active and google_profile_active:
+        return estimated_priority(
+            95.0,
+            label="No website listed",
+            reason="The active Google Business Profile lists no website.",
+        )
+
+    if has_website_url and status_value in {"present", "available"} and not ownership_verified:
+        return estimated_priority(
+            80.0,
+            label="Estimated website potential",
+            reason=(
+                "The attached website has not been verified as belonging to this business; "
+                "its quality result is not trusted yet."
+            ),
+        )
+
+    if gaps:
+        strongest = max(gaps, key=lambda item: float(item.get("score") or 0.0))
+        score = round(float(strongest.get("score") or ESTIMATED_WEBSITE_UPGRADE_SCORE), 1)
+        if eligibility_state == "estimated" or missing_gap is not None:
+            return estimated_priority(
+                score,
+                label=strongest["label"],
+                reason=strongest["reason"],
+            )
+        return {
+            "state": "candidate",
+            "score": score,
+            "label": strongest["label"],
+            "confidence": "verified",
+            "reason": strongest["reason"],
+        }
+
+    needs_review = [item for item in considered if item["state"] == "review"]
+    if eligibility_state == "estimated" or needs_review or not considered:
+        reasons = [item["reason"] for item in needs_review]
+        no_website_signal = not has_website_url or status_value in {"", "not_listed", "missing"}
+        return estimated_priority(
+            ESTIMATED_NO_WEBSITE_SCORE
+            if no_website_signal
+            else ESTIMATED_WEBSITE_UPGRADE_SCORE,
+            label=(
+                "Estimated missing-website potential"
+                if no_website_signal
+                else "Estimated website-upgrade potential"
+            ),
+            reason=" ".join(reasons)
+            or "Website evidence is incomplete; priority is estimated from the available footprint.",
+        )
+
+    measured_scores = [
+        float(item["score"])
+        for item in considered
+        if item.get("score") is not None
+    ]
+    score = round(max(measured_scores, default=0.0), 1)
+    return {
+        "state": "healthy",
+        "score": score,
+        "label": "Website appears healthy",
+        "confidence": "measured",
+        "reason": "Available website checks did not cross the upgrade threshold.",
     }
 
 
@@ -2670,16 +2831,16 @@ def _opportunity_groups(opportunities: list[dict[str, Any]]) -> list[dict[str, A
     result = []
     for group in grouped.values():
         attributes = group["attributes"]
-        verified = [item for item in attributes if item["state"] == "verified"]
-        not_evaluated = [
-            item for item in attributes if item["state"] == "not_evaluated"
+        verified = [item for item in attributes if item["state"] == "gap"]
+        needs_review = [
+            item for item in attributes if item["state"] == "review"
         ]
         state = (
-            "verified"
+            "gap"
             if verified
-            else "not_evaluated"
-            if not_evaluated
-            else "no_gap"
+            else "review"
+            if needs_review
+            else "healthy"
         )
         last_evaluated_at = max(
             (
@@ -2694,16 +2855,13 @@ def _opportunity_groups(opportunities: list[dict[str, Any]]) -> list[dict[str, A
                 **group,
                 "state": state,
                 "reasons": [item["label"] for item in verified]
-                or [item["label"] for item in not_evaluated],
-                # A group reads "verified" the moment any single member check
-                # fails, which is correct for that one finding but does not
-                # mean the whole category was comprehensively assessed. These
-                # fields let callers show the real coverage (e.g. "2 of 6
-                # checks failed, 4 not evaluated") instead of implying a
-                # broad verdict was reached.
-                "evaluated_count": len(attributes) - len(not_evaluated),
+                or [item["label"] for item in needs_review],
+                # A group can contain both measured findings and checks that
+                # still need evidence. Keep that coverage explicit so a
+                # partial grade is never presented as comprehensive.
+                "evaluated_count": len(attributes) - len(needs_review),
                 "total_count": len(attributes),
-                "not_evaluated_reasons": [item["label"] for item in not_evaluated],
+                "review_reasons": [item["label"] for item in needs_review],
                 "last_evaluated_at": last_evaluated_at,
             }
         )
