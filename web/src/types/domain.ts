@@ -1021,6 +1021,14 @@ export type AdminBusinessSummary = {
       status: string;
       confidence: number | null;
     }>;
+    informational_checks?: Array<{
+      key: string;
+      label: string;
+      score: number | null;
+      status: string;
+      confidence: number | null;
+      required?: boolean;
+    }>;
     opportunity_scores: Array<{
       key: string;
       label: string;

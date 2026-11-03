@@ -1566,6 +1566,9 @@ class AdminDataService:
                 "required_checks": detail["data_quality_breakdown"].get(
                     "validation_scores", []
                 ),
+                "informational_checks": detail["data_quality_breakdown"].get(
+                    "informational_checks", []
+                ),
                 "reasons": detail["data_quality_breakdown"].get(
                     "quality_reasons", []
                 ),
@@ -2453,18 +2456,20 @@ def _admin_candidate_score(
                 if operational_usable and operational is not None
                 else 0.0
             ),
-            hard_gate=True,
+            # Missing operational evidence is not evidence that the business is
+            # closed. Only a current, explicit inactive fact is a hard veto.
+            hard_gate=bool(operational_usable and operational_value is False),
             status=(
                 "passed" if operational_usable and operational_value is True
                 else "failed" if operational_usable and operational_value is False
-                else "missing"
+                else "unknown"
             ),
             reason=(
                 "Business is active"
-                if operational_value is True
+                if operational_usable and operational_value is True
                 else "Business is confirmed inactive"
-                if operational_value is False
-                else "Operational status is unverified"
+                if operational_usable and operational_value is False
+                else "Operational status is unverified; no closure was reported"
             ),
         ),
     )
@@ -2682,17 +2687,6 @@ def _attribute_data_quality_score(
                 default=None,
             ),
         },
-        {
-            "key": "business_operational",
-            "label": "Operational status",
-            "score": operational_score,
-            "status": operational_status,
-            "confidence": (
-                operational_fact["evidence_confidence"]
-                if operational_fact is not None
-                else None
-            ),
-        },
         *[
         {
             "key": key,
@@ -2715,9 +2709,23 @@ def _attribute_data_quality_score(
         )
         ],
     ]
+    operational_component = {
+        "key": "business_operational",
+        "label": "Operational status",
+        "score": operational_score,
+        "status": operational_status,
+        "confidence": (
+            operational_fact["evidence_confidence"]
+            if operational_fact is not None
+            else None
+        ),
+        "required": False,
+    }
     pending = any(component["score"] is None for component in validation_components)
     score = (
-        None
+        0
+        if operational_status == "failed"
+        else None
         if pending
         else round(
             sum(int(component["score"]) for component in validation_components)
@@ -2742,7 +2750,7 @@ def _attribute_data_quality_score(
     )
     limitations = []
     quality_reasons = []
-    for component in validation_components:
+    for component in [*validation_components, operational_component]:
         component_key = str(component["key"]).upper()
         if component["status"] == "passed":
             quality_reasons.append(
@@ -2760,6 +2768,18 @@ def _attribute_data_quality_score(
                             else "."
                         )
                     ),
+                }
+            )
+            continue
+        if component["key"] == "business_operational" and component["status"] != "failed":
+            quality_reasons.append(
+                {
+                    "code": "BUSINESS_OPERATIONAL_UNKNOWN",
+                    "impact": "neutral",
+                    "severity": "info",
+                    "check": component["key"],
+                    "score": None,
+                    "message": "Operational status is unverified; no closure was reported.",
                 }
             )
             continue
@@ -2789,12 +2809,14 @@ def _attribute_data_quality_score(
         f'{item["label"]} evidence is {item["evidence_state"]}'
         for item in fact_attributes
         if item["evidence_state"] != "usable"
+        and item["key"] != "business_operational"
     )
     return {
         "data_quality_score": score,
         "data_quality_label": label,
         "data_quality_breakdown": {
             "validation_scores": validation_components,
+            "informational_checks": [operational_component],
             "opportunity_scores": fact_attributes,
             "scored_attribute_count": sum(
                 item["score"] is not None for item in fact_attributes

@@ -596,6 +596,7 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
       score: detail.data_quality_score,
       label: detail.data_quality_label,
       required_checks: detail.data_quality_breakdown.validation_scores,
+      informational_checks: detail.data_quality_breakdown.informational_checks || [],
       reasons: detail.data_quality_breakdown.quality_reasons,
       limitations: detail.data_quality_breakdown.limitations,
     },

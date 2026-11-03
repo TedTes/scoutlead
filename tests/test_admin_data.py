@@ -137,7 +137,7 @@ def _add_operational_fact(session, business, *, confidence: int = 95):
             quality_state="published",
             quality_policy_version=1,
             observed_at=now,
-            expires_at=now + timedelta(days=14),
+            expires_at=now + timedelta(days=90),
             source_observation_id=observation.id,
             resolver_version=1,
         )
@@ -414,7 +414,7 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         assert {
             reason["code"]
             for reason in rows[0]["data_quality_breakdown"]["quality_reasons"]
-        } >= {"BUSINESS_IDENTITY_MISSING", "BUSINESS_OPERATIONAL_MISSING"}
+        } >= {"BUSINESS_IDENTITY_MISSING", "BUSINESS_OPERATIONAL_UNKNOWN"}
         assert [row["id"] for row in reliable_rows] == [reliable.id]
         assert reliable_rows[0]["data_quality_breakdown"]["fact_count"] == 2
         opportunity_scores = {
@@ -435,10 +435,19 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
             ]
         } == {
             "business_identity": 100,
-            "business_operational": 100,
             "trade": 100,
             "location": 100,
         }
+        assert reliable_rows[0]["data_quality_breakdown"]["informational_checks"] == [
+            {
+                "key": "business_operational",
+                "label": "Operational status",
+                "score": 100,
+                "status": "passed",
+                "confidence": 100,
+                "required": False,
+            }
+        ]
         assert all(
             reason["impact"] == "positive"
             for reason in reliable_rows[0]["data_quality_breakdown"]["quality_reasons"]
@@ -470,18 +479,21 @@ def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
         )
         operational_fact.expires_at = now - timedelta(days=1)
         session.commit()
-        refresh_required = next(
+        still_reliable = next(
             row
             for row in service.list_businesses(
-                **params, quality="refresh_required", sort="score_desc"
+                **params, quality="reliable", sort="score_desc"
             )["items"]
             if row["id"] == reliable.id
         )
-        assert refresh_required["data_quality_score"] is None
-        assert refresh_required["data_quality_label"] == "refresh_required"
-        assert "Operational status evidence requires refresh" in refresh_required[
+        assert still_reliable["data_quality_score"] == 100
+        assert still_reliable["data_quality_label"] == "reliable"
+        assert "Operational status evidence requires refresh" not in still_reliable[
             "data_quality_breakdown"
         ]["limitations"]
+        assert still_reliable["data_quality_breakdown"]["informational_checks"][0][
+            "status"
+        ] == "refresh_required"
 
 
 def test_admin_businesses_filter_by_the_same_attribute_gate_as_audiences() -> None:
@@ -576,7 +588,10 @@ def test_admin_businesses_filter_by_the_same_attribute_gate_as_audiences() -> No
                         expires_at=now + timedelta(days=30),
                     )
                 )
-            _add_operational_fact(session, business)
+            # Missing operational evidence is neutral. Keep the matching lead
+            # unverified and give only the non-matching business an active fact.
+            if business.id == has_form.id:
+                _add_operational_fact(session, business)
             observation = SourceObservationModel(
                 id=new_id("observation"),
                 business_id=business.id,
