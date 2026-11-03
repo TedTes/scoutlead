@@ -1394,6 +1394,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         matched_signal = rows[0]["raw"]["profile_match"]["matched_signals"][0]
         assert matched_signal["source_observation_id"]
         assert matched_signal["source"] == "google_places"
+        assert matched_signal["pitch_eligible"] is False
         assert {
             "signal_key": matched_signal["signal_key"],
             "fact_key": matched_signal["fact_key"],

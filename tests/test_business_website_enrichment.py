@@ -76,6 +76,12 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert enrichment["has_testimonials"] is False
         assert enrichment["has_privacy_policy"] is False
         assert enrichment["has_complete_contact_details"] is True
+        assert enrichment["inspection"]["scope"] == {
+            "homepage_complete": True,
+            "contact_intent_page_complete": True,
+            "quote_intent_page_complete": True,
+            "mobile_render_complete": False,
+        }
         assert observation.raw_payload["digital_opportunity"]["score"] == 15
         assert observation.raw_payload["digital_opportunity"]["level"] == "low"
 

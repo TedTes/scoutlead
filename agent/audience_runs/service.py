@@ -28,6 +28,7 @@ from db.models import (
 )
 from job_queue.service import QueueService
 from seeding.batches import active_membership_condition
+from signal_collection.requirements import fact_requires_collection
 from shared.geospatial import haversine_distance_km_expression
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
@@ -247,13 +248,7 @@ class AudienceRunService:
                 SignalDefinitionModel.status == "active",
                 SignalDefinitionModel.collector_key.is_not(None),
                 SignalDefinitionModel.opportunity_direction != "none",
-                or_(
-                    fact.id.is_(None),
-                    fact.quality_state == "staged",
-                    fact.resolution_state != "confirmed",
-                    fact.expires_at.is_(None),
-                    fact.expires_at <= utcnow(),
-                ),
+                fact_requires_collection(fact),
                 BusinessNicheMembershipModel.niche_id.in_(
                     [niche.id for niche in niches]
                 ),

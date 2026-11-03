@@ -21,6 +21,10 @@ from business_validation.repository import ValidationRepository, ValidationResul
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import utcnow
 from signal_collection.service import extract_signal_value
+from signal_validation.pitch_scope import (
+    PAGE_SCOPED_NEGATIVE_SIGNALS,
+    pitch_scope_decision,
+)
 from source_observations.integrity import evaluate_observation_integrity
 from source_observations.contracts import expected_sources_for
 
@@ -343,7 +347,11 @@ def _website_evidence_check(
         return False, f"Website signal {signal_key!r} has no evidence entry."
     if value is True and not evidence:
         return False, f"Positive website signal {signal_key!r} has no matching element."
-    if value is False and inspection.get("complete") is not True:
+    if value is False and signal_key in PAGE_SCOPED_NEGATIVE_SIGNALS:
+        eligible, detail = pitch_scope_decision(signal_key, value, payload)
+        if not eligible:
+            return False, detail
+    elif value is False and inspection.get("complete") is not True:
         return False, f"Negative website signal {signal_key!r} came from an incomplete DOM crawl."
     return True, (
         f"Website signal {signal_key!r} is backed by {len(evidence)} matching element(s)."

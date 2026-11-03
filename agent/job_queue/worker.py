@@ -32,6 +32,7 @@ from job_queue.service import QueueService
 from messages.service import MessageService
 from search_evaluations.service import SearchEvaluationService
 from signal_collection.service import SignalCollectionService
+from signal_collection.scheduler import enqueue_due_signal_collections
 from signal_validation.service import SignalValidationService
 from business_index.schemas import SearchContract
 from products.repository import ProductRepository
@@ -47,6 +48,7 @@ _last_business_index_scheduler_tick = 0.0
 _last_outcome_maintenance_date: date | None = None
 _last_audience_run_scheduler_tick = 0.0
 _last_evidence_expiry_tick = 0.0
+_last_signal_collection_tick = 0.0
 
 
 def run_once() -> bool:
@@ -534,6 +536,7 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
     global _last_audience_run_scheduler_tick
     global _last_business_index_scheduler_tick
     global _last_evidence_expiry_tick
+    global _last_signal_collection_tick
     global _last_outcome_maintenance_date, _last_territory_scheduler_tick
     now = monotonic()
     if now - _last_audience_run_scheduler_tick >= 60:
@@ -548,6 +551,9 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
     if now - _last_evidence_expiry_tick >= 3600:
         enforce_fact_publication_invariants(session)
         _last_evidence_expiry_tick = now
+    if now - _last_signal_collection_tick >= 3600:
+        enqueue_due_signal_collections(session, limit=50, batch_size=10)
+        _last_signal_collection_tick = now
     today = datetime.now(timezone.utc).date()
     if _last_outcome_maintenance_date != today:
         run_outcome_maintenance(

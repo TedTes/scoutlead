@@ -25,7 +25,7 @@ from shared.utils import utcnow
 
 
 RESOLVER_VERSION = 1
-WEBSITE_EXTRACTOR_VERSION = 3
+WEBSITE_EXTRACTOR_VERSION = 4
 WEBSITE_COLLECTORS = {"website_http", "website_dom"}
 GOOGLE_SOURCES = {"google_places", "google_places_seed"}
 DOMAIN_COLLECTORS = {"domain_rdap"}

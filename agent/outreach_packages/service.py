@@ -548,6 +548,8 @@ def _outreach_eligible_matched_signals(
     details = signal_details if isinstance(signal_details, dict) else {}
     confirmed = []
     for item in matched:
+        if item.get("pitch_eligible") is not True:
+            continue
         signal_key = str(item.get("signal_key") or "")
         detail = details.get(signal_key)
         detail_confidence = (
@@ -558,8 +560,6 @@ def _outreach_eligible_matched_signals(
             confirmed.append(item)
     if confirmed:
         return confirmed
-    if int(profile_match.get("confirmed_signal_count") or 0) >= len(matched):
-        return matched
     return []
 
 
@@ -620,6 +620,7 @@ def _evidence_fingerprint(result: AudienceResultModel) -> str:
             "confidence": item.get("confidence"),
             "source_observation_id": item.get("source_observation_id"),
             "observed_at": item.get("observed_at"),
+            "pitch_eligible": item.get("pitch_eligible"),
         }
         for item in matched[:6]
     ]

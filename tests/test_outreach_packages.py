@@ -245,6 +245,27 @@ def test_outreach_package_rejects_unverified_opportunity() -> None:
             service.generate(result.id)
 
 
+def test_outreach_package_rejects_claim_without_pitch_scope() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        snapshot = dict(result.match_snapshot)
+        raw = dict(snapshot["raw"])
+        profile_match = dict(raw["profile_match"])
+        matched = [dict(item) for item in profile_match["matched_signals"]]
+        matched[0]["pitch_eligible"] = False
+        profile_match["matched_signals"] = matched
+        raw["profile_match"] = profile_match
+        snapshot["raw"] = raw
+        result.match_snapshot = snapshot
+        session.commit()
+
+        with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
+            OutreachPackageService(
+                session,
+                workspace_id="workspace:first",
+            ).generate(result.id)
+
+
 def test_outreach_package_rejects_unsupported_service_signal_pair() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=True)
@@ -259,6 +280,7 @@ def test_outreach_package_rejects_unsupported_service_signal_pair() -> None:
                     "signal_key": "google_review_count",
                     "value": 5,
                     "confidence": "confirmed",
+                    "pitch_eligible": True,
                 }
             ],
         }
@@ -291,6 +313,7 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
                 "fact_key": "quote_or_booking_form_present",
                 "value": False,
                 "confidence": "confirmed",
+                "pitch_eligible": True,
             },
         ]
         raw["profile_match"] = profile_match
@@ -410,7 +433,15 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
     )
     session.add(run)
     session.flush()
-    matched = [{"signal_key": "no_quote_flow", "fact_key": "quote_or_booking_form_present", "value": False}] if confirmed else []
+    matched = [
+        {
+            "signal_key": "no_quote_flow",
+            "fact_key": "quote_or_booking_form_present",
+            "value": False,
+            "confidence": "confirmed",
+            "pitch_eligible": True,
+        }
+    ] if confirmed else []
     result = AudienceResultModel(
         id=new_id("audience_result"),
         run_id=run.id,

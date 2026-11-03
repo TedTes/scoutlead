@@ -470,7 +470,14 @@ class WebsiteEnrichmentClient:
         base_url = _site_base_url(website_url)
         if not base_url:
             return [website_url]
-        urls = [website_url, *[urljoin(base_url, path) for path in COMMON_PATHS]]
+        # A provider may link to a location/service page rather than the
+        # homepage. Always inspect the canonical root as its own scope before
+        # drawing homepage-level conclusions.
+        urls = [
+            website_url,
+            base_url,
+            *[urljoin(base_url, path) for path in COMMON_PATHS],
+        ]
         return list(dict.fromkeys(urls))
 
     def _fetch_page(self, url: str, *, inspect_content: bool = True) -> WebsitePage:
@@ -1190,16 +1197,42 @@ def _enrichment_from_pages(
         if has_mobile_viewport is True
         else []
     )
+    page_scope = [
+        {
+            "page": page,
+            "intents": _inspection_intents(page, website_url),
+        }
+        for page in pages
+    ]
     page_signals["inspection"] = {
         "complete": bool(page_signals.get("crawl_complete")),
         "pages": [
             {
-                "url": page.url,
-                "status_code": page.status_code,
-                "dom_complete": page.dom_complete,
+                "url": item["page"].url,
+                "status_code": item["page"].status_code,
+                "dom_complete": item["page"].dom_complete,
+                "intents": item["intents"],
             }
-            for page in pages
+            for item in page_scope
         ],
+        "scope": {
+            "homepage_complete": any(
+                "homepage" in item["intents"] and item["page"].dom_complete
+                for item in page_scope
+            ),
+            "contact_intent_page_complete": any(
+                "contact" in item["intents"] and item["page"].dom_complete
+                for item in page_scope
+            ),
+            "quote_intent_page_complete": any(
+                "quote_or_booking" in item["intents"]
+                and item["page"].dom_complete
+                for item in page_scope
+            ),
+            # The current browser renderer does not record a mobile viewport
+            # contract, so absence of click-to-call cannot yet be pitched.
+            "mobile_render_complete": False,
+        },
     }
     page_signals["https_available"] = uses_https
     page_signals["https_enforced"] = https_enforced
@@ -2157,6 +2190,29 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _inspection_intents(page: WebsitePage, website_url: str) -> list[str]:
+    parsed = urlparse(page.url)
+    base = _site_base_url(website_url)
+    base_parsed = urlparse(base) if base else None
+    path = (parsed.path or "/").lower().rstrip("/") or "/"
+    context = f"{path} {page.title}".lower()
+    intents: list[str] = []
+    if (
+        path == "/"
+        and base_parsed is not None
+        and parsed.netloc.lower() == base_parsed.netloc.lower()
+    ):
+        intents.append("homepage")
+    if re.search(r"\b(contact|contact-us|get-in-touch)\b", context):
+        intents.append("contact")
+    if re.search(
+        r"\b(quote|estimate|book|booking|schedule|appointment|request)\b",
+        context,
+    ):
+        intents.append("quote_or_booking")
+    return intents
 
 
 def _site_base_url(value: str) -> str | None:

@@ -36,6 +36,7 @@ from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adj
 from shared.errors import ConflictError
 from shared.geospatial import haversine_distance_km_expression
 from shared.utils import utcnow
+from signal_validation.pitch_scope import pitch_scope_decision
 from seeding.batches import active_membership_condition, observation_is_quarantined
 
 
@@ -486,12 +487,26 @@ class ProfileMatchService:
                 "opportunity_score": fact.attribute_score if fact is not None else None,
             }
             if fact_observation is not None:
+                pitch_eligible, pitch_reason = pitch_scope_decision(
+                    spec.fact_key,
+                    fact_value(fact),
+                    fact_observation.raw_payload or {},
+                )
                 evidence.update(
                     {
                         "source_observation_id": fact_observation.id,
                         "source": fact_observation.source,
                         "source_url": fact_observation.source_url,
                         "observed_at": fact_observation.observed_at.isoformat(),
+                        "pitch_eligible": pitch_eligible,
+                        "pitch_reason": pitch_reason,
+                    }
+                )
+            else:
+                evidence.update(
+                    {
+                        "pitch_eligible": False,
+                        "pitch_reason": "Finding has no source observation.",
                     }
                 )
             signal_evidence[spec.key] = evidence
@@ -503,6 +518,8 @@ class ProfileMatchService:
                 "confidence": evidence["confidence"],
                 "evidence_confidence": evidence["evidence_confidence"],
                 "opportunity_score": evidence["opportunity_score"],
+                "pitch_eligible": evidence["pitch_eligible"],
+                "pitch_reason": evidence["pitch_reason"],
                 **(
                     {
                         "source_observation_id": evidence["source_observation_id"],
