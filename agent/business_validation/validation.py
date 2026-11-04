@@ -13,7 +13,7 @@ from canonical.website_evidence import (
     assess_website_ownership,
 )
 from canonical.normalization import first_raw_text, nested_raw
-from canonical.business_entity import assess_provider_business_entity
+from canonical.business_entity import GOOGLE_GENERIC_TYPES, assess_provider_business_entity
 from db.models import (
     BusinessIndexSegmentModel,
     BusinessModel,
@@ -27,7 +27,7 @@ from shared.geospatial import haversine_distance_km
 from territories.markets import market_center, market_matches_location
 
 
-VALIDATOR_VERSION = 6
+VALIDATOR_VERSION = 7
 BLOCKED_HOSTS = BLOCKED_WEBSITE_HOSTS
 GENERIC_TITLES = {
     "renovation",
@@ -384,7 +384,9 @@ class BusinessValidationService:
             "structured_categories": structured_categories,
         }
         text = _normalized(json.dumps(independent_fields, default=str))
-        matched = sorted(term for term in terms if _contains_trade_term(text, term))
+        matched = sorted(
+            term for term in terms if _contains_trade_term(text, term, allow_plural=True)
+        )
         config = getattr(segment.niche, "search_config", {}) or search_config_for_slug(slug)
         excluded_terms = set(config.get("exclude_terms") or [])
         excluded = sorted(
@@ -405,10 +407,19 @@ class BusinessValidationService:
             for term in excluded_terms
             if _contains_trade_term(decisive_text, term, allow_suffix=True)
         )
-        structured_text = _normalized(json.dumps(structured_categories, default=str))
+        specific_structured_categories = [
+            value
+            for value in structured_categories
+            if _normalized(str(value)).replace(" ", "_") not in GOOGLE_GENERIC_TYPES
+        ]
+        structured_text = _normalized(
+            json.dumps(specific_structured_categories, default=str)
+        )
         structured_present = bool(structured_text)
         structured_matches = sorted(
-            term for term in terms if _contains_trade_term(structured_text, term)
+            term
+            for term in terms
+            if _contains_trade_term(structured_text, term, allow_plural=True)
         )
         status = (
             "failed"
@@ -459,6 +470,7 @@ class BusinessValidationService:
                 {
                     "matched_terms": matched,
                     "structured_categories": structured_categories,
+                    "specific_structured_categories": specific_structured_categories,
                     "structured_matched_terms": structured_matches,
                     "excluded_terms": excluded,
                     "decisive_excluded_terms": decisive_exclusions,
@@ -564,7 +576,13 @@ def _normalized(value: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
 
 
-def _contains_trade_term(text: str, term: str, *, allow_suffix: bool = False) -> bool:
+def _contains_trade_term(
+    text: str,
+    term: str,
+    *,
+    allow_suffix: bool = False,
+    allow_plural: bool = False,
+) -> bool:
     """Match a complete normalized trade word or phrase, never a substring.
 
     For example, ``paint`` must not classify ``Painted Post Convenience`` as a
@@ -577,7 +595,13 @@ def _contains_trade_term(text: str, term: str, *, allow_suffix: bool = False) ->
     if not normalized_text or not normalized_term:
         return False
     escaped = re.escape(normalized_term)
-    suffix = r"(?:s|er|ers|ing|ed)?" if allow_suffix else ""
+    suffix = (
+        r"(?:s|er|ers|ing|ed)?"
+        if allow_suffix
+        else r"s?"
+        if allow_plural and not normalized_term.endswith("s")
+        else ""
+    )
     return re.search(
         rf"(?<![a-z0-9]){escaped}{suffix}(?![a-z0-9])",
         normalized_text,

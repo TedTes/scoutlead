@@ -284,6 +284,45 @@ def test_partial_trade_word_and_conflicting_provider_category_fail_trade() -> No
     assert "convenience_store" in result.evidence[0]["structured_categories"]
 
 
+def test_generic_google_types_do_not_override_supported_trade() -> None:
+    now = utcnow()
+    result = BusinessValidationService(None)._trade(
+        SimpleNamespace(id="business_aura", phone="4165550100", domain="aurahomepainters.com"),
+        SimpleNamespace(
+            id="source_aura",
+            source_observation_id="observation_aura",
+            provider_id="google_places",
+            external_id="places/aura",
+            title="Aura Home Painters Inc",
+            raw_payload={
+                "types": ["point_of_interest", "establishment"],
+                "nationalPhoneNumber": "(416) 555-0100",
+                "websiteUri": "https://aurahomepainters.com/",
+                "displayName": {"text": "Aura Home Painters Inc"},
+            },
+        ),
+        SimpleNamespace(
+            niche_id="niche_painting",
+            market_key="toronto",
+            niche=SimpleNamespace(
+                slug="home_service_painting",
+                label="Painting",
+                category="painting contractor",
+                search_config={
+                    "include_terms": ["paint", "painter", "painting"],
+                    "exclude_terms": ["paint store"],
+                },
+            ),
+        ),
+        now,
+        now,
+    )
+
+    assert result.status == "passed"
+    assert "painter" in result.evidence[0]["matched_terms"]
+    assert result.evidence[0]["specific_structured_categories"] == []
+
+
 def test_excluded_trade_in_business_title_remains_a_failure() -> None:
     now = utcnow()
     result = BusinessValidationService(None)._trade(
