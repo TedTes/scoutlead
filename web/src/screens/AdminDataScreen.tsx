@@ -40,22 +40,6 @@ const emptyOverview: AdminOverview = {
   match_attributes: [],
 };
 
-const emptyMatchStateCounts = {
-  matched: 0,
-  not_evaluated: 0,
-  not_validated: 0,
-  does_not_match: 0,
-  not_qualified: 0,
-};
-
-const matchStateLabels = {
-  matched: "Verified opportunity",
-  not_evaluated: "Estimated match",
-  not_validated: "Estimated eligibility",
-  does_not_match: "Measured healthy",
-  not_qualified: "Excluded",
-} as const;
-
 export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [overview, setOverview] = useState(emptyOverview);
@@ -64,11 +48,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("lead_desc");
-  const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
-  const [matchAttribute, setMatchAttribute] = useState("");
-  const [matchState, setMatchState] = useState("all");
-  const [matchStateCounts, setMatchStateCounts] = useState(emptyMatchStateCounts);
   const [selectedId, setSelectedId] = useState("");
   const [selectedBusinesses, setSelectedBusinesses] = useState<Record<string, AdminBusinessSummary>>({});
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
@@ -92,10 +72,8 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       const businessPage = await api.getAdminBusinesses({
         q: search,
         sort,
-        status,
+        status: "active",
         niche_slug: selectedNiche,
-        match_attribute: matchAttribute,
-        match_state: matchState,
         page,
         page_size: 50,
       });
@@ -109,10 +87,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
-      setMatchStateCounts({
-        ...emptyMatchStateCounts,
-        ...(businessPage.match_state_counts || {}),
-      });
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
           ? current
@@ -125,7 +99,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
+  }, [api, nicheSlug, page, search, sort]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -138,10 +112,10 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       return;
     }
     const selectedMarketKey = rows.find((row) => row.id === selectedId)?.market_key || "";
-    void api.getAdminBusiness(selectedId, matchAttribute, nicheSlug, selectedMarketKey).then(setDetail).catch((cause) => {
+    void api.getAdminBusiness(selectedId, nicheSlug, selectedMarketKey).then(setDetail).catch((cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
-  }, [allowed, api, matchAttribute, nicheSlug, rows, selectedId]);
+  }, [allowed, api, nicheSlug, rows, selectedId]);
 
   const refreshDetail = async (result?: AdminBusinessDetail) => {
     if (result) {
@@ -182,7 +156,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           const [businessDetail, businessLineage] = await Promise.all([
             api.getAdminBusiness(
               businessId,
-              matchAttribute,
               selectedBusinesses[businessId]?.niche_slug || nicheSlug,
               selectedBusinesses[businessId]?.market_key || "",
             ),
@@ -265,43 +238,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
         </label>
-        <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
-          const value = event.target.value;
-          setMatchAttribute(value);
-          setMatchState("all");
-          setSort("lead_desc");
-          setPage(1);
-        }}>
-          <option value="">All match attributes</option>
-          {Array.from(new Set((overview.match_attributes || []).map((attribute) => attribute.category))).map((category) => (
-            <optgroup key={category} label={category.replace(/_/g, " ")}>
-              {(overview.match_attributes || []).filter((attribute) => attribute.category === category).map((attribute) => (
-                <option key={attribute.key} value={attribute.key}>{attribute.label}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        {matchAttribute ? (
-          <select
-            aria-label="Attribute match result"
-            title="Filter the selected attribute's result"
-            value={matchState}
-            onChange={(event) => { setMatchState(event.target.value); setPage(1); }}
-          >
-            <option value="all">
-              All attribute results ({Object.values(matchStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
-            </option>
-            {Object.entries(matchStateLabels).map(([value, label]) => (
-              <option key={value} value={value}>{label} ({matchStateCounts[value as keyof typeof matchStateCounts].toLocaleString()})</option>
-            ))}
-          </select>
-        ) : null}
-        <select aria-label="Business state" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
-          <option value="">All states</option>
-          <option value="active">Active</option>
-          <option value="quarantined">Quarantined</option>
-          <option value="archived">Archived</option>
-        </select>
         <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
           <option value="lead_desc">Lead candidates first</option>
           <option value="lead_asc">Lowest lead score first</option>
@@ -342,7 +278,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                 type="checkbox"
                 onChange={toggleVisibleSelection}
               /></th>
-              <th>Business</th><th>Market</th><th>Lead assessment</th><th>State</th>
+              <th>Business</th><th>Market</th><th>Lead assessment</th>
             </tr></thead>
             <tbody>
               {rows.map((row) => (
@@ -351,10 +287,9 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
                   <td><strong>{row.display_name}</strong><span>{row.niche_label || "Unclassified"}</span></td>
                   <td><strong>{row.market_key || "Unknown"}</strong><span>{row.address || row.geography || "No address"}</span></td>
                   <td><LeadAssessmentBadge row={row} /></td>
-                  <td><StatusPill value={row.status} /></td>
                 </tr>
               ))}
-              {!loading && !rows.length ? <tr><td colSpan={5} className="admin-empty">No businesses match these filters.</td></tr> : null}
+              {!loading && !rows.length ? <tr><td colSpan={4} className="admin-empty">No businesses match these filters.</td></tr> : null}
             </tbody>
           </table>
           <footer className="admin-pagination">
@@ -378,10 +313,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
 
 function Metric({ label, value, tone = "" }: { label: string; value: number; tone?: string }) {
   return <div className={`admin-metric ${tone}`}><span>{label}:</span><strong>{value.toLocaleString()}</strong></div>;
-}
-
-function StatusPill({ value }: { value: string }) {
-  return <span className={`admin-status-pill is-${value.replace(/_/g, "-")}`}>{value.replace(/_/g, " ")}</span>;
 }
 
 function leadPriority(assessment: AdminBusinessSummary["lead_assessment"]) {

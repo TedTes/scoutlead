@@ -901,12 +901,13 @@ class AdminDataService:
         return self._data_job_summary(root, include_samples=True)
 
     def overview(self) -> dict[str, Any]:
-        businesses = list(self.session.scalars(select(BusinessModel)))
+        all_businesses = list(self.session.scalars(select(BusinessModel)))
+        businesses = [business for business in all_businesses if business.status == "active"]
         states = self._validation_states(
             [business.id for business in businesses],
             include_quality=False,
         )
-        status_counts = Counter(business.status for business in businesses)
+        status_counts = Counter(business.status for business in all_businesses)
         validation_counts = Counter(states[business.id]["state"] for business in businesses)
         trade_rows = list(
             self.session.execute(
@@ -921,7 +922,14 @@ class AdminDataService:
                     BusinessNicheMembershipModel,
                     BusinessNicheMembershipModel.niche_id == NicheModel.id,
                 )
-                .where(NicheModel.active.is_(True))
+                .join(
+                    BusinessModel,
+                    BusinessModel.id == BusinessNicheMembershipModel.business_id,
+                )
+                .where(
+                    NicheModel.active.is_(True),
+                    BusinessModel.status == "active",
+                )
                 .group_by(NicheModel.slug, NicheModel.label)
                 .order_by(
                     func.count(func.distinct(BusinessNicheMembershipModel.business_id)).desc(),

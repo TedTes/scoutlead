@@ -84,9 +84,8 @@ export class ApiClient {
     return this.request<AdminBusinessPage>(`/admin/businesses?${query.toString()}`);
   }
 
-  getAdminBusiness(id: string, matchAttribute = "", nicheSlug = "", marketKey = "") {
+  getAdminBusiness(id: string, nicheSlug = "", marketKey = "") {
     const query = new URLSearchParams();
-    if (matchAttribute) query.set("match_attribute", matchAttribute);
     if (nicheSlug) query.set("niche_slug", nicheSlug);
     if (marketKey) query.set("market_key", marketKey);
     const suffix = query.size ? `?${query.toString()}` : "";
@@ -114,13 +113,6 @@ export class ApiClient {
 
   updateAdminBusiness(id: string, body: Record<string, unknown>) {
     return this.request<AdminBusinessDetail>(`/admin/businesses/${id}`, { method: "PATCH", body });
-  }
-
-  changeAdminBusinessStatus(id: string, status: string, reason: string) {
-    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}/status`, {
-      method: "POST",
-      body: { status, reason },
-    });
   }
 
   revalidateAdminBusiness(id: string, reason: string) {

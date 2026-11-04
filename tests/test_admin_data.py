@@ -723,6 +723,48 @@ def test_admin_reports_validated_membership_as_searchable() -> None:
         ]
 
 
+def test_admin_overview_counts_only_active_businesses_in_the_working_pool() -> None:
+    factory = _session_factory()
+    with factory() as session:
+        active, niche = _business(session)
+        now = utcnow()
+        archived = BusinessModel(
+            id=new_id("business"),
+            display_name="Archived Search Result",
+            normalized_name="archived search result",
+            geography="Toronto",
+            market_key="toronto",
+            status="archived",
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        session.add(archived)
+        session.flush()
+        for business in (active, archived):
+            session.add(
+                BusinessNicheMembershipModel(
+                    id=new_id("membership"),
+                    business_id=business.id,
+                    niche_id=niche.id,
+                    market_key="toronto",
+                    confidence=1.0,
+                    evidence=[],
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+        session.commit()
+
+        overview = _service(session).overview()
+
+        assert overview["total"] == 1
+        assert overview["active"] == 1
+        assert overview["archived"] == 1
+        assert overview["trade_groups"] == [
+            {"slug": niche.slug, "label": niche.label, "count": 1}
+        ]
+
+
 def test_admin_businesses_can_filter_and_sort_by_data_quality_score() -> None:
     factory = _session_factory()
     with factory() as session:
