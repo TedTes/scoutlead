@@ -13,6 +13,7 @@ from db.models import (
 )
 from db.session import create_database
 from shared.utils import new_id, utcnow
+from signal_collection.requirements import STANDING_WEBSITE_ATTRIBUTE_KEYS
 from signal_collection.scheduler import enqueue_due_signal_collections
 
 
@@ -102,3 +103,15 @@ def test_standing_refresh_queues_missing_website_evidence() -> None:
         assert job.payload["signal_definition_id"] == definition.id
         assert job.payload["business_ids"] == [business.id]
         assert job.payload["reason"] == "scheduled_website_evidence_refresh"
+
+
+def test_standing_website_collection_covers_composite_upgrade_components() -> None:
+    assert STANDING_WEBSITE_ATTRIBUTE_KEYS == {
+        "website_status",
+        "website_quality_score",
+        "mobile_viewport_present",
+        "contact_form_present",
+        "quote_or_booking_form_present",
+        "primary_cta_present",
+        "click_to_call_present",
+    }

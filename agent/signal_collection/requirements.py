@@ -7,15 +7,19 @@ from sqlalchemy import or_
 from shared.utils import utcnow
 
 
-# The standing sweep is deliberately limited to the two user-facing website
-# opportunities. One website-status inspection still preserves its full raw
-# DOM evidence, while PageSpeed preserves all Lighthouse categories; granular
-# attributes can be derived or explicitly recollected without multiplying the
-# external request backlog.
+# The user selects one website-upgrade opportunity, but that decision is backed
+# by several independently auditable attributes.  Website DOM collection reuses
+# one recent observation for every definition, so keeping the component keys in
+# the standing sweep does not require a fresh crawl per attribute.
 STANDING_WEBSITE_ATTRIBUTE_KEYS = frozenset(
     {
         "website_status",
         "website_quality_score",
+        "mobile_viewport_present",
+        "contact_form_present",
+        "quote_or_booking_form_present",
+        "primary_cta_present",
+        "click_to_call_present",
     }
 )
 

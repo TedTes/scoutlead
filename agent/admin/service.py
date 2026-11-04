@@ -109,10 +109,13 @@ OPPORTUNITY_GROUPS = {
     "performance_score": ("website_upgrade", "Website needs upgrade"),
     "accessibility_score": ("website_upgrade", "Website needs upgrade"),
     "best_practices_score": ("website_upgrade", "Website needs upgrade"),
-    "contact_form_present": ("lead_capture", "Lead-capture gap"),
-    "quote_or_booking_form_present": ("lead_capture", "Lead-capture gap"),
-    "primary_cta_present": ("lead_capture", "Lead-capture gap"),
-    "click_to_call_present": ("lead_capture", "Lead-capture gap"),
+    # Conversion findings are component evidence for the one customer-facing
+    # website-upgrade opportunity. They remain individually visible so an
+    # administrator can tell exactly why the composite outcome was produced.
+    "contact_form_present": ("website_upgrade", "Website needs improvement"),
+    "quote_or_booking_form_present": ("website_upgrade", "Website needs improvement"),
+    "primary_cta_present": ("website_upgrade", "Website needs improvement"),
+    "click_to_call_present": ("website_upgrade", "Website needs improvement"),
     "google_rating": ("reputation", "Reputation gap"),
     "google_review_count": ("reputation", "Reputation gap"),
 }

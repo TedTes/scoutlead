@@ -1885,6 +1885,10 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
                 "service_key": service_definition.key,
                 "label": service_definition.label,
                 "score": 1.5,
+                    "composite_score": 100.0,
+                    "measured_score": 100.0,
+                    "coverage": 1.0,
+                    "matched_weight": 1.5,
                 "supporting_evidence": [
                     {
                         "signal_key": signal.key,

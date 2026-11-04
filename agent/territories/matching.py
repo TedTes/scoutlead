@@ -473,6 +473,17 @@ class ProfileMatchService:
         signal_evidence = {}
         for spec in signal_specs:
             fact = facts.get(spec.fact_key)
+            minimum_confidence = int(
+                spec.config.get(
+                    "minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE
+                )
+            )
+            eligible = fact_is_eligible(
+                fact,
+                minimum_confidence=minimum_confidence,
+                require_provenance=True,
+            )
+            match_confidence = _signal_match_confidence(spec, fact)
             fact_observation = (
                 observations_by_id.get(fact.source_observation_id)
                 if fact is not None and fact.source_observation_id
@@ -481,8 +492,9 @@ class ProfileMatchService:
             evidence = {
                 "fact_key": spec.fact_key,
                 "value": fact_value(fact),
-                "matched": _signal_match_confidence(spec, fact) is not None,
-                "confidence": _signal_match_confidence(spec, fact),
+                "evaluated": eligible and fact.attribute_score is not None,
+                "matched": match_confidence is not None,
+                "confidence": match_confidence,
                 "evidence_confidence": fact.confidence if fact is not None else None,
                 "opportunity_score": fact.attribute_score if fact is not None else None,
             }
@@ -548,6 +560,19 @@ class ProfileMatchService:
         )
         matched_services = []
         for service in service_specs:
+            total_weight = sum(weight for _, weight in service.signals)
+            evaluated_weight = sum(
+                weight
+                for signal_key, weight in service.signals
+                if signal_key in signal_evidence
+                and signal_evidence[signal_key]["evaluated"] is True
+            )
+            weighted_opportunity = sum(
+                weight * float(signal_evidence[signal_key]["opportunity_score"] or 0.0)
+                for signal_key, weight in service.signals
+                if signal_key in signal_evidence
+                and signal_evidence[signal_key]["evaluated"] is True
+            )
             supporting_evidence = [
                 {
                     "signal_key": signal_key,
@@ -567,11 +592,30 @@ class ProfileMatchService:
                         "label": service.label,
                         "score": round(
                             sum(float(item["weight"]) for item in supporting_evidence),
-                            2,
+                            3,
+                        ),
+                        "composite_score": round(
+                            weighted_opportunity / total_weight,
+                            1,
+                        ) if total_weight else 0.0,
+                        "measured_score": round(
+                            weighted_opportunity / evaluated_weight,
+                            1,
+                        ),
+                        "coverage": round(evaluated_weight / total_weight, 3)
+                        if total_weight
+                        else 0.0,
+                        "matched_weight": round(
+                            sum(float(item["weight"]) for item in supporting_evidence),
+                            3,
                         ),
                         "supporting_evidence": supporting_evidence,
                     }
                 )
+        composite_service_score = max(
+            (float(item["composite_score"]) for item in matched_services),
+            default=0.0,
+        )
         classifications = {
             "customer_kind": business.customer_kind,
             "is_chain": business.is_chain,
@@ -660,7 +704,8 @@ class ProfileMatchService:
             "profile_match": {
                 "status": "matched",
                 "score": matched_signal_count,
-                "service_score": round(weighted_match_score, 2),
+                "service_score": round(weighted_match_score, 3),
+                "website_improvement_score": round(composite_service_score, 1),
                 "opportunity_score": opportunity_score,
                 "score_breakdown": score_breakdown,
                 "lead_assessment": lead_assessment,
@@ -775,7 +820,20 @@ def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
     result, row = item
     profile_match = result["raw"]["profile_match"]
     distance = profile_match.get("distance_km")
+    matched_signals = profile_match.get("matched_signals") or []
+    verified_missing_website = any(
+        signal.get("fact_key") == "website_status"
+        and signal.get("value") == "missing"
+        for signal in matched_signals
+    )
     return (
+        # When both website options are selected, a verified missing website is
+        # always the strongest opportunity. Composite upgrade evidence orders
+        # the remaining candidates before distance is used as a tie-breaker.
+        0 if verified_missing_website else 1,
+        -float(profile_match.get("website_improvement_score") or 0.0),
+        -float(profile_match.get("opportunity_score") or 0.0),
+        -float(profile_match.get("service_score") or 0.0),
         -int(profile_match.get("confirmed_signal_count") or 0),
         -int(profile_match.get("matched_signal_count") or 0),
         -float(profile_match.get("outcome_adjustment") or 0.0),

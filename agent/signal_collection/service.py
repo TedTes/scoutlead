@@ -722,7 +722,10 @@ def _normalized_pagespeed_payload(payload: Any) -> dict[str, Any] | None:
         **scores,
         "website_quality_score": (
             round(sum(available_scores) / len(available_scores), 1)
-            if available_scores
+            # A partial Lighthouse response must not be presented as a full
+            # website grade. The individual categories remain available for
+            # diagnostics, while the composite stays unknown and is retried.
+            if len(available_scores) == len(scores)
             else None
         ),
         "lcp_ms": audit_value("largest-contentful-paint"),
