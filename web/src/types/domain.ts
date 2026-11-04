@@ -630,6 +630,40 @@ export type OutreachPackage = {
   updated_at: string;
 };
 
+export type LeadConcept = {
+  id: string;
+  workspace_id: string;
+  business_id: string;
+  source_result_id?: string | null;
+  business_name: string;
+  concept_type: "website_launch" | "website_redesign";
+  status: "draft" | "ready" | "sent";
+  concept_url?: string | null;
+  personalization_note?: string | null;
+  feature_highlights: string[];
+  concept_banner_confirmed: boolean;
+  noindex_confirmed: boolean;
+  instagram_message: string;
+  follow_up_message: string;
+  call_opener: string;
+  sent_at?: string | null;
+  follow_up_due_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LeadConceptInput = {
+  concept_type: LeadConcept["concept_type"];
+  concept_url?: string | null;
+  personalization_note?: string | null;
+  feature_highlights: string[];
+  concept_banner_confirmed: boolean;
+  noindex_confirmed: boolean;
+  instagram_message?: string | null;
+  follow_up_message?: string | null;
+  call_opener?: string | null;
+};
+
 export type OutreachResponseClassification = {
   category: string;
   label: string;

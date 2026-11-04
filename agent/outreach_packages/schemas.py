@@ -153,6 +153,40 @@ class OutreachPackageUpdate(BaseModel):
     content: OutreachPackageContent
 
 
+class LeadConceptUpsert(BaseModel):
+    concept_type: Literal["website_launch", "website_redesign"]
+    concept_url: str | None = Field(default=None, max_length=2000)
+    personalization_note: str | None = Field(default=None, max_length=600)
+    feature_highlights: list[str] = Field(default_factory=list, max_length=5)
+    concept_banner_confirmed: bool = False
+    noindex_confirmed: bool = False
+    instagram_message: str = Field(default="", max_length=2200)
+    follow_up_message: str = Field(default="", max_length=900)
+    call_opener: str = Field(default="", max_length=900)
+
+
+class LeadConceptRead(BaseModel):
+    id: str
+    workspace_id: str
+    business_id: str
+    source_result_id: str | None = None
+    business_name: str
+    concept_type: Literal["website_launch", "website_redesign"]
+    status: Literal["draft", "ready", "sent"]
+    concept_url: str | None = None
+    personalization_note: str | None = None
+    feature_highlights: list[str] = Field(default_factory=list)
+    concept_banner_confirmed: bool = False
+    noindex_confirmed: bool = False
+    instagram_message: str
+    follow_up_message: str
+    call_opener: str
+    sent_at: datetime | None = None
+    follow_up_due_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class OutreachAISuggestionRequest(BaseModel):
     channel: Literal["message", "form", "email"]
 

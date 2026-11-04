@@ -394,6 +394,26 @@ export class ApiClient {
     return this.request<OutreachPackage>(`/outreach-packages/from-result/${resultId}`, { method: "POST" });
   }
 
+  getLeadConcept(resultId: string) {
+    return this.request<import("../types/domain").LeadConcept | null>(
+      `/outreach-packages/concepts/by-result/${resultId}`,
+    );
+  }
+
+  saveLeadConcept(resultId: string, input: import("../types/domain").LeadConceptInput) {
+    return this.request<import("../types/domain").LeadConcept>(
+      `/outreach-packages/concepts/by-result/${resultId}`,
+      { method: "PUT", body: input },
+    );
+  }
+
+  markLeadConceptSent(resultId: string) {
+    return this.request<import("../types/domain").LeadConcept>(
+      `/outreach-packages/concepts/by-result/${resultId}/sent`,
+      { method: "POST" },
+    );
+  }
+
   updateOutreachPackage(id: string, content: OutreachPackage["content"]) {
     return this.request<OutreachPackage>(`/outreach-packages/${id}`, {
       method: "PATCH",

@@ -43,6 +43,8 @@ import type {
   DiscoveryRun,
   DiscoveryResult,
   LeadContactPolicyInput,
+  LeadConcept,
+  LeadConceptInput,
   LeadReviewStatus,
   LeadUpdateInput,
   LeadOutcomeValue,
@@ -1104,6 +1106,9 @@ export function ResultsScreen({
             onClassifyResponse={(packageId, channel, responseText) => territoryApi.classifyOutreachResponse(packageId, channel, responseText)}
             onRecordEvent={(packageId, event) => territoryApi.recordOutreachEvent(packageId, event)}
             onPrepareMessage={(packageId) => territoryApi.prepareOutreachMessage(packageId)}
+            onGetConcept={() => territoryApi.getLeadConcept(detailContact.id)}
+            onSaveConcept={(input) => territoryApi.saveLeadConcept(detailContact.id, input)}
+            onMarkConceptSent={() => territoryApi.markLeadConceptSent(detailContact.id)}
           />
         ) : (
           <ContactDrawer
@@ -1270,6 +1275,9 @@ function OutreachWorkspace({
   onClassifyResponse,
   onRecordEvent,
   onPrepareMessage,
+  onGetConcept,
+  onSaveConcept,
+  onMarkConceptSent,
   persistent = false,
 }: {
   contact: DiscoveryResult;
@@ -1282,6 +1290,9 @@ function OutreachWorkspace({
   onClassifyResponse: (packageId: string, channel: OutreachChannel, responseText: string) => Promise<OutreachResponseClassification>;
   onRecordEvent: (packageId: string, event: { channel: OutreachChannel; event_type: string; variant_id?: string | null; metadata?: Record<string, unknown> }) => Promise<unknown>;
   onPrepareMessage: (packageId: string) => Promise<Message>;
+  onGetConcept: () => Promise<LeadConcept | null>;
+  onSaveConcept: (input: LeadConceptInput) => Promise<LeadConcept>;
+  onMarkConceptSent: () => Promise<LeadConcept>;
   persistent?: boolean;
 }) {
   const { showToast } = useToast();
@@ -1704,6 +1715,13 @@ function OutreachWorkspace({
         {outreachPackage && draft ? (
           <>
             <div className="outreach-canvas">
+              <LeadConceptHandoff
+                contact={contact}
+                evidence={draft.evidence}
+                onGet={onGetConcept}
+                onSave={onSaveConcept}
+                onMarkSent={onMarkConceptSent}
+              />
               <section className="outreach-signals" aria-label="Verified opportunity">
                 <span className="outreach-section-label">Verified opportunity</span>
                 <div className="outreach-signal-list">
@@ -2006,6 +2024,213 @@ function OutreachWorkspace({
       </aside>
     </div>
   );
+}
+
+function LeadConceptHandoff({
+  contact,
+  evidence,
+  onGet,
+  onSave,
+  onMarkSent,
+}: {
+  contact: DiscoveryResult;
+  evidence: OutreachPackageContent["evidence"];
+  onGet: () => Promise<LeadConcept | null>;
+  onSave: (input: LeadConceptInput) => Promise<LeadConcept>;
+  onMarkSent: () => Promise<LeadConcept>;
+}) {
+  const { showToast } = useToast();
+  const [concept, setConcept] = useState<LeadConcept | null>(null);
+  const [handoffText, setHandoffText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const hydrate = (value: LeadConcept | null) => {
+    setConcept(value);
+  };
+
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setError("");
+    void onGet().then(
+      (value) => { if (current) hydrate(value); },
+      (reason) => { if (current) setError(reason instanceof Error ? reason.message : String(reason)); },
+    ).finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [contact.id]);
+
+  const copy = async (value: string, label = "Copy") => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast({ title: `${label} copied`, tone: "green" });
+    } catch {
+      showToast({ title: "Copy failed", tone: "red" });
+    }
+  };
+  const copyBrief = () => copy(buildConceptBrief(contact, evidence), "Business context");
+  const save = async (input: LeadConceptInput) => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const value = await onSave(input);
+      hydrate(value);
+      setHandoffText("");
+      showToast({ title: "Handoff saved", message: "The demo and outreach copy are attached to this lead.", tone: "green" });
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setError(message);
+      showToast({ title: "Could not save handoff", message, tone: "red" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const applyHandoff = () => {
+    try {
+      const parsed = parseConceptHandoff(handoffText, contact);
+      void save(parsed);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setError(message);
+      showToast({ title: "Could not read handoff", message, tone: "red" });
+    }
+  };
+  const markSent = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const value = await onMarkSent();
+      hydrate(value);
+      showToast({ title: "Instagram outreach recorded", message: "Follow-up is due in five days.", tone: "green" });
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setError(message);
+      showToast({ title: "Could not mark sent", message, tone: "red" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="lead-handoff">
+      <header>
+        <div>
+          <span className="outreach-section-label">Concept handoff</span>
+          <strong>{concept ? "Demo and outreach attached" : "Continue the concept workflow"}</strong>
+        </div>
+        <button title="Copy business context" type="button" onClick={() => void copyBrief()}><Copy size={14} /> Copy</button>
+      </header>
+
+      {loading ? <p className="lead-handoff-note">Loading saved handoff…</p> : null}
+      {!loading && !concept ? (
+        <div className="lead-handoff-paste">
+          <p>Copy the business context, build the page externally, then paste the returned JSON here.</p>
+          <textarea aria-label="Structured concept handoff" placeholder='Paste the structured handoff JSON' value={handoffText} onChange={(event) => { setHandoffText(event.target.value); setError(""); }} />
+          <button disabled={saving || !handoffText.trim()} type="button" onClick={applyHandoff}>{saving ? "Saving…" : "Apply"}</button>
+        </div>
+      ) : null}
+
+      {concept ? (
+        <div className="lead-handoff-saved">
+          <div className="lead-handoff-summary">
+            <a href={concept.concept_url || undefined} rel="noreferrer" target="_blank"><ExternalLink size={14} /> Open demo</a>
+            <span>{concept.concept_type === "website_launch" ? "New website" : "Website redesign"}</span>
+            <span>{concept.feature_highlights.length} feature{concept.feature_highlights.length === 1 ? "" : "s"}</span>
+          </div>
+          {concept.feature_highlights.length ? <ul>{concept.feature_highlights.map((feature) => <li key={feature}>{feature}</li>)}</ul> : null}
+          <HandoffCopyRow label="Instagram DM" value={concept.instagram_message} onCopy={copy} />
+          {concept.follow_up_message ? <HandoffCopyRow label="Follow-up" value={concept.follow_up_message} onCopy={copy} /> : null}
+          {concept.call_opener ? <HandoffCopyRow label="Call opener" value={concept.call_opener} onCopy={copy} /> : null}
+          <footer>
+            <button className="secondary" type="button" onClick={() => setConcept(null)}>Replace handoff</button>
+            <span>{concept.status === "sent" && concept.follow_up_due_at ? `Sent · follow up ${formatDate(concept.follow_up_due_at)}` : concept.status === "ready" ? "Ready to send" : "Safeguards were not confirmed"}</span>
+            <button disabled={saving || concept.status !== "ready"} type="button" onClick={() => void markSent()}><Send size={14} /> {concept.status === "sent" ? "Sent" : "Mark sent"}</button>
+          </footer>
+        </div>
+      ) : null}
+      {error ? <p className="lead-concept-error">{error}</p> : null}
+    </section>
+  );
+}
+
+function HandoffCopyRow({ label, value, onCopy }: { label: string; value: string; onCopy: (value: string, label?: string) => Promise<void> }) {
+  return (
+    <div className="lead-handoff-copy-row">
+      <div><span>{label}</span><p>{value}</p></div>
+      <button title={`Copy ${label.toLowerCase()}`} type="button" onClick={() => void onCopy(value, label)}><Copy size={14} /></button>
+    </div>
+  );
+}
+
+function buildConceptBrief(contact: DiscoveryResult, evidence: OutreachPackageContent["evidence"]): string {
+  const facts = [
+    `Business: ${contact.company_name}`,
+    `Trade: ${contactListCategoryLabel(contact) || "Not verified"}`,
+    `Location: ${contact.geography || "Not verified"}`,
+    `Current website: ${contact.website_url || "No verified website"}`,
+    `Phone: ${contact.contact_phone || "Not verified"}`,
+    `Email: ${contact.contact_email || "Not verified"}`,
+    contact.google_rating != null ? `Google rating: ${contact.google_rating}` : null,
+    contact.google_review_count != null ? `Google reviews: ${contact.google_review_count}` : null,
+    ...evidence.map((item) => `Evidence: ${item.statement}`),
+  ].filter(Boolean);
+  return [
+    "Create a personalized website concept for this business using only the verified context below.",
+    "Do not invent reviews, ratings, services, people, awards, or business claims.",
+    "The deployed page must include a visible concept-design disclaimer and a noindex directive.",
+    "When finished, return only valid JSON using this exact structure:",
+    JSON.stringify({
+      demo_url: "https://...",
+      concept_type: contact.website_url ? "website_redesign" : "new_website",
+      implemented_features: ["Feature actually included"],
+      verified_personal_detail: "A specific verified detail used in the page and message",
+      instagram_dm: "Ready-to-send Instagram message",
+      follow_up_dm: "Short follow-up message",
+      call_opener: "Optional call opener",
+      concept_banner_added: true,
+      search_indexing_disabled: true,
+    }, null, 2),
+    "Verified business context:",
+    ...facts,
+  ].join("\n");
+}
+
+function parseConceptHandoff(value: string, contact: DiscoveryResult): LeadConceptInput {
+  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const candidate = (fenced || value).trim();
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("Paste the JSON handoff returned after the concept is completed.");
+  let raw: unknown;
+  try {
+    raw = JSON.parse(candidate.slice(start, end + 1));
+  } catch {
+    throw new Error("The pasted handoff is not valid JSON.");
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("The handoff must be a JSON object.");
+  const data = raw as Record<string, unknown>;
+  const text = (key: string, fallback = "") => typeof data[key] === "string" ? String(data[key]).trim() : fallback;
+  const featuresValue = data.implemented_features ?? data.feature_highlights;
+  const features = Array.isArray(featuresValue) ? featuresValue.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, 5) : [];
+  const conceptUrl = text("demo_url", text("concept_url"));
+  const instagramMessage = text("instagram_dm", text("instagram_message"));
+  if (!conceptUrl) throw new Error("The handoff is missing demo_url.");
+  if (!instagramMessage) throw new Error("The handoff is missing instagram_dm.");
+  const type = text("concept_type");
+  return {
+    concept_type: type === "new_website" || type === "website_launch" || (!type && !contact.website_url) ? "website_launch" : "website_redesign",
+    concept_url: conceptUrl,
+    personalization_note: text("verified_personal_detail", text("personalization_note")),
+    feature_highlights: features,
+    concept_banner_confirmed: data.concept_banner_added === true || data.concept_banner_confirmed === true,
+    noindex_confirmed: data.search_indexing_disabled === true || data.noindex_confirmed === true,
+    instagram_message: instagramMessage,
+    follow_up_message: text("follow_up_dm", text("follow_up_message")),
+    call_opener: text("call_opener"),
+  };
 }
 
 type AudienceMatchedSignal = {
