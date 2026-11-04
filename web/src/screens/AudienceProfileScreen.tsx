@@ -33,6 +33,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const submittingRef = useRef(false);
+  const defaultOpportunityAppliedRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -79,6 +80,12 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const activeService = serviceOptions.find((service) => service.key === hoveredService);
   const valid = Boolean(selectedProductId && nicheId && selectedPlace && services.length && services.every((service) => enabledServiceKeys.has(service)));
   const activeBatch = useMemo(() => profileBatch?.audience.id === selectedProfile?.id ? profileBatch : null, [profileBatch, selectedProfile?.id]);
+
+  useEffect(() => {
+    if (defaultOpportunityAppliedRef.current || !profileOptions || mode !== "create" || editing) return;
+    defaultOpportunityAppliedRef.current = true;
+    if (enabledServiceKeys.has("website_availability")) setServices(["website_availability"]);
+  }, [editing, enabledServiceKeys, mode, profileOptions]);
 
   const beginEdit = (nextMode: "edit" | "clone") => {
     if (!selectedProfile) return;
@@ -173,8 +180,8 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
 
         <section className="audience-compact-section" aria-labelledby="audience-signals-title">
           <header className="audience-section-heading"><span>03</span><h2 id="audience-signals-title">Website opportunity</h2><small>Choose one or both</small></header>
-          <div className="audience-opportunity-chips" role="listbox" aria-describedby="audience-opportunity-help" aria-label="Website opportunities">
-            {enabledServices.map((service) => { const selected = services.includes(service.key); return <button aria-selected={selected} className={selected ? "is-selected" : ""} key={service.key} role="option" type="button" onBlur={() => setHoveredService(null)} onClick={() => setServices(toggleValue(services, service.key))} onFocus={() => setHoveredService(service.key)} onMouseEnter={() => setHoveredService(service.key)} onMouseLeave={() => setHoveredService(null)}><span className="audience-opportunity-check">{selected ? <Check size={11} /> : null}</span>{opportunityLabel(service.key, service.label)}</button>; })}
+          <div className="audience-opportunity-chips" role="group" aria-describedby="audience-opportunity-help" aria-label="Website opportunities">
+            {enabledServices.map((service) => { const selected = services.includes(service.key); return <button aria-pressed={selected} className={selected ? "is-selected" : ""} key={service.key} type="button" onBlur={() => setHoveredService(null)} onClick={() => setServices(toggleValue(services, service.key))} onFocus={() => setHoveredService(service.key)} onMouseEnter={() => setHoveredService(service.key)} onMouseLeave={() => setHoveredService(null)}>{selected ? <Check aria-hidden="true" size={13} /> : null}{opportunityLabel(service.key, service.label)}</button>; })}
           </div>
           <p className="audience-opportunity-help" id="audience-opportunity-help" aria-live="polite">{opportunityHelp}</p>
         </section>

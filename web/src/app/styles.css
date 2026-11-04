@@ -9452,20 +9452,9 @@ body.is-resizing-navigation .rail {
   color: var(--af-accent-ink);
 }
 
-.audience-opportunity-check {
-  align-items: center;
-  border: 1.5px solid var(--af-border-strong);
-  border-radius: 5px;
-  display: inline-flex;
-  height: 15px;
-  justify-content: center;
-  width: 15px;
-}
-
-.audience-opportunity-chips button.is-selected .audience-opportunity-check {
-  background: var(--af-accent);
-  border-color: var(--af-accent);
-  color: var(--af-on-accent);
+.audience-opportunity-chips button {
+  border-radius: 999px;
+  padding-inline: 14px;
 }
 
 .audience-opportunity-chips .audience-upcoming-toggle {
