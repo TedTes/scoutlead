@@ -56,7 +56,8 @@ def test_every_catalog_signal_renders_every_channel_safely() -> None:
                 assert len(generation.email.body) <= 1200
                 rendered += 1
 
-    assert rendered == 102
+    expected = sum(len(service.signals) for service in catalog.services) * 3
+    assert rendered == expected
 
 
 def test_playbook_variant_is_stable_for_the_same_result() -> None:

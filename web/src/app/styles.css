@@ -12063,13 +12063,75 @@ button.bulk-recipient-select:hover {
   background: var(--panel-muted);
   border: 1px solid var(--line);
   border-radius: 10px;
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+.lead-handoff > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  padding: 11px 12px;
+}
+
+.lead-handoff > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lead-handoff > summary > div {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.lead-handoff > summary > div > svg {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.lead-handoff > summary > div > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lead-handoff > summary strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.lead-handoff > summary small {
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.lead-handoff-status {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.lead-handoff-status.is-attached {
+  background: var(--green-bg);
+  border-color: var(--green-line);
+  color: var(--green-dark);
+}
+
+.lead-handoff-body {
+  border-top: 1px solid var(--line);
   display: grid;
   gap: 10px;
-  margin-bottom: 18px;
   padding: 12px;
 }
 
-.lead-handoff > header,
+.lead-handoff-actions,
 .lead-handoff-saved > footer {
   align-items: center;
   display: flex;
@@ -12077,15 +12139,12 @@ button.bulk-recipient-select:hover {
   justify-content: space-between;
 }
 
-.lead-handoff > header > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.lead-handoff > header strong {
-  color: var(--text);
-  font-size: 12px;
+.lead-handoff-actions p {
+  color: var(--muted);
+  flex: 1;
+  font-size: 10.5px;
+  line-height: 1.4;
+  margin: 0;
 }
 
 .lead-handoff button,
@@ -12237,6 +12296,54 @@ button.bulk-recipient-select:hover {
   background: var(--black);
   border-color: var(--black);
   color: #fff;
+}
+
+.outreach-unavailable-inline {
+  align-items: flex-start;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+}
+
+.outreach-unavailable-inline > svg {
+  color: var(--amber);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.outreach-unavailable-inline > div {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+}
+
+.outreach-unavailable-inline strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.outreach-unavailable-inline p {
+  font-size: 10.5px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.outreach-unavailable-inline button {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 650;
+  gap: 5px;
+  padding: 6px 8px;
 }
 
 .outreach-canvas {

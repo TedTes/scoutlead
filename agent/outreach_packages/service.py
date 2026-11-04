@@ -148,13 +148,7 @@ class OutreachPackageService:
         profile_match = _profile_match(snapshot)
         matched = _outreach_eligible_matched_signals(profile_match)
         if not matched:
-            raise WorkflowBoundaryError(
-                "A verified opportunity is required before preparing outreach.",
-                {
-                    "result_id": result.id,
-                    "user_message": "Collect or request an opportunity signal for this business first.",
-                },
-            )
+            matched = [_shortlisted_interest_signal()]
 
         evidence = [_evidence(item) for item in matched[:6]]
         matched_services = [
@@ -170,15 +164,14 @@ class OutreachPackageService:
             evidence=evidence,
         )
         if playbook_match is None:
-            raise WorkflowBoundaryError(
-                "No supported outreach playbook matches this opportunity.",
-                {
-                    "result_id": result.id,
-                    "service_keys": list(audience.service_keys or []),
-                    "signal_keys": [item.signal_key for item in evidence],
-                    "user_message": "Review this opportunity manually before contacting the business.",
-                },
+            evidence = [_evidence(_shortlisted_interest_signal())]
+            playbook_match = playbooks.resolve(
+                service_keys=["website_modernization"],
+                matched_services=[],
+                evidence=evidence,
             )
+        if playbook_match is None:
+            raise RuntimeError("shortlisted outreach playbook is not configured")
         stable_key = f"{result.id}:{business.id}"
         strategy = playbooks.strategy_for(
             playbook_match,
@@ -563,6 +556,17 @@ def _outreach_eligible_matched_signals(
     return []
 
 
+def _shortlisted_interest_signal() -> dict[str, Any]:
+    return {
+        "signal_key": "shortlisted_interest",
+        "fact_key": None,
+        "value": True,
+        "confidence": "user_selected",
+        "pitch_eligible": True,
+        "pitch_reason": "The user shortlisted this business for outreach.",
+    }
+
+
 def _evidence(item: dict[str, Any]) -> OutreachEvidence:
     key = str(item.get("signal_key") or "opportunity")
     value = item.get("value")
@@ -581,6 +585,7 @@ def _evidence(item: dict[str, Any]) -> OutreachEvidence:
         "no_quote_flow": "No quote or booking flow was found in the latest website check.",
         "no_contact_form": "No contact form was found in the latest website check.",
         "mobile_viewport_missing": "The latest website check did not find a mobile viewport declaration.",
+        "shortlisted_interest": "This business was shortlisted for personalized outreach.",
     }
     if key == "reviews_under_15":
         statement = f"The business has {int(value or 0)} public reviews in the latest record."
@@ -605,6 +610,7 @@ def _evidence_label(key: str, value: object) -> str:
         "no_contact_form": "Contact form missing",
         "mobile_viewport_missing": "Mobile setup missing",
         "reviews_under_15": "Low review count",
+        "shortlisted_interest": "Personalized website idea",
     }
     return labels.get(key, key.replace("_", " ").strip().capitalize())
 

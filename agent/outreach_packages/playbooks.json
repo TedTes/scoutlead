@@ -184,6 +184,15 @@
           "evidence_statement": "The latest website best-practices score was {value}.",
           "observation": "The latest check found some website best-practice issues.",
           "discovery_question": "Has the website been reviewed or updated recently?"
+        },
+        {
+          "signal_key": "shortlisted_interest",
+          "match_values": [true],
+          "evidence_statement": "This business was selected for personalized outreach.",
+          "observation": "I came across your business and wanted to share a website idea.",
+          "discovery_question": "Would a focused website concept be useful for the business right now?",
+          "permitted_claims": ["I came across your business and wanted to share an idea."],
+          "prohibited_claims": ["Your website is outdated.", "Your website is losing customers."]
         }
       ]
     },

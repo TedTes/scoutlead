@@ -22,7 +22,7 @@ from outreach_packages.schemas import (
     OutreachResponseClassifyRequest,
 )
 from outreach_packages.service import OutreachPackageService, _evidence
-from shared.errors import ValidationError, WorkflowBoundaryError
+from shared.errors import ValidationError
 from shared.utils import new_id, utcnow
 
 
@@ -233,7 +233,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         assert session.get(OutreachPackageModel, package.id).prompt_version == 7
 
 
-def test_outreach_package_rejects_unverified_opportunity() -> None:
+def test_outreach_package_uses_safe_fallback_for_shortlisted_business_without_verified_opportunity() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=False)
         service = OutreachPackageService(
@@ -241,11 +241,14 @@ def test_outreach_package_rejects_unverified_opportunity() -> None:
             workspace_id="workspace:first",
         )
 
-        with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
-            service.generate(result.id)
+        package = service.generate(result.id)
+
+        assert package.content.strategy.primary_signal_key == "shortlisted_interest"
+        assert "website is outdated" not in package.content.message.body.lower()
+        assert "losing customers" not in package.content.message.body.lower()
 
 
-def test_outreach_package_rejects_claim_without_pitch_scope() -> None:
+def test_outreach_package_uses_safe_fallback_when_claim_lacks_pitch_scope() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=True)
         snapshot = dict(result.match_snapshot)
@@ -259,14 +262,15 @@ def test_outreach_package_rejects_claim_without_pitch_scope() -> None:
         result.match_snapshot = snapshot
         session.commit()
 
-        with pytest.raises(WorkflowBoundaryError, match="verified opportunity"):
-            OutreachPackageService(
-                session,
-                workspace_id="workspace:first",
-            ).generate(result.id)
+        package = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+        ).generate(result.id)
+
+        assert package.content.strategy.primary_signal_key == "shortlisted_interest"
 
 
-def test_outreach_package_rejects_unsupported_service_signal_pair() -> None:
+def test_outreach_package_uses_safe_fallback_for_unsupported_service_signal_pair() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=True)
         audience = session.get(TerritoryModel, result.audience_id)
@@ -288,11 +292,12 @@ def test_outreach_package_rejects_unsupported_service_signal_pair() -> None:
         result.match_snapshot = snapshot
         session.commit()
 
-        with pytest.raises(WorkflowBoundaryError, match="No supported outreach playbook"):
-            OutreachPackageService(
-                session,
-                workspace_id="workspace:first",
-            ).generate(result.id)
+        package = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+        ).generate(result.id)
+
+        assert package.content.strategy.primary_signal_key == "shortlisted_interest"
 
 
 def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> None:
@@ -330,7 +335,7 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
         assert package.content.observation.startswith("No quote")
 
 
-def test_outreach_package_rejects_unconfirmed_not_listed_website_observation() -> None:
+def test_outreach_package_uses_safe_fallback_for_unconfirmed_website_observation() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=False)
         snapshot = dict(result.match_snapshot)
@@ -354,11 +359,9 @@ def test_outreach_package_rejects_unconfirmed_not_listed_website_observation() -
             workspace_id="workspace:first",
         )
 
-        with pytest.raises(
-            WorkflowBoundaryError,
-            match="A verified opportunity is required",
-        ):
-            service.generate(result.id)
+        package = service.generate(result.id)
+
+        assert package.content.strategy.primary_signal_key == "shortlisted_interest"
 
 
 def _session_factory():

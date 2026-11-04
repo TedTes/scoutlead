@@ -1715,15 +1715,8 @@ function OutreachWorkspace({
         {outreachPackage && draft ? (
           <>
             <div className="outreach-canvas">
-              <LeadConceptHandoff
-                contact={contact}
-                evidence={draft.evidence}
-                onGet={onGetConcept}
-                onSave={onSaveConcept}
-                onMarkSent={onMarkConceptSent}
-              />
               <section className="outreach-signals" aria-label="Verified opportunity">
-                <span className="outreach-section-label">Verified opportunity</span>
+                <span className="outreach-section-label">{draft.evidence.every((item) => item.signal_key === "shortlisted_interest") ? "Outreach approach" : "Verified opportunity"}</span>
                 <div className="outreach-signal-list">
                   {draft.evidence.map((evidence) => (
                     <span className="outreach-signal-chip" key={`${evidence.signal_key}:${String(evidence.value)}`} title={evidence.statement}>
@@ -1957,6 +1950,13 @@ function OutreachWorkspace({
                   </section>
                 ) : null}
               </section>
+              <LeadConceptHandoff
+                contact={contact}
+                evidence={draft.evidence}
+                onGet={onGetConcept}
+                onSave={onSaveConcept}
+                onMarkSent={onMarkConceptSent}
+              />
             </div>
 
             <footer className="outreach-action-footer">
@@ -2002,23 +2002,27 @@ function OutreachWorkspace({
             </footer>
           </>
         ) : (
-          <div className="outreach-empty-state">
-            {loading ? (
-              <><span className="outreach-empty-icon"><FileText size={18} /></span><strong>Preparing outreach</strong><p>Preparing channel drafts from the selected opportunity.</p></>
-            ) : loadError ? (
-              <>
-                <span className="outreach-empty-icon"><AlertTriangle size={18} /></span>
-                <strong>Could not prepare outreach</strong>
-                <p>{loadError}</p>
-                <button className="primary" disabled={busy} type="button" onClick={() => void generate()}><RotateCw size={14} /> {busy ? "Retrying..." : "Retry"}</button>
-              </>
-            ) : (
-              <>
-                <span className="outreach-empty-icon"><AlertTriangle size={18} /></span>
-                <strong>Outreach unavailable</strong>
-                <p>No outreach package was returned for this lead.</p>
-              </>
-            )}
+          <div className="outreach-canvas">
+            <section className="outreach-unavailable-inline">
+              {loading ? (
+                <><RotateCw size={15} /><div><strong>Preparing standard outreach</strong><p>Checking the saved evidence for available channels.</p></div></>
+              ) : loadError ? (
+                <>
+                  <AlertTriangle size={15} />
+                  <div><strong>Standard outreach draft unavailable</strong><p>{loadError}</p></div>
+                  <button disabled={busy} type="button" onClick={() => void generate()}><RotateCw size={13} /> {busy ? "Retrying..." : "Retry"}</button>
+                </>
+              ) : (
+                <><AlertTriangle size={15} /><div><strong>Standard outreach draft unavailable</strong><p>You can still copy the business context and attach a completed concept.</p></div></>
+              )}
+            </section>
+            <LeadConceptHandoff
+              contact={contact}
+              evidence={[]}
+              onGet={onGetConcept}
+              onSave={onSaveConcept}
+              onMarkSent={onMarkConceptSent}
+            />
           </div>
         )}
       </aside>
@@ -2115,44 +2119,53 @@ function LeadConceptHandoff({
   };
 
   return (
-    <section className="lead-handoff">
-      <header>
+    <details className="lead-handoff">
+      <summary>
         <div>
-          <span className="outreach-section-label">Concept handoff</span>
-          <strong>{concept ? "Demo and outreach attached" : "Continue the concept workflow"}</strong>
+          <FileText size={15} />
+          <span>
+            <strong>Concept page</strong>
+            <small>{concept ? "Demo and messages attached" : "Optional — attach a completed demo"}</small>
+          </span>
         </div>
-        <button title="Copy business context" type="button" onClick={() => void copyBrief()}><Copy size={14} /> Copy</button>
-      </header>
+        <span className={concept ? "lead-handoff-status is-attached" : "lead-handoff-status"}>{concept ? "Attached" : "Add"}</span>
+      </summary>
 
-      {loading ? <p className="lead-handoff-note">Loading saved handoff…</p> : null}
-      {!loading && !concept ? (
-        <div className="lead-handoff-paste">
-          <p>Copy the business context, build the page externally, then paste the returned JSON here.</p>
-          <textarea aria-label="Structured concept handoff" placeholder='Paste the structured handoff JSON' value={handoffText} onChange={(event) => { setHandoffText(event.target.value); setError(""); }} />
-          <button disabled={saving || !handoffText.trim()} type="button" onClick={applyHandoff}>{saving ? "Saving…" : "Apply"}</button>
+      <div className="lead-handoff-body">
+        <div className="lead-handoff-actions">
+          <p>Copy the business context for your page builder, then attach its structured result here.</p>
+          <button title="Copy business context" type="button" onClick={() => void copyBrief()}><Copy size={14} /> Copy</button>
         </div>
-      ) : null}
 
-      {concept ? (
-        <div className="lead-handoff-saved">
-          <div className="lead-handoff-summary">
-            <a href={concept.concept_url || undefined} rel="noreferrer" target="_blank"><ExternalLink size={14} /> Open demo</a>
-            <span>{concept.concept_type === "website_launch" ? "New website" : "Website redesign"}</span>
-            <span>{concept.feature_highlights.length} feature{concept.feature_highlights.length === 1 ? "" : "s"}</span>
+        {loading ? <p className="lead-handoff-note">Loading saved concept…</p> : null}
+        {!loading && !concept ? (
+          <div className="lead-handoff-paste">
+            <textarea aria-label="Structured concept handoff" placeholder='Paste the structured handoff JSON' value={handoffText} onChange={(event) => { setHandoffText(event.target.value); setError(""); }} />
+            <button disabled={saving || !handoffText.trim()} type="button" onClick={applyHandoff}>{saving ? "Saving…" : "Attach"}</button>
           </div>
-          {concept.feature_highlights.length ? <ul>{concept.feature_highlights.map((feature) => <li key={feature}>{feature}</li>)}</ul> : null}
-          <HandoffCopyRow label="Instagram DM" value={concept.instagram_message} onCopy={copy} />
-          {concept.follow_up_message ? <HandoffCopyRow label="Follow-up" value={concept.follow_up_message} onCopy={copy} /> : null}
-          {concept.call_opener ? <HandoffCopyRow label="Call opener" value={concept.call_opener} onCopy={copy} /> : null}
-          <footer>
-            <button className="secondary" type="button" onClick={() => setConcept(null)}>Replace handoff</button>
-            <span>{concept.status === "sent" && concept.follow_up_due_at ? `Sent · follow up ${formatDate(concept.follow_up_due_at)}` : concept.status === "ready" ? "Ready to send" : "Safeguards were not confirmed"}</span>
-            <button disabled={saving || concept.status !== "ready"} type="button" onClick={() => void markSent()}><Send size={14} /> {concept.status === "sent" ? "Sent" : "Mark sent"}</button>
-          </footer>
-        </div>
-      ) : null}
-      {error ? <p className="lead-concept-error">{error}</p> : null}
-    </section>
+        ) : null}
+
+        {concept ? (
+          <div className="lead-handoff-saved">
+            <div className="lead-handoff-summary">
+              <a href={concept.concept_url || undefined} rel="noreferrer" target="_blank"><ExternalLink size={14} /> Open demo</a>
+              <span>{concept.concept_type === "website_launch" ? "New website" : "Website redesign"}</span>
+              <span>{concept.feature_highlights.length} feature{concept.feature_highlights.length === 1 ? "" : "s"}</span>
+            </div>
+            {concept.feature_highlights.length ? <ul>{concept.feature_highlights.map((feature) => <li key={feature}>{feature}</li>)}</ul> : null}
+            <HandoffCopyRow label="Instagram DM" value={concept.instagram_message} onCopy={copy} />
+            {concept.follow_up_message ? <HandoffCopyRow label="Follow-up" value={concept.follow_up_message} onCopy={copy} /> : null}
+            {concept.call_opener ? <HandoffCopyRow label="Call opener" value={concept.call_opener} onCopy={copy} /> : null}
+            <footer>
+              <button className="secondary" type="button" onClick={() => setConcept(null)}>Replace</button>
+              <span>{concept.status === "sent" && concept.follow_up_due_at ? `Sent · follow up ${formatDate(concept.follow_up_due_at)}` : concept.status === "ready" ? "Ready to send" : "Safeguards were not confirmed"}</span>
+              <button disabled={saving || concept.status !== "ready"} type="button" onClick={() => void markSent()}><Send size={14} /> {concept.status === "sent" ? "Sent" : "Mark sent"}</button>
+            </footer>
+          </div>
+        ) : null}
+        {error ? <p className="lead-concept-error">{error}</p> : null}
+      </div>
+    </details>
   );
 }
 
