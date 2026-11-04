@@ -1195,6 +1195,7 @@ class AdminDataService:
         *,
         match_attribute: str | None = None,
         niche_slug: str | None = None,
+        market_key: str | None = None,
     ) -> dict[str, Any]:
         business = self._business(business_id)
         memberships = list(
@@ -1209,7 +1210,8 @@ class AdminDataService:
             (
                 membership
                 for membership in memberships
-                if niche_slug is not None and membership[1].slug == niche_slug
+                if (niche_slug is None or membership[1].slug == niche_slug)
+                and (market_key is None or membership[0].market_key == market_key)
             ),
             memberships[0] if memberships else None,
         )
@@ -2672,15 +2674,6 @@ def _website_lead_priority(
     """
 
     considered = [item for item in opportunities if item is not None]
-    if eligibility_state == "excluded":
-        return {
-            "state": "excluded",
-            "score": 0.0,
-            "label": "Excluded",
-            "confidence": "excluded",
-            "reason": " ".join(eligibility_reasons) or "Business is not eligible.",
-        }
-
     operational = facts.get("business_operational")
     operational_active = bool(
         operational
@@ -2732,7 +2725,7 @@ def _website_lead_priority(
     )
     if missing_gap is not None and operational_active:
         source = "active Google Business Profile" if google_profile_active else "active business evidence"
-        if eligibility_state == "estimated":
+        if eligibility_state != "target":
             return estimated_priority(
                 100.0,
                 label="Website missing",
@@ -2766,7 +2759,7 @@ def _website_lead_priority(
     if gaps:
         strongest = max(gaps, key=lambda item: float(item.get("score") or 0.0))
         score = round(float(strongest.get("score") or ESTIMATED_WEBSITE_UPGRADE_SCORE), 1)
-        if eligibility_state == "estimated" or missing_gap is not None:
+        if eligibility_state != "target" or missing_gap is not None:
             return estimated_priority(
                 score,
                 label=strongest["label"],
@@ -2781,7 +2774,7 @@ def _website_lead_priority(
         }
 
     needs_review = [item for item in considered if item["state"] == "review"]
-    if eligibility_state == "estimated" or needs_review or not considered:
+    if eligibility_state != "target" or needs_review or not considered:
         reasons = [item["reason"] for item in needs_review]
         no_website_signal = not has_website_url or status_value in {"", "not_listed", "missing"}
         return estimated_priority(

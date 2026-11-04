@@ -84,10 +84,11 @@ export class ApiClient {
     return this.request<AdminBusinessPage>(`/admin/businesses?${query.toString()}`);
   }
 
-  getAdminBusiness(id: string, matchAttribute = "", nicheSlug = "") {
+  getAdminBusiness(id: string, matchAttribute = "", nicheSlug = "", marketKey = "") {
     const query = new URLSearchParams();
     if (matchAttribute) query.set("match_attribute", matchAttribute);
     if (nicheSlug) query.set("niche_slug", nicheSlug);
+    if (marketKey) query.set("market_key", marketKey);
     const suffix = query.size ? `?${query.toString()}` : "";
     return this.request<AdminBusinessDetail>(`/admin/businesses/${id}${suffix}`);
   }

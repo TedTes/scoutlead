@@ -56,18 +56,6 @@ const matchStateLabels = {
   not_qualified: "Excluded",
 } as const;
 
-const emptyEligibilityStateCounts = {
-  target: 0,
-  estimated: 0,
-  excluded: 0,
-};
-
-const eligibilityStateLabels = {
-  target: "Target businesses",
-  estimated: "Estimated eligibility",
-  excluded: "Excluded",
-} as const;
-
 export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [overview, setOverview] = useState(emptyOverview);
@@ -78,8 +66,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [sort, setSort] = useState("lead_desc");
   const [status, setStatus] = useState("");
   const [nicheSlug, setNicheSlug] = useState("");
-  const [eligibilityState, setEligibilityState] = useState("all");
-  const [eligibilityStateCounts, setEligibilityStateCounts] = useState(emptyEligibilityStateCounts);
   const [matchAttribute, setMatchAttribute] = useState("");
   const [matchState, setMatchState] = useState("all");
   const [matchStateCounts, setMatchStateCounts] = useState(emptyMatchStateCounts);
@@ -108,7 +94,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         sort,
         status,
         niche_slug: selectedNiche,
-        eligibility_state: eligibilityState,
         match_attribute: matchAttribute,
         match_state: matchState,
         page,
@@ -124,12 +109,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
-      const returnedEligibilityCounts = businessPage.eligibility_state_counts;
-      setEligibilityStateCounts({
-        target: returnedEligibilityCounts?.target ?? 0,
-        estimated: returnedEligibilityCounts?.estimated ?? returnedEligibilityCounts?.needs_review ?? 0,
-        excluded: returnedEligibilityCounts?.excluded ?? 0,
-      });
       setMatchStateCounts({
         ...emptyMatchStateCounts,
         ...(businessPage.match_state_counts || {}),
@@ -146,7 +125,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
     } finally {
       setLoading(false);
     }
-  }, [api, eligibilityState, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
+  }, [api, matchAttribute, matchState, nicheSlug, page, search, sort, status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 180);
@@ -158,10 +137,11 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
       setDetail(null);
       return;
     }
-    void api.getAdminBusiness(selectedId, matchAttribute, nicheSlug).then(setDetail).catch((cause) => {
+    const selectedMarketKey = rows.find((row) => row.id === selectedId)?.market_key || "";
+    void api.getAdminBusiness(selectedId, matchAttribute, nicheSlug, selectedMarketKey).then(setDetail).catch((cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
-  }, [allowed, api, matchAttribute, nicheSlug, selectedId]);
+  }, [allowed, api, matchAttribute, nicheSlug, rows, selectedId]);
 
   const refreshDetail = async (result?: AdminBusinessDetail) => {
     if (result) {
@@ -200,7 +180,12 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         const batch = businessIds.slice(index, index + 5);
         const batchPayloads = await Promise.all(batch.map(async (businessId) => {
           const [businessDetail, businessLineage] = await Promise.all([
-            api.getAdminBusiness(businessId, matchAttribute, nicheSlug),
+            api.getAdminBusiness(
+              businessId,
+              matchAttribute,
+              selectedBusinesses[businessId]?.niche_slug || nicheSlug,
+              selectedBusinesses[businessId]?.market_key || "",
+            ),
             api.getAdminBusinessFactLineage(businessId),
           ]);
           return buildBusinessJsonPayload(businessDetail, businessLineage);
@@ -280,18 +265,6 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
         </label>
-        <select
-          aria-label="Business eligibility"
-          value={eligibilityState}
-          onChange={(event) => { setEligibilityState(event.target.value); setPage(1); }}
-        >
-          <option value="all">
-            All business eligibility ({Object.values(eligibilityStateCounts).reduce((sum, count) => sum + count, 0).toLocaleString()})
-          </option>
-          {Object.entries(eligibilityStateLabels).map(([value, label]) => (
-            <option key={value} value={value}>{label} ({(eligibilityStateCounts[value as keyof typeof eligibilityStateCounts] ?? 0).toLocaleString()})</option>
-          ))}
-        </select>
         <select aria-label="Audience-match attribute" value={matchAttribute} onChange={(event) => {
           const value = event.target.value;
           setMatchAttribute(value);
@@ -331,7 +304,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         </select>
         <select aria-label="Sort businesses" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
           <option value="lead_desc">Lead candidates first</option>
-          <option value="lead_asc">Lowest-confidence and exclusions first</option>
+          <option value="lead_asc">Lowest lead score first</option>
           <option value="name">Name A–Z</option>
         </select>
         <button

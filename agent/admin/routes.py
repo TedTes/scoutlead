@@ -360,11 +360,13 @@ def business_detail(
     auth: AdminAuth,
     match_attribute: str | None = None,
     niche_slug: str | None = None,
+    market_key: str | None = None,
 ):
     return _service(session, auth).detail(
         business_id,
         match_attribute=match_attribute,
         niche_slug=niche_slug,
+        market_key=market_key,
     )
 
 

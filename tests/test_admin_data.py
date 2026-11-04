@@ -263,6 +263,66 @@ def test_active_google_business_with_missing_website_is_top_priority() -> None:
     assert "active Google Business Profile" in assessment["priority_reason"]
 
 
+def test_failed_business_fit_is_ranked_as_an_estimate_instead_of_forced_to_zero() -> None:
+    now = utcnow()
+    business = BusinessModel(
+        id="business_estimated_fit",
+        display_name="Ambiguous Paint Business",
+        normalized_name="ambiguous paint business",
+        status="active",
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    validations = {
+        key: ValidationResultModel(
+            validation_type=key,
+            status="failed" if key == "trade" else "passed",
+            confidence=95,
+            reason="Provider category does not support the requested trade."
+            if key == "trade"
+            else "Verified.",
+        )
+        for key in ("identity", "business_identity", "trade", "location")
+    }
+    definition = SignalDefinitionModel(
+        key="website_status",
+        label="Website status",
+        opportunity_direction="categorical",
+        config={"audience_min_score": 70},
+    )
+    facts = [
+        {
+            "key": "business_operational",
+            "value": True,
+            "score": 0,
+            "evidence_state": "usable",
+        },
+        {
+            "key": "website_status",
+            "value": "missing",
+            "score": 100,
+            "basis": "Website verification completed without finding an owned site.",
+            "evidence_state": "usable",
+            "evidence_confidence": 100,
+            "source_observation_id": "website-check",
+        },
+    ]
+
+    assessment = _admin_lead_assessment(
+        business,
+        validations,
+        facts,
+        None,
+        [definition],
+    )
+
+    assert assessment["eligibility"]["state"] == "excluded"
+    assert assessment["lead_state"] == "candidate"
+    assert assessment["priority_score"] == 80
+    assert assessment["priority_confidence"] == "estimated"
+    assert "Provider category" in assessment["priority_reason"]
+
+
 def test_incomplete_website_measurement_gets_estimated_priority() -> None:
     now = utcnow()
     business = BusinessModel(
@@ -367,7 +427,7 @@ def test_unverified_attached_website_is_estimated_instead_of_trusted() -> None:
     assert "not been verified as belonging" in assessment["priority_reason"]
 
 
-def test_admin_detail_uses_the_same_selected_trade_scope_as_the_list() -> None:
+def test_admin_detail_uses_the_same_selected_trade_and_market_scope_as_the_list() -> None:
     factory = _session_factory()
     with factory() as session:
         business, painting = _business(session)
@@ -394,6 +454,18 @@ def test_admin_detail_uses_the_same_selected_trade_scope_as_the_list() -> None:
                     last_seen_at=now,
                 )
             )
+        session.add(
+            BusinessNicheMembershipModel(
+                id=new_id("membership"),
+                business_id=business.id,
+                niche_id=electrical.id,
+                market_key="north york",
+                confidence=1.0,
+                evidence=[],
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+        )
         for validation_type in ("identity", "business_identity", "trade", "location"):
             session.add(
                 ValidationResultModel(
@@ -413,14 +485,34 @@ def test_admin_detail_uses_the_same_selected_trade_scope_as_the_list() -> None:
                     expires_at=now + timedelta(days=30),
                 )
             )
+        session.add(
+            ValidationResultModel(
+                id=new_id("validation"),
+                idempotency_key=f"{business.id}:trade:electrical:north-york",
+                business_id=business.id,
+                niche_id=electrical.id,
+                market_key="north york",
+                validation_type="trade",
+                status="failed",
+                confidence=95,
+                reason="A different market-scoped trade check failed.",
+                evidence=[],
+                validator="test",
+                validator_version=1,
+                observed_at=now,
+                expires_at=now + timedelta(days=30),
+            )
+        )
         session.commit()
 
         detail = _service(session).detail(
             business.id,
             niche_slug=electrical.slug,
+            market_key="toronto",
         )
 
         assert detail["niche_slug"] == electrical.slug
+        assert detail["market_key"] == "toronto"
         assert detail["eligibility_state"] == "target"
 
 
