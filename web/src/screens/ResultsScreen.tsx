@@ -49,6 +49,7 @@ import type {
   Message,
   OutreachPackage,
   OutreachPackageContent,
+  OutreachGenerationInput,
   OutreachChannel,
   OutreachResponseClassification,
   Product,
@@ -294,11 +295,7 @@ export function ResultsScreen({
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
     : undefined;
-  const detailContact = selectedContact && (
-    workflowView !== "shortlisted" || hasActionableAudienceOpportunity(selectedContact)
-  )
-    ? selectedContact
-    : undefined;
+  const detailContact = selectedContact;
   const selectedMessage = selectedContact
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
@@ -1014,15 +1011,6 @@ export function ResultsScreen({
                       && !window.confirm("Discard unsaved outreach changes?")
                     ) return;
                     setOutreachDraftDirty(false);
-                    if (workflowView === "shortlisted" && !hasActionableAudienceOpportunity(contact)) {
-                      setSelectedContactId(contact.id);
-                      setDetailPanelOpen(false);
-                      showToast({
-                        title: "Outreach unavailable",
-                        message: "This lead does not have a verified opportunity yet.",
-                      });
-                      return;
-                    }
                     setSelectedContactId(contact.id);
                     setDetailPanelOpen(true);
                   }}
@@ -1097,11 +1085,8 @@ export function ResultsScreen({
             onClose={() => setDetailPanelOpen(false)}
             onDirtyChange={setOutreachDraftDirty}
             onGetPackage={() => territoryApi.getOutreachPackage(detailContact.id)}
-            onGeneratePackage={() => territoryApi.generateOutreachPackage(detailContact.id)}
+            onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailContact.id, input)}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
-            onClassifyResponse={(packageId, channel, responseText) => territoryApi.classifyOutreachResponse(packageId, channel, responseText)}
-            onRecordEvent={(packageId, event) => territoryApi.recordOutreachEvent(packageId, event)}
-            onPrepareMessage={(packageId) => territoryApi.prepareOutreachMessage(packageId)}
           />
         ) : (
           <ContactDrawer
@@ -1257,7 +1242,409 @@ function formatLegacyGeneratedMessage(outreachPackage: OutreachPackage) {
   };
 }
 
+function proposalAngleFromReason(businessName: string, reason: string, fallback: string) {
+  const normalized = reason.toLowerCase();
+  if (normalized.includes("no website") || normalized.includes("does not include a website")) {
+    return `New website concept for ${businessName}: services, project proof, and a clear quote-request path`;
+  }
+  if (normalized.includes("quote") || normalized.includes("booking")) {
+    return `Website update for ${businessName}: a guided quote or booking flow`;
+  }
+  if (normalized.includes("contact form")) {
+    return `Website update for ${businessName}: a clearer contact and quote-request path`;
+  }
+  if (normalized.includes("unavailable") || normalized.includes("mobile")) {
+    return `Website refresh for ${businessName}: a clearer, mobile-friendly customer path`;
+  }
+  return fallback;
+}
+
 function OutreachWorkspace({
+  contact,
+  onClose,
+  onGeneratePackage,
+  onGetPackage,
+  onDirtyChange,
+  onSavePackage,
+  persistent = false,
+}: {
+  contact: DiscoveryResult;
+  onClose: () => void;
+  onGeneratePackage: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
+  onGetPackage: () => Promise<OutreachPackage | null>;
+  onDirtyChange: (dirty: boolean) => void;
+  onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
+  persistent?: boolean;
+}) {
+  const { showToast } = useToast();
+  const [outreachPackage, setOutreachPackage] = useState<OutreachPackage | null>(null);
+  const [draft, setDraft] = useState<OutreachPackageContent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [contextCopied, setContextCopied] = useState(false);
+  const [channelCopied, setChannelCopied] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [editingInputs, setEditingInputs] = useState(false);
+  const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<"instagram" | "sms" | "email" | "call">("instagram");
+  const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
+  const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [] });
+  const [featureText, setFeatureText] = useState("");
+
+  const selectedEvidence = visibleAudienceEvidence(contact);
+  const copiedEvidence = draft?.evidence?.length
+    ? draft.evidence
+    : selectedEvidence.map((item) => ({
+        signal_key: item.signalKey,
+        label: item.signalKey.replace(/_/g, " "),
+        statement: item.statement,
+        value: item.value as string | number | boolean | null,
+      }));
+  const businessContextJson = buildBusinessContext(contact, copiedEvidence);
+
+  const withTemplate = (content: OutreachPackageContent): OutreachPackageContent => {
+    const rating = Number(getRating(contact));
+    const reviews = Number(getReviewCount(contact));
+    const positiveDetail = Number.isFinite(rating) && rating >= 4.5 && Number.isFinite(reviews) && reviews > 0
+      ? `${rating} Google rating · ${reviews} public reviews`
+      : Number.isFinite(reviews) && reviews >= 20
+        ? `${reviews} public reviews`
+        : "";
+    const matchedReason = audienceMatchedSignals(contact).find(isOutreachEligibleEvidence)?.statement;
+    const leadReason = content.message_template?.lead_reason
+      || matchedReason
+      || content.strategy?.evidence_statement
+      || content.observation
+      || "";
+    const proposalAngle = content.message_template?.opportunity
+      || proposalAngleFromReason(contact.company_name, leadReason, content.strategy?.value_hypothesis || "");
+    return {
+      ...content,
+      message_template: {
+        business_strength: content.message_template?.business_strength || positiveDetail,
+        lead_reason: leadReason,
+        opportunity: proposalAngle,
+        proof_url: content.message_template?.proof_url || null,
+      },
+    };
+  };
+
+  const loadPackage = async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const existing = await onGetPackage();
+      setOutreachPackage(existing);
+      setDraft(existing ? withTemplate(existing.content) : null);
+      const loadedInput = existing?.content.outreach_input || { channels: ["instagram"], concept_features: [] };
+      if (!loadedInput.channels?.length) loadedInput.channels = ["instagram"];
+      setOutreachInput(loadedInput);
+      setFeatureText(loadedInput.concept_features.join("\n"));
+      setDirty(false);
+      onDirtyChange(false);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateOutreach = async () => {
+    if (generating || !outreachInput.channels.length) return;
+    setGenerating(true);
+    setLoadError("");
+    const input = {
+      ...outreachInput,
+      concept_features: featureText.split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 8),
+    };
+    try {
+      const generated = await onGeneratePackage(input);
+      setOutreachPackage(generated);
+      setDraft(withTemplate(generated.content));
+      setOutreachInput(input);
+      setEditingInputs(false);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    setWorkspaceTab("outreach");
+    void loadPackage();
+    return () => onDirtyChange(false);
+  // Package loaders are intentionally scoped to the selected business.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contact.id]);
+
+  useEffect(() => {
+    if (!dirty || !draft || !outreachPackage) return;
+    const timer = window.setTimeout(async () => {
+      setSaveState("saving");
+      try {
+        const saved = await onSavePackage(outreachPackage.id, draft);
+        setOutreachPackage(saved);
+        setDraft(withTemplate(saved.content));
+        setDirty(false);
+        onDirtyChange(false);
+        setSaveState("saved");
+      } catch {
+        setSaveState("error");
+      }
+    }, 700);
+    return () => window.clearTimeout(timer);
+  // withTemplate only supplies a compatibility fallback for older packages.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, draft, outreachPackage?.id]);
+
+  const copyBusinessContext = async () => {
+    try {
+      await navigator.clipboard.writeText(businessContextJson);
+      setContextCopied(true);
+      window.setTimeout(() => setContextCopied(false), 1600);
+      showToast({ title: "Business context copied", tone: "green" });
+    } catch {
+      showToast({ title: "Copy failed", tone: "red" });
+    }
+  };
+
+  const generatedOutreach = draft?.generated_outreach;
+  const generatedChannels = useMemo(
+    () => generatedOutreach
+      ? (["instagram", "sms", "email", "call"] as const).filter(
+          (channel) => Boolean(generatedOutreach.channels[channel]),
+        )
+      : [],
+    [generatedOutreach],
+  );
+
+  useEffect(() => {
+    if (!generatedChannels.length || generatedChannels.includes(activeGeneratedChannel)) return;
+    setActiveGeneratedChannel(generatedChannels[0]);
+  }, [activeGeneratedChannel, generatedChannels]);
+
+  const channelCopy = generatedOutreach
+    ? activeGeneratedChannel === "instagram"
+      ? generatedOutreach.channels.instagram
+        ? [generatedOutreach.channels.instagram.initial, generatedOutreach.channels.instagram.follow_up].join("\n\nFollow-up:\n")
+        : ""
+      : activeGeneratedChannel === "sms"
+        ? generatedOutreach.channels.sms
+          ? [generatedOutreach.channels.sms.initial, generatedOutreach.channels.sms.follow_up].join("\n\nFollow-up:\n")
+          : ""
+        : activeGeneratedChannel === "email"
+          ? generatedOutreach.channels.email ? [
+              `Subject: ${generatedOutreach.channels.email.subject}`,
+              generatedOutreach.channels.email.body,
+              `Follow-up subject: ${generatedOutreach.channels.email.follow_up_subject}`,
+              generatedOutreach.channels.email.follow_up_body,
+            ].join("\n\n") : ""
+          : generatedOutreach.channels.call ? [
+              generatedOutreach.channels.call.opener,
+              ...generatedOutreach.channels.call.talking_points.map((item) => `• ${item}`),
+              generatedOutreach.channels.call.close,
+            ].join("\n\n") : ""
+    : "";
+
+  const toggleGenerationChannel = (channel: "instagram" | "sms" | "email" | "call") => {
+    const selected = outreachInput.channels.includes(channel);
+    setOutreachInput({
+      ...outreachInput,
+      channels: selected
+        ? outreachInput.channels.filter((item) => item !== channel)
+        : [...outreachInput.channels, channel],
+    });
+  };
+
+  const copyChannel = async () => {
+    try {
+      await navigator.clipboard.writeText(channelCopy);
+      setChannelCopied(true);
+      window.setTimeout(() => setChannelCopied(false), 1600);
+      showToast({ title: "Channel draft copied", tone: "green" });
+    } catch {
+      showToast({ title: "Copy failed", tone: "red" });
+    }
+  };
+
+  const updateGeneratedChannel = (
+    channel: "instagram" | "sms" | "email" | "call",
+    field: string,
+    value: string,
+  ) => {
+    if (!draft?.generated_outreach) return;
+    const current = draft.generated_outreach;
+    const channelValue = current.channels[channel];
+    const nextChannel = field === "talking_points"
+      ? { ...channelValue, talking_points: value.split("\n").map((item) => item.trim()).filter(Boolean) }
+      : { ...channelValue, [field]: value };
+    setDraft({
+      ...draft,
+      generated_outreach: {
+        ...current,
+        channels: { ...current.channels, [channel]: nextChannel },
+      },
+    });
+    setDirty(true);
+    setSaveState("idle");
+    onDirtyChange(true);
+  };
+
+  const closeWorkspace = () => {
+    if (dirty && !window.confirm("Discard unsaved outreach changes?")) return;
+    onClose();
+  };
+
+  const businessJsonPanel = (
+    <section className="outreach-business-json">
+      <header>
+        <div><strong>Business JSON</strong><span>Exact context copied for external use</span></div>
+        <button type="button" onClick={() => void copyBusinessContext()}>
+          {contextCopied ? <Check size={14} /> : <Copy size={14} />}
+          {contextCopied ? "Copied" : "Copy JSON"}
+        </button>
+      </header>
+      <div className="outreach-business-json-body">
+        <pre>{businessContextJson}</pre>
+      </div>
+    </section>
+  );
+
+  const workspaceTabs = (
+    <nav className="outreach-workspace-tabs" aria-label="Outreach workspace">
+      <button className={workspaceTab === "outreach" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("outreach")}>
+        Outreach
+      </button>
+      <button className={workspaceTab === "json" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("json")}>
+        Business JSON
+      </button>
+    </nav>
+  );
+
+  return (
+    <div className={persistent ? "contact-drawer-overlay outreach-overlay open is-persistent" : "contact-drawer-overlay outreach-overlay open"}>
+      {persistent ? null : <button className="contact-drawer-backdrop" type="button" aria-label="Close outreach" onClick={closeWorkspace} />}
+      <aside className="contact-drawer-panel outreach-workspace" aria-label={`Outreach for ${contact.company_name}`}>
+        <header className="outreach-workspace-header">
+          <div className="outreach-header-content">
+            <div className="outreach-header-identity">
+              <strong>{contact.company_name}</strong>
+              <small>{[contact.geography, contactListCategoryLabel(contact)].filter(Boolean).join(" · ")}</small>
+            </div>
+          </div>
+          <div className="outreach-header-actions">
+            <button aria-label="Close outreach" title="Close" type="button" onClick={closeWorkspace}><X size={17} /></button>
+          </div>
+        </header>
+
+        {loading ? (
+          <div className="outreach-template-status"><RotateCw className="spin" size={18} /><strong>Loading outreach…</strong></div>
+        ) : generatedOutreach && !editingInputs ? (
+          <div className="outreach-tab-layout">
+            {workspaceTabs}
+            <div className="generated-outreach-canvas">
+            {workspaceTab === "json" ? businessJsonPanel : <>
+              <section className="generated-proposal-summary">
+              {generatedOutreach.proposal.positive_detail ? <p><span>Business proof</span>{generatedOutreach.proposal.positive_detail}</p> : null}
+              <p><span>Lead evidence</span>{generatedOutreach.proposal.observed_opportunity}</p>
+              <p><span>Proposal</span>{generatedOutreach.proposal.proposal_angle}</p>
+              {generatedOutreach.proposal.proof_url ? <p><span>Proof</span><a href={generatedOutreach.proposal.proof_url} target="_blank" rel="noreferrer">{generatedOutreach.proposal.proof_url}</a></p> : null}
+              </section>
+
+              <section className="generated-channel-workspace">
+              <header className="generated-channel-tabs">
+                {generatedChannels.map((channel) => (
+                  <button className={activeGeneratedChannel === channel ? "active" : ""} key={channel} type="button" onClick={() => setActiveGeneratedChannel(channel)}>
+                    {channel === "instagram" ? "Instagram" : channel === "sms" ? "Text" : channel === "email" ? "Email" : "Call"}
+                  </button>
+                ))}
+                <button className="generated-edit-inputs" type="button" onClick={() => setEditingInputs(true)}>Edit inputs</button>
+              </header>
+
+              <div className="generated-channel-editor">
+                {activeGeneratedChannel === "instagram" && generatedOutreach.channels.instagram ? (
+                  <>
+                    <label><span>Initial message</span><AutoGrowTextarea ariaLabel="Instagram initial message" value={generatedOutreach.channels.instagram.initial} onChange={(value) => updateGeneratedChannel("instagram", "initial", value)} /></label>
+                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Instagram follow-up" value={generatedOutreach.channels.instagram.follow_up} onChange={(value) => updateGeneratedChannel("instagram", "follow_up", value)} /></label>
+                  </>
+                ) : null}
+                {activeGeneratedChannel === "sms" && generatedOutreach.channels.sms ? (
+                  <>
+                    <label><span>Initial text</span><AutoGrowTextarea ariaLabel="Text initial message" value={generatedOutreach.channels.sms.initial} onChange={(value) => updateGeneratedChannel("sms", "initial", value)} /></label>
+                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Text follow-up" value={generatedOutreach.channels.sms.follow_up} onChange={(value) => updateGeneratedChannel("sms", "follow_up", value)} /></label>
+                  </>
+                ) : null}
+                {activeGeneratedChannel === "email" && generatedOutreach.channels.email ? (
+                  <>
+                    <label><span>Subject</span><input value={generatedOutreach.channels.email.subject} onChange={(event) => updateGeneratedChannel("email", "subject", event.target.value)} /></label>
+                    <label><span>Email</span><AutoGrowTextarea ariaLabel="Email body" value={generatedOutreach.channels.email.body} onChange={(value) => updateGeneratedChannel("email", "body", value)} /></label>
+                    <label><span>Follow-up subject</span><input value={generatedOutreach.channels.email.follow_up_subject} onChange={(event) => updateGeneratedChannel("email", "follow_up_subject", event.target.value)} /></label>
+                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Email follow-up" value={generatedOutreach.channels.email.follow_up_body} onChange={(value) => updateGeneratedChannel("email", "follow_up_body", value)} /></label>
+                  </>
+                ) : null}
+                {activeGeneratedChannel === "call" && generatedOutreach.channels.call ? (
+                  <>
+                    <label><span>Opener</span><AutoGrowTextarea ariaLabel="Call opener" value={generatedOutreach.channels.call.opener} onChange={(value) => updateGeneratedChannel("call", "opener", value)} /></label>
+                    <label><span>Talking points</span><AutoGrowTextarea ariaLabel="Call talking points" value={generatedOutreach.channels.call.talking_points.join("\n")} onChange={(value) => updateGeneratedChannel("call", "talking_points", value)} /></label>
+                    <label><span>Close</span><AutoGrowTextarea ariaLabel="Call close" value={generatedOutreach.channels.call.close} onChange={(value) => updateGeneratedChannel("call", "close", value)} /></label>
+                  </>
+                ) : null}
+              </div>
+
+              <footer className="generated-channel-footer">
+                <span>{outreachPackage?.provider}{outreachPackage?.model ? ` · ${outreachPackage.model}` : ""} · prompt {generatedOutreach.prompt_version}</span>
+                {saveState !== "idle" ? <em className={`is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save failed"}</em> : null}
+                <button type="button" onClick={() => void copyChannel()}>{channelCopied ? <Check size={14} /> : <Copy size={14} />}{channelCopied ? "Copied" : "Copy"}</button>
+              </footer>
+              </section>
+            </>}
+            </div>
+          </div>
+        ) : (
+          <div className="outreach-tab-layout">
+            {workspaceTabs}
+            <div className="outreach-input-canvas">
+            {workspaceTab === "json" ? businessJsonPanel : <>
+              <section className="outreach-input-evidence">
+              <span>Why this lead</span>
+              {selectedEvidence.map((item) => <p key={item.signalKey}>{item.statement}</p>)}
+              {!selectedEvidence.length ? <p>Shortlisted by you for a personalized proposal.</p> : null}
+              </section>
+              <section className="outreach-input-form">
+              <label><span>Personal detail <em>optional</em></span><textarea rows={3} value={outreachInput.personal_detail || ""} onChange={(event) => setOutreachInput({ ...outreachInput, personal_detail: event.target.value || null })} placeholder="A project, review, photo, or detail you personally verified." /></label>
+              <label><span>Concept or proof link <em>optional</em></span><input type="url" value={outreachInput.concept_url || ""} onChange={(event) => setOutreachInput({ ...outreachInput, concept_url: event.target.value || null })} placeholder="https://…" /></label>
+              <label><span>Features included <em>optional · one per line</em></span><textarea rows={3} value={featureText} onChange={(event) => setFeatureText(event.target.value)} placeholder={"Before/after gallery\nMobile quote request\nOne-tap call"} /></label>
+              <label><span>Direction <em>optional</em></span><textarea rows={2} value={outreachInput.direction || ""} onChange={(event) => setOutreachInput({ ...outreachInput, direction: event.target.value || null })} placeholder="Focus on making quote requests easier. Keep it casual." /></label>
+              {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
+              <div className="outreach-input-actions">
+                <div className="outreach-channel-select" aria-label="Message formats to generate">
+                  <span>Message for</span>
+                  {(["instagram", "sms", "email", "call"] as const).map((channel) => {
+                    const selected = outreachInput.channels.includes(channel);
+                    return (
+                      <button className={selected ? "selected" : ""} key={channel} type="button" aria-pressed={selected} onClick={() => toggleGenerationChannel(channel)}>
+                        {selected ? <Check size={12} /> : null}
+                        {channel === "instagram" ? "Instagram" : channel === "sms" ? "Text" : channel === "email" ? "Email" : "Call"}
+                      </button>
+                    );
+                  })}
+                </div>
+                {generatedOutreach ? <button className="secondary" type="button" onClick={() => setEditingInputs(false)}>Cancel</button> : null}
+                <button disabled={generating || !outreachInput.channels.length} type="button" onClick={() => void generateOutreach()}>{generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}{generating ? "Generating…" : `${generatedOutreach ? "Regenerate" : "Generate"}${outreachInput.channels.length > 1 ? ` ${outreachInput.channels.length} drafts` : ""}`}</button>
+              </div>
+              </section>
+            </>}
+            </div>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+export function LegacyOutreachWorkspace({
   contact,
   onClose,
   onGeneratePackage,
@@ -1644,6 +2031,37 @@ function OutreachWorkspace({
                 </div>
               </section>
 
+              {draft.strategy ? (
+                <details className="outreach-pitch-structure" open>
+                  <summary>
+                    <span><strong>Pitch structure</strong><small>One grounded pitch, adapted to each channel</small></span>
+                    <em>5 parts</em>
+                  </summary>
+                  <ol>
+                    <li>
+                      <span>1</span>
+                      <div><strong>Who you are</strong><p>{draft.strategy.seller_positioning}</p></div>
+                    </li>
+                    <li>
+                      <span>2</span>
+                      <div><strong>Specific detail</strong><p>{draft.strategy.observation}</p></div>
+                    </li>
+                    <li>
+                      <span>3</span>
+                      <div><strong>Opportunity</strong><p>{draft.strategy.value_hypothesis}</p></div>
+                    </li>
+                    <li className="is-optional">
+                      <span>4</span>
+                      <div><strong>Proof <em>optional</em></strong><p>Include a concept or short video only when one exists.</p></div>
+                    </li>
+                    <li>
+                      <span>5</span>
+                      <div><strong>Soft call to action</strong><p>{draft.strategy.next_step}</p></div>
+                    </li>
+                  </ol>
+                </details>
+              ) : null}
+
               <section className={`outreach-editor-card is-${activeChannel}`}>
                 <header className="outreach-editor-header">
                   <div className="outreach-editor-identity">
@@ -1911,6 +2329,7 @@ function buildBusinessContext(
   contact: DiscoveryResult,
   evidence: OutreachPackageContent["evidence"],
 ): string {
+  const savedSearchSignals = audienceMatchedSignals(contact);
   return JSON.stringify({
     business: {
       id: contact.business_id || contact.id,
@@ -1925,11 +2344,20 @@ function buildBusinessContext(
       google_review_count: contact.google_review_count ?? null,
       source: contact.source || null,
     },
-    verified_evidence: evidence.map((item) => ({
+    lead_evidence: evidence.map((item) => ({
       signal_key: item.signal_key,
       label: item.label,
       statement: item.statement,
       value: item.value,
+    })),
+    saved_search_signals: savedSearchSignals.map((item) => ({
+      signal_key: item.signalKey,
+      fact_key: item.factKey,
+      value: item.value,
+      confidence: item.confidence,
+      pitch_eligible: item.pitchEligible,
+      pitch_reason: item.pitchReason,
+      statement: item.statement,
     })),
     research: contact.research || null,
     qualification: contact.qualification || null,
@@ -1938,9 +2366,12 @@ function buildBusinessContext(
 
 type AudienceMatchedSignal = {
   confidence: "confirmed" | "possible";
+  factKey: string | null;
   signalKey: string;
   statement: string;
   value: unknown;
+  pitchEligible: boolean | null;
+  pitchReason: string | null;
 };
 
 function audienceMatchedSignals(contact: DiscoveryResult): AudienceMatchedSignal[] {
@@ -1965,11 +2396,24 @@ function audienceMatchedSignals(contact: DiscoveryResult): AudienceMatchedSignal
     if (confidence !== "confirmed" && confidence !== "possible") return [];
     const value = signal.value;
     const statement = audienceSignalStatement(signalKey, value);
-    return [{ confidence, signalKey, statement, value } as AudienceMatchedSignal];
+    return [{
+      confidence,
+      factKey: typeof signal.fact_key === "string" ? signal.fact_key : null,
+      signalKey,
+      statement,
+      value,
+      pitchEligible: typeof signal.pitch_eligible === "boolean" ? signal.pitch_eligible : null,
+      pitchReason: typeof signal.pitch_reason === "string" ? signal.pitch_reason : null,
+    } as AudienceMatchedSignal];
   });
 }
 
 function isOutreachEligibleEvidence(evidence: AudienceMatchedSignal): boolean {
+  if (evidence.pitchEligible === false) return false;
+  if (
+    ["primary_cta_present", "click_to_call_present", "contact_form_present", "quote_or_booking_form_present"].includes(evidence.signalKey)
+    && evidence.value !== false
+  ) return false;
   return evidence.confidence === "confirmed" || (
     evidence.confidence === "possible"
     && evidence.signalKey === "website_status"
@@ -1977,8 +2421,27 @@ function isOutreachEligibleEvidence(evidence: AudienceMatchedSignal): boolean {
   );
 }
 
-function hasActionableAudienceOpportunity(contact: DiscoveryResult): boolean {
-  return audienceMatchedSignals(contact).some(isOutreachEligibleEvidence);
+function visibleAudienceEvidence(contact: DiscoveryResult): AudienceMatchedSignal[] {
+  const eligible = audienceMatchedSignals(contact).filter(isOutreachEligibleEvidence);
+  const websiteMissing = eligible.filter((item) => (
+    item.signalKey === "website_status"
+    && (item.value === "missing" || item.value === "not_listed")
+  ));
+  if (websiteMissing.length) return websiteMissing;
+  if (!contact.website_url) {
+    const pageSignalKeys = new Set([
+      "no_quote_flow",
+      "quote_or_booking_form_present",
+      "no_contact_form",
+      "contact_form_present",
+      "primary_cta_present",
+      "click_to_call_present",
+      "mobile_viewport_missing",
+      "website_unavailable",
+    ]);
+    return eligible.filter((item) => !pageSignalKeys.has(item.signalKey));
+  }
+  return eligible;
 }
 
 function audienceSignalStatement(
@@ -1993,6 +2456,12 @@ function audienceSignalStatement(
   }
   if (signalKey === "no_contact_form" || (signalKey === "contact_form_present" && value === false)) {
     return "No contact form was found in the latest website check.";
+  }
+  if (signalKey === "primary_cta_present" && value === false) {
+    return "No primary call to action was found in the latest website check.";
+  }
+  if (signalKey === "click_to_call_present" && value === false) {
+    return "No click-to-call action was found in the latest mobile website check.";
   }
   if (signalKey === "website_unavailable") {
     return "The website was unavailable during the latest check.";

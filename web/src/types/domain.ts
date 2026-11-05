@@ -583,10 +583,44 @@ export type OutreachStrategy = {
   reply_paths: OutreachReplyPath[];
 };
 
+export type OutreachMessageTemplate = {
+  business_strength: string;
+  lead_reason: string;
+  opportunity: string;
+  proof_url?: string | null;
+};
+
+export type OutreachGenerationInput = {
+  channels: ("instagram" | "sms" | "email" | "call")[];
+  personal_detail?: string | null;
+  concept_url?: string | null;
+  concept_features: string[];
+  direction?: string | null;
+};
+
+export type GeneratedOutreach = {
+  proposal: {
+    positive_detail: string;
+    observed_opportunity: string;
+    proposal_angle: string;
+    proof_url?: string | null;
+  };
+  channels: {
+    instagram?: { initial: string; follow_up: string } | null;
+    sms?: { initial: string; follow_up: string } | null;
+    email?: { subject: string; body: string; follow_up_subject: string; follow_up_body: string } | null;
+    call?: { opener: string; talking_points: string[]; close: string } | null;
+  };
+  prompt_version: number;
+};
+
 export type OutreachPackageContent = {
   evidence_fingerprint: string;
   observation: string;
   evidence: OutreachEvidence[];
+  message_template?: OutreachMessageTemplate | null;
+  outreach_input: OutreachGenerationInput;
+  generated_outreach?: GeneratedOutreach | null;
   message: { body: string };
   call?: {
     opener: string;
@@ -625,7 +659,7 @@ export type OutreachResponseClassification = {
   category: string;
   label: string;
   confidence: number;
-  source: "deterministic" | "openai" | "fallback";
+  source: "deterministic" | "anthropic" | "openai" | "remote" | "llm" | "fallback";
   suggested_reply?: string | null;
   path?: OutreachReplyPath | null;
 };
