@@ -1259,6 +1259,19 @@ function proposalAngleFromReason(businessName: string, reason: string, fallback:
   return fallback;
 }
 
+const OUTREACH_DRAFT_CHANNELS = ["instagram", "sms", "email", "call"] as const;
+type OutreachDraftChannel = (typeof OUTREACH_DRAFT_CHANNELS)[number];
+
+function outreachDraftChannelLabel(channel: OutreachDraftChannel) {
+  return channel === "instagram"
+    ? "Instagram"
+    : channel === "sms"
+      ? "Text"
+      : channel === "email"
+        ? "Email"
+        : "Call";
+}
+
 function OutreachWorkspace({
   contact,
   onClose,
@@ -1287,7 +1300,7 @@ function OutreachWorkspace({
   const [channelCopied, setChannelCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [editingInputs, setEditingInputs] = useState(false);
-  const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<"instagram" | "sms" | "email" | "call">("instagram");
+  const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
   const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
   const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [] });
   const [featureText, setFeatureText] = useState("");
@@ -1341,6 +1354,10 @@ function OutreachWorkspace({
       if (!loadedInput.channels?.length) loadedInput.channels = ["instagram"];
       setOutreachInput(loadedInput);
       setFeatureText(loadedInput.concept_features.join("\n"));
+      const firstGeneratedChannel = OUTREACH_DRAFT_CHANNELS.find(
+        (channel) => Boolean(existing?.content.generated_outreach?.channels[channel]),
+      );
+      setActiveGeneratedChannel(firstGeneratedChannel || "instagram");
       setDirty(false);
       onDirtyChange(false);
     } catch (error) {
@@ -1350,19 +1367,21 @@ function OutreachWorkspace({
     }
   };
 
-  const generateOutreach = async () => {
-    if (generating || !outreachInput.channels.length) return;
+  const generateOutreach = async (channels: OutreachDraftChannel[] = outreachInput.channels) => {
+    if (generating || !channels.length) return;
     setGenerating(true);
     setLoadError("");
     const input = {
       ...outreachInput,
+      channels,
       concept_features: featureText.split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 8),
     };
     try {
       const generated = await onGeneratePackage(input);
       setOutreachPackage(generated);
       setDraft(withTemplate(generated.content));
-      setOutreachInput(input);
+      setOutreachInput(generated.content.outreach_input || input);
+      setActiveGeneratedChannel(channels[0]);
       setEditingInputs(false);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -1410,20 +1429,17 @@ function OutreachWorkspace({
     }
   };
 
-  const generatedOutreach = draft?.generated_outreach;
+  const generatedOutreach = outreachPackage?.provider === "template"
+    ? undefined
+    : draft?.generated_outreach;
   const generatedChannels = useMemo(
     () => generatedOutreach
-      ? (["instagram", "sms", "email", "call"] as const).filter(
+      ? OUTREACH_DRAFT_CHANNELS.filter(
           (channel) => Boolean(generatedOutreach.channels[channel]),
         )
       : [],
     [generatedOutreach],
   );
-
-  useEffect(() => {
-    if (!generatedChannels.length || generatedChannels.includes(activeGeneratedChannel)) return;
-    setActiveGeneratedChannel(generatedChannels[0]);
-  }, [activeGeneratedChannel, generatedChannels]);
 
   const channelCopy = generatedOutreach
     ? activeGeneratedChannel === "instagram"
@@ -1448,7 +1464,7 @@ function OutreachWorkspace({
             ].join("\n\n") : ""
     : "";
 
-  const toggleGenerationChannel = (channel: "instagram" | "sms" | "email" | "call") => {
+  const toggleGenerationChannel = (channel: OutreachDraftChannel) => {
     const selected = outreachInput.channels.includes(channel);
     setOutreachInput({
       ...outreachInput,
@@ -1470,7 +1486,7 @@ function OutreachWorkspace({
   };
 
   const updateGeneratedChannel = (
-    channel: "instagram" | "sms" | "email" | "call",
+    channel: OutreachDraftChannel,
     field: string,
     value: string,
   ) => {
@@ -1555,9 +1571,10 @@ function OutreachWorkspace({
 
               <section className="generated-channel-workspace">
               <header className="generated-channel-tabs">
-                {generatedChannels.map((channel) => (
-                  <button className={activeGeneratedChannel === channel ? "active" : ""} key={channel} type="button" onClick={() => setActiveGeneratedChannel(channel)}>
-                    {channel === "instagram" ? "Instagram" : channel === "sms" ? "Text" : channel === "email" ? "Email" : "Call"}
+                {OUTREACH_DRAFT_CHANNELS.map((channel) => (
+                  <button className={`${activeGeneratedChannel === channel ? "active" : ""}${generatedChannels.includes(channel) ? "" : " is-missing"}`} key={channel} type="button" onClick={() => setActiveGeneratedChannel(channel)}>
+                    <span>{outreachDraftChannelLabel(channel)}</span>
+                    {!generatedChannels.includes(channel) ? <small>Not generated</small> : null}
                   </button>
                 ))}
                 <button className="generated-edit-inputs" type="button" onClick={() => setEditingInputs(true)}>Edit inputs</button>
@@ -1591,12 +1608,23 @@ function OutreachWorkspace({
                     <label><span>Close</span><AutoGrowTextarea ariaLabel="Call close" value={generatedOutreach.channels.call.close} onChange={(value) => updateGeneratedChannel("call", "close", value)} /></label>
                   </>
                 ) : null}
+                {!generatedOutreach.channels[activeGeneratedChannel] ? (
+                  <div className="generated-channel-empty">
+                    <strong>{outreachDraftChannelLabel(activeGeneratedChannel)} has not been generated</strong>
+                    <p>Generate this message without replacing drafts from the other channels.</p>
+                    <button disabled={generating} type="button" onClick={() => void generateOutreach([activeGeneratedChannel])}>
+                      {generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}
+                      {generating ? "Generating…" : `Generate ${outreachDraftChannelLabel(activeGeneratedChannel)}`}
+                    </button>
+                  </div>
+                ) : null}
+                {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
               </div>
 
               <footer className="generated-channel-footer">
                 <span>{outreachPackage?.provider}{outreachPackage?.model ? ` · ${outreachPackage.model}` : ""} · prompt {generatedOutreach.prompt_version}</span>
                 {saveState !== "idle" ? <em className={`is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save failed"}</em> : null}
-                <button type="button" onClick={() => void copyChannel()}>{channelCopied ? <Check size={14} /> : <Copy size={14} />}{channelCopied ? "Copied" : "Copy"}</button>
+                {channelCopy ? <button type="button" onClick={() => void copyChannel()}>{channelCopied ? <Check size={14} /> : <Copy size={14} />}{channelCopied ? "Copied" : "Copy"}</button> : null}
               </footer>
               </section>
             </>}
@@ -1621,12 +1649,12 @@ function OutreachWorkspace({
               <div className="outreach-input-actions">
                 <div className="outreach-channel-select" aria-label="Message formats to generate">
                   <span>Message for</span>
-                  {(["instagram", "sms", "email", "call"] as const).map((channel) => {
+                  {OUTREACH_DRAFT_CHANNELS.map((channel) => {
                     const selected = outreachInput.channels.includes(channel);
                     return (
                       <button className={selected ? "selected" : ""} key={channel} type="button" aria-pressed={selected} onClick={() => toggleGenerationChannel(channel)}>
                         {selected ? <Check size={12} /> : null}
-                        {channel === "instagram" ? "Instagram" : channel === "sms" ? "Text" : channel === "email" ? "Email" : "Call"}
+                        {outreachDraftChannelLabel(channel)}
                       </button>
                     );
                   })}

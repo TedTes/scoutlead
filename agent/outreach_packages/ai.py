@@ -6,18 +6,13 @@ from pydantic import BaseModel, Field
 
 from agents.llm import LLMClient
 from outreach_packages.schemas import (
-    CallChannelDraft,
-    EmailChannelDraft,
     GeneratedOutreach,
-    OutreachChannelDrafts,
     OutreachGeneration,
     OutreachGenerationInput,
     OutreachClaim,
     OutreachEvidence,
     OutreachProposal,
     OutreachResponseClassification,
-    SmsChannelDraft,
-    SocialChannelDraft,
     OutreachStrategy,
     ReplyPath,
 )
@@ -26,6 +21,7 @@ from outreach_packages.templates import (
     OutreachTemplateContext,
 )
 from shared.logger import get_logger
+from shared.errors import ConfigurationError
 
 
 logger = get_logger(__name__)
@@ -47,7 +43,10 @@ class StructuredOutreachGenerator:
         fallback_proposal: OutreachProposal,
     ) -> GeneratedOutreach:
         if not self.use_ai:
-            return self._fallback(business, outreach_input, fallback_proposal)
+            raise ConfigurationError(
+                "AI outreach generation is disabled. Configure an LLM provider and set "
+                "OUTREACH_AI_MODE=generation or OUTREACH_AI_MODE=all."
+            )
         generated = self.llm.generate_object(
             task="outreach_channel_generation",
             system=(
@@ -93,59 +92,6 @@ class StructuredOutreachGenerator:
                 "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
             }
         )
-
-    @staticmethod
-    def _fallback(
-        business: dict,
-        outreach_input: OutreachGenerationInput,
-        proposal: OutreachProposal,
-    ) -> GeneratedOutreach:
-        name = str(business.get("name") or "your business")
-        detail = f" {proposal.positive_detail}." if proposal.positive_detail else ""
-        proof = f" {proposal.proof_url}" if proposal.proof_url else ""
-        initial = (
-            f"Hi {name} — {proposal.proposal_angle}."
-            f"{detail}{proof} Open to a quick look?"
-        ).replace("..", ".").strip()
-        follow_up = "Just following up in case this got buried. Happy to send a short walkthrough if useful."
-        sms = initial[:317].rstrip()
-        selected = set(outreach_input.channels)
-        return GeneratedOutreach(
-            proposal=proposal,
-            channels=OutreachChannelDrafts(
-                instagram=(
-                    SocialChannelDraft(initial=initial, follow_up=follow_up)
-                    if "instagram" in selected
-                    else None
-                ),
-                sms=(
-                    SmsChannelDraft(initial=sms, follow_up=follow_up[:237])
-                    if "sms" in selected
-                    else None
-                ),
-                email=(
-                    EmailChannelDraft(
-                        subject=f"Website idea for {name}"[:120],
-                        body=initial,
-                        follow_up_subject=f"Following up — {name}"[:120],
-                        follow_up_body=follow_up,
-                    )
-                    if "email" in selected
-                    else None
-                ),
-                call=(
-                    CallChannelDraft(
-                        opener=f"Hi, I’m calling with a website idea for {name}.",
-                        talking_points=[proposal.observed_opportunity, proposal.proposal_angle],
-                        close="Would it be useful if I sent a short example?",
-                    )
-                    if "call" in selected
-                    else None
-                ),
-            ),
-            prompt_version=OUTREACH_GENERATION_PROMPT_VERSION,
-        )
-
 
 class PhrasedSections(BaseModel):
     customer_consequence: str = Field(min_length=8, max_length=320)

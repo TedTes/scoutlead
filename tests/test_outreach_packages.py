@@ -23,7 +23,7 @@ from outreach_packages.schemas import (
     OutreachResponseClassifyRequest,
 )
 from outreach_packages.service import OutreachPackageService, _evidence
-from shared.errors import ValidationError
+from shared.errors import ConfigurationError, ValidationError
 from shared.utils import new_id, utcnow
 
 
@@ -205,6 +205,38 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         )
         assert service.find_for_result(result.id) is not None
         assert len(llm.calls) == 1
+
+        expanded = service.generate(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(channels=["call"])
+            ),
+        )
+
+        assert len(llm.calls) == 2
+        assert expanded.content.generated_outreach.channels.instagram is not None
+        assert expanded.content.generated_outreach.channels.email is not None
+        assert expanded.content.generated_outreach.channels.call is not None
+        assert expanded.content.generated_outreach.channels.sms is None
+        assert expanded.content.outreach_input.channels == ["instagram", "email", "call"]
+
+
+def test_explicit_generation_requires_real_llm_configuration() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            ai_mode="off",
+        )
+
+        with pytest.raises(ConfigurationError, match="AI outreach generation is disabled"):
+            service.generate(
+                result.id,
+                OutreachGenerateRequest(
+                    outreach_input=OutreachGenerationInput(channels=["instagram"])
+                ),
+            )
 
 
 def test_outreach_package_handoff_snapshots_one_message() -> None:

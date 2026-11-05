@@ -110,7 +110,7 @@ class OutreachPackageService:
         )
         if existing is not None:
             if data is not None:
-                existing.content = self._render_content(
+                generated = self._render_content(
                     result,
                     audience,
                     product,
@@ -118,7 +118,13 @@ class OutreachPackageService:
                     workspace,
                     outreach_input=data.outreach_input,
                     generate_channels=True,
-                ).model_dump()
+                )
+                if existing.provider != "template":
+                    generated = _merge_generated_channels(
+                        OutreachPackageContent.model_validate(existing.content),
+                        generated,
+                    )
+                existing.content = generated.model_dump()
                 existing.provider = _llm_provider(self.llm, self.ai_mode)
                 existing.model = _llm_model(self.llm, self.ai_mode)
                 existing.usage = _llm_usage(self.llm, self.ai_mode)
@@ -246,21 +252,26 @@ class OutreachPackageService:
             ),
             proof_url=generation_input.concept_url,
         )
-        generated_outreach = StructuredOutreachGenerator(
-            llm=self.llm,
-            use_ai=generate_channels and _generation_enabled(self.ai_mode),
-        ).generate(
-            business=_business_generation_context(business, snapshot),
-            sender={
-                "identity": signature,
-                "offer_summary": product.offer_summary,
-            },
-            evidence=evidence,
-            outreach_input=generation_input,
-            fallback_proposal=fallback_proposal,
-        )
-        generated_channels = generated_outreach.channels
-        if generate_channels and any(
+        generated_outreach = None
+        generated_channels = None
+        proposal = fallback_proposal
+        if generate_channels:
+            generated_outreach = StructuredOutreachGenerator(
+                llm=self.llm,
+                use_ai=_generation_enabled(self.ai_mode),
+            ).generate(
+                business=_business_generation_context(business, snapshot),
+                sender={
+                    "identity": signature,
+                    "offer_summary": product.offer_summary,
+                },
+                evidence=evidence,
+                outreach_input=generation_input,
+                fallback_proposal=fallback_proposal,
+            )
+            generated_channels = generated_outreach.channels
+            proposal = generated_outreach.proposal
+        if generated_channels is not None and any(
             getattr(generated_channels, channel) is None
             for channel in generation_input.channels
         ):
@@ -269,18 +280,18 @@ class OutreachPackageService:
             )
         generated_message_body = (
             generated_channels.sms.initial
-            if generated_channels.sms
+            if generated_channels and generated_channels.sms
             else generated_channels.instagram.initial
-            if generated_channels.instagram
+            if generated_channels and generated_channels.instagram
             else generated_channels.email.body
-            if generated_channels.email
+            if generated_channels and generated_channels.email
             else " ".join(
                 [
                     generated_channels.call.opener,
                     generated_channels.call.close,
                 ]
             )
-            if generated_channels.call
+            if generated_channels and generated_channels.call
             else None
         )
         if generate_channels and generated_message_body is None:
@@ -290,10 +301,10 @@ class OutreachPackageService:
             observation=observation,
             evidence=evidence,
             message_template=OutreachMessageTemplate(
-                business_strength=generated_outreach.proposal.positive_detail,
-                lead_reason=generated_outreach.proposal.observed_opportunity,
-                opportunity=generated_outreach.proposal.proposal_angle,
-                proof_url=generated_outreach.proposal.proof_url,
+                business_strength=proposal.positive_detail,
+                lead_reason=proposal.observed_opportunity,
+                opportunity=proposal.proposal_angle,
+                proof_url=proposal.proof_url,
             ),
             outreach_input=generation_input,
             generated_outreach=generated_outreach if generate_channels else None,
@@ -306,7 +317,7 @@ class OutreachPackageService:
                 (
                     CallDraft(
                         opener=generated_channels.call.opener,
-                        observation=generated_outreach.proposal.observed_opportunity,
+                        observation=proposal.observed_opportunity,
                         ask=generated_channels.call.close,
                         branches=strategy.call_branches,
                     )
@@ -736,6 +747,43 @@ def _llm_usage(llm: LLMClient, ai_mode: str) -> dict[str, Any]:
 def _generation_enabled(ai_mode: str) -> bool:
     # Keep the older "phrasing" value compatible with deployed environments.
     return ai_mode in {"generation", "phrasing", "all"}
+
+
+def _merge_generated_channels(
+    previous: OutreachPackageContent,
+    generated: OutreachPackageContent,
+) -> OutreachPackageContent:
+    previous_outreach = previous.generated_outreach
+    generated_outreach = generated.generated_outreach
+    if previous_outreach is None or generated_outreach is None:
+        return generated
+
+    channel_names = ("instagram", "sms", "email", "call")
+    merged_channels = generated_outreach.channels.model_copy(
+        update={
+            channel: (
+                getattr(generated_outreach.channels, channel)
+                or getattr(previous_outreach.channels, channel)
+            )
+            for channel in channel_names
+        }
+    )
+    selected_channels = [
+        channel for channel in channel_names if getattr(merged_channels, channel) is not None
+    ]
+    return generated.model_copy(
+        update={
+            "generated_outreach": generated_outreach.model_copy(
+                update={"channels": merged_channels}
+            ),
+            "outreach_input": generated.outreach_input.model_copy(
+                update={"channels": selected_channels}
+            ),
+            "call": generated.call or previous.call,
+            "form": generated.form or previous.form,
+            "email": generated.email or previous.email,
+        }
+    )
 
 
 def _proposal_angle(

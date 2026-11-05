@@ -522,6 +522,22 @@
   padding: 9px 12px 10px;
 }
 
+.generated-channel-tabs button span,
+.generated-channel-tabs button small {
+  display: block;
+}
+
+.generated-channel-tabs button small {
+  color: #9aa4b2;
+  font-size: 9px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.generated-channel-tabs button.is-missing {
+  color: #8a95a3;
+}
+
 .generated-channel-tabs button.active {
   border-bottom-color: #15965a;
   color: #20262d;
@@ -539,6 +555,46 @@
 
 .generated-channel-editor label {
   display: block;
+}
+
+.generated-channel-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  justify-content: center;
+  min-height: 190px;
+  text-align: center;
+}
+
+.generated-channel-empty strong {
+  color: #293139;
+  font-size: 14px;
+}
+
+.generated-channel-empty p {
+  color: #7a8694;
+  font-size: 12px;
+  margin: 0;
+}
+
+.generated-channel-empty button {
+  align-items: center;
+  background: #20262d;
+  border: 1px solid #20262d;
+  border-radius: 7px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+  margin-top: 7px;
+  min-height: 35px;
+  padding: 0 13px;
+}
+
+.generated-channel-empty button:disabled {
+  opacity: .55;
 }
 
 .generated-channel-footer {
