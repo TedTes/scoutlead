@@ -16,7 +16,6 @@ from db.models import (
 )
 from db.session import create_database
 from outreach_packages.schemas import (
-    OutreachAISuggestionRequest,
     OutreachEventCreate,
     OutreachPackageUpdate,
     OutreachResponseClassifyRequest,
@@ -57,7 +56,6 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert len(package.content.message.body) <= 160
         assert "example" not in package.content.message.body.lower()
         assert len(package.content.evidence_fingerprint) == 64
-        assert len(package.content.alternatives) == 6
         assert package.content.reply_paths
         assert package.content.message.body.endswith("?")
         assert package.content.form.body.count("\n\n") >= 5
@@ -149,39 +147,6 @@ def test_outreach_package_refreshes_when_evidence_snapshot_changes() -> None:
 
         assert refreshed is not None
         assert refreshed.content.evidence_fingerprint != original_fingerprint
-
-
-def test_outreach_package_generates_grounded_ai_suggestion_on_demand() -> None:
-    class SuggestionLLM:
-        def generate_object(self, *, response_model, **_kwargs):
-            return response_model.model_validate(
-                {
-                    "customer_consequence": "That could make it harder for customers to request quotes online.",
-                    "seller_positioning": "I help local service businesses simplify online quote requests.",
-                    "value_hypothesis": "A clearer request path could help customers take the next step.",
-                    "next_step": "Would it be useful if I sent a quick example?",
-                }
-            )
-
-    with _session_factory()() as session:
-        result = _seed_result(session, confirmed=True)
-        service = OutreachPackageService(
-            session,
-            workspace_id="workspace:first",
-            llm=SuggestionLLM(),
-        )
-        package = service.generate(result.id)
-
-        suggestion = service.generate_ai_suggestion(
-            package.id,
-            OutreachAISuggestionRequest(channel="message"),
-        )
-
-        assert suggestion.id.startswith("openai:message:")
-        assert suggestion.label == "AI suggestion"
-        assert package.content.strategy.observation in suggestion.body
-        assert len(suggestion.body) <= 160
-        assert "example" not in suggestion.body.lower()
 
 
 def test_outreach_package_refreshes_older_template_copy() -> None:

@@ -561,39 +561,6 @@ class OutreachPackageModel(TimestampMixin, Base):
     prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
-class LeadConceptModel(TimestampMixin, Base):
-    __tablename__ = "lead_concepts"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "business_id",
-            name="uq_lead_concepts_workspace_business",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=False, index=True
-    )
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    source_result_id: Mapped[str | None] = mapped_column(
-        ForeignKey("audience_results.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    concept_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
-    concept_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    personalization_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    feature_highlights: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    safeguards: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    instagram_message: Mapped[str] = mapped_column(Text, nullable=False)
-    follow_up_message: Mapped[str] = mapped_column(Text, nullable=False)
-    call_opener: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class OutreachPlaybookModel(TimestampMixin, Base):
     __tablename__ = "outreach_playbooks"
     __table_args__ = (

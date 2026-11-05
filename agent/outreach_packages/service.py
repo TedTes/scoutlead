@@ -21,7 +21,6 @@ from db.models import (
     WorkspaceModel,
 )
 from outreach_packages.schemas import (
-    DraftAlternative,
     OutreachAnalyticsRead,
     OutreachEvidence,
     OutreachEventCreate,
@@ -29,7 +28,6 @@ from outreach_packages.schemas import (
     OutreachPackageContent,
     OutreachPackageRead,
     OutreachPackageUpdate,
-    OutreachAISuggestionRequest,
     OutreachResponseClassification,
     OutreachResponseClassifyRequest,
     CallDraft,
@@ -43,7 +41,7 @@ from outreach_packages.repository import OutreachEventRepository, OutreachPlaybo
 from outreach_packages.templates import OutreachTemplateContext, render_outreach
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead, OutreachDraft
-from shared.errors import ConfigurationError, NotFoundError, ValidationError, WorkflowBoundaryError
+from shared.errors import NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
 
@@ -218,14 +216,6 @@ class OutreachPackageService:
             validated_strategy = strategy
             OutreachPolicyValidator().validate(strategy=strategy, generation=generated)
         strategy = validated_strategy
-        alternatives = self._alternatives(
-            playbooks=playbooks,
-            playbook_match=playbook_match,
-            stable_key=stable_key,
-            trade_key=business.category_key or "default",
-            business_name=business.display_name,
-            signature=signature,
-        )
         return OutreachPackageContent(
             evidence_fingerprint=_evidence_fingerprint(result),
             observation=observation,
@@ -235,45 +225,8 @@ class OutreachPackageService:
             form=generated.form if contact_url else None,
             email=generated.email if email else None,
             strategy=strategy,
-            alternatives=alternatives,
             reply_paths=strategy.reply_paths,
         )
-
-    def _alternatives(
-        self,
-        *,
-        playbooks: PlaybookRepository,
-        playbook_match,
-        stable_key: str,
-        trade_key: str,
-        business_name: str,
-        signature: str,
-    ) -> list[DraftAlternative]:
-        alternatives: list[DraftAlternative] = []
-        for offset, label in ((1, "Direct"), (2, "Consultative")):
-            strategy = playbooks.strategy_for(
-                playbook_match,
-                stable_key=stable_key,
-                trade_key=trade_key,
-                variant_offset=offset,
-            )
-            generated = render_outreach(
-                OutreachTemplateContext(
-                    business_name=business_name,
-                    strategy=strategy,
-                    signature=signature,
-                )
-            )
-            OutreachPolicyValidator().validate(strategy=strategy, generation=generated)
-            variant_id = f"{strategy.experiment_id}:{strategy.selected_variant}"
-            alternatives.extend(
-                [
-                    DraftAlternative(id=variant_id, label=label, channel="message", body=generated.message.body),
-                    DraftAlternative(id=variant_id, label=label, channel="form", body=generated.form.body),
-                    DraftAlternative(id=variant_id, label=label, channel="email", subject=generated.email.subject, body=generated.email.body),
-                ]
-            )
-        return alternatives
 
     def update(self, package_id: str, data: OutreachPackageUpdate) -> OutreachPackageRead:
         row = self._owned(package_id)
@@ -289,7 +242,6 @@ class OutreachPackageService:
             or data.content.observation != original.observation
             or data.content.evidence != original.evidence
             or data.content.strategy != original.strategy
-            or data.content.alternatives != original.alternatives
             or data.content.reply_paths != original.reply_paths
         ):
             raise ValidationError("Verified outreach evidence cannot be edited in a draft update.")
@@ -304,67 +256,6 @@ class OutreachPackageService:
         self.session.commit()
         self.session.refresh(row)
         return self._read(row, business, result)
-
-    def generate_ai_suggestion(
-        self,
-        package_id: str,
-        data: OutreachAISuggestionRequest,
-    ) -> DraftAlternative:
-        row = self._owned(package_id)
-        content = OutreachPackageContent.model_validate(row.content)
-        if content.strategy is None or self.llm is None:
-            raise ConfigurationError(
-                "AI outreach suggestion is unavailable",
-                {"user_message": "OpenAI suggestions are not configured for this account."},
-            )
-
-        result, _, product, business, workspace = self._context(row.audience_result_id)
-        signature = (
-            (workspace.sender_legal_name if workspace else None)
-            or (workspace.sender_contact if workspace else None)
-            or product.product_name
-        )
-        adapter = OpenAIPhrasingAdapter(self.llm)
-        generated = render_outreach(
-            OutreachTemplateContext(
-                business_name=business.display_name,
-                strategy=content.strategy,
-                signature=signature,
-            ),
-            phrasing=adapter,
-        )
-        if adapter.last_strategy is None:
-            raise ConfigurationError(
-                "AI outreach suggestion could not be generated",
-                {"user_message": "OpenAI could not generate a grounded suggestion. Try again."},
-            )
-        OutreachPolicyValidator().validate(
-            strategy=adapter.last_strategy,
-            generation=generated,
-        )
-
-        suggestion_id = f"openai:{data.channel}:{new_id('variant')}"
-        if data.channel == "message":
-            return DraftAlternative(
-                id=suggestion_id,
-                label="AI suggestion",
-                channel=data.channel,
-                body=generated.message.body,
-            )
-        if data.channel == "form":
-            return DraftAlternative(
-                id=suggestion_id,
-                label="AI suggestion",
-                channel=data.channel,
-                body=generated.form.body,
-            )
-        return DraftAlternative(
-            id=suggestion_id,
-            label="AI suggestion",
-            channel=data.channel,
-            subject=generated.email.subject,
-            body=generated.email.body,
-        )
 
     def classify_response(
         self,
@@ -687,7 +578,6 @@ def _needs_strategy_upgrade(row: OutreachPackageModel) -> bool:
         row.prompt_version < TEMPLATE_VERSION
         or "customer_consequence" not in strategy
         or "reply_paths" not in content
-        or "alternatives" not in content
     )
 
 

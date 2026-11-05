@@ -4,10 +4,6 @@ from fastapi import APIRouter, Depends, status
 
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from outreach_packages.schemas import (
-    DraftAlternative,
-    LeadConceptRead,
-    LeadConceptUpsert,
-    OutreachAISuggestionRequest,
     OutreachAnalyticsRead,
     OutreachEventCreate,
     OutreachEventRead,
@@ -16,7 +12,6 @@ from outreach_packages.schemas import (
     OutreachResponseClassification,
     OutreachResponseClassifyRequest,
 )
-from outreach_packages.concepts import LeadConceptService
 from outreach_packages.service import OutreachPackageService
 from messages.schemas import MessageRead
 
@@ -38,41 +33,6 @@ def _service(
         llm=services.llm,
         ai_mode=services.settings.outreach_ai_mode,
     )
-
-
-def _concept_service(
-    session: DbSession, workspace_id: str | None
-) -> LeadConceptService:
-    return LeadConceptService(session, workspace_id=workspace_id)
-
-
-@router.get(
-    "/concepts/by-result/{result_id}",
-    response_model=LeadConceptRead | None,
-)
-def get_concept_for_result(result_id: str, session: DbSession, auth: CurrentAuth):
-    return _concept_service(session, auth.workspace_id).find_for_result(result_id)
-
-
-@router.put(
-    "/concepts/by-result/{result_id}",
-    response_model=LeadConceptRead,
-)
-def upsert_concept_for_result(
-    result_id: str,
-    data: LeadConceptUpsert,
-    session: DbSession,
-    auth: CurrentAuth,
-):
-    return _concept_service(session, auth.workspace_id).upsert(result_id, data)
-
-
-@router.post(
-    "/concepts/by-result/{result_id}/sent",
-    response_model=LeadConceptRead,
-)
-def mark_concept_sent(result_id: str, session: DbSession, auth: CurrentAuth):
-    return _concept_service(session, auth.workspace_id).mark_sent(result_id)
 
 
 @router.get("/by-result/{result_id}", response_model=OutreachPackageRead | None)
@@ -102,19 +62,6 @@ def update_package(
     services: Services,
 ):
     return _service(session, auth.workspace_id, services).update(package_id, data)
-
-
-@router.post("/{package_id}/ai-suggestion", response_model=DraftAlternative)
-def generate_ai_suggestion(
-    package_id: str,
-    data: OutreachAISuggestionRequest,
-    session: DbSession,
-    auth: CurrentAuth,
-    services: Services,
-):
-    return _service(session, auth.workspace_id, services).generate_ai_suggestion(
-        package_id, data
-    )
 
 
 @router.post(
