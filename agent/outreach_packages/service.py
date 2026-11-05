@@ -25,7 +25,11 @@ from outreach_packages.schemas import (
     OutreachEvidence,
     OutreachEventCreate,
     OutreachEventRead,
+    OutreachGenerateRequest,
+    OutreachGenerationInput,
     OutreachPackageContent,
+    OutreachMessageTemplate,
+    OutreachProposal,
     OutreachPackageRead,
     OutreachPackageUpdate,
     OutreachResponseClassification,
@@ -34,7 +38,10 @@ from outreach_packages.schemas import (
     EmailDraft,
     WrittenDraft,
 )
-from outreach_packages.ai import OpenAIPhrasingAdapter, ResponseClassifier
+from outreach_packages.ai import (
+    ResponseClassifier,
+    StructuredOutreachGenerator,
+)
 from outreach_packages.playbooks import PlaybookRepository
 from outreach_packages.policy import OutreachPolicyValidator, validate_text_message
 from outreach_packages.repository import OutreachEventRepository, OutreachPlaybookRepository
@@ -45,7 +52,7 @@ from shared.errors import NotFoundError, ValidationError, WorkflowBoundaryError
 from shared.utils import new_id
 
 
-TEMPLATE_VERSION = 7
+TEMPLATE_VERSION = 12
 
 
 class OutreachPackageService:
@@ -84,7 +91,11 @@ class OutreachPackageService:
             self.session.refresh(row)
         return self._read(row, business, result) if row is not None else None
 
-    def generate(self, result_id: str) -> OutreachPackageRead:
+    def generate(
+        self,
+        result_id: str,
+        data: OutreachGenerateRequest | None = None,
+    ) -> OutreachPackageRead:
         result, audience, product, business, workspace = self._context(result_id)
         if result.shortlisted_at is None:
             raise WorkflowBoundaryError(
@@ -98,7 +109,23 @@ class OutreachPackageService:
             )
         )
         if existing is not None:
-            if (
+            if data is not None:
+                existing.content = self._render_content(
+                    result,
+                    audience,
+                    product,
+                    business,
+                    workspace,
+                    outreach_input=data.outreach_input,
+                    generate_channels=True,
+                ).model_dump()
+                existing.provider = _llm_provider(self.llm, self.ai_mode)
+                existing.model = _llm_model(self.llm, self.ai_mode)
+                existing.usage = _llm_usage(self.llm, self.ai_mode)
+                existing.prompt_version = TEMPLATE_VERSION
+                self.session.commit()
+                self.session.refresh(existing)
+            elif (
                 _should_refresh_template(existing)
                 or _needs_strategy_upgrade(existing)
                 or not _evidence_is_current(existing, result)
@@ -112,20 +139,24 @@ class OutreachPackageService:
                 self.session.refresh(existing)
             return self._read(existing, business, result)
 
-        content = self._render_content(result, audience, product, business, workspace)
+        content = self._render_content(
+            result,
+            audience,
+            product,
+            business,
+            workspace,
+            outreach_input=data.outreach_input if data else OutreachGenerationInput(),
+            generate_channels=data is not None,
+        )
         row = OutreachPackageModel(
             id=new_id("outreach_package"),
             workspace_id=self.workspace_id,
             audience_result_id=result.id,
             business_id=result.business_id,
             content=content.model_dump(),
-            provider=(
-                "openai"
-                if content.strategy and content.strategy.phrasing_provider == "openai"
-                else "template"
-            ),
-            model=getattr(self.llm, "model", None) if content.strategy and content.strategy.phrasing_provider == "openai" else None,
-            usage={},
+            provider=_llm_provider(self.llm, self.ai_mode) if data is not None else "template",
+            model=_llm_model(self.llm, self.ai_mode) if data is not None else None,
+            usage=_llm_usage(self.llm, self.ai_mode) if data is not None else {},
             prompt_version=TEMPLATE_VERSION,
         )
         self.session.add(row)
@@ -140,6 +171,8 @@ class OutreachPackageService:
         product: ProductModel,
         business: BusinessModel,
         workspace: WorkspaceModel | None,
+        outreach_input: OutreachGenerationInput | None = None,
+        generate_channels: bool = False,
     ) -> OutreachPackageContent:
 
         snapshot = result.match_snapshot or {}
@@ -197,33 +230,113 @@ class OutreachPackageService:
             strategy=strategy,
             signature=signature,
         )
-        phrasing = (
-            OpenAIPhrasingAdapter(self.llm)
-            if self.llm is not None and self.ai_mode in {"phrasing", "all"}
+        rendered = render_outreach(template_context)
+        OutreachPolicyValidator().validate(strategy=strategy, generation=rendered)
+        generation_input = outreach_input or OutreachGenerationInput()
+        fallback_proposal = OutreachProposal(
+            positive_detail=(
+                generation_input.personal_detail
+                or _positive_business_detail(snapshot)
+            ),
+            observed_opportunity=primary_evidence.statement,
+            proposal_angle=_proposal_angle(
+                business.display_name,
+                primary_evidence,
+                generation_input.direction or strategy.value_hypothesis,
+            ),
+            proof_url=generation_input.concept_url,
+        )
+        generated_outreach = StructuredOutreachGenerator(
+            llm=self.llm,
+            use_ai=generate_channels and _generation_enabled(self.ai_mode),
+        ).generate(
+            business=_business_generation_context(business, snapshot),
+            sender={
+                "identity": signature,
+                "offer_summary": product.offer_summary,
+            },
+            evidence=evidence,
+            outreach_input=generation_input,
+            fallback_proposal=fallback_proposal,
+        )
+        generated_channels = generated_outreach.channels
+        if generate_channels and any(
+            getattr(generated_channels, channel) is None
+            for channel in generation_input.channels
+        ):
+            raise ValidationError(
+                "The outreach provider did not return every selected channel draft."
+            )
+        generated_message_body = (
+            generated_channels.sms.initial
+            if generated_channels.sms
+            else generated_channels.instagram.initial
+            if generated_channels.instagram
+            else generated_channels.email.body
+            if generated_channels.email
+            else " ".join(
+                [
+                    generated_channels.call.opener,
+                    generated_channels.call.close,
+                ]
+            )
+            if generated_channels.call
             else None
         )
-        generated = render_outreach(template_context, phrasing=phrasing)
-        validated_strategy = phrasing.last_strategy if phrasing and phrasing.last_strategy else strategy
-        try:
-            OutreachPolicyValidator().validate(
-                strategy=validated_strategy,
-                generation=generated,
-            )
-        except ValidationError:
-            if phrasing is None:
-                raise
-            generated = render_outreach(template_context)
-            validated_strategy = strategy
-            OutreachPolicyValidator().validate(strategy=strategy, generation=generated)
-        strategy = validated_strategy
+        if generate_channels and generated_message_body is None:
+            raise ValidationError("The outreach provider did not return a selected channel draft.")
         return OutreachPackageContent(
             evidence_fingerprint=_evidence_fingerprint(result),
             observation=observation,
             evidence=evidence,
-            message=generated.message,
-            call=generated.call if business.phone else None,
-            form=generated.form if contact_url else None,
-            email=generated.email if email else None,
+            message_template=OutreachMessageTemplate(
+                business_strength=generated_outreach.proposal.positive_detail,
+                lead_reason=generated_outreach.proposal.observed_opportunity,
+                opportunity=generated_outreach.proposal.proposal_angle,
+                proof_url=generated_outreach.proposal.proof_url,
+            ),
+            outreach_input=generation_input,
+            generated_outreach=generated_outreach if generate_channels else None,
+            message=(
+                WrittenDraft(body=generated_message_body)
+                if generate_channels
+                else rendered.message
+            ),
+            call=(
+                (
+                    CallDraft(
+                        opener=generated_channels.call.opener,
+                        observation=generated_outreach.proposal.observed_opportunity,
+                        ask=generated_channels.call.close,
+                        branches=strategy.call_branches,
+                    )
+                    if generated_channels.call and business.phone
+                    else None
+                )
+                if generate_channels
+                else (rendered.call if business.phone else None)
+            ),
+            form=(
+                (
+                    WrittenDraft(body=generated_channels.instagram.initial)
+                    if generated_channels.instagram and contact_url
+                    else None
+                )
+                if generate_channels
+                else (rendered.form if contact_url else None)
+            ),
+            email=(
+                (
+                    EmailDraft(
+                        subject=generated_channels.email.subject,
+                        body=generated_channels.email.body,
+                    )
+                    if generated_channels.email and email
+                    else None
+                )
+                if generate_channels
+                else (rendered.email if email else None)
+            ),
             strategy=strategy,
             reply_paths=strategy.reply_paths,
         )
@@ -554,6 +667,95 @@ def _optional_string(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _positive_business_detail(snapshot: dict[str, Any]) -> str:
+    raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
+    facts = raw.get("business_facts") if isinstance(raw.get("business_facts"), dict) else {}
+    rating = _fact_scalar(facts.get("google_rating"))
+    reviews = _fact_scalar(facts.get("google_review_count"))
+    if (
+        isinstance(rating, int | float)
+        and isinstance(reviews, int | float)
+        and rating >= 4.5
+        and reviews > 0
+    ):
+        return f"{rating:g} Google rating · {int(reviews)} public reviews"
+    if isinstance(reviews, int | float) and reviews >= 20:
+        return f"{int(reviews)} public reviews"
+    return ""
+
+
+def _fact_scalar(value: object) -> object:
+    if isinstance(value, dict):
+        for key in ("value", "current_value", "fact_value"):
+            if key in value:
+                return value[key]
+    return value
+
+
+def _business_generation_context(
+    business: BusinessModel,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
+    facts = raw.get("business_facts") if isinstance(raw.get("business_facts"), dict) else {}
+    return {
+        "id": business.id,
+        "name": business.display_name,
+        "trade": business.category_key,
+        "market": business.market_key,
+        "address": business.address,
+        "website_url": business.website_url,
+        "phone": business.phone,
+        "google_rating": _fact_scalar(facts.get("google_rating")),
+        "google_review_count": _fact_scalar(facts.get("google_review_count")),
+    }
+
+
+def _llm_provider(llm: LLMClient, ai_mode: str) -> str:
+    return (
+        str(getattr(llm, "provider", "template"))
+        if _generation_enabled(ai_mode)
+        else "template"
+    )
+
+
+def _llm_model(llm: LLMClient, ai_mode: str) -> str | None:
+    if not _generation_enabled(ai_mode):
+        return None
+    value = getattr(llm, "model", None)
+    return str(value) if value else None
+
+
+def _llm_usage(llm: LLMClient, ai_mode: str) -> dict[str, Any]:
+    if not _generation_enabled(ai_mode):
+        return {}
+    value = getattr(llm, "last_usage", None)
+    return value if isinstance(value, dict) else {}
+
+
+def _generation_enabled(ai_mode: str) -> bool:
+    # Keep the older "phrasing" value compatible with deployed environments.
+    return ai_mode in {"generation", "phrasing", "all"}
+
+
+def _proposal_angle(
+    business_name: str,
+    evidence: OutreachEvidence,
+    fallback: str,
+) -> str:
+    key = evidence.signal_key
+    value = evidence.value
+    if key == "website_status" and value in {"missing", "not_listed"}:
+        return f"New website concept for {business_name}: services, project proof, and a clear quote-request path"
+    if key in {"no_quote_flow", "quote_or_booking_form_present"}:
+        return f"Website update for {business_name}: a guided quote or booking flow"
+    if key in {"no_contact_form", "contact_form_present"}:
+        return f"Website update for {business_name}: a clearer contact and quote-request path"
+    if key in {"website_unavailable", "mobile_viewport_missing"}:
+        return f"Website refresh for {business_name}: a clearer, mobile-friendly customer path"
+    return fallback
+
+
 def _should_refresh_template(row: OutreachPackageModel) -> bool:
     if row.provider != "template" or row.prompt_version >= TEMPLATE_VERSION:
         return False
@@ -578,6 +780,7 @@ def _needs_strategy_upgrade(row: OutreachPackageModel) -> bool:
         row.prompt_version < TEMPLATE_VERSION
         or "customer_consequence" not in strategy
         or "reply_paths" not in content
+        or "message_template" not in content
     )
 
 
@@ -599,7 +802,7 @@ def _looks_like_generated_copy(value: object) -> bool:
     observation = str(strategy.get("observation") or "")
     positioning = str(strategy.get("seller_positioning") or "")
     next_step = str(strategy.get("next_step") or "")
-    return bool(
+    long_template = bool(
         body
         and observation
         and positioning
@@ -608,6 +811,13 @@ def _looks_like_generated_copy(value: object) -> bool:
         and positioning in body
         and next_step in body
     )
+    compact_template = bool(
+        body
+        and observation
+        and observation in body
+        and body.rstrip().endswith(("Is improving that a priority?", "Worth reviewing?"))
+    )
+    return long_template or compact_template
 
 
 def _merge_legacy_draft(

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 OutreachChannel = Literal["message", "call", "form", "email"]
+OutreachDraftChannel = Literal["instagram", "sms", "email", "call"]
 OutreachEventType = Literal[
     "channel_viewed",
     "draft_copied",
@@ -26,6 +27,68 @@ class OutreachEvidence(BaseModel):
 
 class WrittenDraft(BaseModel):
     body: str = Field(min_length=20, max_length=900)
+
+
+class OutreachMessageTemplate(BaseModel):
+    business_strength: str = Field(default="", max_length=1000)
+    lead_reason: str = Field(default="", max_length=1000)
+    opportunity: str = Field(default="", max_length=1000)
+    proof_url: str | None = Field(default=None, max_length=2000)
+
+
+class OutreachGenerationInput(BaseModel):
+    channels: list[OutreachDraftChannel] = Field(
+        default_factory=lambda: ["instagram"],
+        min_length=1,
+        max_length=4,
+    )
+    personal_detail: str | None = Field(default=None, max_length=1000)
+    concept_url: str | None = Field(default=None, max_length=2000)
+    concept_features: list[str] = Field(default_factory=list, max_length=8)
+    direction: str | None = Field(default=None, max_length=1000)
+
+
+class OutreachProposal(BaseModel):
+    positive_detail: str = Field(default="", max_length=1000)
+    observed_opportunity: str = Field(min_length=8, max_length=1000)
+    proposal_angle: str = Field(min_length=8, max_length=1000)
+    proof_url: str | None = Field(default=None, max_length=2000)
+
+
+class SocialChannelDraft(BaseModel):
+    initial: str = Field(min_length=20, max_length=1200)
+    follow_up: str = Field(min_length=10, max_length=600)
+
+
+class SmsChannelDraft(BaseModel):
+    initial: str = Field(min_length=20, max_length=320)
+    follow_up: str = Field(min_length=10, max_length=240)
+
+
+class EmailChannelDraft(BaseModel):
+    subject: str = Field(min_length=2, max_length=120)
+    body: str = Field(min_length=20, max_length=1600)
+    follow_up_subject: str = Field(min_length=2, max_length=120)
+    follow_up_body: str = Field(min_length=20, max_length=1000)
+
+
+class CallChannelDraft(BaseModel):
+    opener: str = Field(min_length=8, max_length=500)
+    talking_points: list[str] = Field(min_length=1, max_length=6)
+    close: str = Field(min_length=8, max_length=320)
+
+
+class OutreachChannelDrafts(BaseModel):
+    instagram: SocialChannelDraft | None = None
+    sms: SmsChannelDraft | None = None
+    email: EmailChannelDraft | None = None
+    call: CallChannelDraft | None = None
+
+
+class GeneratedOutreach(BaseModel):
+    proposal: OutreachProposal
+    channels: OutreachChannelDrafts
+    prompt_version: int = Field(ge=1)
 
 
 class EmailDraft(BaseModel):
@@ -114,6 +177,9 @@ class OutreachPackageContent(BaseModel):
     evidence_fingerprint: str = Field(min_length=64, max_length=64)
     observation: str = Field(min_length=8, max_length=320)
     evidence: list[OutreachEvidence] = Field(min_length=1, max_length=6)
+    message_template: OutreachMessageTemplate | None = None
+    outreach_input: OutreachGenerationInput = Field(default_factory=OutreachGenerationInput)
+    generated_outreach: GeneratedOutreach | None = None
     message: WrittenDraft
     call: CallDraft | None = None
     form: WrittenDraft | None = None
@@ -144,6 +210,10 @@ class OutreachPackageUpdate(BaseModel):
     content: OutreachPackageContent
 
 
+class OutreachGenerateRequest(BaseModel):
+    outreach_input: OutreachGenerationInput = Field(default_factory=OutreachGenerationInput)
+
+
 class OutreachResponseClassifyRequest(BaseModel):
     channel: OutreachChannel
     response_text: str = Field(min_length=1, max_length=4000)
@@ -153,7 +223,7 @@ class OutreachResponseClassification(BaseModel):
     category: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=1, max_length=120)
     confidence: float = Field(ge=0, le=1)
-    source: Literal["deterministic", "openai", "fallback"]
+    source: Literal["deterministic", "anthropic", "openai", "remote", "llm", "fallback"]
     suggested_reply: str | None = Field(default=None, max_length=1200)
     path: ReplyPath | None = None
 

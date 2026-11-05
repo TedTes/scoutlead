@@ -6,9 +6,18 @@ from pydantic import BaseModel, Field
 
 from agents.llm import LLMClient
 from outreach_packages.schemas import (
+    CallChannelDraft,
+    EmailChannelDraft,
+    GeneratedOutreach,
+    OutreachChannelDrafts,
     OutreachGeneration,
+    OutreachGenerationInput,
     OutreachClaim,
+    OutreachEvidence,
+    OutreachProposal,
     OutreachResponseClassification,
+    SmsChannelDraft,
+    SocialChannelDraft,
     OutreachStrategy,
     ReplyPath,
 )
@@ -20,6 +29,122 @@ from shared.logger import get_logger
 
 
 logger = get_logger(__name__)
+OUTREACH_GENERATION_PROMPT_VERSION = 1
+
+
+class StructuredOutreachGenerator:
+    def __init__(self, *, llm: LLMClient, use_ai: bool) -> None:
+        self.llm = llm
+        self.use_ai = use_ai
+
+    def generate(
+        self,
+        *,
+        business: dict,
+        sender: dict,
+        evidence: list[OutreachEvidence],
+        outreach_input: OutreachGenerationInput,
+        fallback_proposal: OutreachProposal,
+    ) -> GeneratedOutreach:
+        if not self.use_ai:
+            return self._fallback(business, outreach_input, fallback_proposal)
+        generated = self.llm.generate_object(
+            task="outreach_channel_generation",
+            system=(
+                "Create grounded outreach for a local business from the supplied JSON only. "
+                "Never invent compliments, projects, reviews, results, contact details, links, prices, "
+                "or website findings. Treat lead evidence as an observation, not proof of lost revenue. "
+                "Frame the proposal as a potential gain without criticizing the business. Use the optional "
+                "personal detail, concept URL, concept features, and direction only when supplied. Return "
+                "one shared proposal plus channel-specific drafts. Each written draft should naturally cover "
+                "the sender identity, one supported business-specific detail when available, one opportunity "
+                "framed as a gain, proof only when a real concept URL exists, and a soft call to action. "
+                "Instagram should be conversational; SMS must be concise; email may be fuller; call output "
+                "must be an opener, talking points, and a soft close. Omit proof claims when no concept URL "
+                "exists. Generate only the channels listed in outreach_input.channels and return null for "
+                "every unselected channel."
+            ),
+            prompt=(
+                "Generate a proposal and outreach drafts that preserve the same factual substance across "
+                "channels while adapting length and delivery to each channel."
+            ),
+            response_model=GeneratedOutreach,
+            context={
+                "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
+                "business": business,
+                "sender": sender,
+                "verified_evidence": [item.model_dump() for item in evidence],
+                "outreach_input": outreach_input.model_dump(),
+                "fallback_proposal": fallback_proposal.model_dump(),
+            },
+        )
+        selected = set(outreach_input.channels)
+        channels = generated.channels.model_copy(
+            update={
+                "instagram": generated.channels.instagram if "instagram" in selected else None,
+                "sms": generated.channels.sms if "sms" in selected else None,
+                "email": generated.channels.email if "email" in selected else None,
+                "call": generated.channels.call if "call" in selected else None,
+            }
+        )
+        return generated.model_copy(
+            update={
+                "channels": channels,
+                "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
+            }
+        )
+
+    @staticmethod
+    def _fallback(
+        business: dict,
+        outreach_input: OutreachGenerationInput,
+        proposal: OutreachProposal,
+    ) -> GeneratedOutreach:
+        name = str(business.get("name") or "your business")
+        detail = f" {proposal.positive_detail}." if proposal.positive_detail else ""
+        proof = f" {proposal.proof_url}" if proposal.proof_url else ""
+        initial = (
+            f"Hi {name} — {proposal.proposal_angle}."
+            f"{detail}{proof} Open to a quick look?"
+        ).replace("..", ".").strip()
+        follow_up = "Just following up in case this got buried. Happy to send a short walkthrough if useful."
+        sms = initial[:317].rstrip()
+        selected = set(outreach_input.channels)
+        return GeneratedOutreach(
+            proposal=proposal,
+            channels=OutreachChannelDrafts(
+                instagram=(
+                    SocialChannelDraft(initial=initial, follow_up=follow_up)
+                    if "instagram" in selected
+                    else None
+                ),
+                sms=(
+                    SmsChannelDraft(initial=sms, follow_up=follow_up[:237])
+                    if "sms" in selected
+                    else None
+                ),
+                email=(
+                    EmailChannelDraft(
+                        subject=f"Website idea for {name}"[:120],
+                        body=initial,
+                        follow_up_subject=f"Following up — {name}"[:120],
+                        follow_up_body=follow_up,
+                    )
+                    if "email" in selected
+                    else None
+                ),
+                call=(
+                    CallChannelDraft(
+                        opener=f"Hi, I’m calling with a website idea for {name}.",
+                        talking_points=[proposal.observed_opportunity, proposal.proposal_angle],
+                        close="Would it be useful if I sent a short example?",
+                    )
+                    if "call" in selected
+                    else None
+                ),
+            ),
+            prompt_version=OUTREACH_GENERATION_PROMPT_VERSION,
+        )
 
 
 class PhrasedSections(BaseModel):
@@ -47,13 +172,17 @@ class OpenAIPhrasingAdapter:
             phrased = self.llm.generate_object(
                 task="outreach_phrasing",
                 system=(
-                    "Refine approved outreach sections without introducing facts. Keep hypotheses "
-                    "qualified with may, might, or could. Return a direct question as next_step. "
-                    "Do not claim outcomes, prices, customer losses, or that a website is absent."
+                    "Refine approved outreach sections without introducing facts. The final pitch uses "
+                    "this order: one-line sender positioning, one verified business detail, one opportunity "
+                    "framed as a gain, optional proof only when supplied, and one soft call to action. "
+                    "Keep hypotheses qualified with may, might, or could. Make seller_positioning one concise "
+                    "sentence and next_step an easy, low-pressure question. Do not invent compliments, proof, "
+                    "concept links, videos, outcomes, prices, customer losses, or that a website is absent."
                 ),
                 prompt=(
-                    "Improve clarity and natural sales phrasing. The verified observation is immutable "
-                    "and is not included in the output schema."
+                    "Improve clarity and natural sales phrasing. Frame the opportunity positively rather "
+                    "than criticizing the business. The verified observation is immutable and is not "
+                    "included in the output schema."
                 ),
                 response_model=PhrasedSections,
                 context={
@@ -121,7 +250,9 @@ class ResponseClassifier:
         if self.use_ai:
             result = self._classify_with_ai(response_text, paths)
             if result is not None:
-                return _classification(result.category, result.confidence, "openai", channel, paths)
+                provider = str(getattr(self.llm, "provider", "llm"))
+                source = provider if provider in {"anthropic", "openai", "remote"} else "llm"
+                return _classification(result.category, result.confidence, source, channel, paths)
         category, confidence = _deterministic_category(response_text, paths)
         source = "deterministic" if confidence > 0 else "fallback"
         return _classification(category, max(confidence, 0.25), source, channel, paths)
@@ -175,7 +306,7 @@ def _deterministic_category(response_text: str, paths: list[ReplyPath]) -> tuple
 def _classification(
     category: str,
     confidence: float,
-    source: Literal["deterministic", "openai", "fallback"],
+    source: Literal["deterministic", "anthropic", "openai", "remote", "llm", "fallback"],
     channel: Literal["message", "call", "form", "email"],
     paths: list[ReplyPath],
 ) -> OutreachResponseClassification:

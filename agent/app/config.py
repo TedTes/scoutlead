@@ -81,10 +81,15 @@ class Settings(BaseSettings):
     llm_json_endpoint: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    llm_provider: Literal["auto", "anthropic", "openai", "remote"] = "auto"
+    anthropic_api_key: str | None = None
+    anthropic_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     openai_embedding_model: str = "text-embedding-3-small"
-    outreach_ai_mode: Literal["off", "phrasing", "classification", "all"] = "off"
+    outreach_ai_mode: Literal[
+        "off", "generation", "phrasing", "classification", "all"
+    ] = "off"
     embedding_dimension: int = Field(default=1536, gt=0, le=4096)
     semantic_cache_min_score: float = Field(default=0.78, ge=0, le=1)
     semantic_cache_min_results: int = Field(default=5, ge=0, le=100)

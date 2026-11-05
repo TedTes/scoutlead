@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from agents.embeddings import EmbeddingClient, MissingEmbeddingClient, OpenAIEmbeddingClient
 from agents.llm import (
+    AnthropicStructuredLLMClient,
     LLMClient,
     MissingLLMClient,
     OpenAIStructuredLLMClient,
@@ -45,14 +46,32 @@ class AppServices:
 
 def create_app_services(settings: Settings) -> AppServices:
     llm: LLMClient
-    if settings.openai_api_key:
+    selected_provider = settings.llm_provider
+    if selected_provider == "anthropic" or (
+        selected_provider == "auto" and settings.anthropic_api_key
+    ):
+        if not settings.anthropic_api_key or not settings.anthropic_model:
+            raise ValueError("ANTHROPIC_API_KEY and ANTHROPIC_MODEL are required for the Anthropic LLM provider")
+        llm = AnthropicStructuredLLMClient(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_attempts=settings.llm_max_attempts,
+        )
+    elif selected_provider == "openai" or (
+        selected_provider == "auto" and settings.openai_api_key
+    ):
+        if not settings.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required for the OpenAI LLM provider")
         llm = OpenAIStructuredLLMClient(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
             timeout_seconds=settings.llm_timeout_seconds,
             max_attempts=settings.llm_max_attempts,
         )
-    elif settings.llm_json_endpoint:
+    elif selected_provider == "remote" or settings.llm_json_endpoint:
+        if not settings.llm_json_endpoint:
+            raise ValueError("LLM_JSON_ENDPOINT is required for the remote LLM provider")
         llm = RemoteJsonLLMClient(
             endpoint=settings.llm_json_endpoint,
             api_key=settings.llm_api_key,

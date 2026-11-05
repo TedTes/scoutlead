@@ -47,6 +47,13 @@ def test_every_catalog_signal_renders_every_channel_safely() -> None:
                 assert strategy.observation in generation.form.body
                 assert strategy.observation in generation.email.body
                 assert strategy.observation in generation.call.observation
+                assert "I'm Example Studio." in generation.form.body
+                assert "I'm Example Studio." in generation.email.body
+                assert "I'm Example Studio." in generation.call.opener
+                assert strategy.value_hypothesis in generation.form.body
+                assert strategy.value_hypothesis in generation.email.body
+                assert strategy.next_step in generation.form.body
+                assert strategy.next_step in generation.email.body
                 assert generation.call.discovery_question
                 assert generation.call.branches
                 assert strategy.reply_paths

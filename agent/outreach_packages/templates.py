@@ -30,7 +30,11 @@ class TextRenderer:
     def render(self, context: OutreachTemplateContext) -> WrittenDraft:
         strategy = context.strategy
         return WrittenDraft(
-            body=_text_message(context.business_name, strategy.observation)
+            body=_text_message(
+                context.business_name,
+                context.signature,
+                strategy.observation,
+            )
         )
 
 
@@ -39,7 +43,7 @@ class CallRenderer:
         strategy = context.strategy
         return CallDraft(
             opener=_sentence_limit(
-                f"Hi, is this the owner or manager at {context.business_name}?",
+                f"Hi, I'm {context.signature}. Is this the owner or manager at {context.business_name}?",
                 240,
             ),
             permission=_sentence_limit(strategy.permission, 240),
@@ -66,10 +70,13 @@ class FormRenderer:
                     value
                     for value in [
                         f"Hello {context.business_name} team,",
-                        strategy.observation,
-                        strategy.customer_consequence,
-                        strategy.uncertainty_clause,
-                        strategy.seller_positioning,
+                        _identity_line(context),
+                        " ".join(
+                            item
+                            for item in [strategy.observation, strategy.uncertainty_clause]
+                            if item
+                        ),
+                        strategy.value_hypothesis,
                         strategy.next_step,
                         f"Thanks,\n{context.signature}",
                     ]
@@ -125,10 +132,12 @@ def _email_subject(strategy: OutreachStrategy) -> str:
     return "Quick question about your website"
 
 
-def _text_message(business_name: str, observation: str) -> str:
+def _text_message(business_name: str, signature: str, observation: str) -> str:
     """Keep cold text factual, single-segment, and free of invented deliverables."""
     options = (
+        f"Hi {business_name} — I'm {signature}. {observation} Is improving that a priority?",
         f"Hi {business_name} — {observation} Is improving that a priority?",
+        f"Hi, I'm {signature}. {observation} Worth reviewing?",
         f"{observation} Is improving that a priority?",
         f"{observation} Worth reviewing?",
     )
@@ -150,11 +159,13 @@ def _long_body(context: OutreachTemplateContext, *, limit: int) -> str:
             value
             for value in [
                 f"Hi {context.business_name} team,",
-                strategy.observation,
-                strategy.customer_consequence,
-                strategy.uncertainty_clause,
+                _identity_line(context),
+                " ".join(
+                    item
+                    for item in [strategy.observation, strategy.uncertainty_clause]
+                    if item
+                ),
                 strategy.value_hypothesis,
-                strategy.seller_positioning,
                 strategy.next_step,
                 f"Thanks,\n{context.signature}",
             ]
@@ -162,6 +173,11 @@ def _long_body(context: OutreachTemplateContext, *, limit: int) -> str:
         ),
         limit,
     )
+
+
+def _identity_line(context: OutreachTemplateContext) -> str:
+    positioning = context.strategy.seller_positioning.strip()
+    return f"I'm {context.signature}. {positioning}"
 
 
 def _sentence_limit(value: str, length: int) -> str:

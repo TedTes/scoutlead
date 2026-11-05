@@ -2,12 +2,51 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from agents.llm import OpenAIStructuredLLMClient
+from agents.llm import AnthropicStructuredLLMClient, OpenAIStructuredLLMClient
 from shared.errors import ConfigurationError
 
 
 class Result(BaseModel):
     value: str
+
+
+def test_anthropic_client_uses_structured_tool_output(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_post(*args, **kwargs):
+        captured.update(kwargs["json"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+            json={
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "return_structured_output",
+                        "input": {"value": "ok"},
+                    }
+                ],
+                "usage": {"input_tokens": 12, "output_tokens": 4},
+            },
+        )
+
+    monkeypatch.setattr("agents.llm.httpx.post", fake_post)
+    client = AnthropicStructuredLLMClient(api_key="test", model="test-model")
+
+    result = client.generate_object(
+        task="test",
+        system="Return data.",
+        prompt="Test",
+        response_model=Result,
+        context={"business": "Example"},
+    )
+
+    assert result.value == "ok"
+    assert captured["tool_choice"] == {
+        "type": "tool",
+        "name": "return_structured_output",
+    }
+    assert client.last_usage == {"input_tokens": 12, "output_tokens": 4}
 
 
 def test_openai_client_exposes_provider_validation_error(monkeypatch) -> None:

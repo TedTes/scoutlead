@@ -7,6 +7,7 @@ from outreach_packages.schemas import (
     OutreachAnalyticsRead,
     OutreachEventCreate,
     OutreachEventRead,
+    OutreachGenerateRequest,
     OutreachPackageRead,
     OutreachPackageUpdate,
     OutreachResponseClassification,
@@ -48,9 +49,16 @@ def get_for_result(
     status_code=status.HTTP_201_CREATED,
 )
 def generate_for_result(
-    result_id: str, session: DbSession, auth: CurrentAuth, services: Services
+    result_id: str,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services,
+    data: OutreachGenerateRequest | None = None,
 ):
-    return _service(session, auth.workspace_id, services).generate(result_id)
+    return _service(session, auth.workspace_id, services).generate(
+        result_id,
+        data or OutreachGenerateRequest(),
+    )
 
 
 @router.patch("/{package_id}", response_model=OutreachPackageRead)

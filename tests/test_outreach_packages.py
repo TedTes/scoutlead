@@ -17,12 +17,58 @@ from db.models import (
 from db.session import create_database
 from outreach_packages.schemas import (
     OutreachEventCreate,
+    OutreachGenerateRequest,
+    OutreachGenerationInput,
     OutreachPackageUpdate,
     OutreachResponseClassifyRequest,
 )
 from outreach_packages.service import OutreachPackageService, _evidence
 from shared.errors import ValidationError
 from shared.utils import new_id, utcnow
+
+
+class _StructuredLLM:
+    provider = "test-provider"
+    model = "test-model"
+
+    def __init__(self) -> None:
+        self.last_usage = {"input_tokens": 42, "output_tokens": 17}
+        self.calls: list[dict] = []
+
+    def generate_object(self, **kwargs):
+        self.calls.append(kwargs)
+        return kwargs["response_model"].model_validate(
+            {
+                "proposal": {
+                    "positive_detail": "A verified 5-star rating across 30 public reviews.",
+                    "observed_opportunity": "No quote or booking flow was found in the latest website check.",
+                    "proposal_angle": "A simpler quote-request path using the supplied concept.",
+                    "proof_url": "https://concept.example/demo",
+                },
+                "channels": {
+                    "instagram": {
+                        "initial": "Hi Lakeside Painting — I made a concept for a simpler quote-request path: https://concept.example/demo",
+                        "follow_up": "Following up in case the concept link got buried. Happy to walk through it.",
+                    },
+                    "sms": {
+                        "initial": "Hi Lakeside Painting — I made a concept for a simpler quote path. Open to a quick look?",
+                        "follow_up": "Following up in case this got buried. Happy to send the link again.",
+                    },
+                    "email": {
+                        "subject": "Website concept for Lakeside Painting",
+                        "body": "Hi Lakeside Painting, I made a concept for a simpler quote-request path: https://concept.example/demo",
+                        "follow_up_subject": "Following up — Lakeside Painting",
+                        "follow_up_body": "Following up in case the website concept got buried. Happy to walk through it.",
+                    },
+                    "call": {
+                        "opener": "Hi, I made a website concept for Lakeside Painting.",
+                        "talking_points": ["The current quote path was the opportunity I focused on."],
+                        "close": "Would it be useful if I sent the concept link?",
+                    },
+                },
+                "prompt_version": 1,
+            }
+        )
 
 
 def test_boolean_evidence_labels_reflect_the_value() -> None:
@@ -66,14 +112,20 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert len(package.content.call.branches) == 6
         assert package.content.strategy.service_key == "booking_payments"
         assert package.content.strategy.phrasing_provider == "deterministic"
+        assert package.content.message_template is not None
+        assert package.content.message_template.lead_reason == package.content.observation
+        assert package.content.message_template.opportunity
+        assert "Lakeside Painting" in package.content.message_template.opportunity
         assert service.generate(result.id).id == package.id
         assert session.scalar(select(func.count()).select_from(OutreachPackageModel)) == 1
 
         content = package.content.model_copy(deep=True)
         content.message.body = "Updated message grounded in the same verified opportunity evidence?"
+        content.message_template.proof_url = "https://example.com/concept"
         updated = service.update(package.id, OutreachPackageUpdate(content=content))
 
         assert updated.content.message.body.startswith("Updated message")
+        assert updated.content.message_template.proof_url == "https://example.com/concept"
         assert service.find_for_result(result.id).content.message.body == updated.content.message.body
 
         content = updated.content.model_copy(deep=True)
@@ -107,6 +159,52 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         analytics = service.analytics()
         assert analytics.total_events == 2
         assert analytics.by_event == {"response_classified": 1, "draft_copied": 1}
+
+
+def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        llm = _StructuredLLM()
+        service = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            llm=llm,
+            ai_mode="generation",
+        )
+
+        package = service.generate(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(
+                    channels=["instagram", "email"],
+                    personal_detail="The business has 30 public reviews.",
+                    concept_url="https://concept.example/demo",
+                    concept_features=["Guided quote request", "Project gallery"],
+                    direction="Keep the proposal practical and low pressure.",
+                )
+            ),
+        )
+
+        assert len(llm.calls) == 1
+        assert llm.calls[0]["task"] == "outreach_channel_generation"
+        assert llm.calls[0]["context"]["sender"]["identity"] == "Conversion Studio"
+        assert package.provider == "test-provider"
+        assert package.model == "test-model"
+        assert package.usage == {"input_tokens": 42, "output_tokens": 17}
+        assert package.content.outreach_input.concept_features == [
+            "Guided quote request",
+            "Project gallery",
+        ]
+        assert package.content.outreach_input.channels == ["instagram", "email"]
+        assert package.content.generated_outreach is not None
+        assert package.content.generated_outreach.channels.email.subject == (
+            "Website concept for Lakeside Painting"
+        )
+        assert package.content.generated_outreach.proposal.proof_url == (
+            "https://concept.example/demo"
+        )
+        assert service.find_for_result(result.id) is not None
+        assert len(llm.calls) == 1
 
 
 def test_outreach_package_handoff_snapshots_one_message() -> None:
@@ -172,7 +270,7 @@ def test_outreach_package_refreshes_older_template_copy() -> None:
         assert "on businesses in" not in refreshed.content.message.body
         assert "quote" in refreshed.content.message.body.lower()
         assert len(refreshed.content.message.body) <= 160
-        assert row.prompt_version == 7
+        assert row.prompt_version == 12
 
 
 def test_outreach_package_preserves_edited_older_template_copy() -> None:
@@ -195,7 +293,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         assert preserved.content.message.body == custom_body
         assert preserved.content.strategy is not None
         assert preserved.content.call.branches
-        assert session.get(OutreachPackageModel, package.id).prompt_version == 7
+        assert session.get(OutreachPackageModel, package.id).prompt_version == 12
 
 
 def test_outreach_package_uses_safe_fallback_for_shortlisted_business_without_verified_opportunity() -> None:
