@@ -21,7 +21,6 @@ from outreach_packages.templates import (
     OutreachTemplateContext,
 )
 from shared.logger import get_logger
-from shared.errors import ConfigurationError
 
 
 logger = get_logger(__name__)
@@ -29,9 +28,8 @@ OUTREACH_GENERATION_PROMPT_VERSION = 1
 
 
 class StructuredOutreachGenerator:
-    def __init__(self, *, llm: LLMClient, use_ai: bool) -> None:
+    def __init__(self, *, llm: LLMClient) -> None:
         self.llm = llm
-        self.use_ai = use_ai
 
     def generate(
         self,
@@ -42,11 +40,6 @@ class StructuredOutreachGenerator:
         outreach_input: OutreachGenerationInput,
         fallback_proposal: OutreachProposal,
     ) -> GeneratedOutreach:
-        if not self.use_ai:
-            raise ConfigurationError(
-                "AI outreach generation is disabled. Configure an LLM provider and set "
-                "OUTREACH_AI_MODE=generation or OUTREACH_AI_MODE=all."
-            )
         generated = self.llm.generate_object(
             task="outreach_channel_generation",
             system=(

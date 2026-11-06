@@ -169,7 +169,6 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
             session,
             workspace_id="workspace:first",
             llm=llm,
-            ai_mode="generation",
         )
 
         package = service.generate(
@@ -221,16 +220,15 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert expanded.content.outreach_input.channels == ["instagram", "email", "call"]
 
 
-def test_explicit_generation_requires_real_llm_configuration() -> None:
+def test_explicit_generation_requires_configured_llm_provider() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=True)
         service = OutreachPackageService(
             session,
             workspace_id="workspace:first",
-            ai_mode="off",
         )
 
-        with pytest.raises(ConfigurationError, match="AI outreach generation is disabled"):
+        with pytest.raises(ConfigurationError, match="real LLM provider is required"):
             service.generate(
                 result.id,
                 OutreachGenerateRequest(

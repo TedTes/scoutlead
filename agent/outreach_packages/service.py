@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agents.llm import LLMClient
+from agents.llm import LLMClient, MissingLLMClient
 from audience_runs.outreach import AudienceOutreachService
 from campaigns.schemas import OutreachChannel
 
@@ -62,12 +62,10 @@ class OutreachPackageService:
         *,
         workspace_id: str | None,
         llm: LLMClient | None = None,
-        ai_mode: str = "off",
     ) -> None:
         self.session = session
         self.workspace_id = workspace_id
-        self.llm = llm
-        self.ai_mode = ai_mode
+        self.llm = llm or MissingLLMClient()
 
     def find_for_result(self, result_id: str) -> OutreachPackageRead | None:
         result, audience, product, business, workspace = self._context(result_id)
@@ -125,9 +123,9 @@ class OutreachPackageService:
                         generated,
                     )
                 existing.content = generated.model_dump()
-                existing.provider = _llm_provider(self.llm, self.ai_mode)
-                existing.model = _llm_model(self.llm, self.ai_mode)
-                existing.usage = _llm_usage(self.llm, self.ai_mode)
+                existing.provider = _llm_provider(self.llm)
+                existing.model = _llm_model(self.llm)
+                existing.usage = _llm_usage(self.llm)
                 existing.prompt_version = TEMPLATE_VERSION
                 self.session.commit()
                 self.session.refresh(existing)
@@ -160,9 +158,9 @@ class OutreachPackageService:
             audience_result_id=result.id,
             business_id=result.business_id,
             content=content.model_dump(),
-            provider=_llm_provider(self.llm, self.ai_mode) if data is not None else "template",
-            model=_llm_model(self.llm, self.ai_mode) if data is not None else None,
-            usage=_llm_usage(self.llm, self.ai_mode) if data is not None else {},
+            provider=_llm_provider(self.llm) if data is not None else "template",
+            model=_llm_model(self.llm) if data is not None else None,
+            usage=_llm_usage(self.llm) if data is not None else {},
             prompt_version=TEMPLATE_VERSION,
         )
         self.session.add(row)
@@ -256,10 +254,7 @@ class OutreachPackageService:
         generated_channels = None
         proposal = fallback_proposal
         if generate_channels:
-            generated_outreach = StructuredOutreachGenerator(
-                llm=self.llm,
-                use_ai=_generation_enabled(self.ai_mode),
-            ).generate(
+            generated_outreach = StructuredOutreachGenerator(llm=self.llm).generate(
                 business=_business_generation_context(business, snapshot),
                 sender={
                     "identity": signature,
@@ -390,7 +385,7 @@ class OutreachPackageService:
         content = OutreachPackageContent.model_validate(row.content)
         result = ResponseClassifier(
             llm=self.llm,
-            use_ai=self.ai_mode in {"classification", "all"},
+            use_ai=_llm_configured(self.llm),
         ).classify(
             response_text=data.response_text,
             channel=data.channel,
@@ -722,31 +717,22 @@ def _business_generation_context(
     }
 
 
-def _llm_provider(llm: LLMClient, ai_mode: str) -> str:
-    return (
-        str(getattr(llm, "provider", "template"))
-        if _generation_enabled(ai_mode)
-        else "template"
-    )
+def _llm_provider(llm: LLMClient) -> str:
+    return str(getattr(llm, "provider", "missing"))
 
 
-def _llm_model(llm: LLMClient, ai_mode: str) -> str | None:
-    if not _generation_enabled(ai_mode):
-        return None
+def _llm_model(llm: LLMClient) -> str | None:
     value = getattr(llm, "model", None)
     return str(value) if value else None
 
 
-def _llm_usage(llm: LLMClient, ai_mode: str) -> dict[str, Any]:
-    if not _generation_enabled(ai_mode):
-        return {}
+def _llm_usage(llm: LLMClient) -> dict[str, Any]:
     value = getattr(llm, "last_usage", None)
     return value if isinstance(value, dict) else {}
 
 
-def _generation_enabled(ai_mode: str) -> bool:
-    # Keep the older "phrasing" value compatible with deployed environments.
-    return ai_mode in {"generation", "phrasing", "all"}
+def _llm_configured(llm: LLMClient) -> bool:
+    return getattr(llm, "provider", "missing") != "missing"
 
 
 def _merge_generated_channels(

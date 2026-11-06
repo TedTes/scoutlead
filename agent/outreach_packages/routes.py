@@ -32,7 +32,6 @@ def _service(
         session,
         workspace_id=workspace_id,
         llm=services.llm,
-        ai_mode=services.settings.outreach_ai_mode,
     )
 
 
