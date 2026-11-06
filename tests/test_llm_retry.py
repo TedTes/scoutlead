@@ -3,11 +3,19 @@ import pytest
 from pydantic import BaseModel
 
 from agents.llm import AnthropicStructuredLLMClient, OpenAIStructuredLLMClient
+from outreach_packages.schemas import CallChannelDraft
 from shared.errors import ConfigurationError
 
 
 class Result(BaseModel):
     value: str
+
+
+def test_call_generation_schema_matches_saved_call_limits() -> None:
+    schema = CallChannelDraft.model_json_schema()["properties"]
+
+    assert schema["opener"]["maxLength"] == 240
+    assert schema["close"]["maxLength"] == 240
 
 
 def test_anthropic_client_uses_structured_tool_output(monkeypatch) -> None:

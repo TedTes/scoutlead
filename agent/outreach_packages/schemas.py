@@ -73,9 +73,9 @@ class EmailChannelDraft(BaseModel):
 
 
 class CallChannelDraft(BaseModel):
-    opener: str = Field(min_length=8, max_length=500)
+    opener: str = Field(min_length=8, max_length=240)
     talking_points: list[str] = Field(min_length=1, max_length=6)
-    close: str = Field(min_length=8, max_length=320)
+    close: str = Field(min_length=8, max_length=240)
 
 
 class OutreachChannelDrafts(BaseModel):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
 from agents.llm import LLMClient
 from outreach_packages.schemas import (
@@ -20,11 +20,12 @@ from outreach_packages.templates import (
     DeterministicPhrasingAdapter,
     OutreachTemplateContext,
 )
+from shared.errors import ConfigurationError
 from shared.logger import get_logger
 
 
 logger = get_logger(__name__)
-OUTREACH_GENERATION_PROMPT_VERSION = 1
+OUTREACH_GENERATION_PROMPT_VERSION = 2
 
 
 class StructuredOutreachGenerator:
@@ -40,36 +41,69 @@ class StructuredOutreachGenerator:
         outreach_input: OutreachGenerationInput,
         fallback_proposal: OutreachProposal,
     ) -> GeneratedOutreach:
-        generated = self.llm.generate_object(
-            task="outreach_channel_generation",
-            system=(
-                "Create grounded outreach for a local business from the supplied JSON only. "
-                "Never invent compliments, projects, reviews, results, contact details, links, prices, "
-                "or website findings. Treat lead evidence as an observation, not proof of lost revenue. "
-                "Frame the proposal as a potential gain without criticizing the business. Use the optional "
-                "personal detail, concept URL, concept features, and direction only when supplied. Return "
-                "one shared proposal plus channel-specific drafts. Each written draft should naturally cover "
-                "the sender identity, one supported business-specific detail when available, one opportunity "
-                "framed as a gain, proof only when a real concept URL exists, and a soft call to action. "
-                "Instagram should be conversational; SMS must be concise; email may be fuller; call output "
-                "must be an opener, talking points, and a soft close. Omit proof claims when no concept URL "
-                "exists. Generate only the channels listed in outreach_input.channels and return null for "
-                "every unselected channel."
-            ),
-            prompt=(
-                "Generate a proposal and outreach drafts that preserve the same factual substance across "
-                "channels while adapting length and delivery to each channel."
-            ),
-            response_model=GeneratedOutreach,
-            context={
-                "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
-                "business": business,
-                "sender": sender,
-                "verified_evidence": [item.model_dump() for item in evidence],
-                "outreach_input": outreach_input.model_dump(),
-                "fallback_proposal": fallback_proposal.model_dump(),
-            },
+        system = (
+            "Create grounded outreach for a local business from the supplied JSON only. "
+            "Never invent compliments, projects, reviews, results, contact details, links, prices, "
+            "or website findings. Treat lead evidence as an observation, not proof of lost revenue. "
+            "Frame the proposal as a potential gain without criticizing the business. Use the optional "
+            "personal detail, concept URL, concept features, and direction only when supplied. Return "
+            "one shared proposal plus channel-specific drafts. Each written draft should naturally cover "
+            "the sender identity, one supported business-specific detail when available, one opportunity "
+            "framed as a gain, proof only when a real concept URL exists, and a soft call to action. "
+            "Instagram should be conversational; SMS must be concise; email may be fuller; call output "
+            "must be an opener, talking points, and a soft close. Omit proof claims when no concept URL "
+            "exists. Generate only the channels listed in outreach_input.channels and return null for "
+            "every unselected channel. Follow every length and structural constraint in the response schema."
         )
+        prompt = (
+            "Generate a proposal and outreach drafts that preserve the same factual substance across "
+            "channels while adapting length and delivery to each channel."
+        )
+        context = {
+            "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
+            "business": business,
+            "sender": sender,
+            "verified_evidence": [item.model_dump() for item in evidence],
+            "outreach_input": outreach_input.model_dump(),
+            "fallback_proposal": fallback_proposal.model_dump(),
+        }
+        try:
+            generated = self._request(
+                system=system,
+                prompt=prompt,
+                context=context,
+            )
+        except PydanticValidationError as exc:
+            validation_feedback = exc.errors(
+                include_url=False,
+                include_context=False,
+                include_input=False,
+            )
+            try:
+                generated = self._request(
+                    system=(
+                        f"{system} Your previous structured response failed validation. "
+                        "Correct only the invalid fields and return the complete object again."
+                    ),
+                    prompt=f"{prompt}\nValidation errors: {validation_feedback}",
+                    context=context,
+                )
+            except PydanticValidationError as retry_exc:
+                raise ConfigurationError(
+                    "The LLM returned invalid outreach after one corrective retry.",
+                    {
+                        "provider": str(getattr(self.llm, "provider", "unknown")),
+                        "model": getattr(self.llm, "model", None),
+                        "validation_errors": retry_exc.errors(
+                            include_url=False,
+                            include_context=False,
+                            include_input=False,
+                        ),
+                        "user_message": (
+                            "The generated outreach did not match the required format. Try generating again."
+                        ),
+                    },
+                ) from retry_exc
         selected = set(outreach_input.channels)
         channels = generated.channels.model_copy(
             update={
@@ -84,6 +118,15 @@ class StructuredOutreachGenerator:
                 "channels": channels,
                 "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
             }
+        )
+
+    def _request(self, *, system: str, prompt: str, context: dict) -> GeneratedOutreach:
+        return self.llm.generate_object(
+            task="outreach_channel_generation",
+            system=system,
+            prompt=prompt,
+            response_model=GeneratedOutreach,
+            context=context,
         )
 
 class PhrasedSections(BaseModel):

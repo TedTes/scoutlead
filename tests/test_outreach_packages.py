@@ -31,14 +31,14 @@ class _StructuredLLM:
     provider = "test-provider"
     model = "test-model"
 
-    def __init__(self) -> None:
+    def __init__(self, *, invalid_call_first: bool = False) -> None:
         self.last_usage = {"input_tokens": 42, "output_tokens": 17}
         self.calls: list[dict] = []
+        self.invalid_call_first = invalid_call_first
 
     def generate_object(self, **kwargs):
         self.calls.append(kwargs)
-        return kwargs["response_model"].model_validate(
-            {
+        payload = {
                 "proposal": {
                     "positive_detail": "A verified 5-star rating across 30 public reviews.",
                     "observed_opportunity": "No quote or booking flow was found in the latest website check.",
@@ -68,7 +68,9 @@ class _StructuredLLM:
                 },
                 "prompt_version": 1,
             }
-        )
+        if self.invalid_call_first and len(self.calls) == 1:
+            payload["channels"]["call"]["opener"] = "x" * 241
+        return kwargs["response_model"].model_validate(payload)
 
 
 def test_boolean_evidence_labels_reflect_the_value() -> None:
@@ -235,6 +237,29 @@ def test_explicit_generation_requires_configured_llm_provider() -> None:
                     outreach_input=OutreachGenerationInput(channels=["instagram"])
                 ),
             )
+
+
+def test_outreach_generation_retries_invalid_structured_response_once() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        llm = _StructuredLLM(invalid_call_first=True)
+        service = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            llm=llm,
+        )
+
+        package = service.generate(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(channels=["call"])
+            ),
+        )
+
+        assert len(llm.calls) == 2
+        assert "previous structured response failed validation" in llm.calls[1]["system"]
+        assert package.content.generated_outreach.channels.call is not None
+        assert len(package.content.generated_outreach.channels.call.opener) <= 240
 
 
 def test_outreach_package_handoff_snapshots_one_message() -> None:
