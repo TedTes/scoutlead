@@ -595,7 +595,7 @@ export type OutreachGenerationInput = {
   personal_detail?: string | null;
   concept_url?: string | null;
   concept_features: string[];
-  direction?: string | null;
+  persuasion_style: "friendly_adviser" | "direct_specialist" | "curious_consultant" | "visual_demonstrator";
 };
 
 export type GeneratedOutreach = {

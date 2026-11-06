@@ -246,7 +246,7 @@ class OutreachPackageService:
             proposal_angle=_proposal_angle(
                 business.display_name,
                 primary_evidence,
-                generation_input.direction or strategy.value_hypothesis,
+                strategy.value_hypothesis,
             ),
             proof_url=generation_input.concept_url,
         )

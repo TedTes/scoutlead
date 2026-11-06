@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, ValidationError as PydanticValidationErro
 from agents.llm import LLMClient
 from outreach_packages.schemas import (
     GeneratedOutreach,
+    GeneratedOutreachResponse,
     OutreachGeneration,
     OutreachGenerationInput,
     OutreachClaim,
@@ -25,7 +26,26 @@ from shared.logger import get_logger
 
 
 logger = get_logger(__name__)
-OUTREACH_GENERATION_PROMPT_VERSION = 2
+OUTREACH_GENERATION_PROMPT_VERSION = 4
+
+PERSUASION_STYLE_INSTRUCTIONS = {
+    "friendly_adviser": (
+        "Friendly adviser: begin with one verified positive detail when available, introduce one useful "
+        "opportunity gently, offer one practical idea, then ask permission to share or discuss it."
+    ),
+    "direct_specialist": (
+        "Direct specialist: state the verified opportunity early, connect it to one concrete customer "
+        "benefit, recommend one practical improvement, then ask for a clear low-effort next step."
+    ),
+    "curious_consultant": (
+        "Curious consultant: mention one verified observation, ask one relevant discovery question, then "
+        "briefly explain the idea that could help depending on their answer. Do not turn it into an interview."
+    ),
+    "visual_demonstrator": (
+        "Visual demonstrator: lead with the supplied concept or proof when one exists; otherwise lead with "
+        "one concrete visual idea. Connect it to one business benefit and ask for their reaction."
+    ),
+}
 
 
 class StructuredOutreachGenerator:
@@ -41,19 +61,23 @@ class StructuredOutreachGenerator:
         outreach_input: OutreachGenerationInput,
         fallback_proposal: OutreachProposal,
     ) -> GeneratedOutreach:
+        persuasion_instruction = PERSUASION_STYLE_INSTRUCTIONS[
+            outreach_input.persuasion_style
+        ]
         system = (
             "Create grounded outreach for a local business from the supplied JSON only. "
             "Never invent compliments, projects, reviews, results, contact details, links, prices, "
             "or website findings. Treat lead evidence as an observation, not proof of lost revenue. "
             "Frame the proposal as a potential gain without criticizing the business. Use the optional "
-            "personal detail, concept URL, concept features, and direction only when supplied. Return "
-            "one shared proposal plus channel-specific drafts. Each written draft should naturally cover "
-            "the sender identity, one supported business-specific detail when available, one opportunity "
-            "framed as a gain, proof only when a real concept URL exists, and a soft call to action. "
-            "Instagram should be conversational; SMS must be concise; email may be fuller; call output "
-            "must be an opener, talking points, and a soft close. Omit proof claims when no concept URL "
+            "personal detail, concept URL, and concept features only when supplied. Return one shared "
+            "proposal plus channel-specific drafts. Preserve the selected persuasion structure while "
+            "adapting its wording to each channel. Proof may appear only when a real concept URL exists. "
+            "Instagram should be conversational and no more than 110 words. SMS must fit in 160 characters. "
+            "Email may be fuller but must stay under 180 words. A call must take roughly 20 to 30 seconds: "
+            "at most 65 words total, no more than two short talking points, and one question. Omit proof claims when no concept URL "
             "exists. Generate only the channels listed in outreach_input.channels and return null for "
-            "every unselected channel. Follow every length and structural constraint in the response schema."
+            "every unselected channel. Follow every length and structural constraint in the response schema. "
+            f"Use this persuasion structure: {persuasion_instruction}"
         )
         prompt = (
             "Generate a proposal and outreach drafts that preserve the same factual substance across "
@@ -65,6 +89,7 @@ class StructuredOutreachGenerator:
             "sender": sender,
             "verified_evidence": [item.model_dump() for item in evidence],
             "outreach_input": outreach_input.model_dump(),
+            "persuasion_structure": persuasion_instruction,
             "fallback_proposal": fallback_proposal.model_dump(),
         }
         try:
@@ -113,19 +138,21 @@ class StructuredOutreachGenerator:
                 "call": generated.channels.call if "call" in selected else None,
             }
         )
-        return generated.model_copy(
-            update={
-                "channels": channels,
-                "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
-            }
+        return GeneratedOutreach.model_validate(
+            generated.model_copy(
+                update={
+                    "channels": channels,
+                    "prompt_version": OUTREACH_GENERATION_PROMPT_VERSION,
+                }
+            ).model_dump()
         )
 
-    def _request(self, *, system: str, prompt: str, context: dict) -> GeneratedOutreach:
+    def _request(self, *, system: str, prompt: str, context: dict) -> GeneratedOutreachResponse:
         return self.llm.generate_object(
             task="outreach_channel_generation",
             system=system,
             prompt=prompt,
-            response_model=GeneratedOutreach,
+            response_model=GeneratedOutreachResponse,
             context=context,
         )
 

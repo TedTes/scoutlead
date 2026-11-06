@@ -181,7 +181,7 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
                     personal_detail="The business has 30 public reviews.",
                     concept_url="https://concept.example/demo",
                     concept_features=["Guided quote request", "Project gallery"],
-                    direction="Keep the proposal practical and low pressure.",
+                    persuasion_style="direct_specialist",
                 )
             ),
         )
@@ -189,6 +189,8 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert len(llm.calls) == 1
         assert llm.calls[0]["task"] == "outreach_channel_generation"
         assert llm.calls[0]["context"]["sender"]["identity"] == "Conversion Studio"
+        assert llm.calls[0]["context"]["outreach_input"]["persuasion_style"] == "direct_specialist"
+        assert "Direct specialist" in llm.calls[0]["system"]
         assert package.provider == "test-provider"
         assert package.model == "test-model"
         assert package.usage == {"input_tokens": 42, "output_tokens": 17}

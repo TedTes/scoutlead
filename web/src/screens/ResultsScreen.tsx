@@ -1262,6 +1262,13 @@ function proposalAngleFromReason(businessName: string, reason: string, fallback:
 const OUTREACH_DRAFT_CHANNELS = ["instagram", "sms", "email", "call"] as const;
 type OutreachDraftChannel = (typeof OUTREACH_DRAFT_CHANNELS)[number];
 
+const PERSUASION_STYLES = [
+  { value: "friendly_adviser", label: "Friendly adviser", description: "Positive detail → useful idea → permission question" },
+  { value: "direct_specialist", label: "Direct specialist", description: "Opportunity → practical benefit → clear next step" },
+  { value: "curious_consultant", label: "Curious consultant", description: "Observation → discovery question → relevant offer" },
+  { value: "visual_demonstrator", label: "Visual demonstrator", description: "Concept or visual idea → benefit → request feedback" },
+] as const;
+
 function outreachDraftChannelLabel(channel: OutreachDraftChannel) {
   return channel === "instagram"
     ? "Instagram"
@@ -1302,7 +1309,7 @@ function OutreachWorkspace({
   const [editingInputs, setEditingInputs] = useState(false);
   const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
   const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
-  const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [] });
+  const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [], persuasion_style: "friendly_adviser" });
   const [featureText, setFeatureText] = useState("");
 
   const selectedEvidence = visibleAudienceEvidence(contact);
@@ -1350,8 +1357,13 @@ function OutreachWorkspace({
       const existing = await onGetPackage();
       setOutreachPackage(existing);
       setDraft(existing ? withTemplate(existing.content) : null);
-      const loadedInput = existing?.content.outreach_input || { channels: ["instagram"], concept_features: [] };
-      if (!loadedInput.channels?.length) loadedInput.channels = ["instagram"];
+      const savedInput = existing?.content.outreach_input;
+      const loadedInput: OutreachGenerationInput = {
+        ...savedInput,
+        channels: savedInput?.channels?.length ? savedInput.channels : ["instagram"],
+        concept_features: savedInput?.concept_features || [],
+        persuasion_style: savedInput?.persuasion_style || "friendly_adviser",
+      };
       setOutreachInput(loadedInput);
       setFeatureText(loadedInput.concept_features.join("\n"));
       const firstGeneratedChannel = OUTREACH_DRAFT_CHANNELS.find(
@@ -1641,10 +1653,21 @@ function OutreachWorkspace({
               {!selectedEvidence.length ? <p>Shortlisted by you for a personalized proposal.</p> : null}
               </section>
               <section className="outreach-input-form">
-              <label><span>Personal detail <em>optional</em></span><textarea rows={3} value={outreachInput.personal_detail || ""} onChange={(event) => setOutreachInput({ ...outreachInput, personal_detail: event.target.value || null })} placeholder="A project, review, photo, or detail you personally verified." /></label>
-              <label><span>Concept or proof link <em>optional</em></span><input type="url" value={outreachInput.concept_url || ""} onChange={(event) => setOutreachInput({ ...outreachInput, concept_url: event.target.value || null })} placeholder="https://…" /></label>
-              <label><span>Features included <em>optional · one per line</em></span><textarea rows={3} value={featureText} onChange={(event) => setFeatureText(event.target.value)} placeholder={"Before/after gallery\nMobile quote request\nOne-tap call"} /></label>
-              <label><span>Direction <em>optional</em></span><textarea rows={2} value={outreachInput.direction || ""} onChange={(event) => setOutreachInput({ ...outreachInput, direction: event.target.value || null })} placeholder="Focus on making quote requests easier. Keep it casual." /></label>
+              <details className="outreach-context-drawer" open={Boolean(outreachInput.personal_detail || outreachInput.concept_url || featureText)}>
+                <summary><span>Add context</span><em>Optional personalization and proof</em></summary>
+                <div>
+                  <label><span>Personal detail <em>optional</em></span><textarea rows={3} value={outreachInput.personal_detail || ""} onChange={(event) => setOutreachInput({ ...outreachInput, personal_detail: event.target.value || null })} placeholder="A project, review, photo, or detail you personally verified." /></label>
+                  <label><span>Concept or proof link <em>optional</em></span><input type="url" value={outreachInput.concept_url || ""} onChange={(event) => {
+                    const conceptUrl = event.target.value || null;
+                    setOutreachInput({
+                      ...outreachInput,
+                      concept_url: conceptUrl,
+                    });
+                  }} placeholder="https://…" /></label>
+                  <label><span>Features included <em>optional · one per line</em></span><textarea rows={3} value={featureText} onChange={(event) => setFeatureText(event.target.value)} placeholder={"Before/after gallery\nMobile quote request\nOne-tap call"} /></label>
+                  <label className="outreach-pitch-style"><span>Pitch style</span><select value={outreachInput.persuasion_style} onChange={(event) => setOutreachInput({ ...outreachInput, persuasion_style: event.target.value as OutreachGenerationInput["persuasion_style"] })}>{PERSUASION_STYLES.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select><small>{PERSUASION_STYLES.find((style) => style.value === outreachInput.persuasion_style)?.description}</small></label>
+                </div>
+              </details>
               {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
               <div className="outreach-input-actions">
                 <div className="outreach-channel-select" aria-label="Message formats to generate">
@@ -2424,6 +2447,7 @@ function audienceMatchedSignals(contact: DiscoveryResult): AudienceMatchedSignal
     if (confidence !== "confirmed" && confidence !== "possible") return [];
     const value = signal.value;
     const statement = audienceSignalStatement(signalKey, value);
+    if (!statement) return [];
     return [{
       confidence,
       factKey: typeof signal.fact_key === "string" ? signal.fact_key : null,
@@ -2475,7 +2499,7 @@ function visibleAudienceEvidence(contact: DiscoveryResult): AudienceMatchedSigna
 function audienceSignalStatement(
   signalKey: string,
   value: unknown,
-): string {
+): string | null {
   if (signalKey === "reviews_under_15" || signalKey === "google_review_count") {
     return `${Number(value || 0)} public reviews in the latest business record.`;
   }
@@ -2503,7 +2527,7 @@ function audienceSignalStatement(
     if (value === "unknown") return "Website presence has not been verified.";
     return `Verified website status: ${value.replace(/_/g, " ")}.`;
   }
-  return `The latest check found a ${signalKey.replace(/_/g, " ")} opportunity.`;
+  return null;
 }
 
 function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {

@@ -3,7 +3,7 @@ import pytest
 from pydantic import BaseModel
 
 from agents.llm import AnthropicStructuredLLMClient, OpenAIStructuredLLMClient
-from outreach_packages.schemas import CallChannelDraft
+from outreach_packages.schemas import GeneratedCallChannelDraft, GeneratedOutreach
 from shared.errors import ConfigurationError
 
 
@@ -11,11 +11,38 @@ class Result(BaseModel):
     value: str
 
 
-def test_call_generation_schema_matches_saved_call_limits() -> None:
-    schema = CallChannelDraft.model_json_schema()["properties"]
+def test_call_generation_schema_enforces_short_spoken_draft() -> None:
+    schema = GeneratedCallChannelDraft.model_json_schema()["properties"]
 
-    assert schema["opener"]["maxLength"] == 240
-    assert schema["close"]["maxLength"] == 240
+    assert schema["opener"]["maxLength"] == 160
+    assert schema["talking_points"]["maxItems"] == 2
+    assert schema["close"]["maxLength"] == 120
+
+
+def test_existing_longer_generated_call_remains_loadable() -> None:
+    saved = GeneratedOutreach.model_validate(
+        {
+            "proposal": {
+                "positive_detail": "Strong public reviews.",
+                "observed_opportunity": "A verified website opportunity was found.",
+                "proposal_angle": "Make the customer path easier to use.",
+            },
+            "channels": {
+                "call": {
+                    "opener": "Hi, I am calling with one website idea for this local business.",
+                    "talking_points": [
+                        "This older saved draft contains more than two talking points.",
+                        "It should remain readable after stricter generation ships.",
+                        "Only newly generated content uses the shorter response contract.",
+                    ],
+                    "close": "Would it be useful if I sent a short example?",
+                }
+            },
+            "prompt_version": 2,
+        }
+    )
+
+    assert len(saved.channels.call.talking_points) == 3
 
 
 def test_anthropic_client_uses_structured_tool_output(monkeypatch) -> None:

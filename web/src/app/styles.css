@@ -351,6 +351,60 @@
   overflow: hidden;
 }
 
+.outreach-context-drawer {
+  border-bottom: 1px solid #e4e8ec;
+}
+
+.outreach-context-drawer > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  padding: 14px 20px;
+}
+
+.outreach-context-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.outreach-context-drawer > summary::after {
+  color: #778391;
+  content: "+";
+  font-size: 17px;
+  margin-left: auto;
+}
+
+.outreach-context-drawer[open] > summary::after {
+  content: "−";
+}
+
+.outreach-context-drawer > summary span {
+  color: #37424d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.outreach-context-drawer > summary em {
+  color: #929dab;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.outreach-context-drawer > div {
+  border-top: 1px solid #edf0f2;
+}
+
+.outreach-context-drawer label {
+  border-bottom: 1px solid #edf0f2;
+  display: block;
+  padding: 16px 20px;
+}
+
+.outreach-context-drawer label:last-child {
+  border-bottom: 0;
+}
+
 .outreach-input-form > label {
   border-bottom: 1px solid #e4e8ec;
   display: block;
@@ -358,6 +412,7 @@
 }
 
 .outreach-input-form > label > span,
+.outreach-context-drawer label > span,
 .generated-channel-editor label > span {
   color: #596575;
   display: block;
@@ -373,6 +428,7 @@
 }
 
 .outreach-input-form input,
+.outreach-input-form select,
 .outreach-input-form textarea,
 .generated-channel-editor input,
 .generated-channel-editor textarea {
@@ -387,6 +443,13 @@
   padding: 9px 11px;
   resize: vertical;
   width: 100%;
+}
+
+.outreach-pitch-style small {
+  color: #8995a5;
+  display: block;
+  font-size: 10px;
+  margin-top: 6px;
 }
 
 .outreach-input-form input:focus,

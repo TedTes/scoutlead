@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 OutreachChannel = Literal["message", "call", "form", "email"]
@@ -45,7 +45,12 @@ class OutreachGenerationInput(BaseModel):
     personal_detail: str | None = Field(default=None, max_length=1000)
     concept_url: str | None = Field(default=None, max_length=2000)
     concept_features: list[str] = Field(default_factory=list, max_length=8)
-    direction: str | None = Field(default=None, max_length=1000)
+    persuasion_style: Literal[
+        "friendly_adviser",
+        "direct_specialist",
+        "curious_consultant",
+        "visual_demonstrator",
+    ] = "friendly_adviser"
 
 
 class OutreachProposal(BaseModel):
@@ -78,6 +83,55 @@ class CallChannelDraft(BaseModel):
     close: str = Field(min_length=8, max_length=240)
 
 
+class GeneratedSocialChannelDraft(BaseModel):
+    initial: str = Field(min_length=20, max_length=700)
+    follow_up: str = Field(min_length=10, max_length=320)
+
+    @model_validator(mode="after")
+    def enforce_word_limits(self):
+        if len(self.initial.split()) > 110:
+            raise ValueError("Instagram initial message must be 110 words or fewer")
+        if len(self.follow_up.split()) > 45:
+            raise ValueError("Instagram follow-up must be 45 words or fewer")
+        return self
+
+
+class GeneratedSmsChannelDraft(BaseModel):
+    initial: str = Field(min_length=20, max_length=160)
+    follow_up: str = Field(min_length=10, max_length=160)
+
+
+class GeneratedEmailChannelDraft(BaseModel):
+    subject: str = Field(min_length=2, max_length=120)
+    body: str = Field(min_length=20, max_length=1200)
+    follow_up_subject: str = Field(min_length=2, max_length=120)
+    follow_up_body: str = Field(min_length=20, max_length=700)
+
+    @model_validator(mode="after")
+    def enforce_word_limits(self):
+        if len(self.body.split()) > 180:
+            raise ValueError("Email body must be 180 words or fewer")
+        if len(self.follow_up_body.split()) > 90:
+            raise ValueError("Email follow-up must be 90 words or fewer")
+        return self
+
+
+CallTalkingPoint = Annotated[str, Field(min_length=4, max_length=120)]
+
+
+class GeneratedCallChannelDraft(BaseModel):
+    opener: str = Field(min_length=8, max_length=160)
+    talking_points: list[CallTalkingPoint] = Field(min_length=1, max_length=2)
+    close: str = Field(min_length=8, max_length=120)
+
+    @model_validator(mode="after")
+    def enforce_spoken_length(self):
+        words = " ".join([self.opener, *self.talking_points, self.close]).split()
+        if len(words) > 65:
+            raise ValueError("Call draft must be 65 words or fewer")
+        return self
+
+
 class OutreachChannelDrafts(BaseModel):
     instagram: SocialChannelDraft | None = None
     sms: SmsChannelDraft | None = None
@@ -85,9 +139,22 @@ class OutreachChannelDrafts(BaseModel):
     call: CallChannelDraft | None = None
 
 
+class GeneratedOutreachChannelDrafts(BaseModel):
+    instagram: GeneratedSocialChannelDraft | None = None
+    sms: GeneratedSmsChannelDraft | None = None
+    email: GeneratedEmailChannelDraft | None = None
+    call: GeneratedCallChannelDraft | None = None
+
+
 class GeneratedOutreach(BaseModel):
     proposal: OutreachProposal
     channels: OutreachChannelDrafts
+    prompt_version: int = Field(ge=1)
+
+
+class GeneratedOutreachResponse(BaseModel):
+    proposal: OutreachProposal
+    channels: GeneratedOutreachChannelDrafts
     prompt_version: int = Field(ge=1)
 
 

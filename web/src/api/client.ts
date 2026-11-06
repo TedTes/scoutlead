@@ -392,7 +392,7 @@ export class ApiClient {
   generateOutreachPackage(resultId: string, outreachInput?: import("../types/domain").OutreachGenerationInput) {
     return this.request<OutreachPackage>(`/outreach-packages/from-result/${resultId}`, {
       method: "POST",
-      body: { outreach_input: outreachInput || { channels: ["instagram"], concept_features: [] } },
+      body: { outreach_input: outreachInput || { channels: ["instagram"], concept_features: [], persuasion_style: "friendly_adviser" } },
     });
   }
 
