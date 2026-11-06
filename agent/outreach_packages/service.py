@@ -370,7 +370,8 @@ class OutreachPackageService:
                 raise ValidationError(
                     "Selected call response is not part of this outreach playbook."
                 )
-        validate_text_message(data.content.message.body)
+        if data.content.generated_outreach is None:
+            validate_text_message(data.content.message.body)
         row.content = data.content.model_dump()
         self.session.commit()
         self.session.refresh(row)

@@ -209,6 +209,22 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert service.find_for_result(result.id) is not None
         assert len(llm.calls) == 1
 
+        edited_content = package.content.model_copy(deep=True)
+        edited_message = "Hi Lakeside Painting — this is my edited Instagram message."
+        edited_content.generated_outreach.channels.instagram.initial = edited_message
+        edited = service.update(
+            package.id,
+            OutreachPackageUpdate(content=edited_content),
+        )
+
+        assert edited.content.generated_outreach.channels.instagram.initial == edited_message
+        assert (
+            service.find_for_result(result.id)
+            .content.generated_outreach.channels.instagram.initial
+            == edited_message
+        )
+        assert len(llm.calls) == 1
+
         expanded = service.generate(
             result.id,
             OutreachGenerateRequest(

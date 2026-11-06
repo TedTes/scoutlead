@@ -1636,6 +1636,7 @@ function OutreachWorkspace({
               <footer className="generated-channel-footer">
                 <span>{outreachPackage?.provider}{outreachPackage?.model ? ` · ${outreachPackage.model}` : ""} · prompt {generatedOutreach.prompt_version}</span>
                 {saveState !== "idle" ? <em className={`is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save failed"}</em> : null}
+                {generatedOutreach.channels[activeGeneratedChannel] ? <button className="secondary" disabled={generating || dirty || saveState === "saving"} type="button" onClick={() => void generateOutreach([activeGeneratedChannel])}>{generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}{generating ? "Generating…" : "Regenerate"}</button> : null}
                 {channelCopy ? <button type="button" onClick={() => void copyChannel()}>{channelCopied ? <Check size={14} /> : <Copy size={14} />}{channelCopied ? "Copied" : "Copy"}</button> : null}
               </footer>
               </section>

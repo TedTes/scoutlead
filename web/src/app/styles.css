@@ -523,7 +523,14 @@
   color: #39434d;
 }
 
-.outreach-input-actions button:disabled {
+.generated-channel-footer button.secondary {
+  background: #fff;
+  border-color: #cad2da;
+  color: #39434d;
+}
+
+.outreach-input-actions button:disabled,
+.generated-channel-footer button:disabled {
   opacity: .55;
 }
 
