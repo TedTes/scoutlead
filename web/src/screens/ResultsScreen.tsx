@@ -298,6 +298,10 @@ export function ResultsScreen({
     ? contacts.find((contact) => contact.id === selectedContactId)
     : undefined;
   const detailContact = selectedContact;
+  const detailAudienceResultId = detailContact
+    ? detailContact.audience_result_id
+      || (detailContact.id.startsWith("audience_result_") ? detailContact.id : null)
+    : null;
   const selectedMessage = selectedContact
     ? messageByLeadId.get(selectedContact.outreach_lead_id || selectedContact.id)
     : undefined;
@@ -1090,14 +1094,17 @@ export function ResultsScreen({
           ) : null}
         </section>
 
-        {detailContact ? (workflowView === "shortlisted" ? (
+        {detailContact
+        && (workflowView === "shortlisted" || workflowView === "contacted")
+        && detailAudienceResultId ? (
           <OutreachWorkspace
             contact={detailContact}
+            mode={workflowView === "contacted" ? "contacted" : "shortlisted"}
             persistent={desktopSplitView}
             onClose={() => setDetailPanelOpen(false)}
             onDirtyChange={setOutreachDraftDirty}
-            onGetPackage={() => territoryApi.getOutreachPackage(detailContact.id)}
-            onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailContact.id, input)}
+            onGetPackage={() => territoryApi.getOutreachPackage(detailAudienceResultId)}
+            onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailAudienceResultId, input)}
             onMarkContacted={(channel) => recordContactOutcome(detailContact.id, "contacted", channel)}
             onMarkSent={async (packageId, channel) => {
               const updated = await territoryApi.markOutreachSent(packageId, channel);
@@ -1106,7 +1113,7 @@ export function ResultsScreen({
             }}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
           />
-        ) : (
+        ) : detailContact ? (
           <ContactDrawer
             audiences={territories.filter((territory) => territory.product_id === detailContact.product_id)}
             contact={detailContact}
@@ -1126,7 +1133,7 @@ export function ResultsScreen({
             onUpdateLead={updateLead}
             onUpdateMessage={updateMessage}
           />
-        )) : null}
+        ) : null}
       </div>
 
       {pendingExport ? (
@@ -1179,11 +1186,13 @@ function AutoGrowTextarea({
   value,
   onChange,
   compact = false,
+  readOnly = false,
 }: {
   ariaLabel: string;
   value: string;
   onChange: (value: string) => void;
   compact?: boolean;
+  readOnly?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1201,6 +1210,7 @@ function AutoGrowTextarea({
       aria-label={ariaLabel}
       ref={textareaRef}
       rows={1}
+      readOnly={readOnly}
       value={value}
       onChange={(event) => onChange(event.target.value)}
     />
@@ -1299,6 +1309,7 @@ function outreachDraftChannelLabel(channel: OutreachDraftChannel) {
 
 function OutreachWorkspace({
   contact,
+  mode = "shortlisted",
   onClose,
   onGeneratePackage,
   onGetPackage,
@@ -1309,6 +1320,7 @@ function OutreachWorkspace({
   persistent = false,
 }: {
   contact: DiscoveryResult;
+  mode?: "shortlisted" | "contacted";
   onClose: () => void;
   onGeneratePackage: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onGetPackage: () => Promise<OutreachPackage | null>;
@@ -1334,6 +1346,7 @@ function OutreachWorkspace({
   const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
   const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [], persuasion_style: "friendly_adviser" });
   const [featureText, setFeatureText] = useState("");
+  const isContactedHistory = mode === "contacted";
 
   const selectedEvidence = visibleAudienceEvidence(contact);
   const copiedEvidence = draft?.evidence?.length
@@ -1389,10 +1402,13 @@ function OutreachWorkspace({
       };
       setOutreachInput(loadedInput);
       setFeatureText(loadedInput.concept_features.join("\n"));
+      const firstSentChannel = OUTREACH_DRAFT_CHANNELS.find(
+        (channel) => Boolean(existing?.sent_channels?.[channel]),
+      );
       const firstGeneratedChannel = OUTREACH_DRAFT_CHANNELS.find(
         (channel) => Boolean(existing?.content.generated_outreach?.channels[channel]),
       );
-      setActiveGeneratedChannel(firstGeneratedChannel || "instagram");
+      setActiveGeneratedChannel(firstSentChannel || firstGeneratedChannel || "instagram");
       setDirty(false);
       onDirtyChange(false);
     } catch (error) {
@@ -1617,7 +1633,7 @@ function OutreachWorkspace({
             </div>
           </div>
           <div className="outreach-header-actions">
-            <button
+            {!isContactedHistory ? <button
               className="outreach-mark-contacted"
               disabled={markingContacted || dirty || saveState === "saving"}
               type="button"
@@ -1625,13 +1641,42 @@ function OutreachWorkspace({
             >
               {markingContacted ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
               {markingContacted ? "Updating…" : "Mark contacted"}
-            </button>
+            </button> : null}
             <button aria-label="Close outreach" title="Close" type="button" onClick={closeWorkspace}><X size={17} /></button>
           </div>
         </header>
 
         {loading ? (
           <div className="outreach-template-status"><RotateCw className="spin" size={18} /><strong>Loading outreach…</strong></div>
+        ) : isContactedHistory && !outreachPackage ? (
+          <div className="outreach-template-status">
+            <AlertTriangle size={18} />
+            <strong>No saved outreach message</strong>
+            <p>This business was marked contacted without saving a message in ScoutLead.</p>
+          </div>
+        ) : isContactedHistory && draft && !generatedOutreach ? (
+          <div className="outreach-tab-layout">
+            {workspaceTabs}
+            <div className="generated-outreach-canvas">
+              {workspaceTab === "json" ? businessJsonPanel : (
+                <section className="generated-channel-workspace">
+                  <header className="generated-channel-tabs">
+                    <button className="active" type="button"><span>Message</span></button>
+                  </header>
+                  <div className="generated-channel-editor">
+                    <label>
+                      <span>Sent message</span>
+                      <AutoGrowTextarea ariaLabel="Sent outreach message" readOnly value={draft.message.body} onChange={() => undefined} />
+                    </label>
+                  </div>
+                  <footer className="generated-channel-footer">
+                    <span>Contacted</span>
+                    <button type="button" onClick={() => void navigator.clipboard.writeText(draft.message.body)}><Copy size={14} />Copy</button>
+                  </footer>
+                </section>
+              )}
+            </div>
+          </div>
         ) : generatedOutreach && !editingInputs ? (
           <div className="outreach-tab-layout">
             {workspaceTabs}
@@ -1652,38 +1697,38 @@ function OutreachWorkspace({
                     {!generatedChannels.includes(channel) ? <small>Not generated</small> : null}
                   </button>
                 ))}
-                <button className="generated-edit-inputs" type="button" onClick={() => setEditingInputs(true)}>Edit inputs</button>
+                {!isContactedHistory ? <button className="generated-edit-inputs" type="button" onClick={() => setEditingInputs(true)}>Edit inputs</button> : null}
               </header>
 
               <div className="generated-channel-editor">
                 {activeGeneratedChannel === "instagram" && generatedOutreach.channels.instagram ? (
                   <>
-                    <label><span>Initial message</span><AutoGrowTextarea ariaLabel="Instagram initial message" value={generatedOutreach.channels.instagram.initial} onChange={(value) => updateGeneratedChannel("instagram", "initial", value)} /></label>
-                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Instagram follow-up" value={generatedOutreach.channels.instagram.follow_up} onChange={(value) => updateGeneratedChannel("instagram", "follow_up", value)} /></label>
+                    <label><span>Initial message</span><AutoGrowTextarea ariaLabel="Instagram initial message" readOnly={isContactedHistory} value={generatedOutreach.channels.instagram.initial} onChange={(value) => updateGeneratedChannel("instagram", "initial", value)} /></label>
+                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Instagram follow-up" readOnly={isContactedHistory} value={generatedOutreach.channels.instagram.follow_up} onChange={(value) => updateGeneratedChannel("instagram", "follow_up", value)} /></label>
                   </>
                 ) : null}
                 {activeGeneratedChannel === "sms" && generatedOutreach.channels.sms ? (
                   <>
-                    <label><span>Initial text</span><AutoGrowTextarea ariaLabel="Text initial message" value={generatedOutreach.channels.sms.initial} onChange={(value) => updateGeneratedChannel("sms", "initial", value)} /></label>
-                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Text follow-up" value={generatedOutreach.channels.sms.follow_up} onChange={(value) => updateGeneratedChannel("sms", "follow_up", value)} /></label>
+                    <label><span>Initial text</span><AutoGrowTextarea ariaLabel="Text initial message" readOnly={isContactedHistory} value={generatedOutreach.channels.sms.initial} onChange={(value) => updateGeneratedChannel("sms", "initial", value)} /></label>
+                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Text follow-up" readOnly={isContactedHistory} value={generatedOutreach.channels.sms.follow_up} onChange={(value) => updateGeneratedChannel("sms", "follow_up", value)} /></label>
                   </>
                 ) : null}
                 {activeGeneratedChannel === "email" && generatedOutreach.channels.email ? (
                   <>
-                    <label><span>Subject</span><input value={generatedOutreach.channels.email.subject} onChange={(event) => updateGeneratedChannel("email", "subject", event.target.value)} /></label>
-                    <label><span>Email</span><AutoGrowTextarea ariaLabel="Email body" value={generatedOutreach.channels.email.body} onChange={(value) => updateGeneratedChannel("email", "body", value)} /></label>
-                    <label><span>Follow-up subject</span><input value={generatedOutreach.channels.email.follow_up_subject} onChange={(event) => updateGeneratedChannel("email", "follow_up_subject", event.target.value)} /></label>
-                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Email follow-up" value={generatedOutreach.channels.email.follow_up_body} onChange={(value) => updateGeneratedChannel("email", "follow_up_body", value)} /></label>
+                    <label><span>Subject</span><input readOnly={isContactedHistory} value={generatedOutreach.channels.email.subject} onChange={(event) => updateGeneratedChannel("email", "subject", event.target.value)} /></label>
+                    <label><span>Email</span><AutoGrowTextarea ariaLabel="Email body" readOnly={isContactedHistory} value={generatedOutreach.channels.email.body} onChange={(value) => updateGeneratedChannel("email", "body", value)} /></label>
+                    <label><span>Follow-up subject</span><input readOnly={isContactedHistory} value={generatedOutreach.channels.email.follow_up_subject} onChange={(event) => updateGeneratedChannel("email", "follow_up_subject", event.target.value)} /></label>
+                    <label><span>Follow-up</span><AutoGrowTextarea ariaLabel="Email follow-up" readOnly={isContactedHistory} value={generatedOutreach.channels.email.follow_up_body} onChange={(value) => updateGeneratedChannel("email", "follow_up_body", value)} /></label>
                   </>
                 ) : null}
                 {activeGeneratedChannel === "call" && generatedOutreach.channels.call ? (
                   <>
-                    <label><span>Opener</span><AutoGrowTextarea ariaLabel="Call opener" value={generatedOutreach.channels.call.opener} onChange={(value) => updateGeneratedChannel("call", "opener", value)} /></label>
-                    <label><span>Talking points</span><AutoGrowTextarea ariaLabel="Call talking points" value={generatedOutreach.channels.call.talking_points.join("\n")} onChange={(value) => updateGeneratedChannel("call", "talking_points", value)} /></label>
-                    <label><span>Close</span><AutoGrowTextarea ariaLabel="Call close" value={generatedOutreach.channels.call.close} onChange={(value) => updateGeneratedChannel("call", "close", value)} /></label>
+                    <label><span>Opener</span><AutoGrowTextarea ariaLabel="Call opener" readOnly={isContactedHistory} value={generatedOutreach.channels.call.opener} onChange={(value) => updateGeneratedChannel("call", "opener", value)} /></label>
+                    <label><span>Talking points</span><AutoGrowTextarea ariaLabel="Call talking points" readOnly={isContactedHistory} value={generatedOutreach.channels.call.talking_points.join("\n")} onChange={(value) => updateGeneratedChannel("call", "talking_points", value)} /></label>
+                    <label><span>Close</span><AutoGrowTextarea ariaLabel="Call close" readOnly={isContactedHistory} value={generatedOutreach.channels.call.close} onChange={(value) => updateGeneratedChannel("call", "close", value)} /></label>
                   </>
                 ) : null}
-                {!generatedOutreach.channels[activeGeneratedChannel] ? (
+                {!generatedOutreach.channels[activeGeneratedChannel] && !isContactedHistory ? (
                   <div className="generated-channel-empty">
                     <strong>{outreachDraftChannelLabel(activeGeneratedChannel)} has not been generated</strong>
                     <p>Generate this message without replacing drafts from the other channels.</p>
@@ -1697,9 +1742,13 @@ function OutreachWorkspace({
               </div>
 
               <footer className="generated-channel-footer">
-                <span>{outreachPackage?.provider}{outreachPackage?.model ? ` · ${outreachPackage.model}` : ""} · prompt {generatedOutreach.prompt_version}</span>
+                <span>{isContactedHistory
+                  ? outreachPackage?.sent_channels?.[activeGeneratedChannel]
+                    ? `Sent ${formatDate(outreachPackage.sent_channels[activeGeneratedChannel] || "")}`
+                    : "Contacted"
+                  : `${outreachPackage?.provider}${outreachPackage?.model ? ` · ${outreachPackage.model}` : ""} · prompt ${generatedOutreach.prompt_version}`}</span>
                 {saveState !== "idle" ? <em className={`is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save failed"}</em> : null}
-                {generatedOutreach.channels[activeGeneratedChannel] ? <button className="secondary" disabled={generating || dirty || saveState === "saving"} type="button" onClick={() => void generateOutreach([activeGeneratedChannel])}>{generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}{generating ? "Generating…" : "Regenerate"}</button> : null}
+                {generatedOutreach.channels[activeGeneratedChannel] && !isContactedHistory ? <button className="secondary" disabled={generating || dirty || saveState === "saving"} type="button" onClick={() => void generateOutreach([activeGeneratedChannel])}>{generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}{generating ? "Generating…" : "Regenerate"}</button> : null}
                 {channelCopy ? <button type="button" onClick={() => void copyChannel()}>{channelCopied ? <Check size={14} /> : <Copy size={14} />}{channelCopied ? "Copied" : "Copy"}</button> : null}
               </footer>
               </section>
@@ -4988,7 +5037,12 @@ function matchesWorkflowView(
   if (dismissed) return false;
 
   if (view === "inbox") {
-    return context.includeAllLeads || reviewStatus(contact) === "unreviewed";
+    return Boolean(
+      !contact.shortlisted_at
+      && !contact.last_contacted_at
+      && !contact.latest_outcome
+      && (context.includeAllLeads || reviewStatus(contact) === "unreviewed"),
+    );
   }
   if (view === "this_week") {
     if (context.includeAllLeads) return true;

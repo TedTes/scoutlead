@@ -27,6 +27,7 @@ from outreach_packages.schemas import (
     OutreachResponseClassifyRequest,
 )
 from outreach_packages.service import OutreachPackageService, _evidence
+from leads.workspace import WorkspaceLeadService
 from shared.errors import ConfigurationError, ValidationError
 from shared.utils import new_id, utcnow
 
@@ -276,6 +277,12 @@ def test_mark_sent_moves_shortlisted_result_to_contacted_once() -> None:
         assert contacted.sent_channels["instagram"] == repeated.sent_channels["instagram"]
         assert session.scalar(select(func.count()).select_from(LeadOutcomeModel)) == 1
         assert session.scalar(select(func.count()).select_from(OutreachEventModel)) == 1
+        contacted_page = WorkspaceLeadService(
+            session,
+            workspace_id="workspace:first",
+        ).page(view="contacted")
+        assert contacted_page.total == 1
+        assert contacted_page.items[0].audience_result_id == result.id
 
 
 def test_explicit_generation_requires_configured_llm_provider() -> None:

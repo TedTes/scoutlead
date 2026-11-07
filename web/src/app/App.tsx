@@ -152,7 +152,11 @@ function AppShell({
   const activeProductContacts = productContacts.filter(isActiveLead);
   const overviewCounts = workspaceOverview?.counts;
   const workflowCounts: LeadWorkflowCounts = {
-    inbox: overviewCounts?.leads ?? activeProductContacts.length,
+    inbox: overviewCounts?.leads ?? activeProductContacts.filter((contact) => (
+      !contact.shortlisted_at
+      && !contact.last_contacted_at
+      && !contact.latest_outcome
+    )).length,
     this_week: recentProductContacts.length,
     shortlisted: overviewCounts?.shortlisted ?? productContacts.filter((contact) => Boolean(
       contact.shortlisted_at

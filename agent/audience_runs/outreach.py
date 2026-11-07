@@ -72,6 +72,10 @@ class AudienceOutreachService:
             result.match_snapshot,
             commit=False,
         )
+        # The audience result is already tied to the canonical business. Keep the
+        # promoted lead on that same identity even when an older snapshot omitted
+        # canonical_business_id, so workspace workflow stages do not duplicate it.
+        lead.business_id = result.business_id
         match = (result.match_snapshot.get("raw") or {}).get("profile_match") or {}
         reasons = [
             _signal_reason(item)

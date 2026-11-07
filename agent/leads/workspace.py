@@ -36,6 +36,7 @@ class _Candidate:
     kind: Literal["lead", "audience_result"]
     model: LeadModel | AudienceResultModel
     key: str
+    audience_result_id: str | None
     review_status: str
     shortlisted_at: datetime | None
     contacted_at: datetime | None
@@ -92,6 +93,7 @@ class WorkspaceLeadService:
                 item = LeadRead.model_validate(candidate.model).model_dump()
             item["shortlisted_at"] = candidate.shortlisted_at
             item["last_contacted_at"] = candidate.contacted_at
+            item["audience_result_id"] = candidate.audience_result_id
             item["review_status"] = candidate.review_status
             item["contact_policy_status"] = candidate.contact_policy_status
             items.append(
@@ -124,6 +126,9 @@ class WorkspaceLeadService:
                 ),
                 shortlisted_at=current.shortlisted_at or candidate.shortlisted_at,
                 contacted_at=current.contacted_at or candidate.contacted_at,
+                audience_result_id=(
+                    current.audience_result_id or candidate.audience_result_id
+                ),
                 contact_policy_status=(
                     current.contact_policy_status
                     if current.contact_policy_status != "allowed"
@@ -219,6 +224,7 @@ class WorkspaceLeadService:
                     kind="audience_result",
                     model=item,
                     key=f"business:{item.business_id}",
+                    audience_result_id=item.id,
                     review_status=item.review_status,
                     shortlisted_at=item.shortlisted_at,
                     contacted_at=contacted_at,
@@ -238,11 +244,33 @@ class WorkspaceLeadService:
                 .where(ProductModel.workspace_id == self.workspace_id)
             )
         )
+        linked_results: dict[str, AudienceResultModel] = {}
+        lead_ids = [lead.id for lead in leads]
+        if lead_ids:
+            rows = self.session.scalars(
+                select(AudienceResultModel)
+                .join(AudienceRunModel, AudienceRunModel.id == AudienceResultModel.run_id)
+                .where(
+                    AudienceRunModel.workspace_id == self.workspace_id,
+                    AudienceResultModel.outreach_lead_id.in_(lead_ids),
+                )
+                .order_by(AudienceResultModel.updated_at.desc())
+            ).all()
+            for result in rows:
+                if result.outreach_lead_id:
+                    linked_results.setdefault(result.outreach_lead_id, result)
         return [
             _Candidate(
                 kind="lead",
                 model=lead,
-                key=f"business:{lead.business_id}" if lead.business_id else f"lead:{lead.id}",
+                key=(
+                    f"business:{lead.business_id or linked_results[lead.id].business_id}"
+                    if lead.business_id or lead.id in linked_results
+                    else f"lead:{lead.id}"
+                ),
+                audience_result_id=(
+                    linked_results[lead.id].id if lead.id in linked_results else None
+                ),
                 review_status=lead.review_status,
                 shortlisted_at=lead.shortlisted_at,
                 contacted_at=lead.last_contacted_at or lead.latest_outcome_at,
@@ -269,6 +297,11 @@ class WorkspaceLeadService:
             )
         if view == "contacted":
             return candidate.contacted_at is not None
+        if view == "inbox":
+            return (
+                candidate.shortlisted_at is None
+                and candidate.contacted_at is None
+            )
         if view == "this_week":
             created_at = candidate.created_at
             cutoff = datetime.now(timezone.utc) - timedelta(days=7)
@@ -280,8 +313,13 @@ class WorkspaceLeadService:
     @staticmethod
     def _counts(candidates: list[_Candidate]) -> WorkspaceLeadCounts:
         active = [item for item in candidates if not item.dismissed]
+        inbox = [
+            item
+            for item in active
+            if item.shortlisted_at is None and item.contacted_at is None
+        ]
         return WorkspaceLeadCounts(
-            leads=len(active),
+            leads=len(inbox),
             shortlisted=sum(
                 item.shortlisted_at is not None and item.contacted_at is None
                 for item in active

@@ -2532,6 +2532,12 @@ def test_workspace_contacted_lead_leaves_shortlisted_view() -> None:
             LeadSeedInput(company_name="Contacted Painting", geography="Toronto"),
         )
         repository.update(lead.id, LeadUpdate(shortlisted=True))
+        shortlisted_service = WorkspaceLeadService(
+            session,
+            workspace_id="workspace:first",
+        )
+        assert shortlisted_service.page(view="inbox").total == 0
+        assert shortlisted_service.page(view="shortlisted").total == 1
         repository.mark_contacted(lead.id)
         service = WorkspaceLeadService(session, workspace_id="workspace:first")
 
@@ -2541,6 +2547,7 @@ def test_workspace_contacted_lead_leaves_shortlisted_view() -> None:
 
         assert counts.shortlisted == 0
         assert counts.contacted == 1
+        assert counts.leads == 0
         assert shortlisted.total == 0
         assert contacted.total == 1
         assert contacted.items[0].id == lead.id

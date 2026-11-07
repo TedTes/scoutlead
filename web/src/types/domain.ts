@@ -245,6 +245,7 @@ export type DiscoveryResult = {
   territory_id?: string | null;
   product_id: string;
   business_id?: string | null;
+  audience_result_id?: string | null;
   outreach_lead_id?: string | null;
   contact_id?: string | null;
   company_name: string;

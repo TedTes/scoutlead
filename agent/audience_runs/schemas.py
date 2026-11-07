@@ -52,6 +52,7 @@ class AudienceLeadRead(BaseModel):
     territory_id: str
     product_id: str
     business_id: str
+    audience_result_id: str | None = None
     outreach_lead_id: str | None = None
     contact_id: str | None = None
     company_name: str

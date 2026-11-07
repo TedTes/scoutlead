@@ -218,6 +218,7 @@ class LeadRead(LeadCreate):
     id: str
     territory_id: str | None = None
     business_id: str | None = None
+    audience_result_id: str | None = None
     contact_id: str | None = None
     status: LeadStatus
     review_status: LeadReviewStatus = LeadReviewStatus.UNREVIEWED
