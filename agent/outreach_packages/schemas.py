@@ -60,6 +60,30 @@ class OutreachGenerationInput(BaseModel):
         "curious_consultant",
         "visual_demonstrator",
     ] = "friendly_adviser"
+    structure_template_id: str | None = Field(default=None, max_length=64)
+    message_structure: str | None = Field(default=None, max_length=4000)
+    example_message: str | None = Field(default=None, max_length=6000)
+
+
+class OutreachTemplateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    structure: str = Field(min_length=10, max_length=4000)
+    example: str | None = Field(default=None, max_length=6000)
+
+
+class OutreachTemplateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    structure: str | None = Field(default=None, min_length=10, max_length=4000)
+    example: str | None = Field(default=None, max_length=6000)
+
+
+class OutreachTemplateRead(BaseModel):
+    id: str
+    name: str
+    structure: str
+    example: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class OutreachProposal(BaseModel):

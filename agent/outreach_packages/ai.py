@@ -26,7 +26,7 @@ from shared.logger import get_logger
 
 
 logger = get_logger(__name__)
-OUTREACH_GENERATION_PROMPT_VERSION = 4
+OUTREACH_GENERATION_PROMPT_VERSION = 5
 
 PERSUASION_STYLE_INSTRUCTIONS = {
     "friendly_adviser": (
@@ -64,6 +64,18 @@ class StructuredOutreachGenerator:
         persuasion_instruction = PERSUASION_STYLE_INSTRUCTIONS[
             outreach_input.persuasion_style
         ]
+        selected_structure = (
+            outreach_input.message_structure.strip()
+            if outreach_input.message_structure
+            else persuasion_instruction
+        )
+        example_instruction = (
+            "The user supplied an example message. Reproduce only its order, pacing, and rhetorical shape. "
+            "Never copy its names, numbers, links, claims, compliments, or business details unless the same "
+            "fact is present in the supplied JSON."
+            if outreach_input.example_message
+            else "No example message was supplied."
+        )
         system = (
             "Create grounded outreach for a local business from the supplied JSON only. "
             "Never invent compliments, projects, reviews, results, contact details, links, prices, "
@@ -77,7 +89,10 @@ class StructuredOutreachGenerator:
             "at most 65 words total, no more than two short talking points, and one question. Omit proof claims when no concept URL "
             "exists. Generate only the channels listed in outreach_input.channels and return null for "
             "every unselected channel. Follow every length and structural constraint in the response schema. "
-            f"Use this persuasion structure: {persuasion_instruction}"
+            "Follow the user's message structure in the stated order. Treat it as a format, not as factual "
+            "content. Optional sections must be omitted when the supplied evidence does not support them. "
+            "Do not fill missing sections with generic claims. "
+            f"Selected message structure: {selected_structure}. {example_instruction}"
         )
         prompt = (
             "Generate a proposal and outreach drafts that preserve the same factual substance across "
@@ -90,6 +105,8 @@ class StructuredOutreachGenerator:
             "verified_evidence": [item.model_dump() for item in evidence],
             "outreach_input": outreach_input.model_dump(),
             "persuasion_structure": persuasion_instruction,
+            "selected_message_structure": selected_structure,
+            "example_message": outreach_input.example_message,
             "fallback_proposal": fallback_proposal.model_dump(),
         }
         try:

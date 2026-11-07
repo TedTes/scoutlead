@@ -561,6 +561,25 @@ class OutreachPackageModel(TimestampMixin, Base):
     prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class OutreachTemplateModel(TimestampMixin, Base):
+    __tablename__ = "outreach_templates"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "name",
+            name="uq_outreach_templates_workspace_name",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    structure: Mapped[str] = mapped_column(Text, nullable=False)
+    example: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class OutreachPlaybookModel(TimestampMixin, Base):
     __tablename__ = "outreach_playbooks"
     __table_args__ = (

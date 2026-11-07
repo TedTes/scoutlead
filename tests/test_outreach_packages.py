@@ -13,6 +13,7 @@ from db.models import (
     MessageModel,
     NicheModel,
     OutreachPackageModel,
+    OutreachTemplateModel,
     OutreachEventModel,
     ProductModel,
     TerritoryModel,
@@ -25,8 +26,14 @@ from outreach_packages.schemas import (
     OutreachMarkSentRequest,
     OutreachPackageUpdate,
     OutreachResponseClassifyRequest,
+    OutreachTemplateCreate,
+    OutreachTemplateUpdate,
 )
-from outreach_packages.service import OutreachPackageService, _evidence
+from outreach_packages.service import (
+    OutreachPackageService,
+    OutreachTemplateService,
+    _evidence,
+)
 from leads.workspace import WorkspaceLeadService
 from shared.errors import ConfigurationError, ValidationError
 from shared.utils import new_id, utcnow
@@ -243,6 +250,72 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert expanded.content.generated_outreach.channels.call is not None
         assert expanded.content.generated_outreach.channels.sms is None
         assert expanded.content.outreach_input.channels == ["instagram", "email", "call"]
+
+
+def test_saved_structure_is_workspace_scoped_and_snapshotted_for_generation() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        templates = OutreachTemplateService(
+            session,
+            workspace_id="workspace:first",
+        )
+        saved = templates.create(
+            OutreachTemplateCreate(
+                name="Proof then question",
+                structure="Greeting, verified proof, opportunity, then one question.",
+                example="Hi Example Co — your 20 reviews stood out. I made this for you. Open to a look?",
+            )
+        )
+        llm = _StructuredLLM()
+
+        package = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            llm=llm,
+        ).generate(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(
+                    channels=["instagram"],
+                    structure_template_id=saved.id,
+                )
+            ),
+        )
+
+        assert package.content.outreach_input.structure_template_id == saved.id
+        assert package.content.outreach_input.message_structure == saved.structure
+        assert package.content.outreach_input.example_message == saved.example
+        assert llm.calls[0]["context"]["selected_message_structure"] == saved.structure
+        assert llm.calls[0]["context"]["example_message"] == saved.example
+        assert "Reproduce only its order, pacing, and rhetorical shape" in llm.calls[0]["system"]
+        assert OutreachTemplateService(
+            session,
+            workspace_id="workspace:other",
+        ).list() == []
+
+
+def test_outreach_template_can_be_updated_cleared_and_deleted() -> None:
+    with _session_factory()() as session:
+        service = OutreachTemplateService(session, workspace_id="workspace:first")
+        saved = service.create(
+            OutreachTemplateCreate(
+                name="Original",
+                structure="Greeting, proof, opportunity, question.",
+                example="An example message.",
+            )
+        )
+
+        updated = service.update(
+            saved.id,
+            OutreachTemplateUpdate(name="Updated", example=None),
+        )
+
+        assert updated.name == "Updated"
+        assert updated.example is None
+        assert len(service.list()) == 1
+        service.delete(saved.id)
+        assert service.list() == []
+        assert session.get(OutreachTemplateModel, saved.id) is None
 
 
 def test_mark_sent_moves_shortlisted_result_to_contacted_once() -> None:

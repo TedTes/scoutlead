@@ -13,8 +13,11 @@ from outreach_packages.schemas import (
     OutreachPackageUpdate,
     OutreachResponseClassification,
     OutreachResponseClassifyRequest,
+    OutreachTemplateCreate,
+    OutreachTemplateRead,
+    OutreachTemplateUpdate,
 )
-from outreach_packages.service import OutreachPackageService
+from outreach_packages.service import OutreachPackageService, OutreachTemplateService
 from messages.schemas import MessageRead
 
 
@@ -34,6 +37,46 @@ def _service(
         workspace_id=workspace_id,
         llm=services.llm,
     )
+
+
+def _template_service(
+    session: DbSession,
+    workspace_id: str | None,
+) -> OutreachTemplateService:
+    return OutreachTemplateService(session, workspace_id=workspace_id)
+
+
+@router.get("/templates", response_model=list[OutreachTemplateRead])
+def list_templates(session: DbSession, auth: CurrentAuth):
+    return _template_service(session, auth.workspace_id).list()
+
+
+@router.post(
+    "/templates",
+    response_model=OutreachTemplateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_template(
+    data: OutreachTemplateCreate,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    return _template_service(session, auth.workspace_id).create(data)
+
+
+@router.patch("/templates/{template_id}", response_model=OutreachTemplateRead)
+def update_template(
+    template_id: str,
+    data: OutreachTemplateUpdate,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    return _template_service(session, auth.workspace_id).update(template_id, data)
+
+
+@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_template(template_id: str, session: DbSession, auth: CurrentAuth):
+    _template_service(session, auth.workspace_id).delete(template_id)
 
 
 @router.get("/by-result/{result_id}", response_model=OutreachPackageRead | None)

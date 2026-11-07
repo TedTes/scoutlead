@@ -16,6 +16,7 @@ from db.models import (
     AudienceRunModel,
     BusinessModel,
     OutreachPackageModel,
+    OutreachTemplateModel,
     ProductModel,
     TerritoryModel,
     WorkspaceModel,
@@ -35,6 +36,9 @@ from outreach_packages.schemas import (
     OutreachPackageUpdate,
     OutreachResponseClassification,
     OutreachResponseClassifyRequest,
+    OutreachTemplateCreate,
+    OutreachTemplateRead,
+    OutreachTemplateUpdate,
     CallDraft,
     EmailDraft,
     WrittenDraft,
@@ -56,6 +60,99 @@ from shared.utils import new_id
 
 
 TEMPLATE_VERSION = 12
+
+
+class OutreachTemplateService:
+    def __init__(self, session: Session, *, workspace_id: str | None) -> None:
+        self.session = session
+        self.workspace_id = workspace_id
+
+    def list(self) -> list[OutreachTemplateRead]:
+        rows = self.session.scalars(
+            select(OutreachTemplateModel)
+            .where(OutreachTemplateModel.workspace_id == self.workspace_id)
+            .order_by(OutreachTemplateModel.updated_at.desc())
+        ).all()
+        return [self._read(row) for row in rows]
+
+    def create(self, data: OutreachTemplateCreate) -> OutreachTemplateRead:
+        name = data.name.strip()
+        self._ensure_name_available(name)
+        row = OutreachTemplateModel(
+            id=new_id("outreach_template"),
+            workspace_id=self.workspace_id,
+            name=name,
+            structure=data.structure.strip(),
+            example=(data.example or "").strip() or None,
+        )
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return self._read(row)
+
+    def update(
+        self,
+        template_id: str,
+        data: OutreachTemplateUpdate,
+    ) -> OutreachTemplateRead:
+        row = self._owned(template_id)
+        if "name" in data.model_fields_set and data.name is not None:
+            name = data.name.strip()
+            if name != row.name:
+                self._ensure_name_available(name, exclude_id=row.id)
+            row.name = name
+        if "structure" in data.model_fields_set and data.structure is not None:
+            row.structure = data.structure.strip()
+        if "example" in data.model_fields_set:
+            row.example = (data.example or "").strip() or None
+        self.session.commit()
+        self.session.refresh(row)
+        return self._read(row)
+
+    def delete(self, template_id: str) -> None:
+        row = self._owned(template_id)
+        self.session.delete(row)
+        self.session.commit()
+
+    def _owned(self, template_id: str) -> OutreachTemplateModel:
+        row = self.session.scalar(
+            select(OutreachTemplateModel).where(
+                OutreachTemplateModel.id == template_id,
+                OutreachTemplateModel.workspace_id == self.workspace_id,
+            )
+        )
+        if row is None:
+            raise NotFoundError(
+                "outreach template not found",
+                {"template_id": template_id},
+            )
+        return row
+
+    def _ensure_name_available(
+        self,
+        name: str,
+        *,
+        exclude_id: str | None = None,
+    ) -> None:
+        query = select(OutreachTemplateModel.id).where(
+            OutreachTemplateModel.workspace_id == self.workspace_id,
+            OutreachTemplateModel.name == name,
+        )
+        if exclude_id:
+            query = query.where(OutreachTemplateModel.id != exclude_id)
+        if self.session.scalar(query) is not None:
+            raise ValidationError("An outreach template with this name already exists.")
+
+    @staticmethod
+    def _read(row: OutreachTemplateModel) -> OutreachTemplateRead:
+        return OutreachTemplateRead(
+            id=row.id,
+            name=row.name,
+            structure=row.structure,
+            example=row.example,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
 
 class OutreachPackageService:
@@ -239,7 +336,9 @@ class OutreachPackageService:
         )
         rendered = render_outreach(template_context)
         OutreachPolicyValidator().validate(strategy=strategy, generation=rendered)
-        generation_input = outreach_input or OutreachGenerationInput()
+        generation_input = self._resolve_generation_input(
+            outreach_input or OutreachGenerationInput()
+        )
         fallback_proposal = OutreachProposal(
             positive_detail=(
                 generation_input.personal_detail
@@ -348,6 +447,41 @@ class OutreachPackageService:
             ),
             strategy=strategy,
             reply_paths=strategy.reply_paths,
+        )
+
+    def _resolve_generation_input(
+        self,
+        generation_input: OutreachGenerationInput,
+    ) -> OutreachGenerationInput:
+        template_id = generation_input.structure_template_id
+        if not template_id:
+            return generation_input
+        row = self.session.scalar(
+            select(OutreachTemplateModel).where(
+                OutreachTemplateModel.id == template_id,
+                OutreachTemplateModel.workspace_id == self.workspace_id,
+            )
+        )
+        if row is None:
+            raise NotFoundError(
+                "outreach template not found",
+                {"template_id": template_id},
+            )
+        message_structure = (
+            generation_input.message_structure.strip()
+            if generation_input.message_structure
+            else row.structure
+        )
+        example_message = (
+            generation_input.example_message
+            if "example_message" in generation_input.model_fields_set
+            else row.example
+        )
+        return generation_input.model_copy(
+            update={
+                "message_structure": message_structure,
+                "example_message": example_message,
+            }
         )
 
     def update(self, package_id: str, data: OutreachPackageUpdate) -> OutreachPackageRead:
