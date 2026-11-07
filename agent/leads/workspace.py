@@ -263,7 +263,10 @@ class WorkspaceLeadService:
         if candidate.dismissed:
             return False
         if view == "shortlisted":
-            return candidate.shortlisted_at is not None
+            return (
+                candidate.shortlisted_at is not None
+                and candidate.contacted_at is None
+            )
         if view == "contacted":
             return candidate.contacted_at is not None
         if view == "this_week":
@@ -279,7 +282,10 @@ class WorkspaceLeadService:
         active = [item for item in candidates if not item.dismissed]
         return WorkspaceLeadCounts(
             leads=len(active),
-            shortlisted=sum(item.shortlisted_at is not None for item in active),
+            shortlisted=sum(
+                item.shortlisted_at is not None and item.contacted_at is None
+                for item in active
+            ),
             contacted=sum(item.contacted_at is not None for item in active),
             dismissed=sum(item.dismissed for item in candidates),
             all=len(candidates),

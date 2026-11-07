@@ -261,7 +261,7 @@ def test_suppressed_lead_blocks_shortlist_and_future_matching() -> None:
         assert rediscovered.contact_policy_reason == "Asked not to be contacted."
 
 
-def test_unreviewed_lead_without_agent_fit_cannot_be_shortlisted() -> None:
+def test_explicit_shortlist_marks_unreviewed_lead_as_maybe() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -283,8 +283,13 @@ def test_unreviewed_lead_without_agent_fit_cannot_be_shortlisted() -> None:
             ),
         )
 
-        with pytest.raises(ConflictError):
-            LeadRepository(session).update(lead.id, LeadUpdate(shortlisted=True))
+        shortlisted = LeadRepository(session).update(
+            lead.id,
+            LeadUpdate(shortlisted=True),
+        )
+
+        assert shortlisted.shortlisted_at is not None
+        assert shortlisted.review_status == LeadReviewStatus.MAYBE.value
 
 
 def test_shortlisted_good_fit_lead_must_be_verified_before_drafting() -> None:

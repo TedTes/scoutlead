@@ -154,7 +154,11 @@ function AppShell({
   const workflowCounts: LeadWorkflowCounts = {
     inbox: overviewCounts?.leads ?? activeProductContacts.length,
     this_week: recentProductContacts.length,
-    shortlisted: overviewCounts?.shortlisted ?? productContacts.filter((contact) => Boolean(contact.shortlisted_at)).length,
+    shortlisted: overviewCounts?.shortlisted ?? productContacts.filter((contact) => Boolean(
+      contact.shortlisted_at
+      && !contact.last_contacted_at
+      && !contact.latest_outcome,
+    )).length,
     contacted: overviewCounts?.contacted ?? productContacts.filter((contact) => Boolean(contact.last_contacted_at || contact.latest_outcome)).length,
     dismissed: overviewCounts?.dismissed ?? productContacts.filter((contact) => contact.review_status === "not_fit" || Boolean(contact.contact_policy_status && contact.contact_policy_status !== "allowed")).length,
     all: overviewCounts?.all ?? productContacts.length,

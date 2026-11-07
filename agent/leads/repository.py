@@ -21,7 +21,6 @@ from db.models import (
     TerritoryModel,
 )
 from leads.policy import (
-    can_shortlist_lead,
     controlled_signal_tags,
     normalize_qualification_result,
 )
@@ -377,18 +376,13 @@ class LeadRepository:
                         "user_message": "This contact is marked do-not-contact and cannot be shortlisted.",
                     },
                 )
-            if data["shortlisted"] and not can_shortlist_lead(
-                review_status=next_review_status,
-                qualification=model.qualification,
-            ):
-                raise ConflictError(
-                    "lead needs a positive fit decision before shortlist",
-                    {
-                        "lead_id": lead_id,
-                        "review_status": next_review_status.value,
-                        "user_message": "Mark this contact as Good fit or Maybe before shortlisting.",
-                    },
-                )
+            if data["shortlisted"] and next_review_status not in {
+                LeadReviewStatus.GOOD_FIT,
+                LeadReviewStatus.MAYBE,
+            }:
+                next_review_status = LeadReviewStatus.MAYBE
+                model.review_status = next_review_status.value
+                model.reviewed_at = utcnow()
             model.shortlisted_at = utcnow() if data["shortlisted"] else None
         if commit:
             self.session.commit()

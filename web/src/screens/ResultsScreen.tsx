@@ -243,18 +243,20 @@ export function ResultsScreen({
       .filter((message) => message.status === "approved" || message.status === "sent")
       .map((message) => message.lead_id),
   );
-  const shortlistedContactRows = contacts.filter((contact) => contact.shortlisted_at);
+  const shortlistedContactRows = contacts.filter(
+    (contact) => contact.shortlisted_at && !contact.last_contacted_at && !contact.latest_outcome,
+  );
   const shortlistedContacts = shortlistedContactRows.length;
   const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
-  const approvedShortlistContacts = contacts.filter(
-    (contact) => contact.shortlisted_at && approvedLeadIds.has(contact.id),
+  const approvedShortlistContacts = shortlistedContactRows.filter(
+    (contact) => approvedLeadIds.has(contact.id),
   );
   const webhookReady = Boolean(
     selectedProduct?.webhook_enabled && selectedProduct.webhook_url && approvedShortlistContacts.length,
   );
   const gmailConnected = Boolean(gmailConnectionStatus?.connected);
-  const draftableShortlistContacts = contacts.filter(
-    (contact) => contact.shortlisted_at && isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
+  const draftableShortlistContacts = shortlistedContactRows.filter(
+    (contact) => isVerifiedContact(contact) && canShortlistContact(contact) && !draftedLeadIds.has(contact.id),
   );
   const outreachReadyContacts = shortlistedContactRows.filter(isBulkOutreachReadyContact);
   const outreachSkippedContacts = shortlistedContactRows.filter((contact) => !isBulkOutreachReadyContact(contact));
@@ -854,7 +856,7 @@ export function ResultsScreen({
                   disabled={!shortlistedContacts}
                   onClick={() =>
                     beginContactsExport(
-                      contacts.filter((contact) => contact.shortlisted_at),
+                      shortlistedContactRows,
                       exportName,
                       "shortlist",
                     )
@@ -1015,7 +1017,17 @@ export function ResultsScreen({
                     setDetailPanelOpen(true);
                   }}
                   onToggleShortlist={() => {
-                    void updateLead(contact.id, { shortlisted: !contact.shortlisted_at }).catch(() => undefined);
+                    const shortlisted = !contact.shortlisted_at;
+                    void updateLead(contact.id, { shortlisted })
+                      .then(() => showToast({
+                        title: shortlisted ? "Added to Shortlisted" : "Removed from Shortlisted",
+                        tone: "green",
+                      }))
+                      .catch((error) => showToast({
+                        title: "Shortlist update failed",
+                        message: error instanceof Error ? error.message : String(error),
+                        tone: "red",
+                      }));
                   }}
                 />
               ))}
@@ -4983,7 +4995,13 @@ function matchesWorkflowView(
     const createdAt = new Date(contact.created_at).getTime();
     return Number.isFinite(createdAt) && createdAt >= context.thisWeekCutoffMs;
   }
-  if (view === "shortlisted") return Boolean(contact.shortlisted_at);
+  if (view === "shortlisted") {
+    return Boolean(
+      contact.shortlisted_at
+      && !contact.last_contacted_at
+      && !contact.latest_outcome,
+    );
+  }
   if (view === "contacted") return Boolean(contact.last_contacted_at || contact.latest_outcome);
   return true;
 }

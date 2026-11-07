@@ -2518,6 +2518,34 @@ def test_workspace_lead_read_model_returns_counts_and_one_page() -> None:
         assert page.items[0].id == active.id
 
 
+def test_workspace_contacted_lead_leaves_shortlisted_view() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        campaign = CampaignRepository(session, workspace_id="workspace:first").create(
+            CampaignCreate(product_id=offer.id, name="Contact workflow", max_leads=10)
+        )
+        repository = LeadRepository(session, workspace_id="workspace:first")
+        lead = repository.create_from_seed(
+            campaign.id,
+            offer.id,
+            LeadSeedInput(company_name="Contacted Painting", geography="Toronto"),
+        )
+        repository.update(lead.id, LeadUpdate(shortlisted=True))
+        repository.mark_contacted(lead.id)
+        service = WorkspaceLeadService(session, workspace_id="workspace:first")
+
+        counts = service.counts()
+        shortlisted = service.page(view="shortlisted")
+        contacted = service.page(view="contacted")
+
+        assert counts.shortlisted == 0
+        assert counts.contacted == 1
+        assert shortlisted.total == 0
+        assert contacted.total == 1
+        assert contacted.items[0].id == lead.id
+
+
 def test_territory_metrics_report_coverage_and_conversion() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
