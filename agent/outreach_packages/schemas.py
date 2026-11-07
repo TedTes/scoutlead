@@ -6,6 +6,14 @@ from pydantic import BaseModel, Field, model_validator
 
 OutreachChannel = Literal["message", "call", "form", "email"]
 OutreachDraftChannel = Literal["instagram", "sms", "email", "call"]
+OutreachEventChannel = Literal[
+    "instagram",
+    "sms",
+    "email",
+    "call",
+    "message",
+    "form",
+]
 OutreachEventType = Literal[
     "channel_viewed",
     "draft_copied",
@@ -15,6 +23,7 @@ OutreachEventType = Literal[
     "positive_reply",
     "negative_reply",
     "meeting_booked",
+    "message_sent",
 ]
 
 
@@ -269,12 +278,17 @@ class OutreachPackageRead(BaseModel):
     provider: str
     model: str | None = None
     usage: dict = Field(default_factory=dict)
+    sent_channels: dict[OutreachDraftChannel, datetime] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
 
 class OutreachPackageUpdate(BaseModel):
     content: OutreachPackageContent
+
+
+class OutreachMarkSentRequest(BaseModel):
+    channel: OutreachDraftChannel
 
 
 class OutreachGenerateRequest(BaseModel):
@@ -296,7 +310,7 @@ class OutreachResponseClassification(BaseModel):
 
 
 class OutreachEventCreate(BaseModel):
-    channel: OutreachChannel
+    channel: OutreachEventChannel
     event_type: OutreachEventType
     variant_id: str | None = Field(default=None, max_length=120)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -305,7 +319,7 @@ class OutreachEventCreate(BaseModel):
 class OutreachEventRead(BaseModel):
     id: str
     package_id: str
-    channel: OutreachChannel
+    channel: OutreachEventChannel
     event_type: OutreachEventType
     variant_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

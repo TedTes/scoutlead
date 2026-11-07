@@ -590,8 +590,10 @@ export type OutreachMessageTemplate = {
   proof_url?: string | null;
 };
 
+export type OutreachDraftChannel = "instagram" | "sms" | "email" | "call";
+
 export type OutreachGenerationInput = {
-  channels: ("instagram" | "sms" | "email" | "call")[];
+  channels: OutreachDraftChannel[];
   personal_detail?: string | null;
   concept_url?: string | null;
   concept_features: string[];
@@ -651,6 +653,7 @@ export type OutreachPackage = {
   provider: string;
   model?: string | null;
   usage: Record<string, unknown>;
+  sent_channels?: Partial<Record<OutreachDraftChannel, string>>;
   created_at: string;
   updated_at: string;
 };

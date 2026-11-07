@@ -8,9 +8,12 @@ from db.models import (
     AudienceResultModel,
     AudienceRunModel,
     BusinessModel,
+    LeadModel,
+    LeadOutcomeModel,
     MessageModel,
     NicheModel,
     OutreachPackageModel,
+    OutreachEventModel,
     ProductModel,
     TerritoryModel,
 )
@@ -19,6 +22,7 @@ from outreach_packages.schemas import (
     OutreachEventCreate,
     OutreachGenerateRequest,
     OutreachGenerationInput,
+    OutreachMarkSentRequest,
     OutreachPackageUpdate,
     OutreachResponseClassifyRequest,
 )
@@ -238,6 +242,40 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert expanded.content.generated_outreach.channels.call is not None
         assert expanded.content.generated_outreach.channels.sms is None
         assert expanded.content.outreach_input.channels == ["instagram", "email", "call"]
+
+
+def test_mark_sent_moves_shortlisted_result_to_contacted_once() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        service = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            llm=_StructuredLLM(),
+        )
+        package = service.generate(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(channels=["instagram"])
+            ),
+        )
+
+        contacted = service.mark_sent(
+            package.id,
+            OutreachMarkSentRequest(channel="instagram"),
+        )
+        repeated = service.mark_sent(
+            package.id,
+            OutreachMarkSentRequest(channel="instagram"),
+        )
+
+        session.refresh(result)
+        lead = session.get(LeadModel, result.outreach_lead_id)
+        assert result.contacted_at is not None
+        assert lead is not None
+        assert lead.last_contacted_at is not None
+        assert contacted.sent_channels["instagram"] == repeated.sent_channels["instagram"]
+        assert session.scalar(select(func.count()).select_from(LeadOutcomeModel)) == 1
+        assert session.scalar(select(func.count()).select_from(OutreachEventModel)) == 1
 
 
 def test_explicit_generation_requires_configured_llm_provider() -> None:

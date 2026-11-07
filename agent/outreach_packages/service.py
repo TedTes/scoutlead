@@ -26,6 +26,7 @@ from outreach_packages.schemas import (
     OutreachEventCreate,
     OutreachEventRead,
     OutreachGenerateRequest,
+    OutreachMarkSentRequest,
     OutreachGenerationInput,
     OutreachPackageContent,
     OutreachMessageTemplate,
@@ -38,6 +39,8 @@ from outreach_packages.schemas import (
     EmailDraft,
     WrittenDraft,
 )
+from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel, OutcomeSource
+from outcomes.service import OutcomeService
 from outreach_packages.ai import (
     ResponseClassifier,
     StructuredOutreachGenerator,
@@ -418,6 +421,59 @@ class OutreachPackageService:
             workspace_id=self.workspace_id,
         ).record(package_id, data)
 
+    def mark_sent(
+        self,
+        package_id: str,
+        data: OutreachMarkSentRequest,
+    ) -> OutreachPackageRead:
+        row = self._owned(package_id)
+        result, _, _, business, _ = self._context(row.audience_result_id)
+        content = OutreachPackageContent.model_validate(row.content)
+        generated = content.generated_outreach
+        if generated is None or getattr(generated.channels, data.channel, None) is None:
+            raise WorkflowBoundaryError(
+                "Generate this channel before marking it sent.",
+                {"package_id": package_id, "channel": data.channel},
+            )
+
+        events = OutreachEventRepository(
+            self.session,
+            workspace_id=self.workspace_id,
+        )
+        sent_channels = events.sent_channels(package_id)
+        if data.channel in sent_channels:
+            return self._read(row, business, result)
+
+        lead = AudienceOutreachService(
+            self.session,
+            workspace_id=self.workspace_id,
+        ).promote(result.id)
+        if result.contacted_at is None:
+            OutcomeService(
+                self.session,
+                workspace_id=self.workspace_id,
+            ).record(
+                lead.id,
+                LeadOutcomeCreate(
+                    outcome=LeadOutcome.CONTACTED,
+                    channel=_outcome_channel(data.channel),
+                    source=OutcomeSource.MANUAL,
+                    note=f"Marked {data.channel} outreach sent.",
+                ),
+            )
+            self.session.refresh(result)
+
+        events.record(
+            package_id,
+            OutreachEventCreate(
+                channel=data.channel,
+                event_type="message_sent",
+                metadata={"audience_result_id": result.id, "lead_id": lead.id},
+            ),
+        )
+        self.session.refresh(row)
+        return self._read(row, business, result)
+
     def analytics(self) -> OutreachAnalyticsRead:
         return OutreachEventRepository(
             self.session,
@@ -516,9 +572,21 @@ class OutreachPackageService:
             provider=row.provider,
             model=row.model,
             usage=row.usage or {},
+            sent_channels=OutreachEventRepository(
+                self.session,
+                workspace_id=self.workspace_id,
+            ).sent_channels(row.id),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+
+def _outcome_channel(channel: str) -> OutcomeChannel:
+    if channel == "email":
+        return OutcomeChannel.EMAIL
+    if channel in {"sms", "call"}:
+        return OutcomeChannel.PHONE
+    return OutcomeChannel.OTHER
 
 
 _CONTACT_URL_KEYS = {

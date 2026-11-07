@@ -1086,6 +1086,12 @@ export function ResultsScreen({
             onDirtyChange={setOutreachDraftDirty}
             onGetPackage={() => territoryApi.getOutreachPackage(detailContact.id)}
             onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailContact.id, input)}
+            onMarkContacted={(channel) => recordContactOutcome(detailContact.id, "contacted", channel)}
+            onMarkSent={async (packageId, channel) => {
+              const updated = await territoryApi.markOutreachSent(packageId, channel);
+              await refreshAll({ showLoading: false });
+              return updated;
+            }}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
           />
         ) : (
@@ -1284,6 +1290,8 @@ function OutreachWorkspace({
   onClose,
   onGeneratePackage,
   onGetPackage,
+  onMarkContacted,
+  onMarkSent,
   onDirtyChange,
   onSavePackage,
   persistent = false,
@@ -1292,6 +1300,8 @@ function OutreachWorkspace({
   onClose: () => void;
   onGeneratePackage: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onGetPackage: () => Promise<OutreachPackage | null>;
+  onMarkContacted: (channel: "email" | "phone" | "other") => Promise<void>;
+  onMarkSent: (packageId: string, channel: OutreachDraftChannel) => Promise<OutreachPackage>;
   onDirtyChange: (dirty: boolean) => void;
   onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
   persistent?: boolean;
@@ -1306,6 +1316,7 @@ function OutreachWorkspace({
   const [contextCopied, setContextCopied] = useState(false);
   const [channelCopied, setChannelCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [markingContacted, setMarkingContacted] = useState(false);
   const [editingInputs, setEditingInputs] = useState(false);
   const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
   const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
@@ -1525,6 +1536,37 @@ function OutreachWorkspace({
     onClose();
   };
 
+  const markContacted = async () => {
+    if (markingContacted || dirty || saveState === "saving") return;
+    setMarkingContacted(true);
+    setLoadError("");
+    try {
+      const hasGeneratedChannel = Boolean(
+        outreachPackage
+        && generatedOutreach?.channels[activeGeneratedChannel],
+      );
+      if (outreachPackage && hasGeneratedChannel) {
+        const updated = await onMarkSent(outreachPackage.id, activeGeneratedChannel);
+        setOutreachPackage(updated);
+      } else {
+        const channel = activeGeneratedChannel === "email"
+          ? "email"
+          : activeGeneratedChannel === "sms" || activeGeneratedChannel === "call"
+            ? "phone"
+            : "other";
+        await onMarkContacted(channel);
+      }
+      showToast({ title: "Moved to Contacted", tone: "green" });
+      onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      showToast({ title: "Could not mark contacted", message, tone: "red" });
+    } finally {
+      setMarkingContacted(false);
+    }
+  };
+
   const businessJsonPanel = (
     <section className="outreach-business-json">
       <header>
@@ -1563,6 +1605,15 @@ function OutreachWorkspace({
             </div>
           </div>
           <div className="outreach-header-actions">
+            <button
+              className="outreach-mark-contacted"
+              disabled={markingContacted || dirty || saveState === "saving"}
+              type="button"
+              onClick={() => void markContacted()}
+            >
+              {markingContacted ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
+              {markingContacted ? "Updating…" : "Mark contacted"}
+            </button>
             <button aria-label="Close outreach" title="Close" type="button" onClick={closeWorkspace}><X size={17} /></button>
           </div>
         </header>

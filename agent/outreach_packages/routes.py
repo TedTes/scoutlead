@@ -8,6 +8,7 @@ from outreach_packages.schemas import (
     OutreachEventCreate,
     OutreachEventRead,
     OutreachGenerateRequest,
+    OutreachMarkSentRequest,
     OutreachPackageRead,
     OutreachPackageUpdate,
     OutreachResponseClassification,
@@ -100,6 +101,17 @@ def record_event(
     services: Services,
 ):
     return _service(session, auth.workspace_id, services).record_event(package_id, data)
+
+
+@router.post("/{package_id}/mark-sent", response_model=OutreachPackageRead)
+def mark_sent(
+    package_id: str,
+    data: OutreachMarkSentRequest,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services,
+):
+    return _service(session, auth.workspace_id, services).mark_sent(package_id, data)
 
 
 @router.post("/{package_id}/message", response_model=MessageRead)

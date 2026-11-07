@@ -12483,6 +12483,25 @@ button.bulk-recipient-select:hover {
   width: auto;
 }
 
+.outreach-header-actions > .outreach-mark-contacted {
+  background: #18211f;
+  color: #fff;
+  flex-basis: auto;
+  gap: 6px;
+  padding: 0 11px;
+  width: auto;
+}
+
+.outreach-header-actions > .outreach-mark-contacted:hover {
+  background: #26332f;
+  color: #fff;
+}
+
+.outreach-header-actions > .outreach-mark-contacted:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .outreach-unavailable-inline {
   align-items: flex-start;
   background: var(--panel-muted);

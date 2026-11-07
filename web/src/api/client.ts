@@ -403,6 +403,13 @@ export class ApiClient {
     });
   }
 
+  markOutreachSent(id: string, channel: import("../types/domain").OutreachDraftChannel) {
+    return this.request<OutreachPackage>(`/outreach-packages/${id}/mark-sent`, {
+      method: "POST",
+      body: { channel },
+    });
+  }
+
   classifyOutreachResponse(id: string, channel: OutreachChannel, responseText: string) {
     return this.request<OutreachResponseClassification>(`/outreach-packages/${id}/classify-response`, {
       method: "POST",

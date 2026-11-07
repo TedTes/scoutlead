@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from outreach_packages.schemas import (
     OutreachAnalyticsRead,
     OutreachEventCreate,
     OutreachEventRead,
+    OutreachDraftChannel,
     PlaybookAdminRead,
 )
 from shared.utils import new_id, utcnow
@@ -104,6 +106,22 @@ class OutreachEventRepository:
         self.session.add(row)
         self.session.commit()
         return _event_read(row)
+
+    def sent_channels(self, package_id: str) -> dict[OutreachDraftChannel, datetime]:
+        rows = self.session.scalars(
+            select(OutreachEventModel)
+            .where(
+                OutreachEventModel.workspace_id == self.workspace_id,
+                OutreachEventModel.package_id == package_id,
+                OutreachEventModel.event_type == "message_sent",
+            )
+            .order_by(OutreachEventModel.created_at.desc())
+        ).all()
+        sent: dict[OutreachDraftChannel, datetime] = {}
+        for row in rows:
+            if row.channel in {"instagram", "sms", "email", "call"}:
+                sent.setdefault(row.channel, row.created_at)
+        return sent
 
     def analytics(self) -> OutreachAnalyticsRead:
         rows = self.session.scalars(
