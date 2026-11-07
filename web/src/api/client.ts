@@ -389,6 +389,28 @@ export class ApiClient {
     return this.request<OutreachPackage | null>(`/outreach-packages/by-result/${resultId}`);
   }
 
+  listOutreachTemplates() {
+    return this.request<import("../types/domain").OutreachTemplate[]>("/outreach-packages/templates");
+  }
+
+  createOutreachTemplate(input: { name: string; structure: string; example?: string | null }) {
+    return this.request<import("../types/domain").OutreachTemplate>("/outreach-packages/templates", {
+      method: "POST",
+      body: input,
+    });
+  }
+
+  updateOutreachTemplate(id: string, input: { name?: string; structure?: string; example?: string | null }) {
+    return this.request<import("../types/domain").OutreachTemplate>(`/outreach-packages/templates/${id}`, {
+      method: "PATCH",
+      body: input,
+    });
+  }
+
+  deleteOutreachTemplate(id: string) {
+    return this.request<void>(`/outreach-packages/templates/${id}`, { method: "DELETE" });
+  }
+
   generateOutreachPackage(resultId: string, outreachInput?: import("../types/domain").OutreachGenerationInput) {
     return this.request<OutreachPackage>(`/outreach-packages/from-result/${resultId}`, {
       method: "POST",

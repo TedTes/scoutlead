@@ -599,6 +599,18 @@ export type OutreachGenerationInput = {
   concept_url?: string | null;
   concept_features: string[];
   persuasion_style: "friendly_adviser" | "direct_specialist" | "curious_consultant" | "visual_demonstrator";
+  structure_template_id?: string | null;
+  message_structure?: string | null;
+  example_message?: string | null;
+};
+
+export type OutreachTemplate = {
+  id: string;
+  name: string;
+  structure: string;
+  example?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type GeneratedOutreach = {

@@ -11548,6 +11548,42 @@ button.bulk-recipient-select:hover {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.outreach-template-builder .bulk-compose-fields {
+  align-content: start;
+}
+
+.outreach-template-picker {
+  display: flex;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.outreach-template-picker select {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  background: #fff;
+  color: #20262e;
+  padding: 9px 11px;
+}
+
+.outreach-template-picker button,
+.outreach-template-save {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+}
+
+.outreach-template-save {
+  justify-self: start;
+}
+
+.personalized-bulk-panel .bulk-recipient-select {
+  cursor: default;
+}
+
 .bulk-field input:focus,
 .bulk-field textarea:focus {
   border-color: var(--black);
