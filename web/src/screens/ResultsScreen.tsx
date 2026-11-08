@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  Instagram,
   Mail,
   MapPin,
   MessageCircle,
@@ -197,6 +198,10 @@ export function ResultsScreen({
   const [refreshingBatch, setRefreshingBatch] = useState(false);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
+  const [bulkSelectedContactIds, setBulkSelectedContactIds] = useState<string[]>([]);
+  const [bulkExcludedContactIds, setBulkExcludedContactIds] = useState<string[]>([]);
+  const [bulkSelectAll, setBulkSelectAll] = useState(false);
+  const [bulkLeadAction, setBulkLeadAction] = useState<"shortlist" | "remove" | "">("");
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [profileDetailsOpen, setProfileDetailsOpen] = useState(false);
@@ -294,6 +299,10 @@ export function ResultsScreen({
   const displayedLeadTotal = isGlobalView
     ? workspaceLeadPage?.total ?? workflowContacts.length
     : workflowContacts.length;
+  const bulkSelectionCount = bulkSelectAll
+    ? Math.max(0, displayedLeadTotal - bulkExcludedContactIds.length)
+    : bulkSelectedContactIds.length;
+  const bulkSelecting = bulkSelectAll || bulkSelectedContactIds.length > 0;
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
@@ -385,6 +394,93 @@ export function ResultsScreen({
   }, [workflowView]);
 
   useEffect(() => {
+    setBulkSelectedContactIds([]);
+    setBulkExcludedContactIds([]);
+    setBulkSelectAll(false);
+  }, [workflowView]);
+
+  useEffect(() => {
+    if (!isGlobalView) return;
+    setBulkSelectedContactIds([]);
+    setBulkExcludedContactIds([]);
+    setBulkSelectAll(false);
+  }, [isGlobalView, workspaceLeadPage?.offset]);
+
+  const updateSelectedLeads = async (action: "shortlist" | "remove") => {
+    if (!(["inbox", "shortlisted"] as LeadWorkflowView[]).includes(workflowView) || bulkLeadAction) return;
+    setBulkLeadAction(action);
+    try {
+      let selected = visibleContacts.filter((contact) => bulkSelectedContactIds.includes(contact.id));
+      if (bulkSelectAll) {
+        if (isGlobalView) {
+          const collected: DiscoveryResult[] = [];
+          let offset = 0;
+          let total = 0;
+          do {
+            const page = await territoryApi.getWorkspaceLeads({ view: workflowView, limit: 100, offset });
+            collected.push(...page.items);
+            total = page.total;
+            offset += page.items.length;
+            if (!page.items.length) break;
+          } while (offset < total);
+          selected = dedupeContacts(collected).filter((contact) => !bulkExcludedContactIds.includes(contact.id));
+        } else {
+          selected = workflowContacts.filter((contact) => !bulkExcludedContactIds.includes(contact.id));
+        }
+      }
+      if (!selected.length) return;
+      if (action === "remove" && !window.confirm(
+        workflowView === "shortlisted"
+          ? `Remove ${selected.length} ${selected.length === 1 ? "business" : "businesses"} from Shortlisted?`
+          : `Remove ${selected.length} ${selected.length === 1 ? "lead" : "leads"} from Leads? You can restore them from Dismissed.`,
+      )) return;
+
+      let cursor = 0;
+      const results: PromiseSettledResult<DiscoveryResult>[] = [];
+      const worker = async () => {
+        while (cursor < selected.length) {
+          const contact = selected[cursor];
+          cursor += 1;
+          try {
+            const saved = await territoryApi.updateLead(contact.id, action === "shortlist"
+              ? { shortlisted: true }
+              : workflowView === "shortlisted"
+                ? { shortlisted: false }
+                : { review_status: "not_fit", shortlisted: false });
+            results.push({ status: "fulfilled", value: saved });
+          } catch (reason) {
+            results.push({ status: "rejected", reason });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, selected.length) }, () => worker()));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      await refreshAll({ showLoading: false });
+      if (isGlobalView) {
+        await loadWorkspaceLeads(workflowView, workspaceLeadPage?.offset || 0, leadSearch);
+      }
+      setBulkSelectedContactIds([]);
+      setBulkExcludedContactIds([]);
+      setBulkSelectAll(false);
+      showToast({
+        title: action === "shortlist"
+          ? "Leads shortlisted"
+          : workflowView === "shortlisted" ? "Removed from Shortlisted" : "Leads removed",
+        message: `${selected.length - failed} updated${failed ? ` · ${failed} failed` : ""}`,
+        tone: failed ? "amber" : "green",
+      });
+    } catch (error) {
+      showToast({
+        title: "Bulk update failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "red",
+      });
+    } finally {
+      setBulkLeadAction("");
+    }
+  };
+
+  useEffect(() => {
     if (!runMenuOpen && !bulkOutreachOpen) return undefined;
     const closeMenus = (event: MouseEvent) => {
       if (!runMenuRef.current?.contains(event.target as Node)) {
@@ -412,7 +508,7 @@ export function ResultsScreen({
 
   useLayoutEffect(() => {
     if (!bulkOutreachOpen) return undefined;
-    const BULK_POPOVER_MAX_WIDTH = 1080;
+    const BULK_POPOVER_MAX_WIDTH = 780;
     const positionPopover = () => {
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
@@ -752,7 +848,7 @@ export function ResultsScreen({
           </nav>
         ) : (
           <nav aria-label="Lead context" className="results-breadcrumb">
-            <strong>All saved searches</strong>
+            <strong>{workflowView === "shortlisted" ? "All shortlisted" : "All saved searches"}</strong>
           </nav>
         )}
         <div className="results-control-actions">
@@ -934,25 +1030,91 @@ export function ResultsScreen({
 
       <div className={detailContact ? "results-body has-detail" : "results-body"}>
         <section className="lead-feed-pane" aria-label="Lead list">
-          <header className="lead-feed-header">
-            <div className="lead-feed-title-row">
-              <div>
-                <strong>
-                  {isProfileAggregate && workflowView === "this_week"
-                    ? "Leads"
-                    : workflowViewLabel(workflowView)}
-                </strong>
-                <span>
-                  {workspaceLeadsLoading ? "Loading" : displayedLeadTotal}
-                </span>
+          <header className={["inbox", "shortlisted"].includes(workflowView) ? "lead-feed-header without-title" : "lead-feed-header"}>
+            {!(["inbox", "shortlisted"] as LeadWorkflowView[]).includes(workflowView) ? (
+              <div className="lead-feed-title-row">
+                <div>
+                  <strong>
+                    {isProfileAggregate && workflowView === "this_week"
+                      ? "Leads"
+                      : workflowViewLabel(workflowView)}
+                  </strong>
+                  <span>
+                    {workspaceLeadsLoading ? "Loading" : displayedLeadTotal}
+                  </span>
+                </div>
               </div>
-              <div className="lead-feed-header-actions">
+            ) : null}
+            <div className="sl-toolbar" data-selecting={bulkSelecting ? "true" : "false"}>
+              <label className="sl-search">
+                <Search size={15} aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search leads"
+                  placeholder="Search leads"
+                  value={leadSearch}
+                  onChange={(event) => setLeadSearch(event.target.value)}
+                />
+              </label>
+              <div className="sl-selbar" role="toolbar" aria-label="Selection actions">
+                <button
+                  aria-label="Clear selection"
+                  className="sl-clear"
+                  type="button"
+                  onClick={() => {
+                    setBulkSelectAll(false);
+                    setBulkSelectedContactIds([]);
+                    setBulkExcludedContactIds([]);
+                  }}
+                >
+                  <X size={15} />
+                </button>
+                <span className="sl-count" aria-live="polite">
+                  {bulkSelectionCount} selected
+                </span>
+                <button
+                  className="sl-selectall"
+                  type="button"
+                  onClick={() => {
+                    setBulkSelectAll((selected) => !selected);
+                    setBulkSelectedContactIds([]);
+                    setBulkExcludedContactIds([]);
+                  }}
+                >
+                  {bulkSelectAll ? "Deselect all" : "Select all"}
+                </button>
+                <div className="sl-actions">
+                {workflowView === "inbox" ? (
+                  <>
+                    <button
+                      className="sl-btn sl-btn--primary"
+                      disabled={!bulkSelectionCount || Boolean(bulkLeadAction)}
+                      type="button"
+                      onClick={() => void updateSelectedLeads("shortlist")}
+                    >
+                      <Star size={14} />
+                      {bulkLeadAction === "shortlist" ? "Adding…" : "Shortlist"}
+                    </button>
+                    <button
+                      className="sl-btn sl-btn--danger"
+                      disabled={!bulkSelectionCount || Boolean(bulkLeadAction)}
+                      title="Move selected leads to Dismissed"
+                      type="button"
+                      onClick={() => void updateSelectedLeads("remove")}
+                    >
+                      <Trash2 size={14} />
+                      {bulkLeadAction === "remove" ? "Removing…" : "Remove"}
+                    </button>
+                  </>
+                ) : null}
                 {workflowView === "shortlisted" && shortlistedContactRows.length ? (
+                  <>
                   <div className="bulk-outreach-control" ref={bulkOutreachRef}>
                     <button
                       aria-expanded={bulkOutreachOpen}
                       aria-haspopup="dialog"
-                      className={bulkOutreachOpen ? "secondary outreach-toolbar-button active" : "secondary outreach-toolbar-button"}
+                      className={bulkOutreachOpen ? "sl-btn sl-btn--primary active" : "sl-btn sl-btn--primary"}
+                      disabled={!bulkSelectionCount}
                       ref={bulkOutreachButtonRef}
                       type="button"
                       onClick={() => {
@@ -961,8 +1123,7 @@ export function ResultsScreen({
                       }}
                     >
                       <Users size={14} />
-                      <span className="outreach-label">Generate messages</span>
-                      <span className="outreach-count">{isGlobalView ? displayedLeadTotal : shortlistedContactRows.length}</span>
+                      <span>Generate</span>
                     </button>
                     {bulkOutreachOpen
                       ? createPortal(
@@ -976,6 +1137,9 @@ export function ResultsScreen({
                               <PersonalizedBulkOutreachPanel
                                 contacts={shortlistedContactRows}
                                 globalView={isGlobalView}
+                                selectAll={bulkSelectAll}
+                                selectedContactIds={bulkSelectedContactIds}
+                                excludedContactIds={bulkExcludedContactIds}
                                 onClose={() => setBulkOutreachOpen(false)}
                               />
                             </div>
@@ -984,18 +1148,20 @@ export function ResultsScreen({
                         )
                       : null}
                   </div>
+                  <button
+                    className="sl-btn sl-btn--danger"
+                    disabled={!bulkSelectionCount || Boolean(bulkLeadAction)}
+                    type="button"
+                    onClick={() => void updateSelectedLeads("remove")}
+                  >
+                    <Trash2 size={14} />
+                    {bulkLeadAction === "remove" ? "Removing…" : "Remove"}
+                  </button>
+                  </>
                 ) : null}
+                </div>
               </div>
             </div>
-            <label className="lead-feed-search">
-              <Search size={15} aria-hidden="true" />
-              <input
-                aria-label="Search leads"
-                placeholder="Search leads"
-                value={leadSearch}
-                onChange={(event) => setLeadSearch(event.target.value)}
-              />
-            </label>
           </header>
           {visibleContacts.length ? (
             <ul className="contact-card-list">
@@ -1004,6 +1170,10 @@ export function ResultsScreen({
                   audienceLabel={isGlobalView ? contactAudienceLabel(contact, territories, productDiscoveryRuns) : ""}
                   contact={contact}
                   key={contact.id}
+                  selectionChecked={bulkSelectAll
+                    ? !bulkExcludedContactIds.includes(contact.id)
+                    : bulkSelectedContactIds.includes(contact.id)}
+                  selectionEnabled={workflowView === "shortlisted" || workflowView === "inbox"}
                   selected={contact.id === detailContact?.id}
                   onOpen={() => {
                     if (
@@ -1014,6 +1184,17 @@ export function ResultsScreen({
                     setOutreachDraftDirty(false);
                     setSelectedContactId(contact.id);
                     setDetailPanelOpen(true);
+                  }}
+                  onToggleSelection={() => {
+                    if (bulkSelectAll) {
+                      setBulkExcludedContactIds((current) => current.includes(contact.id)
+                        ? current.filter((id) => id !== contact.id)
+                        : [...current, contact.id]);
+                      return;
+                    }
+                    setBulkSelectedContactIds((current) => current.includes(contact.id)
+                      ? current.filter((id) => id !== contact.id)
+                      : [...current, contact.id]);
                   }}
                   onToggleShortlist={() => {
                     const shortlisted = !contact.shortlisted_at;
@@ -1300,6 +1481,63 @@ function outreachDraftChannelLabel(channel: OutreachDraftChannel) {
       : channel === "email"
         ? "Email"
         : "Call";
+}
+
+function outreachDraftChannelIcon(channel: OutreachDraftChannel) {
+  return channel === "instagram"
+    ? Instagram
+    : channel === "sms"
+      ? MessageCircle
+      : channel === "email"
+        ? Mail
+        : Phone;
+}
+
+function contactInstagramHandle(contact: DiscoveryResult) {
+  const keys = [
+    "instagram",
+    "instagram_url",
+    "instagram_handle",
+    "social.instagram",
+    "socials.instagram",
+    "raw_payload.instagram",
+    "raw_payload.instagram_url",
+  ];
+  for (const raw of getRawObjects(contact)) {
+    for (const key of keys) {
+      const value = rawValueToString(getRawValue(raw, key));
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+function contactCanReceiveOutreach(contact: DiscoveryResult, channel: OutreachDraftChannel) {
+  if (channel === "email") return Boolean(contact.contact_email || contact.research?.contact_email);
+  if (channel === "instagram") return Boolean(contactInstagramHandle(contact));
+  if (channel === "sms" || channel === "call") return Boolean(getPhone(contact));
+  return false;
+}
+
+function outreachReachabilityLabel(channel: OutreachDraftChannel, count: number) {
+  if (channel === "email") return `email${count === 1 ? "" : "s"}`;
+  if (channel === "instagram") return `Instagram account${count === 1 ? "" : "s"}`;
+  return `phone number${count === 1 ? "" : "s"}`;
+}
+
+function generatedChannelPreview(outreachPackage: OutreachPackage | null | undefined, channel: OutreachDraftChannel) {
+  const generated = outreachPackage?.content.generated_outreach?.channels;
+  if (!generated) return "";
+  if (channel === "instagram") return generated.instagram?.initial || "";
+  if (channel === "sms") return generated.sms?.initial || "";
+  if (channel === "email") {
+    const email = generated.email;
+    return email ? [`Subject: ${email.subject}`, email.body].filter(Boolean).join("\n\n") : "";
+  }
+  const call = generated.call;
+  return call
+    ? [call.opener, ...(call.talking_points || []).map((point) => `• ${point}`), call.close].filter(Boolean).join("\n\n")
+    : "";
 }
 
 function OutreachWorkspace({
@@ -2804,11 +3042,17 @@ function ScheduleSearchDialog({
 
 function PersonalizedBulkOutreachPanel({
   contacts: initialContacts,
+  excludedContactIds,
   globalView,
+  selectAll,
+  selectedContactIds,
   onClose,
 }: {
   contacts: DiscoveryResult[];
+  excludedContactIds: string[];
   globalView: boolean;
+  selectAll: boolean;
+  selectedContactIds: string[];
   onClose: () => void;
 }) {
   const { showToast } = useToast();
@@ -2818,14 +3062,16 @@ function PersonalizedBulkOutreachPanel({
   const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("builtin");
   const [templateName, setTemplateName] = useState("");
-  const [structure, setStructure] = useState(defaultPersonalizedStructure);
-  const [example, setExample] = useState("");
-  const [selectedChannels, setSelectedChannels] = useState<OutreachDraftChannel[]>(["instagram"]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [messageStructure, setMessageStructure] = useState(defaultPersonalizedStructure);
+  const [selectedChannels, setSelectedChannels] = useState<OutreachDraftChannel[]>([]);
+  const [activePreviewChannel, setActivePreviewChannel] = useState<OutreachDraftChannel>("sms");
+  const [generatedPackages, setGeneratedPackages] = useState<Record<string, OutreachPackage>>({});
+  const [channelMenuOpen, setChannelMenuOpen] = useState(false);
+  const channelMenuRef = useRef<HTMLDivElement>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationState, setGenerationState] = useState<Record<string, "pending" | "working" | "generated" | "failed">>({});
-  const [generationErrors, setGenerationErrors] = useState<Record<string, string>>({});
+  const [, setGenerationErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -2876,46 +3122,93 @@ function PersonalizedBulkOutreachPanel({
     () => contacts.filter((contact) => Boolean(contact.audience_result_id || contact.id.startsWith("audience_result_"))),
     [contacts],
   );
-  const generatableKey = generatableContacts.map((contact) => contact.id).join("|");
-
-  useEffect(() => {
-    setSelectedIds((current) => {
-      const valid = current.filter((id) => generatableContacts.some((contact) => contact.id === id));
-      return valid.length ? valid : generatableContacts.map((contact) => contact.id);
-    });
-  }, [generatableKey]);
+  const targetContacts = selectAll
+    ? generatableContacts.filter((contact) => !excludedContactIds.includes(contact.id))
+    : generatableContacts.filter((contact) => selectedContactIds.includes(contact.id));
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
-  const allSelected = generatableContacts.length > 0 && selectedIds.length === generatableContacts.length;
   const generatedCount = Object.values(generationState).filter((state) => state === "generated").length;
   const failedCount = Object.values(generationState).filter((state) => state === "failed").length;
   const completedCount = generatedCount + failedCount;
+  const previewContact = targetContacts[0];
+  const previewPackage = previewContact ? generatedPackages[previewContact.id] : undefined;
+  const previewBody = selectedChannels.includes(activePreviewChannel)
+    ? generatedChannelPreview(previewPackage, activePreviewChannel)
+    : "";
+  const footerChannelOrder: OutreachDraftChannel[] = ["sms", "email", "instagram", "call"];
+  const selectedFooterChannels = footerChannelOrder.filter((channel) => selectedChannels.includes(channel));
+  const visibleFooterChannels = [
+    ...selectedFooterChannels,
+    ...footerChannelOrder.filter((channel) => !selectedChannels.includes(channel)),
+  ].slice(0, Math.max(2, selectedFooterChannels.length));
+  const hiddenFooterChannelCount = footerChannelOrder.length - visibleFooterChannels.length;
+  const channelReachability = useMemo(
+    () => Object.fromEntries(
+      OUTREACH_DRAFT_CHANNELS.map((channel) => [
+        channel,
+        targetContacts.filter((contact) => contactCanReceiveOutreach(contact, channel)).length,
+      ]),
+    ) as Record<OutreachDraftChannel, number>,
+    [targetContacts],
+  );
+
+  useEffect(() => {
+    if (!selectedChannels.includes(activePreviewChannel)) {
+      setActivePreviewChannel(selectedChannels[0] || "sms");
+    }
+  }, [activePreviewChannel, selectedChannels]);
+
+  useEffect(() => {
+    if (!channelMenuOpen) return undefined;
+    const closeChannelMenu = (event: MouseEvent) => {
+      if (!channelMenuRef.current?.contains(event.target as Node)) setChannelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeChannelMenu);
+    return () => document.removeEventListener("mousedown", closeChannelMenu);
+  }, [channelMenuOpen]);
+
+  useEffect(() => {
+    if (!previewContact || generatedPackages[previewContact.id]) return;
+    const resultId = previewContact.audience_result_id
+      || (previewContact.id.startsWith("audience_result_") ? previewContact.id : "");
+    if (!resultId) return;
+    let active = true;
+    void territoryApi.getOutreachPackage(resultId)
+      .then((outreachPackage) => {
+        if (active && outreachPackage) {
+          setGeneratedPackages((current) => ({ ...current, [previewContact.id]: outreachPackage }));
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [generatedPackages, previewContact, territoryApi]);
 
   const chooseTemplate = (id: string) => {
     setSelectedTemplateId(id);
     if (id === "builtin") {
       setTemplateName("");
-      setStructure(defaultPersonalizedStructure);
-      setExample("");
+      setMessageStructure(defaultPersonalizedStructure);
       return;
     }
     const selected = templates.find((template) => template.id === id);
     if (!selected) return;
     setTemplateName(selected.name);
-    setStructure(selected.structure);
-    setExample(selected.example || "");
+    setMessageStructure(
+      selected.example
+        ? `${selected.structure}\n\nExample:\n${selected.example}`
+        : selected.structure,
+    );
   };
 
   const startNewTemplate = () => {
     setSelectedTemplateId("new");
     setTemplateName("");
-    setStructure(defaultPersonalizedStructure);
-    setExample("");
+    setMessageStructure(defaultPersonalizedStructure);
   };
 
   const saveTemplate = async () => {
     const name = templateName.trim();
-    const normalizedStructure = structure.trim() || defaultPersonalizedStructure;
+    const normalizedStructure = messageStructure.trim() || defaultPersonalizedStructure;
     if (!name) {
       showToast({ title: "Name the template", tone: "amber" });
       return;
@@ -2926,18 +3219,17 @@ function PersonalizedBulkOutreachPanel({
         ? await territoryApi.updateOutreachTemplate(selectedTemplate.id, {
             name,
             structure: normalizedStructure,
-            example: example.trim() || null,
+            example: null,
           })
         : await territoryApi.createOutreachTemplate({
             name,
             structure: normalizedStructure,
-            example: example.trim() || null,
+            example: null,
           });
       setTemplates((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
       setSelectedTemplateId(saved.id);
       setTemplateName(saved.name);
-      setStructure(saved.structure);
-      setExample(saved.example || "");
+      setMessageStructure(saved.structure);
       showToast({ title: "Template saved", tone: "green" });
     } catch (error) {
       showToast({ title: "Could not save template", message: error instanceof Error ? error.message : String(error), tone: "red" });
@@ -2959,19 +3251,17 @@ function PersonalizedBulkOutreachPanel({
   };
 
   const toggleChannel = (channel: OutreachDraftChannel) => {
-    setSelectedChannels((current) => current.includes(channel)
-      ? current.filter((item) => item !== channel)
-      : [...current, channel]);
-  };
-
-  const toggleContact = (contactId: string) => {
-    setSelectedIds((current) => current.includes(contactId)
-      ? current.filter((id) => id !== contactId)
-      : [...current, contactId]);
+    setSelectedChannels((current) => {
+      const next = current.includes(channel)
+        ? current.filter((item) => item !== channel)
+        : [...current, channel];
+      if (!current.includes(channel)) setActivePreviewChannel(channel);
+      return next;
+    });
   };
 
   const generateSelected = async () => {
-    const selected = generatableContacts.filter((contact) => selectedIds.includes(contact.id));
+    const selected = targetContacts;
     if (!selected.length || !selectedChannels.length || generating) return;
     setGenerating(true);
     setGenerationErrors({});
@@ -2988,16 +3278,17 @@ function PersonalizedBulkOutreachPanel({
         try {
           const existing = await territoryApi.getOutreachPackage(resultId);
           const previous = existing?.content.outreach_input;
-          await territoryApi.generateOutreachPackage(resultId, {
+          const generated = await territoryApi.generateOutreachPackage(resultId, {
             channels: selectedChannels,
             personal_detail: previous?.personal_detail || null,
             concept_url: previous?.concept_url || null,
             concept_features: previous?.concept_features || [],
             persuasion_style: previous?.persuasion_style || "friendly_adviser",
             structure_template_id: selectedTemplate?.id || null,
-            message_structure: structure.trim() || defaultPersonalizedStructure,
-            example_message: example.trim() || null,
+            message_structure: messageStructure.trim() || defaultPersonalizedStructure,
+            example_message: null,
           });
+          setGeneratedPackages((current) => ({ ...current, [contact.id]: generated }));
           setGenerationState((current) => ({ ...current, [contact.id]: "generated" }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -3024,74 +3315,169 @@ function PersonalizedBulkOutreachPanel({
     <section className="bulk-outreach-panel personalized-bulk-panel">
       <header className="bulk-outreach-header">
         <div>
-          <strong>Generate personalized outreach</strong>
-          <p>One structure, with verified context generated separately for each business.</p>
+          <strong>Generate outreach</strong>
+          <p>One structure, personalized per business from its verified evidence.</p>
         </div>
-        <button className="link-button" type="button" aria-label="Close bulk outreach" onClick={onClose}><X size={17} /></button>
+        <div className="personalized-outreach-header-actions">
+          <span className="personalized-outreach-count">{targetContacts.length} businesses</span>
+          <button className="link-button" type="button" aria-label="Close bulk outreach" onClick={onClose}><X size={17} /></button>
+        </div>
       </header>
 
-      <div className="bulk-outreach-workspace">
-        <section className="bulk-outreach-section bulk-recipients-section" aria-label="Shortlisted businesses">
-          <div className="bulk-section-heading"><span>Shortlist</span><strong>{selectedIds.length} selected</strong></div>
-          {loadingContacts ? <p className="bulk-empty-note">Loading all shortlisted businesses…</p> : (
-            <div className="bulk-recipient-list">
-              <div className="bulk-recipient-list-head">
-                <label><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : generatableContacts.map((contact) => contact.id))} /><strong>All shortlisted</strong></label>
-                <span>{selectedIds.length} of {generatableContacts.length}</span>
-              </div>
-              {generatableContacts.map((contact) => {
-                const state = generationState[contact.id];
-                return (
-                  <div className={`bulk-recipient-row${state === "failed" ? " is-warning" : ""}`} key={contact.id} title={generationErrors[contact.id] || ""}>
-                    <input type="checkbox" checked={selectedIds.includes(contact.id)} aria-label={`Include ${contact.company_name}`} onChange={() => toggleContact(contact.id)} />
-                    <span className="bulk-recipient-select">
-                      <strong>{contact.company_name}</strong>
-                      <em>{state === "working" ? "Generating…" : state === "generated" ? "Generated" : state === "failed" ? "Failed — hover for details" : contactOpportunityReasons(contact)[0] || "Shortlisted"}</em>
-                    </span>
-                  </div>
-                );
-              })}
-              {contacts.length > generatableContacts.length ? <p className="bulk-warning">{contacts.length - generatableContacts.length} legacy shortlist item(s) have no audience result and cannot generate outreach yet.</p> : null}
-            </div>
-          )}
+      <div className="personalized-outreach-body">
+        <section className="personalized-outreach-section">
+          <div className="personalized-section-heading">
+            <span>Template</span>
+          </div>
+          <div className="outreach-template-picker personalized-template-picker">
+            <select value={selectedTemplateId} onChange={(event) => chooseTemplate(event.target.value)}>
+              <option value="builtin">Concise personalized pitch</option>
+              {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              {selectedTemplateId === "new" ? <option value="new">New template</option> : null}
+            </select>
+            <button className="secondary" disabled={selectedTemplateId === "builtin" || savingTemplate} type="button" onClick={() => void saveTemplate()}>
+              <FileText size={14} /> {savingTemplate ? "Saving…" : "Save"}
+            </button>
+            <button className="secondary" type="button" onClick={startNewTemplate}><Plus size={14} /> New</button>
+            {selectedTemplate ? (
+              <button className="secondary icon-only danger-item" type="button" aria-label="Delete template" onClick={() => void deleteTemplate()}>
+                <Trash2 size={14} />
+              </button>
+            ) : null}
+          </div>
+          {selectedTemplateId !== "builtin" ? (
+            <label className="bulk-field personalized-template-name">
+              <span>Template name</span>
+              <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Concise concept outreach" />
+            </label>
+          ) : null}
         </section>
 
-        <section className="bulk-outreach-section bulk-message-section outreach-template-builder">
-          <div className="bulk-message-heading"><div><span>Message structure</span><strong>Reusable template</strong></div></div>
-          <div className="bulk-compose-fields">
-            <div className="outreach-template-picker">
-              <select value={selectedTemplateId} onChange={(event) => chooseTemplate(event.target.value)}>
-                <option value="builtin">Concise personalized pitch</option>
-                {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-                {selectedTemplateId === "new" ? <option value="new">New template</option> : null}
-              </select>
-              <button className="secondary" type="button" onClick={startNewTemplate}>New</button>
-              {selectedTemplate ? <button className="secondary danger-item" type="button" onClick={() => void deleteTemplate()}><Trash2 size={13} />Delete</button> : null}
-            </div>
-            {selectedTemplateId !== "builtin" ? <label className="bulk-field"><span>Template name</span><input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Concise concept outreach" /></label> : null}
-            <label className="bulk-field"><span>Structure</span><textarea value={structure} onChange={(event) => setStructure(event.target.value)} placeholder="Describe the sections and their order." /></label>
-            <label className="bulk-field"><span>Example <em>optional</em></span><textarea value={example} onChange={(event) => setExample(event.target.value)} placeholder="Paste an example. Its structure and pacing will be reused; its facts will not." /></label>
-            {selectedTemplateId !== "builtin" ? <button className="secondary outreach-template-save" disabled={savingTemplate} type="button" onClick={() => void saveTemplate()}>{savingTemplate ? "Saving…" : selectedTemplate ? "Save changes" : "Save template"}</button> : null}
-            <div className="outreach-channel-select" aria-label="Message formats to generate">
-              <span>Message for</span>
-              {OUTREACH_DRAFT_CHANNELS.map((channel) => (
-                <button className={selectedChannels.includes(channel) ? "selected" : ""} key={channel} type="button" aria-pressed={selectedChannels.includes(channel)} onClick={() => toggleChannel(channel)}>
-                  {selectedChannels.includes(channel) ? <Check size={12} /> : null}{outreachDraftChannelLabel(channel)}
-                </button>
-              ))}
+        <section className="personalized-outreach-section">
+          <div className="personalized-section-heading">
+            <span>Message structure</span>
+            <small>shared across channels</small>
+          </div>
+          <div className="outreach-structure-shell">
+            <textarea
+              value={messageStructure}
+              onChange={(event) => setMessageStructure(event.target.value)}
+              placeholder="Describe the message structure or paste an example. Verified business facts replace business-specific details."
+            />
+            <div className="outreach-structure-note">
+              <span><Workflow size={14} /> Each channel adapts length and format automatically — SMS trims to one text, email adds a subject, calls become a talk-track.</span>
+              <strong>One structure, channel-aware</strong>
             </div>
           </div>
         </section>
+
+        <section className="personalized-outreach-section outreach-preview-section">
+          <div className="personalized-section-heading">
+            <span>Preview</span>
+            <small>first selected business</small>
+          </div>
+          <div className="outreach-preview-tabs" role="tablist" aria-label="Preview channel">
+            {selectedChannels.map((channel) => {
+              const Icon = outreachDraftChannelIcon(channel);
+              return (
+                <button
+                  className={activePreviewChannel === channel ? "is-active" : ""}
+                  key={channel}
+                  type="button"
+                  role="tab"
+                  aria-selected={activePreviewChannel === channel}
+                  onClick={() => setActivePreviewChannel(channel)}
+                >
+                  <Icon size={13} /> {outreachDraftChannelLabel(channel)}
+                </button>
+              );
+            })}
+          </div>
+          <div className="outreach-preview-card">
+            {previewContact ? (
+              <>
+                <header>
+                  <span><strong>{previewContact.company_name}</strong> · {contactListCategoryLabel(previewContact)} · {previewContact.geography || previewContact.research?.geography || "Location unavailable"}</span>
+                  {activePreviewChannel === "sms" && previewBody ? <small>SMS · {previewBody.length} chars · {Math.max(1, Math.ceil(previewBody.length / 160))} segment{previewBody.length > 160 ? "s" : ""}</small> : null}
+                </header>
+                <div className={previewBody ? "" : "is-empty"}>
+                  {previewBody || (selectedChannels.length
+                    ? `Generate to preview the ${outreachDraftChannelLabel(activePreviewChannel).toLowerCase()} draft for this business.`
+                    : "Select at least one channel to prepare a preview.")}
+                </div>
+              </>
+            ) : (
+              <div className="is-empty">Select at least one shortlisted business to preview a draft.</div>
+            )}
+          </div>
+          <p className="outreach-preview-help">Generation produces one business-specific draft per selected channel.</p>
+        </section>
       </div>
 
-      <footer className="bulk-outreach-footer">
-        <div className="bulk-send-summary">
-          <strong>{generating ? `${completedCount} of ${selectedIds.length} complete` : `${selectedIds.length} businesses`}</strong>
-          <span>Drafts are generated even when a delivery address or account is unavailable.</span>
+      <footer className="bulk-outreach-footer personalized-outreach-footer">
+        <div className={`outreach-channel-chip-row${selectedChannels.length > 2 ? " is-crowded" : ""}`} aria-label="Message formats to generate">
+          {visibleFooterChannels.map((channel) => {
+            const selected = selectedChannels.includes(channel);
+            const reachable = channelReachability[channel];
+            const Icon = outreachDraftChannelIcon(channel);
+            return (
+              <button
+                className={`outreach-channel-chip${selected ? " is-selected" : ""}`}
+                key={channel}
+                type="button"
+                aria-pressed={selected}
+                aria-label={`${outreachDraftChannelLabel(channel)}: ${reachable} of ${targetContacts.length} ${outreachReachabilityLabel(channel, reachable)}`}
+                onClick={() => toggleChannel(channel)}
+              >
+                <Icon size={13} />
+                <strong>{outreachDraftChannelLabel(channel)}</strong>
+                <small className={reachable < targetContacts.length ? "is-limited" : ""}>
+                  <b>{reachable}/{targetContacts.length}</b> <span>{outreachReachabilityLabel(channel, reachable)}</span>
+                </small>
+              </button>
+            );
+          })}
+          <div className="outreach-channel-menu" ref={channelMenuRef}>
+            <button
+              className="outreach-channel-more"
+              type="button"
+              aria-expanded={channelMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Choose outreach channels"
+              onClick={() => setChannelMenuOpen((open) => !open)}
+            >
+              {hiddenFooterChannelCount > 0
+                ? `+${hiddenFooterChannelCount}`
+                : `${selectedChannels.length} channels`}
+            </button>
+            {channelMenuOpen ? (
+              <div className="outreach-channel-menu-popover" role="menu">
+                {(["sms", "email", "instagram", "call"] as OutreachDraftChannel[]).map((channel) => {
+                  const Icon = outreachDraftChannelIcon(channel);
+                  const reachable = channelReachability[channel];
+                  return (
+                    <label key={channel}>
+                      <input
+                        type="checkbox"
+                        checked={selectedChannels.includes(channel)}
+                        onChange={() => toggleChannel(channel)}
+                      />
+                      <Icon size={14} />
+                      <span>
+                        <strong>{outreachDraftChannelLabel(channel)}</strong>
+                        <small>{reachable}/{targetContacts.length} {outreachReachabilityLabel(channel, reachable)}</small>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         </div>
-        <button className="runbtn bulk-send-selected" type="button" disabled={generating || loadingContacts || !selectedIds.length || !selectedChannels.length} onClick={() => void generateSelected()}>
+        {failedCount ? <span className="bulk-warning">{failedCount} failed. Open each business for details.</span> : null}
+        <button className="runbtn bulk-send-selected" type="button" aria-label="Generate outreach" disabled={generating || loadingContacts || !targetContacts.length || !selectedChannels.length} onClick={() => void generateSelected()}>
           {generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}
-          {generating ? "Generating…" : "Generate"}
+          <span>{generating ? `${completedCount} of ${targetContacts.length}` : "Generate"}</span>
         </button>
       </footer>
     </section>
@@ -3601,13 +3987,19 @@ function ContactCard({
   audienceLabel,
   contact,
   onOpen,
+  onToggleSelection,
   onToggleShortlist,
+  selectionChecked = false,
+  selectionEnabled = false,
   selected = false,
 }: {
   audienceLabel?: string;
   contact: DiscoveryResult;
   onOpen: () => void;
+  onToggleSelection: () => void;
   onToggleShortlist: () => void;
+  selectionChecked?: boolean;
+  selectionEnabled?: boolean;
   selected?: boolean;
 }) {
   const opportunityReason = contactListPrimarySignal(contact);
@@ -3620,6 +4012,7 @@ function ContactCard({
   const cardClass = [
     "contact-card",
     isReachableContact(contact) ? "" : "no-contact",
+    selectionEnabled && selectionChecked ? "is-bulk-selected" : "",
     selected ? "is-selected" : "",
   ]
     .filter(Boolean)
@@ -3639,6 +4032,16 @@ function ContactCard({
           }
         }}
       >
+        {selectionEnabled ? (
+          <label className="contact-select-control" onClick={(event) => event.stopPropagation()}>
+            <input
+              aria-label={`Select ${contact.company_name}`}
+              type="checkbox"
+              checked={selectionChecked}
+              onChange={onToggleSelection}
+            />
+          </label>
+        ) : null}
         <div className="contact-main">
           <span className="contact-identity">
             <span className="contact-title-line">
