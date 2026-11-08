@@ -90,7 +90,9 @@ class StructuredOutreachGenerator:
             "exists. Generate only the channels listed in outreach_input.channels and return null for "
             "every unselected channel. Follow every length and structural constraint in the response schema. "
             "Follow the user's message structure in the stated order. Treat it as a format, not as factual "
-            "content. Optional sections must be omitted when the supplied evidence does not support them. "
+            "content. The input may be section instructions or a complete example message; in either case, "
+            "reuse only its rhetorical order, pacing, and tone. Replace every business-specific detail with "
+            "supported context from the supplied JSON. Optional sections must be omitted when the supplied evidence does not support them. "
             "Do not fill missing sections with generic claims. "
             f"Selected message structure: {selected_structure}. {example_instruction}"
         )
