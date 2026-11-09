@@ -127,7 +127,9 @@ class WorkspaceLeadService:
                 shortlisted_at=current.shortlisted_at or candidate.shortlisted_at,
                 contacted_at=current.contacted_at or candidate.contacted_at,
                 audience_result_id=(
-                    current.audience_result_id or candidate.audience_result_id
+                    representative.audience_result_id
+                    or current.audience_result_id
+                    or candidate.audience_result_id
                 ),
                 contact_policy_status=(
                     current.contact_policy_status

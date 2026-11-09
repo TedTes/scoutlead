@@ -290,6 +290,61 @@ def test_saving_context_does_not_generate_or_replace_existing_drafts() -> None:
         assert saved.content.generated_outreach.channels.instagram.initial == original_message
 
 
+def test_workspace_shortlist_uses_the_shortlisted_result_id_for_duplicate_business() -> None:
+    with _session_factory()() as session:
+        unshortlisted = _seed_result(session, confirmed=True)
+        unshortlisted.shortlisted_at = None
+        first_audience = session.get(TerritoryModel, unshortlisted.audience_id)
+        now = utcnow()
+        shortlisted_audience = TerritoryModel(
+            id=new_id("territory"),
+            workspace_id="workspace:first",
+            product_id=first_audience.product_id,
+            niche_id=first_audience.niche_id,
+            market_key="north-york",
+            city="North York",
+            signal_keys=["no_quote_flow"],
+            label="Painters · North York",
+            criteria_hash="duplicate-business-test",
+        )
+        session.add(shortlisted_audience)
+        session.flush()
+        shortlisted_run = AudienceRunModel(
+            id=new_id("audience_run"),
+            workspace_id="workspace:first",
+            audience_id=shortlisted_audience.id,
+            criteria_version=1,
+            state="ready",
+            requested_count=25,
+            result_count=1,
+            new_result_count=1,
+            deadline_at=now + timedelta(minutes=5),
+            completed_at=now,
+        )
+        session.add(shortlisted_run)
+        session.flush()
+        shortlisted = AudienceResultModel(
+            id=new_id("audience_result"),
+            run_id=shortlisted_run.id,
+            audience_id=shortlisted_audience.id,
+            business_id=unshortlisted.business_id,
+            rank_position=1,
+            is_new=False,
+            shortlisted_at=now,
+            match_snapshot=unshortlisted.match_snapshot,
+        )
+        session.add(shortlisted)
+        session.commit()
+
+        page = WorkspaceLeadService(
+            session,
+            workspace_id="workspace:first",
+        ).page(view="shortlisted")
+
+        assert page.total == 1
+        assert page.items[0].audience_result_id == shortlisted.id
+
+
 def test_saved_structure_is_workspace_scoped_and_snapshotted_for_generation() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=True)

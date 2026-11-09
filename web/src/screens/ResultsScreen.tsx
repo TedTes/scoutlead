@@ -1282,6 +1282,15 @@ export function ResultsScreen({
             onGetPackage={() => territoryApi.getOutreachPackage(detailAudienceResultId)}
             onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailAudienceResultId, input)}
             onMarkContacted={(channel) => recordContactOutcome(detailContact.id, "contacted", channel)}
+            onDismiss={async () => {
+              await updateLead(detailContact.id, {
+                review_status: "not_fit",
+                shortlisted: false,
+              });
+              if (isGlobalView) {
+                await loadWorkspaceLeads("shortlisted", workspaceLeadPage?.offset || 0, leadSearch);
+              }
+            }}
             onMarkSent={async (packageId, channel) => {
               const updated = await territoryApi.markOutreachSent(packageId, channel);
               await refreshAll({ showLoading: false });
@@ -1547,6 +1556,7 @@ function OutreachWorkspace({
   onClose,
   onGeneratePackage,
   onGetPackage,
+  onDismiss,
   onMarkContacted,
   onMarkSent,
   onSaveContext,
@@ -1559,6 +1569,7 @@ function OutreachWorkspace({
   onClose: () => void;
   onGeneratePackage: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onGetPackage: () => Promise<OutreachPackage | null>;
+  onDismiss: () => Promise<void>;
   onMarkContacted: (channel: "email" | "phone" | "other") => Promise<void>;
   onMarkSent: (packageId: string, channel: OutreachDraftChannel) => Promise<OutreachPackage>;
   onSaveContext: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
@@ -1578,6 +1589,7 @@ function OutreachWorkspace({
   const [contextCopied, setContextCopied] = useState(false);
   const [channelCopied, setChannelCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const [markingContacted, setMarkingContacted] = useState(false);
   const [editingInputs, setEditingInputs] = useState(false);
   const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
@@ -1855,6 +1867,24 @@ function OutreachWorkspace({
     }
   };
 
+  const dismissBusiness = async () => {
+    if (dismissing || contextSaving || dirty || saveState === "saving") return;
+    if (!window.confirm(`Dismiss ${contact.company_name}? It will move to Dismissed.`)) return;
+    setDismissing(true);
+    setLoadError("");
+    try {
+      await onDismiss();
+      showToast({ title: "Moved to Dismissed", tone: "green" });
+      onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      showToast({ title: "Could not dismiss business", message, tone: "red" });
+    } finally {
+      setDismissing(false);
+    }
+  };
+
   const businessJsonPanel = (
     <section className="outreach-business-json">
       <header>
@@ -1893,6 +1923,15 @@ function OutreachWorkspace({
             </div>
           </div>
           <div className="outreach-header-actions">
+            {!isContactedHistory ? <button
+              className="outreach-dismiss"
+              disabled={dismissing || contextSaving || dirty || saveState === "saving"}
+              type="button"
+              onClick={() => void dismissBusiness()}
+            >
+              {dismissing ? <RotateCw className="spin" size={14} /> : <X size={14} />}
+              {dismissing ? "Dismissing…" : "Dismiss"}
+            </button> : null}
             {!isContactedHistory ? <button
               className="outreach-mark-contacted"
               disabled={markingContacted || dirty || saveState === "saving"}

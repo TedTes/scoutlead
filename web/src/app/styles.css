@@ -13351,6 +13351,26 @@ button.bulk-recipient-select:hover {
   width: auto;
 }
 
+.outreach-header-actions > .outreach-dismiss {
+  background: #fff;
+  border-color: #efc5c5;
+  color: #b42318;
+  flex-basis: auto;
+  gap: 6px;
+  padding: 0 11px;
+  width: auto;
+}
+
+.outreach-header-actions > .outreach-dismiss:hover {
+  background: #fff4f2;
+  color: #912018;
+}
+
+.outreach-header-actions > .outreach-dismiss:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .outreach-header-actions > .outreach-mark-contacted:hover {
   background: #26332f;
   color: #fff;
