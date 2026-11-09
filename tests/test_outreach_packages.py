@@ -252,6 +252,44 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert expanded.content.outreach_input.channels == ["instagram", "email", "call"]
 
 
+def test_saving_context_does_not_generate_or_replace_existing_drafts() -> None:
+    with _session_factory()() as session:
+        result = _seed_result(session, confirmed=True)
+        llm = _StructuredLLM()
+        service = OutreachPackageService(
+            session,
+            workspace_id="workspace:first",
+            llm=llm,
+        )
+
+        generated = service.generate(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(channels=["instagram"])
+            ),
+        )
+        original_message = generated.content.generated_outreach.channels.instagram.initial
+
+        saved = service.save_context(
+            result.id,
+            OutreachGenerateRequest(
+                outreach_input=OutreachGenerationInput(
+                    channels=["email"],
+                    personal_detail="Their project gallery shows careful preparation.",
+                    concept_url="https://concept.example/new",
+                    concept_features=["Project gallery", "Quote request"],
+                )
+            ),
+        )
+
+        assert len(llm.calls) == 1
+        assert saved.content.outreach_input.personal_detail == (
+            "Their project gallery shows careful preparation."
+        )
+        assert saved.content.outreach_input.concept_url == "https://concept.example/new"
+        assert saved.content.generated_outreach.channels.instagram.initial == original_message
+
+
 def test_saved_structure_is_workspace_scoped_and_snapshotted_for_generation() -> None:
     with _session_factory()() as session:
         result = _seed_result(session, confirmed=True)

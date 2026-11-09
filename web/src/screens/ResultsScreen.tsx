@@ -1287,6 +1287,7 @@ export function ResultsScreen({
               await refreshAll({ showLoading: false });
               return updated;
             }}
+            onSaveContext={(input) => territoryApi.saveOutreachContext(detailAudienceResultId, input)}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
           />
         ) : detailContact ? (
@@ -1548,6 +1549,7 @@ function OutreachWorkspace({
   onGetPackage,
   onMarkContacted,
   onMarkSent,
+  onSaveContext,
   onDirtyChange,
   onSavePackage,
   persistent = false,
@@ -1559,6 +1561,7 @@ function OutreachWorkspace({
   onGetPackage: () => Promise<OutreachPackage | null>;
   onMarkContacted: (channel: "email" | "phone" | "other") => Promise<void>;
   onMarkSent: (packageId: string, channel: OutreachDraftChannel) => Promise<OutreachPackage>;
+  onSaveContext: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onDirtyChange: (dirty: boolean) => void;
   onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
   persistent?: boolean;
@@ -1570,6 +1573,8 @@ function OutreachWorkspace({
   const [loadError, setLoadError] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [contextDirty, setContextDirty] = useState(false);
+  const [contextSaving, setContextSaving] = useState(false);
   const [contextCopied, setContextCopied] = useState(false);
   const [channelCopied, setChannelCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -1643,6 +1648,7 @@ function OutreachWorkspace({
       );
       setActiveGeneratedChannel(firstSentChannel || firstGeneratedChannel || "instagram");
       setDirty(false);
+      setContextDirty(false);
       onDirtyChange(false);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -1748,14 +1754,35 @@ function OutreachWorkspace({
             ].join("\n\n") : ""
     : "";
 
-  const toggleGenerationChannel = (channel: OutreachDraftChannel) => {
-    const selected = outreachInput.channels.includes(channel);
-    setOutreachInput({
+  const updateContextInput = (next: OutreachGenerationInput) => {
+    setOutreachInput(next);
+    setContextDirty(true);
+    onDirtyChange(true);
+  };
+
+  const saveContext = async () => {
+    if (contextSaving) return;
+    setContextSaving(true);
+    setLoadError("");
+    const input: OutreachGenerationInput = {
       ...outreachInput,
-      channels: selected
-        ? outreachInput.channels.filter((item) => item !== channel)
-        : [...outreachInput.channels, channel],
-    });
+      concept_features: featureText.split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 8),
+    };
+    try {
+      const saved = await onSaveContext(input);
+      setOutreachPackage(saved);
+      setDraft(withTemplate(saved.content));
+      setOutreachInput(saved.content.outreach_input || input);
+      setContextDirty(false);
+      onDirtyChange(false);
+      showToast({ title: "Context saved", tone: "green" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      showToast({ title: "Could not save context", message, tone: "red" });
+    } finally {
+      setContextSaving(false);
+    }
   };
 
   const copyChannel = async () => {
@@ -1793,7 +1820,7 @@ function OutreachWorkspace({
   };
 
   const closeWorkspace = () => {
-    if (dirty && !window.confirm("Discard unsaved outreach changes?")) return;
+    if ((dirty || contextDirty) && !window.confirm("Discard unsaved outreach changes?")) return;
     onClose();
   };
 
@@ -1846,7 +1873,7 @@ function OutreachWorkspace({
   const workspaceTabs = (
     <nav className="outreach-workspace-tabs" aria-label="Outreach workspace">
       <button className={workspaceTab === "outreach" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("outreach")}>
-        Outreach
+        {isContactedHistory ? "Outreach" : "Context"}
       </button>
       <button className={workspaceTab === "json" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("json")}>
         Business JSON
@@ -1910,7 +1937,7 @@ function OutreachWorkspace({
               )}
             </div>
           </div>
-        ) : generatedOutreach && !editingInputs ? (
+        ) : isContactedHistory && generatedOutreach && !editingInputs ? (
           <div className="outreach-tab-layout">
             {workspaceTabs}
             <div className="generated-outreach-canvas">
@@ -1993,43 +2020,33 @@ function OutreachWorkspace({
             {workspaceTabs}
             <div className="outreach-input-canvas">
             {workspaceTab === "json" ? businessJsonPanel : <>
-              <section className="outreach-input-evidence">
-              <span>Why this lead</span>
-              {selectedEvidence.map((item) => <p key={item.signalKey}>{item.statement}</p>)}
-              {!selectedEvidence.length ? <p>Shortlisted by you for a personalized proposal.</p> : null}
-              </section>
               <section className="outreach-input-form">
-              <details className="outreach-context-drawer" open={Boolean(outreachInput.personal_detail || outreachInput.concept_url || featureText)}>
+              <details className="outreach-context-drawer" open>
                 <summary><span>Add context</span><em>Optional personalization and proof</em></summary>
                 <div>
-                  <label><span>Personal detail <em>optional</em></span><textarea rows={3} value={outreachInput.personal_detail || ""} onChange={(event) => setOutreachInput({ ...outreachInput, personal_detail: event.target.value || null })} placeholder="A project, review, photo, or detail you personally verified." /></label>
+                  <label><span>Personal detail <em>optional</em></span><textarea rows={3} value={outreachInput.personal_detail || ""} onChange={(event) => updateContextInput({ ...outreachInput, personal_detail: event.target.value || null })} placeholder="A project, review, photo, or detail you personally verified." /></label>
                   <label><span>Concept or proof link <em>optional</em></span><input type="url" value={outreachInput.concept_url || ""} onChange={(event) => {
                     const conceptUrl = event.target.value || null;
-                    setOutreachInput({
+                    updateContextInput({
                       ...outreachInput,
                       concept_url: conceptUrl,
                     });
                   }} placeholder="https://…" /></label>
-                  <label><span>Features included <em>optional · one per line</em></span><textarea rows={3} value={featureText} onChange={(event) => setFeatureText(event.target.value)} placeholder={"Before/after gallery\nMobile quote request\nOne-tap call"} /></label>
-                  <label className="outreach-pitch-style"><span>Pitch style</span><select value={outreachInput.persuasion_style} onChange={(event) => setOutreachInput({ ...outreachInput, persuasion_style: event.target.value as OutreachGenerationInput["persuasion_style"] })}>{PERSUASION_STYLES.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select><small>{PERSUASION_STYLES.find((style) => style.value === outreachInput.persuasion_style)?.description}</small></label>
+                  <label><span>Features included <em>optional · one per line</em></span><textarea rows={3} value={featureText} onChange={(event) => {
+                    setFeatureText(event.target.value);
+                    setContextDirty(true);
+                    onDirtyChange(true);
+                  }} placeholder={"Before/after gallery\nMobile quote request\nOne-tap call"} /></label>
+                  <label className="outreach-pitch-style"><span>Pitch style</span><select value={outreachInput.persuasion_style} onChange={(event) => updateContextInput({ ...outreachInput, persuasion_style: event.target.value as OutreachGenerationInput["persuasion_style"] })}>{PERSUASION_STYLES.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select><small>{PERSUASION_STYLES.find((style) => style.value === outreachInput.persuasion_style)?.description}</small></label>
                 </div>
               </details>
               {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
-              <div className="outreach-input-actions">
-                <div className="outreach-channel-select" aria-label="Message formats to generate">
-                  <span>Message for</span>
-                  {OUTREACH_DRAFT_CHANNELS.map((channel) => {
-                    const selected = outreachInput.channels.includes(channel);
-                    return (
-                      <button className={selected ? "selected" : ""} key={channel} type="button" aria-pressed={selected} onClick={() => toggleGenerationChannel(channel)}>
-                        {selected ? <Check size={12} /> : null}
-                        {outreachDraftChannelLabel(channel)}
-                      </button>
-                    );
-                  })}
-                </div>
-                {generatedOutreach ? <button className="secondary" type="button" onClick={() => setEditingInputs(false)}>Cancel</button> : null}
-                <button disabled={generating || !outreachInput.channels.length} type="button" onClick={() => void generateOutreach()}>{generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}{generating ? "Generating…" : `${generatedOutreach ? "Regenerate" : "Generate"}${outreachInput.channels.length > 1 ? ` ${outreachInput.channels.length} drafts` : ""}`}</button>
+              <div className="outreach-context-actions">
+                <span>{contextDirty ? "Unsaved context" : outreachPackage ? "Context saved" : "No context saved"}</span>
+                <button disabled={contextSaving || !contextDirty} type="button" onClick={() => void saveContext()}>
+                  {contextSaving ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
+                  {contextSaving ? "Saving…" : "Save context"}
+                </button>
               </div>
               </section>
             </>}
@@ -3141,7 +3158,9 @@ function PersonalizedBulkOutreachPanel({
     ...selectedFooterChannels,
     ...footerChannelOrder.filter((channel) => !selectedChannels.includes(channel)),
   ].slice(0, Math.max(2, selectedFooterChannels.length));
-  const hiddenFooterChannelCount = footerChannelOrder.length - visibleFooterChannels.length;
+  const hiddenFooterChannels = footerChannelOrder.filter(
+    (channel) => !visibleFooterChannels.includes(channel),
+  );
   const channelReachability = useMemo(
     () => Object.fromEntries(
       OUTREACH_DRAFT_CHANNELS.map((channel) => [
@@ -3335,9 +3354,6 @@ function PersonalizedBulkOutreachPanel({
               {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
               {selectedTemplateId === "new" ? <option value="new">New template</option> : null}
             </select>
-            <button className="secondary" disabled={selectedTemplateId === "builtin" || savingTemplate} type="button" onClick={() => void saveTemplate()}>
-              <FileText size={14} /> {savingTemplate ? "Saving…" : "Save"}
-            </button>
             <button className="secondary" type="button" onClick={startNewTemplate}><Plus size={14} /> New</button>
             {selectedTemplate ? (
               <button className="secondary icon-only danger-item" type="button" aria-label="Delete template" onClick={() => void deleteTemplate()}>
@@ -3345,7 +3361,7 @@ function PersonalizedBulkOutreachPanel({
               </button>
             ) : null}
           </div>
-          {selectedTemplateId !== "builtin" ? (
+          {selectedTemplateId === "new" ? (
             <label className="bulk-field personalized-template-name">
               <span>Template name</span>
               <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Concise concept outreach" />
@@ -3366,52 +3382,53 @@ function PersonalizedBulkOutreachPanel({
             />
             <div className="outreach-structure-note">
               <span><Workflow size={14} /> Each channel adapts length and format automatically — SMS trims to one text, email adds a subject, calls become a talk-track.</span>
-              <strong>One structure, channel-aware</strong>
+              {selectedTemplateId === "new" ? (
+                <button
+                  className="secondary outreach-structure-save"
+                  disabled={savingTemplate || !templateName.trim()}
+                  type="button"
+                  onClick={() => void saveTemplate()}
+                >
+                  <FileText size={13} /> {savingTemplate ? "Saving…" : "Save template"}
+                </button>
+              ) : <strong>One structure, channel-aware</strong>}
             </div>
           </div>
         </section>
 
-        <section className="personalized-outreach-section outreach-preview-section">
-          <div className="personalized-section-heading">
-            <span>Preview</span>
-            <small>first selected business</small>
-          </div>
-          <div className="outreach-preview-tabs" role="tablist" aria-label="Preview channel">
-            {selectedChannels.map((channel) => {
-              const Icon = outreachDraftChannelIcon(channel);
-              return (
-                <button
-                  className={activePreviewChannel === channel ? "is-active" : ""}
-                  key={channel}
-                  type="button"
-                  role="tab"
-                  aria-selected={activePreviewChannel === channel}
-                  onClick={() => setActivePreviewChannel(channel)}
-                >
-                  <Icon size={13} /> {outreachDraftChannelLabel(channel)}
-                </button>
-              );
-            })}
-          </div>
-          <div className="outreach-preview-card">
-            {previewContact ? (
-              <>
-                <header>
-                  <span><strong>{previewContact.company_name}</strong> · {contactListCategoryLabel(previewContact)} · {previewContact.geography || previewContact.research?.geography || "Location unavailable"}</span>
-                  {activePreviewChannel === "sms" && previewBody ? <small>SMS · {previewBody.length} chars · {Math.max(1, Math.ceil(previewBody.length / 160))} segment{previewBody.length > 160 ? "s" : ""}</small> : null}
-                </header>
-                <div className={previewBody ? "" : "is-empty"}>
-                  {previewBody || (selectedChannels.length
-                    ? `Generate to preview the ${outreachDraftChannelLabel(activePreviewChannel).toLowerCase()} draft for this business.`
-                    : "Select at least one channel to prepare a preview.")}
-                </div>
-              </>
-            ) : (
-              <div className="is-empty">Select at least one shortlisted business to preview a draft.</div>
-            )}
-          </div>
-          <p className="outreach-preview-help">Generation produces one business-specific draft per selected channel.</p>
-        </section>
+        {previewBody && previewContact ? (
+          <section className="personalized-outreach-section outreach-preview-section">
+            <div className="personalized-section-heading">
+              <span>Generated draft</span>
+              <small>first selected business</small>
+            </div>
+            <div className="outreach-preview-tabs" role="tablist" aria-label="Generated draft channel">
+              {selectedChannels.map((channel) => {
+                const Icon = outreachDraftChannelIcon(channel);
+                return (
+                  <button
+                    className={activePreviewChannel === channel ? "is-active" : ""}
+                    key={channel}
+                    type="button"
+                    role="tab"
+                    aria-selected={activePreviewChannel === channel}
+                    onClick={() => setActivePreviewChannel(channel)}
+                  >
+                    <Icon size={13} /> {outreachDraftChannelLabel(channel)}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="outreach-preview-card">
+              <header>
+                <span><strong>{previewContact.company_name}</strong> · {contactListCategoryLabel(previewContact)} · {previewContact.geography || previewContact.research?.geography || "Location unavailable"}</span>
+                {activePreviewChannel === "sms" ? <small>SMS · {previewBody.length} chars · {Math.max(1, Math.ceil(previewBody.length / 160))} segment{previewBody.length > 160 ? "s" : ""}</small> : null}
+              </header>
+              <div>{previewBody}</div>
+            </div>
+            <p className="outreach-preview-help">This is the actual generated draft for the first selected business.</p>
+          </section>
+        ) : null}
       </div>
 
       <footer className="bulk-outreach-footer personalized-outreach-footer">
@@ -3437,7 +3454,7 @@ function PersonalizedBulkOutreachPanel({
               </button>
             );
           })}
-          <div className="outreach-channel-menu" ref={channelMenuRef}>
+          {hiddenFooterChannels.length ? <div className="outreach-channel-menu" ref={channelMenuRef}>
             <button
               className="outreach-channel-more"
               type="button"
@@ -3446,13 +3463,11 @@ function PersonalizedBulkOutreachPanel({
               aria-label="Choose outreach channels"
               onClick={() => setChannelMenuOpen((open) => !open)}
             >
-              {hiddenFooterChannelCount > 0
-                ? `+${hiddenFooterChannelCount}`
-                : `${selectedChannels.length} channels`}
+              +{hiddenFooterChannels.length}
             </button>
             {channelMenuOpen ? (
               <div className="outreach-channel-menu-popover" role="menu">
-                {(["sms", "email", "instagram", "call"] as OutreachDraftChannel[]).map((channel) => {
+                {hiddenFooterChannels.map((channel) => {
                   const Icon = outreachDraftChannelIcon(channel);
                   const reachable = channelReachability[channel];
                   return (
@@ -3472,7 +3487,7 @@ function PersonalizedBulkOutreachPanel({
                 })}
               </div>
             ) : null}
-          </div>
+          </div> : null}
         </div>
         {failedCount ? <span className="bulk-warning">{failedCount} failed. Open each business for details.</span> : null}
         <button className="runbtn bulk-send-selected" type="button" aria-label="Generate outreach" disabled={generating || loadingContacts || !targetContacts.length || !selectedChannels.length} onClick={() => void generateSelected()}>

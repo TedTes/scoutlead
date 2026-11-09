@@ -104,6 +104,20 @@ def generate_for_result(
     )
 
 
+@router.put(
+    "/from-result/{result_id}/context",
+    response_model=OutreachPackageRead,
+)
+def save_context_for_result(
+    result_id: str,
+    data: OutreachGenerateRequest,
+    session: DbSession,
+    auth: CurrentAuth,
+    services: Services,
+):
+    return _service(session, auth.workspace_id, services).save_context(result_id, data)
+
+
 @router.patch("/{package_id}", response_model=OutreachPackageRead)
 def update_package(
     package_id: str,

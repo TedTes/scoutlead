@@ -418,6 +418,13 @@ export class ApiClient {
     });
   }
 
+  saveOutreachContext(resultId: string, outreachInput: import("../types/domain").OutreachGenerationInput) {
+    return this.request<OutreachPackage>(`/outreach-packages/from-result/${resultId}/context`, {
+      method: "PUT",
+      body: { outreach_input: outreachInput },
+    });
+  }
+
   updateOutreachPackage(id: string, content: OutreachPackage["content"]) {
     return this.request<OutreachPackage>(`/outreach-packages/${id}`, {
       method: "PATCH",

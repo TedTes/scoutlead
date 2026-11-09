@@ -268,6 +268,56 @@ class OutreachPackageService:
         self.session.refresh(row)
         return self._read(row, business, result)
 
+    def save_context(
+        self,
+        result_id: str,
+        data: OutreachGenerateRequest,
+    ) -> OutreachPackageRead:
+        result, audience, product, business, workspace = self._context(result_id)
+        if result.shortlisted_at is None:
+            raise WorkflowBoundaryError(
+                "Shortlist this business before saving outreach context.",
+                {"result_id": result_id},
+            )
+        existing = self.session.scalar(
+            select(OutreachPackageModel).where(
+                OutreachPackageModel.workspace_id == self.workspace_id,
+                OutreachPackageModel.audience_result_id == result.id,
+            )
+        )
+        if existing is not None:
+            content = OutreachPackageContent.model_validate(existing.content)
+            content.outreach_input = data.outreach_input
+            existing.content = content.model_dump()
+            self.session.commit()
+            self.session.refresh(existing)
+            return self._read(existing, business, result)
+
+        content = self._render_content(
+            result,
+            audience,
+            product,
+            business,
+            workspace,
+            outreach_input=data.outreach_input,
+            generate_channels=False,
+        )
+        row = OutreachPackageModel(
+            id=new_id("outreach_package"),
+            workspace_id=self.workspace_id,
+            audience_result_id=result.id,
+            business_id=result.business_id,
+            content=content.model_dump(),
+            provider="template",
+            model=None,
+            usage={},
+            prompt_version=TEMPLATE_VERSION,
+        )
+        self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        return self._read(row, business, result)
+
     def _render_content(
         self,
         result: AudienceResultModel,
