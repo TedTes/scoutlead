@@ -102,6 +102,47 @@ export function getContactName(contact: DiscoveryResult) {
   ]);
 }
 
+export function getGoogleProfileUrl(contact: DiscoveryResult) {
+  const directUrl = getRawString(contact, [
+    "googleMapsUri",
+    "google_maps_uri",
+    "googleMapsUrl",
+    "google_maps_url",
+    "mapsUri",
+    "maps_url",
+  ]);
+  if (isGoogleMapsUrl(directUrl)) return directUrl;
+
+  const placeId = getRawString(contact, [
+    "google_place_id",
+    "googlePlaceId",
+    "place_id",
+    "placeId",
+  ]);
+  const query = [contact.company_name, getAddress(contact) || contact.geography]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (!query) return "";
+
+  const params = new URLSearchParams({ api: "1", query });
+  if (placeId) params.set("query_place_id", placeId);
+  return `https://www.google.com/maps/search/?${params.toString()}`;
+}
+
+function isGoogleMapsUrl(value: string) {
+  if (!value) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "maps.google.com"
+      || hostname.endsWith(".google.com")
+      || hostname === "maps.app.goo.gl"
+      || hostname === "goo.gl";
+  } catch {
+    return false;
+  }
+}
+
 function getRawString(contact: DiscoveryResult, keys: string[]) {
   for (const raw of getRawObjects(contact)) {
     for (const key of keys) {

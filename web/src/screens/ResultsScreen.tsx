@@ -72,6 +72,7 @@ import {
   getAddress,
   getContactName,
   getContactUrl,
+  getGoogleProfileUrl,
   getPhone,
   getRating,
   getRawObjects,
@@ -1600,6 +1601,7 @@ function OutreachWorkspace({
         value: item.value as string | number | boolean | null,
       }));
   const businessContextJson = buildBusinessContext(contact, copiedEvidence);
+  const googleProfileUrl = getGoogleProfileUrl(contact);
 
   const withTemplate = (content: OutreachPackageContent): OutreachPackageContent => {
     const rating = Number(getRating(contact));
@@ -1914,6 +1916,16 @@ function OutreachWorkspace({
             </div>
           </div>
           <div className="outreach-header-actions">
+            {googleProfileUrl ? <a
+              className="outreach-google-profile"
+              href={googleProfileUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open ${contact.company_name} on Google Maps`}
+              title="Open Google business profile"
+            >
+              <ExternalLink size={15} />
+            </a> : null}
             {!isContactedHistory ? <button
               className="outreach-dismiss"
               disabled={dismissing || contextSaving || dirty || saveState === "saving"}
