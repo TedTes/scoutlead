@@ -193,8 +193,10 @@ function AppShell({
       icon: <CircleX size={17} />,
     },
   ];
-  const unfiledProfiles = useMemo(() => {
-    const profiles = productProfiles.filter((profile) => !profile.folder_id);
+  const recentProfiles = useMemo(() => {
+    const profiles = [...productProfiles].sort(
+      (left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at),
+    );
     if (profiles.length <= 5) return profiles;
     const recent = profiles.slice(0, 5);
     const selected = profiles.find((profile) => profile.id === selectedProfileId);
@@ -454,8 +456,8 @@ function AppShell({
                     <div className={open ? "audience-folder-children is-open" : "audience-folder-children"}><div className="audience-folder-children-inner">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />) : <small className="audience-folder-empty">No saved searches</small>}</div></div>
                   </section>;
                 })}
-                {productProfiles.some((profile) => !profile.folder_id) ? <div className="audience-recents-heading"><span>Recents</span><em>{productProfiles.filter((profile) => !profile.folder_id).length}</em></div> : null}
-                {unfiledProfiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />)}
+                {recentProfiles.length ? <div className="audience-recents-heading"><span>Recents</span><em>{recentProfiles.length}</em></div> : null}
+                {recentProfiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />)}
             </>
             {productProfiles.length > 5 ? (
               <button

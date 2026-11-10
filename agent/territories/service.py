@@ -199,6 +199,14 @@ class TerritoryService:
                     "cloned audience must belong to the same product",
                     {"audience_id": data.clone_from_id},
                 )
+        folder_id = data.folder_id
+        if folder_id is None:
+            from territories.folders import AudienceFolderService
+
+            folder_id = AudienceFolderService(
+                self.session,
+                workspace_id=self.workspace_id,
+            ).get_or_create_for_niche(product_id=data.product_id, niche=niche).id
         place_label = normalize_text(data.market.place_label)
         city = place_label.split(",", 1)[0].strip() or place_label
         customer_kind = data.customer_kind.value
@@ -251,7 +259,7 @@ class TerritoryService:
         profile = self.create(
             TerritoryCreate(
                 product_id=data.product_id,
-                folder_id=data.folder_id,
+                folder_id=folder_id,
                 niche_id=niche.id,
                 niche_slug=niche.slug,
                 niche_label=niche.label,
@@ -289,7 +297,7 @@ class TerritoryService:
             if interval_days is not None
             else None
         )
-        profile.folder_id = data.folder_id
+        profile.folder_id = folder_id
         if commit:
             self.session.commit()
             self.session.refresh(profile)

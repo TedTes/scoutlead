@@ -21,6 +21,7 @@ from business_index.pipeline import BusinessIndexPipelineService
 from campaigns.schemas import CampaignCreate, CampaignUpdate, LeadSeedInput
 from canonical.repository import CanonicalRepository
 from db.models import (
+    AudienceFolderModel,
     BusinessIndexSegmentModel,
     BusinessFactModel,
     BusinessModel,
@@ -134,6 +135,66 @@ def test_audience_folders_are_optional_and_deletion_preserves_audiences() -> Non
         folders.delete(folder.id)
 
         assert territory_service.get_read(territory.id).folder_id is None
+
+
+def test_global_profiles_are_automatically_grouped_in_a_trade_folder() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        service = TerritoryService(session, workspace_id="workspace:first")
+
+        toronto = service.create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+            )
+        )
+        scarborough = service.create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Scarborough", "radius_km": 25},
+            )
+        )
+
+        assert toronto.folder_id is not None
+        assert scarborough.folder_id == toronto.folder_id
+        folder = session.get(AudienceFolderModel, toronto.folder_id)
+        assert folder is not None
+        assert folder.name == "Painting"
+        assert folder.niche_id == toronto.niche_id
+
+
+def test_explicit_folder_takes_priority_over_automatic_trade_mapping() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        folder = AudienceFolderService(
+            session,
+            workspace_id="workspace:first",
+        ).create(AudienceFolderCreate(product_id=offer.id, name="Campaign A"))
+
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                folder_id=folder.id,
+            )
+        )
+
+        assert profile.folder_id == folder.id
+        assert session.scalar(select(func.count()).select_from(AudienceFolderModel)) == 1
 
 
 def test_audience_can_be_renamed_and_archived_from_the_visible_list() -> None:

@@ -260,6 +260,7 @@ class AudienceFolderRead(BaseModel):
     id: str
     workspace_id: str
     product_id: str
+    niche_id: str | None = None
     name: str
     sort_order: int
     audience_count: int = 0

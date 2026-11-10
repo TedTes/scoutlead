@@ -490,6 +490,7 @@ export type AudienceFolder = {
   id: string;
   workspace_id: string;
   product_id: string;
+  niche_id?: string | null;
   name: string;
   sort_order: number;
   audience_count: number;

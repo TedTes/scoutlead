@@ -603,6 +603,7 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
             created!.audience,
             ...current.filter((profile) => profile.id !== created!.audience.id),
           ]);
+          setAudienceFolders(await api.getAudienceFolders(input.product_id));
           await refreshProfileBatch(created.audience.id);
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));

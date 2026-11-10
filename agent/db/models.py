@@ -678,6 +678,12 @@ class AudienceFolderModel(TimestampMixin, Base):
             "name",
             name="uq_audience_folders_workspace_product_name",
         ),
+        UniqueConstraint(
+            "workspace_id",
+            "product_id",
+            "niche_id",
+            name="uq_audience_folders_workspace_product_niche",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -686,6 +692,9 @@ class AudienceFolderModel(TimestampMixin, Base):
     )
     product_id: Mapped[str] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    niche_id: Mapped[str | None] = mapped_column(
+        ForeignKey("niches.id", ondelete="SET NULL"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
