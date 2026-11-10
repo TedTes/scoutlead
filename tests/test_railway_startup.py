@@ -44,3 +44,4 @@ def test_trade_catalog_changes_trigger_backend_release() -> None:
 
     assert "data/seeds/canonical-trade-catalog\\.json" in workflow
     assert "seed_trade_catalog" in workflow
+    assert workflow.count("\\.gitignore") >= 2
