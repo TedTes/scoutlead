@@ -19,6 +19,8 @@ WORKDIR /app
 
 COPY pyproject.toml alembic.ini ./
 COPY agent ./agent
+COPY data/seeds/canonical-trade-catalog.json ./data/seeds/canonical-trade-catalog.json
+COPY scripts/seed_trade_catalog.py ./scripts/seed_trade_catalog.py
 COPY scripts/start_railway_service.py ./scripts/start_railway_service.py
 COPY scripts/serve_web_static.py ./scripts/serve_web_static.py
 COPY --from=web-builder /web/dist ./web/dist

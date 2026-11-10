@@ -458,13 +458,6 @@
   width: 100%;
 }
 
-.outreach-pitch-style small {
-  color: #8995a5;
-  display: block;
-  font-size: 10px;
-  margin-top: 6px;
-}
-
 .outreach-input-form input:focus,
 .outreach-input-form textarea:focus,
 .generated-channel-editor input:focus,
@@ -10057,7 +10050,6 @@ body.is-resizing-navigation .rail {
   gap: 7px;
 }
 
-.audience-trade-chips button,
 .audience-opportunity-chips button {
   align-items: center;
   background: var(--af-surface);
@@ -10073,24 +10065,148 @@ body.is-resizing-navigation .rail {
   transition: border-color 130ms var(--af-ease), background 130ms var(--af-ease), color 130ms var(--af-ease);
 }
 
-.audience-trade-chips button:hover,
 .audience-opportunity-chips button:hover {
   border-color: var(--af-text-subtle);
   color: var(--af-text);
 }
 
-.audience-trade-chips button:focus-visible,
+.audience-trade-select:focus-visible,
+.audience-trade-add:focus-visible,
+.audience-trade-hide:focus-visible,
+.audience-trade-add-inline button:focus-visible,
 .audience-opportunity-chips button:focus-visible,
 .audience-compact-radius button:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--af-accent) 14%, transparent);
   outline: none;
 }
 
-.audience-trade-chips button.is-selected,
-.audience-trade-chips button.is-selected:hover {
+.audience-trade-chip {
+  align-items: stretch;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border-strong);
+  border-radius: var(--af-radius-sm);
+  display: inline-flex;
+  min-height: 34px;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 130ms var(--af-ease), background 130ms var(--af-ease), color 130ms var(--af-ease);
+}
+
+.audience-trade-chip:hover {
+  border-color: var(--af-text-subtle);
+}
+
+.audience-trade-select,
+.audience-trade-hide,
+.audience-trade-add,
+.audience-trade-add-inline button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--af-text-muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  justify-content: center;
+}
+
+.audience-trade-select {
+  gap: 7px;
+  padding: 6px 10px;
+}
+
+.audience-trade-hide {
+  border-left: 1px solid transparent;
+  max-width: 0;
+  opacity: 0;
+  padding: 0;
+  transition: max-width 130ms var(--af-ease), opacity 130ms var(--af-ease), padding 130ms var(--af-ease);
+}
+
+.audience-trade-chip:hover .audience-trade-hide,
+.audience-trade-chip:focus-within .audience-trade-hide {
+  border-left-color: color-mix(in srgb, currentColor 18%, transparent);
+  max-width: 30px;
+  opacity: .75;
+  padding: 0 7px;
+}
+
+.audience-trade-hide:hover {
+  color: #b42318;
+  opacity: 1 !important;
+}
+
+.audience-trade-chip.is-selected {
   background: var(--af-ink-solid);
   border-color: var(--af-ink-solid);
   color: var(--af-on-ink);
+}
+
+.audience-trade-chip.is-selected .audience-trade-select,
+.audience-trade-chip.is-selected .audience-trade-hide {
+  color: var(--af-on-ink);
+}
+
+.audience-trade-add {
+  border: 1px dashed var(--af-border-strong);
+  border-radius: var(--af-radius-sm);
+  flex: 0 0 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.audience-trade-add:hover {
+  border-color: var(--af-accent);
+  color: var(--af-accent-ink);
+}
+
+.audience-trade-add-inline {
+  align-items: center;
+  border: 1px solid var(--af-accent);
+  border-radius: var(--af-radius-sm);
+  display: inline-flex;
+  min-height: 34px;
+  overflow: hidden;
+}
+
+.audience-trade-add-inline input {
+  background: transparent;
+  border: 0;
+  color: var(--af-text);
+  font: inherit;
+  font-size: 12px;
+  max-width: min(190px, calc(100vw - 150px));
+  min-width: 104px;
+  outline: 0;
+  padding: 6px 9px;
+  width: auto;
+}
+
+.audience-trade-add-inline button {
+  border-left: 1px solid var(--af-border);
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.audience-trade-add-inline button:first-of-type:not(:disabled) {
+  color: var(--af-accent-ink);
+}
+
+.audience-trade-add-inline button:disabled,
+.audience-trade-hide:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+@media (hover: none) {
+  .audience-trade-hide {
+    border-left-color: color-mix(in srgb, currentColor 18%, transparent);
+    max-width: 30px;
+    opacity: .6;
+    padding: 0 7px;
+  }
 }
 
 .audience-empty-options {

@@ -42,6 +42,7 @@ from db.models import (
     SourceObservationModel,
     TerritoryModel,
     ValidationResultModel,
+    WorkspaceNichePreferenceModel,
 )
 from db.session import create_database
 from job_queue.schemas import JobType
@@ -135,6 +136,47 @@ def test_audience_folders_are_optional_and_deletion_preserves_audiences() -> Non
         folders.delete(folder.id)
 
         assert territory_service.get_read(territory.id).folder_id is None
+
+
+def test_trade_preferences_are_workspace_specific_and_preserve_niches() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _offer(session, workspace_id="workspace:first")
+        _offer(session, workspace_id="workspace:second")
+        existing = _niche(
+            session,
+            slug="home_service_painting",
+            label="Painting contractors",
+        )
+        first_service = TerritoryService(session, workspace_id="workspace:first")
+        second_service = TerritoryService(session, workspace_id="workspace:second")
+
+        restaurant = first_service.create_trade("Restaurants")
+        assert restaurant["label"] == "Restaurants"
+        assert restaurant["active"] is True
+        created = session.get(NicheModel, restaurant["id"])
+        assert created.search_config["include_terms"] == ["restaurants", "restaurant"]
+        assert created.created_by_workspace_id == "workspace:first"
+        assert restaurant["id"] in {item["id"] for item in first_service.profile_options()}
+        assert restaurant["id"] not in {item["id"] for item in second_service.profile_options()}
+
+        hidden = first_service.update_trade(existing.id, active=False)
+        assert hidden["active"] is False
+        assert existing.id not in {item["id"] for item in first_service.profile_options()}
+        assert existing.id in {item["id"] for item in second_service.profile_options()}
+        assert session.get(NicheModel, existing.id).active is True
+        preference = session.get(
+            WorkspaceNichePreferenceModel,
+            ("workspace:first", existing.id),
+        )
+        assert preference is not None
+        assert preference.enabled is False
+
+        restored = first_service.create_trade("Painting contractors")
+        assert restored["id"] == existing.id
+        assert restored["active"] is True
+        assert existing.id in {item["id"] for item in first_service.profile_options()}
+        assert session.get(NicheModel, restaurant["id"]) is not None
 
 
 def test_global_profiles_are_automatically_grouped_in_a_trade_folder() -> None:

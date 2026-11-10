@@ -361,6 +361,20 @@ export class ApiClient {
     return this.request<ProfileOptions>("/audiences/options");
   }
 
+  createTrade(label: string) {
+    return this.request<import("../types/domain").TradeCatalogItem>("/audiences/trades", {
+      method: "POST",
+      body: { label },
+    });
+  }
+
+  updateTrade(id: string, update: { active: boolean }) {
+    return this.request<import("../types/domain").TradeCatalogItem>(`/audiences/trades/${id}`, {
+      method: "PATCH",
+      body: update,
+    });
+  }
+
   createProfile(input: ProfileCreateInput) {
     return this.request<ProfileQueued>("/audiences", { method: "POST", body: input });
   }

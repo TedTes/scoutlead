@@ -8,14 +8,16 @@
       "/agent/**",
       "/pyproject.toml",
       "/alembic.ini",
+      "/data/seeds/canonical-trade-catalog.json",
       "/deploy/railway/api.railway.json",
+      "/scripts/seed_trade_catalog.py",
       "/scripts/start_railway_service.py",
       "/scripts/apply_railway_service_config.py",
       "/scripts/railway_up_ci.py"
     ]
   },
   "deploy": {
-    "preDeployCommand": "PYTHONPATH=agent alembic upgrade head",
+    "preDeployCommand": "PYTHONPATH=agent alembic upgrade head && PYTHONPATH=agent python scripts/seed_trade_catalog.py",
     "startCommand": "python scripts/start_railway_service.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300

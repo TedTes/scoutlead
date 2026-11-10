@@ -275,6 +275,19 @@ class ProfileBusinessTypeOptionRead(BaseModel):
     category: str | None = None
 
 
+class TradeCatalogCreate(BaseModel):
+    label: str = Field(min_length=2, max_length=255)
+
+
+class TradeCatalogUpdate(BaseModel):
+    active: bool
+
+
+class TradeCatalogRead(ProfileBusinessTypeOptionRead):
+    active: bool
+    display_order: int
+
+
 class ProfileSignalOptionRead(BaseModel):
     key: str
     label: str

@@ -439,6 +439,15 @@ export type ProfileOptions = {
   batch_size_max: number;
 };
 
+export type TradeCatalogItem = {
+  id: string;
+  key: string;
+  label: string;
+  category?: string | null;
+  active: boolean;
+  display_order: number;
+};
+
 export type PlaceOption = {
   label: string;
   provider: string;

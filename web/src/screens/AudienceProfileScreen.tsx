@@ -1,4 +1,4 @@
-import { ArrowRight, Check, ChevronDown, Copy, LoaderCircle, MapPin, Pencil, Search, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Copy, LoaderCircle, MapPin, Pencil, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useToast } from "../shared-ui";
@@ -32,6 +32,10 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const [hoveredService, setHoveredService] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [tradeAddOpen, setTradeAddOpen] = useState(false);
+  const [newTrade, setNewTrade] = useState("");
+  const [tradeActionBusy, setTradeActionBusy] = useState("");
+  const [tradeActionError, setTradeActionError] = useState("");
   const submittingRef = useRef(false);
   const defaultOpportunityAppliedRef = useRef(false);
 
@@ -44,6 +48,47 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     );
     return () => { active = false; };
   }, [territoryApi]);
+
+  const refreshProfileOptions = async () => {
+    const options = await territoryApi.getProfileOptions();
+    setProfileOptions(options);
+    return options;
+  };
+
+  const addTrade = async () => {
+    const label = newTrade.trim();
+    if (!label || tradeActionBusy) return;
+    setTradeActionBusy("add");
+    setTradeActionError("");
+    try {
+      const created = await territoryApi.createTrade(label);
+      await refreshProfileOptions();
+      setNewTrade("");
+      setTradeAddOpen(false);
+      setNicheId(created.id);
+      showToast({ title: `${created.label} added`, tone: "green" });
+    } catch (error) {
+      setTradeActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTradeActionBusy("");
+    }
+  };
+
+  const hideTrade = async (tradeId: string, label: string) => {
+    if (tradeActionBusy) return;
+    setTradeActionBusy(tradeId);
+    setTradeActionError("");
+    try {
+      await territoryApi.updateTrade(tradeId, { active: false });
+      await refreshProfileOptions();
+      if (nicheId === tradeId) setNicheId("");
+      showToast({ title: `${shortTradeLabel(label)} hidden`, message: "This only changes your trade choices. Existing searches and data remain available.", tone: "green" });
+    } catch (error) {
+      setTradeActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTradeActionBusy("");
+    }
+  };
 
   useEffect(() => {
     if (mode === "create" && !editing) setFolderId(defaultFolderId);
@@ -151,9 +196,11 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
           <div className="audience-compact-field">
             {showTradeSearch ? <label htmlFor="audience-trade-search">Trade</label> : <span className="audience-compact-label">Trade</span>}
             {showTradeSearch ? <div className="audience-trade-search"><Search aria-hidden="true" size={14} /><input autoComplete="off" id="audience-trade-search" placeholder="Search trades…" type="search" value={tradeQuery} onChange={(event) => setTradeQuery(event.target.value)} /></div> : null}
-            <div className="audience-trade-chips" role="listbox" aria-label="Trade">
-              {visibleBusinessTypes.map((businessType) => <button aria-selected={nicheId === businessType.id} className={nicheId === businessType.id ? "is-selected" : ""} key={businessType.id} role="option" type="button" onClick={() => setNicheId(businessType.id)}>{nicheId === businessType.id ? <Check size={13} /> : null}{shortTradeLabel(businessType.label)}</button>)}
+            <div className="audience-trade-chips" role="group" aria-label="Trade">
+              {visibleBusinessTypes.map((businessType) => <div className={`audience-trade-chip${nicheId === businessType.id ? " is-selected" : ""}`} key={businessType.id}><button aria-pressed={nicheId === businessType.id} className="audience-trade-select" disabled={tradeActionBusy === businessType.id} type="button" onClick={() => setNicheId(businessType.id)}>{nicheId === businessType.id ? <Check size={13} /> : null}{shortTradeLabel(businessType.label)}</button><button aria-label={`Hide ${shortTradeLabel(businessType.label)} from my trades`} className="audience-trade-hide" disabled={Boolean(tradeActionBusy)} title="Hide from my trades" type="button" onClick={() => void hideTrade(businessType.id, businessType.label)}>{tradeActionBusy === businessType.id ? <LoaderCircle className="sl-spin" size={12} /> : <X size={12} />}</button></div>)}
+              {tradeAddOpen ? <div className="audience-trade-add-inline"><input aria-label="New trade name" autoFocus placeholder="Add a trade" size={Math.max(10, Math.min(22, newTrade.length + 2))} value={newTrade} onChange={(event) => setNewTrade(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addTrade(); } if (event.key === "Escape") { setTradeAddOpen(false); setNewTrade(""); } }} /><button aria-label="Add trade" disabled={!newTrade.trim() || Boolean(tradeActionBusy)} type="button" onClick={() => void addTrade()}>{tradeActionBusy === "add" ? <LoaderCircle className="sl-spin" size={13} /> : <Check size={13} />}</button><button aria-label="Cancel adding trade" disabled={Boolean(tradeActionBusy)} type="button" onClick={() => { setTradeAddOpen(false); setNewTrade(""); }}><X size={13} /></button></div> : <button aria-label="Add trade" className="audience-trade-add" title="Add trade" type="button" onClick={() => { setTradeAddOpen(true); setTradeActionError(""); }}><Plus size={15} /></button>}
             </div>
+            {tradeActionError ? <p className="audience-row-error">{tradeActionError}</p> : null}
             {!profileOptions && !optionsError ? <p className="audience-row-status"><LoaderCircle className="sl-spin" size={14} />Loading trades</p> : null}
             {profileOptions && !visibleBusinessTypes.length ? <p className="audience-empty-options">No trades match “{tradeQuery}”.</p> : null}
             {optionsError ? <p className="audience-row-error">Trades are unavailable.</p> : null}

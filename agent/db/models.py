@@ -659,6 +659,13 @@ class NicheModel(TimestampMixin, Base):
     category: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     default_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    catalog_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="supported", index=True
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by_workspace_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
     signal_vocabulary: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     search_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
@@ -667,6 +674,19 @@ class NicheModel(TimestampMixin, Base):
     )
     seed_batches: Mapped[list["SeedBatchModel"]] = relationship(back_populates="niche")
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="niche")
+
+
+class WorkspaceNichePreferenceModel(Base):
+    __tablename__ = "workspace_niche_preferences"
+
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    niche_id: Mapped[str] = mapped_column(
+        ForeignKey("niches.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class AudienceFolderModel(TimestampMixin, Base):

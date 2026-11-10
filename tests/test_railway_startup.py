@@ -23,4 +23,6 @@ def test_api_runs_database_migrations_before_deploy() -> None:
     config_path = Path(__file__).parents[1] / "deploy" / "railway" / "api.railway.json"
     config = json.loads(config_path.read_text())
 
-    assert config["deploy"]["preDeployCommand"] == "PYTHONPATH=agent alembic upgrade head"
+    command = config["deploy"]["preDeployCommand"]
+    assert command.startswith("PYTHONPATH=agent alembic upgrade head")
+    assert "python scripts/seed_trade_catalog.py" in command

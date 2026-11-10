@@ -5,7 +5,7 @@ import json
 import re
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from canonical.semantics import semantic_key
@@ -16,6 +16,7 @@ from db.models import (
     LeadOutcomeModel,
     NicheModel,
     SignalDefinitionModel,
+    WorkspaceNichePreferenceModel,
 )
 from outcomes.policy import POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
@@ -306,11 +307,7 @@ class TerritoryService:
         return profile
 
     def profile_options(self) -> list[dict[str, str]]:
-        niches = self.session.scalars(
-            select(NicheModel)
-            .where(NicheModel.active.is_(True))
-            .order_by(NicheModel.label)
-        )
+        rows = self._trade_rows(include_hidden=False)
         return [
             {
                 "id": niche.id,
@@ -318,8 +315,147 @@ class TerritoryService:
                 "label": niche.label,
                 "category": niche.category,
             }
-            for niche in niches
+            for niche, _preference in rows
         ]
+
+    def trade_catalog(self) -> list[dict[str, object]]:
+        return [
+            _trade_catalog_item(niche, preference)
+            for niche, preference in self._trade_rows(include_hidden=True)
+        ]
+
+    def create_trade(self, label: str) -> dict[str, object]:
+        cleaned = normalize_text(label)
+        if len(cleaned) < 2:
+            raise ValidationError("trade name is required")
+        duplicate = self.session.scalar(
+            select(NicheModel).where(
+                func.lower(NicheModel.label) == cleaned.lower(),
+                NicheModel.active.is_(True),
+                or_(
+                    NicheModel.created_by_workspace_id.is_(None),
+                    NicheModel.created_by_workspace_id == self.workspace_id,
+                ),
+            )
+        )
+        if duplicate is not None:
+            preference = self._trade_preference(
+                duplicate.id,
+                display_order=duplicate.display_order,
+            )
+            preference.enabled = True
+            self.session.commit()
+            return _trade_catalog_item(duplicate, preference)
+        base_slug = _slug(cleaned)
+        slug = base_slug
+        suffix = 2
+        while self.session.scalar(select(NicheModel.id).where(NicheModel.slug == slug)):
+            slug = f"{base_slug}_{suffix}"
+            suffix += 1
+        max_order = max(
+            (item[0].display_order for item in self._trade_rows(include_hidden=True)),
+            default=0,
+        )
+        terms = _default_trade_terms(cleaned)
+        niche = NicheModel(
+            id=new_id("niche"),
+            slug=slug,
+            label=cleaned,
+            category=cleaned,
+            default_query=cleaned,
+            active=True,
+            catalog_status="custom",
+            display_order=int(max_order) + 1,
+            created_by_workspace_id=self.workspace_id,
+            search_config={"include_terms": list(dict.fromkeys(terms)), "exclude_terms": []},
+        )
+        self.session.add(niche)
+        self.session.flush()
+        preference = self._trade_preference(
+            niche.id,
+            display_order=niche.display_order,
+        )
+        preference.enabled = True
+        preference.display_order = niche.display_order
+        self.session.commit()
+        self.session.refresh(niche)
+        return _trade_catalog_item(niche, preference)
+
+    def update_trade(
+        self,
+        niche_id: str,
+        *,
+        active: bool,
+    ) -> dict[str, object]:
+        niche = self.session.get(NicheModel, niche_id)
+        if niche is None or niche.created_by_workspace_id not in {None, self.workspace_id}:
+            raise NotFoundError("trade not found", {"trade_id": niche_id})
+        preference = self._trade_preference(
+            niche.id,
+            display_order=niche.display_order,
+        )
+        preference.enabled = active
+        self.session.commit()
+        return _trade_catalog_item(niche, preference)
+
+    def _trade_rows(
+        self,
+        *,
+        include_hidden: bool,
+    ) -> list[tuple[NicheModel, WorkspaceNichePreferenceModel | None]]:
+        statement = (
+            select(NicheModel, WorkspaceNichePreferenceModel)
+            .outerjoin(
+                WorkspaceNichePreferenceModel,
+                and_(
+                    WorkspaceNichePreferenceModel.niche_id == NicheModel.id,
+                    WorkspaceNichePreferenceModel.workspace_id == self.workspace_id,
+                ),
+            )
+            .where(
+                NicheModel.active.is_(True),
+                NicheModel.catalog_status.in_(("supported", "custom")),
+                or_(
+                    NicheModel.created_by_workspace_id.is_(None),
+                    NicheModel.created_by_workspace_id == self.workspace_id,
+                ),
+            )
+            .order_by(
+                func.coalesce(
+                    WorkspaceNichePreferenceModel.display_order,
+                    NicheModel.display_order,
+                ),
+                NicheModel.label,
+            )
+        )
+        if not include_hidden:
+            statement = statement.where(
+                or_(
+                    WorkspaceNichePreferenceModel.enabled.is_(None),
+                    WorkspaceNichePreferenceModel.enabled.is_(True),
+                )
+            )
+        return list(self.session.execute(statement).tuples())
+
+    def _trade_preference(
+        self,
+        niche_id: str,
+        *,
+        display_order: int,
+    ) -> WorkspaceNichePreferenceModel:
+        preference = self.session.get(
+            WorkspaceNichePreferenceModel,
+            (self.workspace_id, niche_id),
+        )
+        if preference is None:
+            preference = WorkspaceNichePreferenceModel(
+                workspace_id=self.workspace_id,
+                niche_id=niche_id,
+                enabled=True,
+                display_order=display_order,
+            )
+            self.session.add(preference)
+        return preference
 
     def profile_signal_options(self) -> list[dict[str, str]]:
         definitions = list(
@@ -623,6 +759,30 @@ def parse_territory_request(value: str, *, default_market: str) -> tuple[str, st
 def _slug(value: str) -> str:
     slug = (semantic_key(value) or "local_business").replace(" ", "_")
     return slug[:255]
+
+
+def _trade_catalog_item(
+    niche: NicheModel,
+    preference: WorkspaceNichePreferenceModel | None,
+) -> dict[str, object]:
+    return {
+        "id": niche.id,
+        "key": niche.slug,
+        "label": niche.label,
+        "category": niche.category,
+        "active": preference.enabled if preference is not None else True,
+        "display_order": (
+            preference.display_order if preference is not None else niche.display_order
+        ),
+    }
+
+
+def _default_trade_terms(label: str) -> list[str]:
+    normalized = semantic_key(label) or label.lower()
+    terms = [normalized]
+    if normalized.endswith("s") and len(normalized) > 3:
+        terms.append(normalized[:-1])
+    return list(dict.fromkeys(terms))
 
 
 def _title_label(value: str) -> str:

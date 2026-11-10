@@ -38,6 +38,9 @@ from territories.schemas import (
     TerritoryResolveRequest,
     TerritoryResolutionRead,
     TerritoryUpdate,
+    TradeCatalogCreate,
+    TradeCatalogRead,
+    TradeCatalogUpdate,
 )
 from territories.service import TerritoryService
 from territories.folders import AudienceFolderService
@@ -228,6 +231,33 @@ def audience_options(session: DbSession, auth: CurrentAuth):
         business_types=service.profile_options(),
         services=service.profile_service_options(),
         opportunity_signals=service.profile_signal_options(),
+    )
+
+
+@audience_router.get("/trades", response_model=list[TradeCatalogRead])
+def list_trades(session: DbSession, auth: CurrentAuth):
+    return _service(session, auth).trade_catalog()
+
+
+@audience_router.post(
+    "/trades",
+    response_model=TradeCatalogRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_trade(data: TradeCatalogCreate, session: DbSession, auth: CurrentAuth):
+    return _service(session, auth).create_trade(data.label)
+
+
+@audience_router.patch("/trades/{trade_id}", response_model=TradeCatalogRead)
+def update_trade(
+    trade_id: str,
+    data: TradeCatalogUpdate,
+    session: DbSession,
+    auth: CurrentAuth,
+):
+    return _service(session, auth).update_trade(
+        trade_id,
+        active=data.active,
     )
 
 
