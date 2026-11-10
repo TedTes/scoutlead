@@ -605,6 +605,7 @@ export type OutreachDraftChannel = "instagram" | "sms" | "email" | "call";
 
 export type OutreachGenerationInput = {
   channels: OutreachDraftChannel[];
+  review_notes?: string | null;
   personal_detail?: string | null;
   concept_url?: string | null;
   concept_features: string[];

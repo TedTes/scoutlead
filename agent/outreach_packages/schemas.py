@@ -51,6 +51,7 @@ class OutreachGenerationInput(BaseModel):
         min_length=1,
         max_length=4,
     )
+    review_notes: str | None = Field(default=None, max_length=4000)
     personal_detail: str | None = Field(default=None, max_length=1000)
     concept_url: str | None = Field(default=None, max_length=2000)
     concept_features: list[str] = Field(default_factory=list, max_length=8)

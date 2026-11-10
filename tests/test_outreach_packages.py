@@ -190,6 +190,7 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
             OutreachGenerateRequest(
                 outreach_input=OutreachGenerationInput(
                     channels=["instagram", "email"],
+                    review_notes="The contact page is difficult to find from the main navigation.",
                     personal_detail="The business has 30 public reviews.",
                     concept_url="https://concept.example/demo",
                     concept_features=["Guided quote request", "Project gallery"],
@@ -202,6 +203,9 @@ def test_explicit_generation_uses_provider_neutral_llm_and_persists_handoff() ->
         assert llm.calls[0]["task"] == "outreach_channel_generation"
         assert llm.calls[0]["context"]["sender"]["identity"] == "Conversion Studio"
         assert llm.calls[0]["context"]["outreach_input"]["persuasion_style"] == "direct_specialist"
+        assert llm.calls[0]["context"]["outreach_input"]["review_notes"] == (
+            "The contact page is difficult to find from the main navigation."
+        )
         assert "Direct specialist" in llm.calls[0]["system"]
         assert package.provider == "test-provider"
         assert package.model == "test-model"
@@ -275,6 +279,7 @@ def test_saving_context_does_not_generate_or_replace_existing_drafts() -> None:
             OutreachGenerateRequest(
                 outreach_input=OutreachGenerationInput(
                     channels=["email"],
+                    review_notes="The website navigation hides the quote request page.",
                     personal_detail="Their project gallery shows careful preparation.",
                     concept_url="https://concept.example/new",
                     concept_features=["Project gallery", "Quote request"],
@@ -285,6 +290,9 @@ def test_saving_context_does_not_generate_or_replace_existing_drafts() -> None:
         assert len(llm.calls) == 1
         assert saved.content.outreach_input.personal_detail == (
             "Their project gallery shows careful preparation."
+        )
+        assert saved.content.outreach_input.review_notes == (
+            "The website navigation hides the quote request page."
         )
         assert saved.content.outreach_input.concept_url == "https://concept.example/new"
         assert saved.content.generated_outreach.channels.instagram.initial == original_message

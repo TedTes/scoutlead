@@ -1476,13 +1476,6 @@ function proposalAngleFromReason(businessName: string, reason: string, fallback:
 const OUTREACH_DRAFT_CHANNELS = ["instagram", "sms", "email", "call"] as const;
 type OutreachDraftChannel = (typeof OUTREACH_DRAFT_CHANNELS)[number];
 
-const PERSUASION_STYLES = [
-  { value: "friendly_adviser", label: "Friendly adviser", description: "Positive detail → useful idea → permission question" },
-  { value: "direct_specialist", label: "Direct specialist", description: "Opportunity → practical benefit → clear next step" },
-  { value: "curious_consultant", label: "Curious consultant", description: "Observation → discovery question → relevant offer" },
-  { value: "visual_demonstrator", label: "Visual demonstrator", description: "Concept or visual idea → benefit → request feedback" },
-] as const;
-
 function outreachDraftChannelLabel(channel: OutreachDraftChannel) {
   return channel === "instagram"
     ? "Instagram"
@@ -1595,7 +1588,6 @@ function OutreachWorkspace({
   const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
   const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
   const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [], persuasion_style: "friendly_adviser" });
-  const [featureText, setFeatureText] = useState("");
   const isContactedHistory = mode === "contacted";
 
   const selectedEvidence = visibleAudienceEvidence(contact);
@@ -1646,12 +1638,12 @@ function OutreachWorkspace({
       const savedInput = existing?.content.outreach_input;
       const loadedInput: OutreachGenerationInput = {
         ...savedInput,
+        review_notes: savedInput?.review_notes || savedInput?.personal_detail || null,
         channels: savedInput?.channels?.length ? savedInput.channels : ["instagram"],
         concept_features: savedInput?.concept_features || [],
         persuasion_style: savedInput?.persuasion_style || "friendly_adviser",
       };
       setOutreachInput(loadedInput);
-      setFeatureText(loadedInput.concept_features.join("\n"));
       const firstSentChannel = OUTREACH_DRAFT_CHANNELS.find(
         (channel) => Boolean(existing?.sent_channels?.[channel]),
       );
@@ -1676,7 +1668,6 @@ function OutreachWorkspace({
     const input = {
       ...outreachInput,
       channels,
-      concept_features: featureText.split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 8),
     };
     try {
       const generated = await onGeneratePackage(input);
@@ -1778,7 +1769,7 @@ function OutreachWorkspace({
     setLoadError("");
     const input: OutreachGenerationInput = {
       ...outreachInput,
-      concept_features: featureText.split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 8),
+      review_notes: outreachInput.review_notes?.trim() || null,
     };
     try {
       const saved = await onSaveContext(input);
@@ -2061,9 +2052,9 @@ function OutreachWorkspace({
             {workspaceTab === "json" ? businessJsonPanel : <>
               <section className="outreach-input-form">
               <details className="outreach-context-drawer" open>
-                <summary><span>Add context</span><em>Optional personalization and proof</em></summary>
+                <summary><span>Add context</span><em>Business-specific notes used in outreach</em></summary>
                 <div>
-                  <label><span>Personal detail <em>optional</em></span><textarea rows={3} value={outreachInput.personal_detail || ""} onChange={(event) => updateContextInput({ ...outreachInput, personal_detail: event.target.value || null })} placeholder="A project, review, photo, or detail you personally verified." /></label>
+                  <label><span>Review notes <em>optional</em></span><textarea rows={5} value={outreachInput.review_notes || ""} onChange={(event) => updateContextInput({ ...outreachInput, review_notes: event.target.value || null })} placeholder="Note what you found on their website: strengths, issues, projects, or details worth referencing." /></label>
                   <label><span>Concept or proof link <em>optional</em></span><input type="url" value={outreachInput.concept_url || ""} onChange={(event) => {
                     const conceptUrl = event.target.value || null;
                     updateContextInput({
@@ -2071,12 +2062,6 @@ function OutreachWorkspace({
                       concept_url: conceptUrl,
                     });
                   }} placeholder="https://…" /></label>
-                  <label><span>Features included <em>optional · one per line</em></span><textarea rows={3} value={featureText} onChange={(event) => {
-                    setFeatureText(event.target.value);
-                    setContextDirty(true);
-                    onDirtyChange(true);
-                  }} placeholder={"Before/after gallery\nMobile quote request\nOne-tap call"} /></label>
-                  <label className="outreach-pitch-style"><span>Pitch style</span><select value={outreachInput.persuasion_style} onChange={(event) => updateContextInput({ ...outreachInput, persuasion_style: event.target.value as OutreachGenerationInput["persuasion_style"] })}>{PERSUASION_STYLES.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select><small>{PERSUASION_STYLES.find((style) => style.value === outreachInput.persuasion_style)?.description}</small></label>
                 </div>
               </details>
               {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
@@ -3338,6 +3323,7 @@ function PersonalizedBulkOutreachPanel({
           const previous = existing?.content.outreach_input;
           const generated = await territoryApi.generateOutreachPackage(resultId, {
             channels: selectedChannels,
+            review_notes: previous?.review_notes || previous?.personal_detail || null,
             personal_detail: previous?.personal_detail || null,
             concept_url: previous?.concept_url || null,
             concept_features: previous?.concept_features || [],
