@@ -4,6 +4,7 @@ dist/
 !/data/seeds/
 /data/seeds/*
 !/data/seeds/*.sample.jsonl
+!/data/seeds/canonical-trade-catalog.json
 !/data/benchmarks/
 /data/benchmarks/*
 !/data/benchmarks/README.md

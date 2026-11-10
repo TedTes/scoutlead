@@ -31,9 +31,11 @@ def test_api_runs_database_migrations_before_deploy() -> None:
 def test_trade_catalog_is_included_in_railway_build_context() -> None:
     root = Path(__file__).parents[1]
     dockerignore = (root / ".dockerignore").read_text().splitlines()
+    gitignore = (root / ".gitignore").read_text().splitlines()
 
     assert "!data/seeds" in dockerignore
     assert "!data/seeds/canonical-trade-catalog.json" in dockerignore
+    assert "!/data/seeds/canonical-trade-catalog.json" in gitignore
 
 
 def test_trade_catalog_changes_trigger_backend_release() -> None:
