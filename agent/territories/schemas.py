@@ -100,6 +100,9 @@ class TerritoryCreate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int = Field(default=25, ge=1, le=250)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
+    min_google_rating: float | None = Field(default=None, ge=0, le=5)
+    min_review_count: int | None = Field(default=None, ge=0)
+    max_review_count: int | None = Field(default=None, ge=0)
     service_keys: list[str] = Field(default_factory=list)
     signal_keys: list[str] = Field(default_factory=list)
     exclusion_keys: list[str] = Field(default_factory=list)
@@ -120,6 +123,12 @@ class TerritoryCreate(BaseModel):
     def require_complete_coordinate_pair(self):
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("latitude and longitude must be provided together")
+        if (
+            self.min_review_count is not None
+            and self.max_review_count is not None
+            and self.min_review_count > self.max_review_count
+        ):
+            raise ValueError("minimum review count cannot exceed maximum review count")
         return self
 
 
@@ -139,6 +148,9 @@ class TerritoryUpdate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int | None = Field(default=None, ge=1, le=250)
     customer_kind: ProfileCustomerKind | None = None
+    min_google_rating: float | None = Field(default=None, ge=0, le=5)
+    min_review_count: int | None = Field(default=None, ge=0)
+    max_review_count: int | None = Field(default=None, ge=0)
     service_keys: list[str] | None = None
     signal_keys: list[str] | None = None
     exclusion_keys: list[str] | None = None
@@ -174,6 +186,9 @@ class TerritoryRead(BaseModel):
     longitude: float | None = None
     radius_km: int
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
+    min_google_rating: float | None = None
+    min_review_count: int | None = None
+    max_review_count: int | None = None
     service_keys: list[str] = Field(default_factory=list)
     signal_keys: list[str] = Field(default_factory=list)
     exclusion_keys: list[str] = Field(default_factory=list)
@@ -233,6 +248,9 @@ class ProfileCreate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     niche_id: str = Field(min_length=1)
     customer_kind: ProfileCustomerKind
+    min_google_rating: float | None = Field(default=None, ge=0, le=5)
+    min_review_count: int | None = Field(default=None, ge=0)
+    max_review_count: int | None = Field(default=None, ge=0)
     market: ProfileMarket
     services: list[str] = Field(default_factory=list, max_length=20)
     signals: list[str] = Field(default_factory=list, max_length=50)
@@ -243,6 +261,16 @@ class ProfileCreate(BaseModel):
     refill_policy: TerritoryRefillPolicy = TerritoryRefillPolicy.WHEN_DEPLETED
     exclude_already_delivered: Literal[True] = True
     clone_from_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def require_valid_review_range(self):
+        if (
+            self.min_review_count is not None
+            and self.max_review_count is not None
+            and self.min_review_count > self.max_review_count
+        ):
+            raise ValueError("minimum review count cannot exceed maximum review count")
+        return self
 
 
 class AudienceFolderCreate(BaseModel):

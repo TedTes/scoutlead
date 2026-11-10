@@ -748,6 +748,9 @@ class TerritoryModel(TimestampMixin, Base):
     customer_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="residential", index=True
     )
+    min_google_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    min_review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     service_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     signal_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     exclusion_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

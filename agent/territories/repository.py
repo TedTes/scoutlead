@@ -46,6 +46,9 @@ class TerritoryRepository:
                 existing.longitude = data.longitude
                 existing.radius_km = data.radius_km
                 existing.customer_kind = data.customer_kind.value
+                existing.min_google_rating = data.min_google_rating
+                existing.min_review_count = data.min_review_count
+                existing.max_review_count = data.max_review_count
                 existing.service_keys = data.service_keys
                 existing.signal_keys = data.signal_keys
                 existing.exclusion_keys = data.exclusion_keys
@@ -89,6 +92,9 @@ class TerritoryRepository:
             longitude=data.longitude,
             radius_km=data.radius_km,
             customer_kind=data.customer_kind.value,
+            min_google_rating=data.min_google_rating,
+            min_review_count=data.min_review_count,
+            max_review_count=data.max_review_count,
             service_keys=data.service_keys,
             signal_keys=data.signal_keys,
             exclusion_keys=data.exclusion_keys,

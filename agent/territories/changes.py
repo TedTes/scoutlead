@@ -88,13 +88,7 @@ class ProfileChangeService:
             .order_by(BusinessFactChangeModel.changed_at.desc())
         )
         if profile.customer_kind != "both":
-            statement = statement.where(
-                or_(
-                    BusinessModel.customer_kind == profile.customer_kind,
-                    BusinessModel.customer_kind == "unknown",
-                    BusinessModel.customer_kind.is_(None),
-                )
-            )
+            statement = statement.where(BusinessModel.customer_kind == profile.customer_kind)
         exclusions = set(profile.exclusion_keys or [])
         if "closed" in exclusions:
             statement = statement.where(BusinessModel.status != "closed")

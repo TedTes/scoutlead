@@ -208,6 +208,11 @@ class AudienceRunService:
     ) -> int:
         """Collect missing, staged, or expired attributes required by an audience."""
         signal_keys = list(dict.fromkeys(audience.signal_keys or []))
+        if audience.min_google_rating is not None:
+            signal_keys.append("google_rating")
+        if audience.min_review_count is not None or audience.max_review_count is not None:
+            signal_keys.append("google_review_count")
+        signal_keys = list(dict.fromkeys(signal_keys))
         if (
             not signal_keys
             or not niches
@@ -261,11 +266,7 @@ class AudienceRunService:
         )
         if audience.customer_kind != "both":
             statement = statement.where(
-                or_(
-                    BusinessModel.customer_kind == audience.customer_kind,
-                    BusinessModel.customer_kind == "unknown",
-                    BusinessModel.customer_kind.is_(None),
-                )
+                BusinessModel.customer_kind == audience.customer_kind
             )
         segment_ids = {
             (segment.niche_id, segment.market_key): segment.id

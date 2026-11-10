@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, case, func, literal, literal_column, or_, select
+from sqlalchemy import and_, case, exists, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from business_facts.eligibility import (
@@ -118,11 +118,33 @@ class ProfileMatchService:
             .where(*searchable_business_conditions())
         )
         if profile.customer_kind != "both":
+            statement = statement.where(BusinessModel.customer_kind == profile.customer_kind)
+
+        if profile.min_google_rating is not None:
             statement = statement.where(
-                or_(
-                    BusinessModel.customer_kind == profile.customer_kind,
-                    BusinessModel.customer_kind == "unknown",
-                    BusinessModel.customer_kind.is_(None),
+                _numeric_fact_exists(
+                    business_id=BusinessModel.id,
+                    fact_key="google_rating",
+                    cutoff=cutoff,
+                    minimum=float(profile.min_google_rating),
+                )
+            )
+        if profile.min_review_count is not None or profile.max_review_count is not None:
+            statement = statement.where(
+                _numeric_fact_exists(
+                    business_id=BusinessModel.id,
+                    fact_key="google_review_count",
+                    cutoff=cutoff,
+                    minimum=(
+                        float(profile.min_review_count)
+                        if profile.min_review_count is not None
+                        else None
+                    ),
+                    maximum=(
+                        float(profile.max_review_count)
+                        if profile.max_review_count is not None
+                        else None
+                    ),
                 )
             )
 
@@ -769,6 +791,36 @@ def _usable_evidence_condition(
         # row here duplicated that decision and hid otherwise publishable facts.
         require_validation=False,
     )
+
+
+def _numeric_fact_exists(
+    *,
+    business_id,
+    fact_key: str,
+    cutoff: datetime,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> Any:
+    """Require current, publishable numeric evidence for an explicit search filter."""
+    fact = aliased(BusinessFactModel, name=f"filter_fact_{fact_key}")
+    conditions: list[Any] = [
+        fact.business_id == business_id,
+        fact.fact_key == fact_key,
+        fact.value_number.is_not(None),
+        fact.observed_at >= cutoff,
+        or_(fact.expires_at.is_(None), fact.expires_at >= utcnow()),
+        eligible_fact_condition(
+            fact,
+            minimum_confidence=DEFAULT_MINIMUM_FACT_CONFIDENCE,
+            require_provenance=True,
+            require_validation=False,
+        ),
+    ]
+    if minimum is not None:
+        conditions.append(fact.value_number >= minimum)
+    if maximum is not None:
+        conditions.append(fact.value_number <= maximum)
+    return exists(select(fact.id).where(*conditions))
 
 
 def _signal_match_confidence(

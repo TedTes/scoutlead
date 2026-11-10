@@ -762,6 +762,72 @@ def test_profile_persists_one_niche_and_supports_both_customer_kinds() -> None:
         assert profile.label == "Painting contractors near Toronto"
 
 
+def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        businesses[0].customer_kind = "residential"
+        businesses[1].customer_kind = "commercial"
+        facts = BusinessFactRepository(session)
+        for business, rating, reviews in (
+            (businesses[0], 4.8, 24),
+            (businesses[1], 4.9, 80),
+        ):
+            source_observation_id = _latest_observation_id(session, business.id)
+            facts.upsert(
+                business.id,
+                BusinessFactValue(
+                    key=BusinessFactKey.GOOGLE_RATING,
+                    value=rating,
+                    observed_at=utcnow(),
+                    source_observation_id=source_observation_id,
+                ),
+            )
+            facts.upsert(
+                business.id,
+                BusinessFactValue(
+                    key=BusinessFactKey.GOOGLE_REVIEW_COUNT,
+                    value=reviews,
+                    observed_at=utcnow(),
+                    source_observation_id=source_observation_id,
+                ),
+            )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                min_google_rating=4.5,
+                min_review_count=10,
+                max_review_count=40,
+                signals=[],
+                exclude=[],
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [businesses[0].display_name]
+        assert profile.min_google_rating == 4.5
+        assert profile.min_review_count == 10
+        assert profile.max_review_count == 40
+
+
 def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -2753,7 +2819,8 @@ def test_overlapping_radius_audiences_reuse_one_business_with_distinct_distances
             source="google_places",
             raw={
                 "id": "places/overlap-painter",
-                    "businessStatus": "OPERATIONAL",
+                "businessStatus": "OPERATIONAL",
+                "customer_kind": "residential",
                 "formattedAddress": "123 Kingston Rd, Scarborough, ON",
                 "location": {"latitude": 43.75, "longitude": -79.28},
                 "source_request_intent": {
@@ -3001,6 +3068,7 @@ def _seed_hvac_businesses(session) -> None:
             raw={
                 "id": f"places/hvac-{index}",
                 "businessStatus": "OPERATIONAL",
+                "customer_kind": "residential",
                 "location": {
                     "latitude": 43.6532 + index / 1000,
                     "longitude": -79.3832 + index / 1000,

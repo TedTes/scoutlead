@@ -9994,6 +9994,146 @@ body.is-resizing-navigation .rail {
   min-width: 0;
 }
 
+.audience-targeting-filters {
+  border-top: 1px solid var(--af-border);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, .9fr) minmax(300px, 1.1fr);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.audience-targeting-filters fieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.audience-targeting-filters legend,
+.audience-google-filters label > span {
+  color: var(--af-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.audience-targeting-filters legend {
+  margin-bottom: 7px;
+}
+
+.audience-customer-options {
+  background: var(--af-surface-sunken);
+  border: 1px solid var(--af-border-strong);
+  border-radius: var(--af-radius-sm);
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
+  width: 100%;
+}
+
+.audience-customer-options label {
+  position: relative;
+}
+
+.audience-customer-options input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.audience-customer-options span {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--af-text-muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  height: 30px;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.audience-customer-options label:has(input:checked) span {
+  background: var(--af-accent-weak);
+  border-color: color-mix(in srgb, var(--af-accent) 25%, transparent);
+  color: var(--af-accent-ink);
+}
+
+.audience-customer-options label:has(input:focus-visible) span {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--af-accent) 14%, transparent);
+}
+
+.audience-google-filters {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(110px, .55fr) minmax(190px, 1fr);
+}
+
+.audience-google-filters > legend {
+  grid-column: 1 / -1;
+  margin-bottom: -3px;
+}
+
+.audience-google-filters label {
+  display: grid;
+  gap: 6px;
+}
+
+.audience-google-filters label > span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.audience-google-filters label > span i {
+  align-items: center;
+  background: var(--af-surface);
+  border: 1px solid var(--af-border-strong);
+  border-radius: 50%;
+  color: var(--af-text);
+  display: inline-flex;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+  height: 15px;
+  justify-content: center;
+  width: 15px;
+}
+
+.audience-google-filters input {
+  background: var(--af-surface-sunken);
+  border: 1px solid var(--af-border-strong);
+  border-radius: var(--af-radius-sm);
+  color: var(--af-text);
+  font: inherit;
+  font-size: 12.5px;
+  height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.audience-google-filters input:focus {
+  border-color: var(--af-text-muted);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--af-text) 7%, transparent);
+  outline: 0;
+}
+
+.audience-number-range {
+  align-items: center;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.audience-number-range > span {
+  color: var(--af-text-subtle);
+  font-size: 11px;
+}
+
 .audience-compact-field > label,
 .audience-compact-field > [id="audience-kind-title"],
 .audience-compact-label {
@@ -10441,6 +10581,10 @@ body.is-resizing-navigation .rail {
     max-width: none;
     text-align: left;
   }
+
+  .audience-targeting-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 520px) {
@@ -10460,6 +10604,14 @@ body.is-resizing-navigation .rail {
 
   .audience-compact-advanced-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audience-google-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audience-google-filters > legend {
+    grid-column: auto;
   }
 
   .audience-footer-submit {
@@ -13431,7 +13583,8 @@ button.bulk-recipient-select:hover {
   color: var(--faint);
 }
 
-.outreach-header-actions > button {
+.outreach-header-actions > button,
+.outreach-header-actions > .outreach-google-profile {
   align-items: center;
   background: var(--panel-muted);
   border: 1px solid var(--line);
@@ -13446,9 +13599,14 @@ button.bulk-recipient-select:hover {
   width: 32px;
 }
 
-.outreach-header-actions > button:hover {
+.outreach-header-actions > button:hover,
+.outreach-header-actions > .outreach-google-profile:hover {
   background: var(--panel);
   color: var(--text);
+}
+
+.outreach-header-actions > .outreach-google-profile {
+  text-decoration: none;
 }
 
 .outreach-header-actions > .outreach-copy-context {

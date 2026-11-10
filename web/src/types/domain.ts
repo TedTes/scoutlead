@@ -343,6 +343,9 @@ export type Territory = {
   longitude?: number | null;
   radius_km: number;
   customer_kind: ProfileCustomerKind;
+  min_google_rating?: number | null;
+  min_review_count?: number | null;
+  max_review_count?: number | null;
   service_keys: string[];
   signal_keys: string[];
   exclusion_keys: string[];
@@ -477,6 +480,9 @@ export type ProfileCreateInput = {
   name?: string;
   niche_id: string;
   customer_kind: ProfileCustomerKind;
+  min_google_rating?: number | null;
+  min_review_count?: number | null;
+  max_review_count?: number | null;
   market: {
     place_label: string;
     place_provider: string;

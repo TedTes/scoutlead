@@ -249,6 +249,9 @@ class TerritoryService:
         criteria = {
             "niche_id": niche.id,
             "customer_kind": customer_kind,
+            "min_google_rating": data.min_google_rating,
+            "min_review_count": data.min_review_count,
+            "max_review_count": data.max_review_count,
             "city": semantic_key(city),
             "radius_km": data.market.radius_km,
             "signals": signals,
@@ -275,6 +278,9 @@ class TerritoryService:
                 longitude=resolved_market.longitude,
                 radius_km=data.market.radius_km,
                 customer_kind=data.customer_kind,
+                min_google_rating=data.min_google_rating,
+                min_review_count=data.min_review_count,
+                max_review_count=data.max_review_count,
                 service_keys=service_keys,
                 signal_keys=signals,
                 exclusion_keys=exclusions,
@@ -615,6 +621,9 @@ class TerritoryService:
             "place_label",
             "radius_km",
             "customer_kind",
+            "min_google_rating",
+            "min_review_count",
+            "max_review_count",
             "service_keys",
             "signal_keys",
             "exclusion_keys",
@@ -622,6 +631,20 @@ class TerritoryService:
             "min_fit",
         }
         criteria_changed = bool(criteria_fields & values.keys())
+        prospective_min_reviews = values.get("min_review_count", model.min_review_count)
+        prospective_max_reviews = values.get("max_review_count", model.max_review_count)
+        if (
+            prospective_min_reviews is not None
+            and prospective_max_reviews is not None
+            and prospective_min_reviews > prospective_max_reviews
+        ):
+            raise ValidationError(
+                "minimum review count cannot exceed maximum review count",
+                {
+                    "min_review_count": prospective_min_reviews,
+                    "max_review_count": prospective_max_reviews,
+                },
+            )
         normalized = TerritoryUpdate.model_validate(
             {key: value for key, value in values.items() if key != "market_key"}
         )
@@ -635,6 +658,9 @@ class TerritoryService:
                 "city": model.city,
                 "radius_km": model.radius_km,
                 "customer_kind": model.customer_kind,
+                "min_google_rating": model.min_google_rating,
+                "min_review_count": model.min_review_count,
+                "max_review_count": model.max_review_count,
                 "service_keys": model.service_keys,
                 "signal_keys": model.signal_keys,
                 "exclusion_keys": model.exclusion_keys,
@@ -801,6 +827,9 @@ def _structured_profile_criteria(data: TerritoryCreate) -> dict:
     return {
         "niche_id": data.niche_id,
         "customer_kind": data.customer_kind.value,
+        "min_google_rating": data.min_google_rating,
+        "min_review_count": data.min_review_count,
+        "max_review_count": data.max_review_count,
         "city": semantic_key(data.city or data.market_key),
         "radius_km": data.radius_km,
         "services": list(data.service_keys),

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { PlaceOption, ProfileCreateInput, ProfileExclusion, ProfileOptions, Territory } from "../types/domain";
+import type { PlaceOption, ProfileCreateInput, ProfileCustomerKind, ProfileExclusion, ProfileOptions, Territory } from "../types/domain";
 
 const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
 const VISIBLE_OPPORTUNITY_KEYS = new Set(["website_availability", "website_upgrade"]);
@@ -25,6 +25,10 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const [placeBusy, setPlaceBusy] = useState(false);
   const [placeOpen, setPlaceOpen] = useState(false);
   const [radiusKm, setRadiusKm] = useState(25);
+  const [customerKinds, setCustomerKinds] = useState<Array<Exclude<ProfileCustomerKind, "both">>>(["residential", "commercial"]);
+  const [minGoogleRating, setMinGoogleRating] = useState("4.3");
+  const [minReviewCount, setMinReviewCount] = useState("20");
+  const [maxReviewCount, setMaxReviewCount] = useState("150");
   const [batchSize, setBatchSize] = useState(25);
   const [refillPolicy, setRefillPolicy] = useState<Territory["refill_policy"]>("when_depleted");
   const [folderId, setFolderId] = useState(defaultFolderId);
@@ -123,7 +127,8 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const enabledServices = serviceOptions.filter((service) => service.enabled && VISIBLE_OPPORTUNITY_KEYS.has(service.key));
   const enabledServiceKeys = new Set(enabledServices.map((service) => service.key));
   const activeService = serviceOptions.find((service) => service.key === hoveredService);
-  const valid = Boolean(selectedProductId && nicheId && selectedPlace && services.length && services.every((service) => enabledServiceKeys.has(service)));
+  const reviewRangeValid = !minReviewCount || !maxReviewCount || Number(minReviewCount) <= Number(maxReviewCount);
+  const valid = Boolean(selectedProductId && nicheId && selectedPlace && customerKinds.length && services.length && services.every((service) => enabledServiceKeys.has(service)) && reviewRangeValid);
   const activeBatch = useMemo(() => profileBatch?.audience.id === selectedProfile?.id ? profileBatch : null, [profileBatch, selectedProfile?.id]);
 
   useEffect(() => {
@@ -142,6 +147,10 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     setSelectedPlace(place);
     setPlaceQuery(place?.label || selectedProfile.place_label || selectedProfile.city);
     setRadiusKm(selectedProfile.radius_km);
+    setCustomerKinds(selectedProfile.customer_kind === "both" ? ["residential", "commercial"] : [selectedProfile.customer_kind]);
+    setMinGoogleRating(optionalNumberInput(selectedProfile.min_google_rating));
+    setMinReviewCount(optionalNumberInput(selectedProfile.min_review_count));
+    setMaxReviewCount(optionalNumberInput(selectedProfile.max_review_count));
     setBatchSize(selectedProfile.batch_size);
     setRefillPolicy(selectedProfile.refill_policy);
     setFolderId(selectedProfile.folder_id || "");
@@ -160,15 +169,20 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     if (!valid || !selectedPlace || submittingRef.current) return;
     submittingRef.current = true;
     setSaving(true);
-    const customerKind = mode === "create" ? "both" : selectedProfile?.customer_kind || "both";
+    const fitFilters = {
+      customer_kind: customerKinds.length === 2 ? "both" as const : customerKinds[0] || "both",
+      min_google_rating: optionalNumber(minGoogleRating),
+      min_review_count: optionalNumber(minReviewCount),
+      max_review_count: optionalNumber(maxReviewCount),
+    };
     const market = { place_label: selectedPlace.label, place_provider: selectedPlace.provider, place_external_id: selectedPlace.external_id, country_code: selectedPlace.country_code, latitude: selectedPlace.latitude, longitude: selectedPlace.longitude, radius_km: radiusKm };
     try {
       if (mode === "edit" && selectedProfile) {
-        await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), folder_id: folderId || null, niche_id: nicheId, customer_kind: customerKind, ...market, service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
+        await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), folder_id: folderId || null, niche_id: nicheId, ...fitFilters, ...market, service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
         setEditing(false);
         showToast({ title: "Search updated", message: "New criteria will apply to the next batch.", tone: "green" });
       } else {
-        const input: ProfileCreateInput = { product_id: selectedProductId, folder_id: folderId || null, name: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, customer_kind: customerKind, market, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
+        const input: ProfileCreateInput = { product_id: selectedProductId, folder_id: folderId || null, name: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, ...fitFilters, market, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
         await createProfile(input);
         setEditing(false);
         setMode("create");
@@ -182,7 +196,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     }
   };
 
-  const formHint = getFormHint(nicheId, selectedPlace, services);
+  const formHint = getFormHint(nicheId, selectedPlace, customerKinds.length, services, reviewRangeValid);
   const generatedName = autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions);
   const opportunityHelp = activeService ? opportunityDescription(activeService.key, activeService.description)
     : services.length ? `${services.length} selected — leads must match at least one website outcome.` : "Choose whether to find businesses with no website, a website that needs improvement, or both.";
@@ -204,6 +218,18 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
             {!profileOptions && !optionsError ? <p className="audience-row-status"><LoaderCircle className="sl-spin" size={14} />Loading trades</p> : null}
             {profileOptions && !visibleBusinessTypes.length ? <p className="audience-empty-options">No trades match “{tradeQuery}”.</p> : null}
             {optionsError ? <p className="audience-row-error">Trades are unavailable.</p> : null}
+          </div>
+          <div className="audience-targeting-filters">
+            <fieldset className="audience-customer-kind">
+              <legend>Customer type</legend>
+              <div className="audience-customer-options">
+                {(["residential", "commercial"] as const).map((value) => <label key={value}><input checked={customerKinds.includes(value)} type="checkbox" value={value} onChange={() => setCustomerKinds(toggleValue(customerKinds, value))} /><span>{value[0].toUpperCase() + value.slice(1)}</span></label>)}
+              </div>
+            </fieldset>
+            <fieldset className="audience-google-filters">
+              <label><span><i aria-hidden="true">G</i> Rating</span><input aria-label="Minimum Google rating" inputMode="decimal" max="5" min="0" step="0.1" type="number" value={minGoogleRating} onChange={(event) => setMinGoogleRating(event.target.value)} /></label>
+              <label><span><i aria-hidden="true">G</i> Reviews</span><div className="audience-number-range"><input aria-label="Minimum Google review count" inputMode="numeric" min="0" step="1" type="number" value={minReviewCount} onChange={(event) => setMinReviewCount(event.target.value)} /><span>to</span><input aria-label="Maximum Google review count" inputMode="numeric" min="0" step="1" type="number" value={maxReviewCount} onChange={(event) => setMaxReviewCount(event.target.value)} /></div></label>
+            </fieldset>
           </div>
         </section>
 
@@ -259,7 +285,9 @@ function shortTradeLabel(label: string) {
   return shortened.replace(/\bhvac\b/gi, "HVAC");
 }
 function toggleValue<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
-function getFormHint(nicheId: string, place: PlaceOption | null, services: string[]) { if (!nicheId) return "Choose a trade to continue."; if (!place) return "Select and confirm a city to continue."; if (!services.length) return "Choose a website opportunity to continue."; return "Ready to find leads."; }
+function getFormHint(nicheId: string, place: PlaceOption | null, customerKindCount: number, services: string[], reviewRangeValid: boolean) { if (!nicheId) return "Choose a trade to continue."; if (!customerKindCount) return "Choose at least one customer type."; if (!place) return "Select and confirm a city to continue."; if (!services.length) return "Choose a website opportunity to continue."; if (!reviewRangeValid) return "Minimum reviews cannot exceed maximum reviews."; return "Ready to find leads."; }
+function optionalNumber(value: string): number | null { return value.trim() === "" ? null : Number(value); }
+function optionalNumberInput(value?: number | null): string { return value == null ? "" : String(value); }
 function placeProviderLabel(value: string) { if (value === "google_places") return "Google Places"; if (value === "openstreetmap_nominatim") return "OpenStreetMap"; return "ScoutLead"; }
 function batchStateLabel(state?: string) { if (state === "scoring") return "Building"; if (state === "retrying") return "Retrying"; if (state === "ready") return "Ready"; if (state === "partial") return "Partial"; if (state === "empty") return "No matches"; if (state === "failed") return "Needs attention"; return "Set up"; }
 function batchStateCopy(batch: ReturnType<typeof useAppData>["profileBatch"]) { if (!batch) return "No lead batch has been generated for this saved search yet."; if (["scoring", "retrying"].includes(batch.state)) return "ScoutLead is collecting and evaluating businesses. You can leave this page."; if (["ready", "partial"].includes(batch.state)) return `${batch.remaining_count} leads remain for review.`; if (batch.state === "failed") return "The latest batch could not be completed."; return "No indexed businesses matched this search."; }
