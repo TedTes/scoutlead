@@ -7,7 +7,10 @@
 **/.env.*.local
 **/__pycache__
 **/*.pyc
-data
+data/*
+!data/seeds
+data/seeds/*
+!data/seeds/canonical-trade-catalog.json
 examples
 tests
 web/node_modules

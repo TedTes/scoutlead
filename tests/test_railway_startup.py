@@ -26,3 +26,19 @@ def test_api_runs_database_migrations_before_deploy() -> None:
     command = config["deploy"]["preDeployCommand"]
     assert command.startswith("PYTHONPATH=agent alembic upgrade head")
     assert "python scripts/seed_trade_catalog.py" in command
+
+
+def test_trade_catalog_is_included_in_railway_build_context() -> None:
+    root = Path(__file__).parents[1]
+    dockerignore = (root / ".dockerignore").read_text().splitlines()
+
+    assert "!data/seeds" in dockerignore
+    assert "!data/seeds/canonical-trade-catalog.json" in dockerignore
+
+
+def test_trade_catalog_changes_trigger_backend_release() -> None:
+    workflow_path = Path(__file__).parents[1] / ".github" / "workflows" / "ci-release.yml"
+    workflow = workflow_path.read_text()
+
+    assert "data/seeds/canonical-trade-catalog\\.json" in workflow
+    assert "seed_trade_catalog" in workflow

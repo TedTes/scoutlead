@@ -106,7 +106,7 @@ jobs:
           migrations=false
           web=false
 
-          if printf '%s\n' "$changed" | grep -Eq '^(agent/|Dockerfile|\.dockerignore|pyproject\.toml|alembic\.ini|deploy/railway/|scripts/(apply_railway_service_config|railway_up_ci|start_railway_service|serve_web_static)\.py)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(agent/|data/seeds/canonical-trade-catalog\.json|Dockerfile|\.dockerignore|pyproject\.toml|alembic\.ini|deploy/railway/|scripts/(apply_railway_service_config|railway_up_ci|seed_trade_catalog|start_railway_service|serve_web_static)\.py)'; then
             backend=true
           fi
           if printf '%s\n' "$changed" | grep -Eq '^(agent/db/migrations/|agent/db/models\.py|alembic\.ini)'; then
