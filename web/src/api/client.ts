@@ -387,6 +387,20 @@ export class ApiClient {
     return this.request<import("../types/domain").PlaceOption[]>(`/audiences/places?q=${encodeURIComponent(query)}`);
   }
 
+  listLocationCountries() {
+    return this.request<import("../types/domain").LocationCountry[]>("/audiences/location-catalog/countries");
+  }
+
+  listLocationRegions(countryCode: string) {
+    return this.request<import("../types/domain").LocationRegion[]>(`/audiences/location-catalog/regions?country_code=${encodeURIComponent(countryCode)}`);
+  }
+
+  listLocationCities(countryCode: string, regionCode?: string) {
+    const params = new URLSearchParams({ country_code: countryCode });
+    if (regionCode) params.set("region_code", regionCode);
+    return this.request<import("../types/domain").LocationCity[]>(`/audiences/location-catalog/cities?${params.toString()}`);
+  }
+
   deleteProfile(id: string) {
     return this.request<void>(`/audiences/${id}`, { method: "DELETE" });
   }

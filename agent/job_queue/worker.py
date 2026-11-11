@@ -182,14 +182,16 @@ def _execute_job(
                 ],
                 source_recipes=services.settings.source_template_configs,
             )
-            queued_niche_ids = (
-                set(
-                    session.scalars(
-                        select(BusinessIndexSegmentModel.niche_id).where(
-                            BusinessIndexSegmentModel.id.in_(segment_ids)
-                        )
+            queued_segments = (
+                {
+                    (row.niche_id, row.market_key)
+                    for row in session.execute(
+                        select(
+                            BusinessIndexSegmentModel.niche_id,
+                            BusinessIndexSegmentModel.market_key,
+                        ).where(BusinessIndexSegmentModel.id.in_(segment_ids))
                     )
-                )
+                }
                 if segment_ids
                 else set()
             )
@@ -201,7 +203,7 @@ def _execute_job(
                 CoverageRequestModel.run_id == run.id,
                 CoverageRequestModel.status == "queued",
             ):
-                if request.niche_id in queued_niche_ids:
+                if (request.niche_id, request.market_key) in queued_segments:
                     request.status = "processing"
                     processing_count += 1
                 else:

@@ -33,6 +33,7 @@ from shared.geospatial import haversine_distance_km_expression
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 from canonical.normalization import normalize_domain, normalize_email, normalize_phone
+from canonical.semantics import semantic_key
 from leads.schemas import LeadContactPolicyUpdate, ContactPolicyStatus
 from suppressions.repository import ContactSuppressionRepository
 from territories.matching import ProfileMatchService
@@ -213,19 +214,23 @@ class AudienceRunService:
         if audience.min_review_count is not None or audience.max_review_count is not None:
             signal_keys.append("google_review_count")
         signal_keys = list(dict.fromkeys(signal_keys))
-        if (
-            not signal_keys
-            or not niches
-            or audience.latitude is None
-            or audience.longitude is None
-        ):
+        if not signal_keys or not niches:
             return 0
-        distance_km = haversine_distance_km_expression(
-            center_latitude=audience.latitude,
-            center_longitude=audience.longitude,
-            latitude=BusinessModel.latitude,
-            longitude=BusinessModel.longitude,
+        location_market_keys = _audience_location_market_keys(audience)
+        distance_km = (
+            None
+            if location_market_keys
+            else haversine_distance_km_expression(
+                center_latitude=audience.latitude,
+                center_longitude=audience.longitude,
+                latitude=BusinessModel.latitude,
+                longitude=BusinessModel.longitude,
+            )
+            if audience.latitude is not None and audience.longitude is not None
+            else None
         )
+        if distance_km is None and not location_market_keys:
+            return 0
         fact = aliased(BusinessFactModel, name="required_attribute_fact")
         statement = (
             select(
@@ -259,11 +264,18 @@ class AudienceRunService:
                 ),
                 active_membership_condition(),
                 *searchable_business_conditions(),
+            )
+        )
+        if location_market_keys:
+            statement = statement.where(
+                BusinessNicheMembershipModel.market_key.in_(location_market_keys)
+            )
+        else:
+            statement = statement.where(
                 BusinessModel.latitude.is_not(None),
                 BusinessModel.longitude.is_not(None),
                 distance_km <= float(audience.radius_km),
             )
-        )
         if audience.customer_kind != "both":
             statement = statement.where(
                 BusinessModel.customer_kind == audience.customer_kind
@@ -497,29 +509,32 @@ class AudienceRunService:
     def _request_coverage(self, run, audience, niches) -> bool:
         created = False
         deficit = max(0, run.requested_count - run.result_count)
+        market_keys = _audience_location_market_keys(audience) or [audience.market_key]
         for niche in niches:
-            existing = self.session.scalar(
-                select(CoverageRequestModel)
-                .where(
-                    CoverageRequestModel.run_id == run.id,
-                    CoverageRequestModel.niche_id == niche.id,
+            for market_key in market_keys:
+                existing = self.session.scalar(
+                    select(CoverageRequestModel)
+                    .where(
+                        CoverageRequestModel.run_id == run.id,
+                        CoverageRequestModel.niche_id == niche.id,
+                        CoverageRequestModel.market_key == market_key,
+                    )
+                    .limit(1)
                 )
-                .limit(1)
-            )
-            if existing is not None:
-                continue
-            self.session.add(
-                CoverageRequestModel(
-                    id=new_id("coverage"),
-                    run_id=run.id,
-                    audience_id=audience.id,
-                    niche_id=niche.id,
-                    market_key=audience.market_key,
-                    requested_count=deficit,
-                    status="queued",
+                if existing is not None:
+                    continue
+                self.session.add(
+                    CoverageRequestModel(
+                        id=new_id("coverage"),
+                        run_id=run.id,
+                        audience_id=audience.id,
+                        niche_id=niche.id,
+                        market_key=market_key,
+                        requested_count=deficit,
+                        status="queued",
+                    )
                 )
-            )
-            created = True
+                created = True
         return created
 
     def _complete_coverage(self, run_id: str) -> None:
@@ -564,7 +579,6 @@ class AudienceRunService:
         ):
             raise NotFoundError("audience not found", {"audience_id": audience_id})
         return audience
-
     def _run(self, run_id: str) -> AudienceRunModel:
         run = self.session.get(AudienceRunModel, run_id)
         if run is None or (
@@ -734,6 +748,20 @@ class AudienceRunService:
         if phone:
             identifiers.add(("phone", phone))
         return sorted(identifiers)
+
+
+def _audience_location_market_keys(audience: TerritoryModel) -> list[str]:
+    return list(
+        dict.fromkeys(
+            semantic_key(
+                str(location.get("label") or location.get("city") or "")
+            )
+            for location in (audience.locations or [])
+            if semantic_key(
+                str(location.get("label") or location.get("city") or "")
+            )
+        )
+    )
 
 
 def _business_id(row: dict) -> str:

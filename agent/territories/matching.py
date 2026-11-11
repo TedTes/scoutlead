@@ -21,6 +21,7 @@ from canonical.normalization import (
     normalize_phone,
     phone_from_raw,
 )
+from canonical.semantics import semantic_key
 from db.models import (
     BusinessFactModel,
     BusinessModel,
@@ -117,6 +118,11 @@ class ProfileMatchService:
             .where(active_membership_condition())
             .where(*searchable_business_conditions())
         )
+        location_market_keys = _profile_location_market_keys(profile)
+        if location_market_keys:
+            statement = statement.where(
+                BusinessNicheMembershipModel.market_key.in_(location_market_keys)
+            )
         if profile.customer_kind != "both":
             statement = statement.where(BusinessModel.customer_kind == profile.customer_kind)
 
@@ -197,7 +203,9 @@ class ProfileMatchService:
             )
 
         distance_km_expression = None
-        if profile.latitude is not None and profile.longitude is not None:
+        if location_market_keys:
+            distance_km_expression = None
+        elif profile.latitude is not None and profile.longitude is not None:
             distance_km_expression = haversine_distance_km_expression(
                 center_latitude=profile.latitude,
                 center_longitude=profile.longitude,
@@ -403,7 +411,6 @@ class ProfileMatchService:
             )
             for definition in definitions
         ]
-
     def _active_outcome_weights(
         self,
         *,
@@ -761,6 +768,16 @@ class ProfileMatchService:
             "source": observation.source if observation else "business_index",
             "raw": raw,
         }
+
+
+def _profile_location_market_keys(profile) -> list[str]:
+    return list(
+        dict.fromkeys(
+            semantic_key(str(location.get("label") or location.get("city") or ""))
+            for location in (profile.locations or [])
+            if semantic_key(str(location.get("label") or location.get("city") or ""))
+        )
+    )
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:

@@ -342,6 +342,18 @@ export type Territory = {
   latitude?: number | null;
   longitude?: number | null;
   radius_km: number;
+  locations?: Array<{
+    id: string;
+    city: string;
+    label: string;
+    provider: string;
+    external_id?: string | null;
+    country_code?: string | null;
+    region_code?: string | null;
+    region_name?: string | null;
+    latitude: number;
+    longitude: number;
+  }>;
   customer_kind: ProfileCustomerKind;
   min_google_rating?: number | null;
   min_review_count?: number | null;
@@ -376,6 +388,7 @@ export type AudiencePerformance = {
   niche_label?: string | null;
   place_label: string;
   radius_km: number;
+  location_count?: number;
   state: string;
   lead_count: number;
   shortlisted_count: number;
@@ -460,6 +473,20 @@ export type PlaceOption = {
   longitude: number;
 };
 
+export type LocationCountry = { code: string; name: string };
+export type LocationRegion = { code: string; name: string };
+export type LocationCity = {
+  id: string;
+  name: string;
+  label: string;
+  country_code: string;
+  region_code?: string | null;
+  region_name?: string | null;
+  latitude: number;
+  longitude: number;
+  population: number;
+};
+
 export type ProfileFactChange = {
   id: string;
   business_id: string;
@@ -483,7 +510,7 @@ export type ProfileCreateInput = {
   min_google_rating?: number | null;
   min_review_count?: number | null;
   max_review_count?: number | null;
-  market: {
+  market?: {
     place_label: string;
     place_provider: string;
     place_external_id?: string | null;
@@ -492,6 +519,18 @@ export type ProfileCreateInput = {
     longitude: number;
     radius_km: number;
   };
+  markets?: Array<{
+    city: string;
+    place_label: string;
+    place_provider: string;
+    place_external_id?: string | null;
+    country_code?: string | null;
+    region_code?: string | null;
+    region_name?: string | null;
+    latitude: number;
+    longitude: number;
+    radius_km?: number;
+  }>;
   services: string[];
   signals: ProfileSignal[];
   exclude: ProfileExclusion[];
@@ -541,6 +580,8 @@ export type ProfileBatch = {
   requested_count: number;
   result_count: number;
   remaining_count: number;
+  location_count?: number;
+  locations_completed?: number;
   failure_class?: "rate_limit" | "quota" | "other" | null;
   retry_at?: string | null;
 };

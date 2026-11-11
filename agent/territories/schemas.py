@@ -99,6 +99,7 @@ class TerritoryCreate(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int = Field(default=25, ge=1, le=250)
+    locations: list[dict] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
@@ -147,6 +148,7 @@ class TerritoryUpdate(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int | None = Field(default=None, ge=1, le=250)
+    locations: list[dict] | None = None
     customer_kind: ProfileCustomerKind | None = None
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
@@ -185,6 +187,7 @@ class TerritoryRead(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     radius_km: int
+    locations: list[dict] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     min_google_rating: float | None = None
     min_review_count: int | None = None
@@ -220,6 +223,9 @@ class ProfileMarket(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     radius_km: int = Field(default=25, ge=1, le=250)
+    city: str | None = Field(default=None, min_length=1, max_length=255)
+    region_code: str | None = Field(default=None, max_length=16)
+    region_name: str | None = Field(default=None, max_length=255)
 
     @field_validator("place_label")
     @classmethod
@@ -251,7 +257,8 @@ class ProfileCreate(BaseModel):
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
     max_review_count: int | None = Field(default=None, ge=0)
-    market: ProfileMarket
+    market: ProfileMarket | None = None
+    markets: list[ProfileMarket] = Field(default_factory=list, max_length=5000)
     services: list[str] = Field(default_factory=list, max_length=20)
     signals: list[str] = Field(default_factory=list, max_length=50)
     exclude: list[ProfileExclusion] = Field(
@@ -264,6 +271,8 @@ class ProfileCreate(BaseModel):
 
     @model_validator(mode="after")
     def require_valid_review_range(self):
+        if self.market is None and not self.markets:
+            raise ValueError("at least one city is required")
         if (
             self.min_review_count is not None
             and self.max_review_count is not None
@@ -271,6 +280,9 @@ class ProfileCreate(BaseModel):
         ):
             raise ValueError("minimum review count cannot exceed maximum review count")
         return self
+
+    def selected_markets(self) -> list[ProfileMarket]:
+        return self.markets or ([self.market] if self.market is not None else [])
 
 
 class AudienceFolderCreate(BaseModel):
@@ -358,6 +370,28 @@ class PlaceRead(BaseModel):
     longitude: float
 
 
+class LocationCountryRead(BaseModel):
+    code: str
+    name: str
+
+
+class LocationRegionRead(BaseModel):
+    code: str
+    name: str
+
+
+class LocationCityRead(BaseModel):
+    id: str
+    name: str
+    label: str
+    country_code: str
+    region_code: str | None = None
+    region_name: str | None = None
+    latitude: float
+    longitude: float
+    population: int = 0
+
+
 class ProfileQueuedRead(BaseModel):
     audience: TerritoryRead
     job: QueueJobRead
@@ -372,5 +406,7 @@ class ProfileBatchRead(BaseModel):
     requested_count: int
     result_count: int
     remaining_count: int
+    location_count: int = 1
+    locations_completed: int = 0
     failure_class: Literal["rate_limit", "quota", "other"] | None = None
     retry_at: datetime | None = None

@@ -697,7 +697,7 @@ function AudienceSidebarRow({
   return <div className="audience-list-row">
     <button className={`audience-list-main ${selected ? "active" : ""}`} aria-label={profile.label} title={profile.label} type="button" onClick={onOpen}>
       {switching ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} /> : <Users className="lead-workspace-icon" size={15} />}
-      <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.place_label || profile.city} · {profile.radius_km} km</small></span>
+      <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.locations?.length ? (profile.locations.length === 1 ? profile.locations[0].label : `${profile.locations.length} cities`) : `${profile.place_label || profile.city} · ${profile.radius_km} km`}</small></span>
     </button>
     <div className="audience-row-actions">
       <button aria-expanded={menuOpen} aria-label={`Actions for ${profile.label}`} type="button" onClick={onMenuToggle}><MoreVertical size={15} /></button>

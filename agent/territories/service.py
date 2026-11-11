@@ -25,7 +25,7 @@ from products.repository import DEFAULT_WORKSPACE_ID, ProductRepository
 from service_definitions.repository import ServiceDefinitionRepository
 from shared.errors import NotFoundError, ValidationError
 from shared.utils import new_id, normalize_text, utcnow
-from territories.geocoding import MarketGeocoder
+from territories.geocoding import GeocodedMarket, MarketGeocoder
 from territories.repository import TerritoryRepository
 from territories.schemas import (
     ProfileCreate,
@@ -208,10 +208,23 @@ class TerritoryService:
                 self.session,
                 workspace_id=self.workspace_id,
             ).get_or_create_for_niche(product_id=data.product_id, niche=niche).id
-        place_label = normalize_text(data.market.place_label)
+        selected_markets = data.selected_markets()
+        primary_market = selected_markets[0]
+        place_label = normalize_text(primary_market.place_label)
         city = place_label.split(",", 1)[0].strip() or place_label
         customer_kind = data.customer_kind.value
-        resolved_market = self.market_geocoder.resolve(place_label)
+        resolved_market = (
+            GeocodedMarket(
+                latitude=primary_market.latitude,
+                longitude=primary_market.longitude,
+                label=place_label,
+                provider=primary_market.place_provider,
+                external_id=primary_market.place_external_id,
+                country_code=primary_market.country_code,
+            )
+            if data.markets
+            else self.market_geocoder.resolve(place_label)
+        )
         if resolved_market is None:
             raise ValidationError(
                 "market coordinates are unavailable",
@@ -220,7 +233,7 @@ class TerritoryService:
                     "reason": "A profile radius requires a stored market center.",
                 },
             )
-        country_code = (resolved_market.country_code or data.market.country_code or "").lower() or None
+        country_code = (resolved_market.country_code or primary_market.country_code or "").lower() or None
         if country_code and country_code not in {"ca", "us", "mx"}:
             raise ValidationError(
                 "selected place is outside the supported market",
@@ -246,6 +259,31 @@ class TerritoryService:
                 {"signal_keys": unknown_signals},
             )
         exclusions = [exclusion.value for exclusion in data.exclude]
+        locations = []
+        if data.markets:
+            seen_location_ids: set[str] = set()
+            for market in selected_markets:
+                location_id = market.place_external_id or semantic_key(market.place_label)
+                if not location_id or location_id in seen_location_ids:
+                    continue
+                seen_location_ids.add(location_id)
+                location_city = normalize_text(
+                    market.city or market.place_label.split(",", 1)[0]
+                )
+                locations.append(
+                    {
+                        "id": location_id,
+                        "city": location_city,
+                        "label": normalize_text(market.place_label),
+                        "provider": market.place_provider,
+                        "external_id": market.place_external_id,
+                        "country_code": (market.country_code or "").lower() or None,
+                        "region_code": market.region_code,
+                        "region_name": market.region_name,
+                        "latitude": market.latitude,
+                        "longitude": market.longitude,
+                    }
+                )
         criteria = {
             "niche_id": niche.id,
             "customer_kind": customer_kind,
@@ -253,7 +291,8 @@ class TerritoryService:
             "min_review_count": data.min_review_count,
             "max_review_count": data.max_review_count,
             "city": semantic_key(city),
-            "radius_km": data.market.radius_km,
+            "radius_km": primary_market.radius_km,
+            "locations": [location["id"] for location in locations],
             "signals": signals,
             "services": service_keys,
             "exclude": exclusions,
@@ -276,7 +315,8 @@ class TerritoryService:
                 country_code=country_code,
                 latitude=resolved_market.latitude,
                 longitude=resolved_market.longitude,
-                radius_km=data.market.radius_km,
+                radius_km=primary_market.radius_km,
+                locations=locations,
                 customer_kind=data.customer_kind,
                 min_google_rating=data.min_google_rating,
                 min_review_count=data.min_review_count,
@@ -284,7 +324,15 @@ class TerritoryService:
                 service_keys=service_keys,
                 signal_keys=signals,
                 exclusion_keys=exclusions,
-                label=data.name or f"{niche.label} near {city}",
+                label=data.name or (
+                    (
+                        f"{niche.label} in {len(locations)} cities"
+                        if len(locations) > 1
+                        else f"{niche.label} in {city}"
+                    )
+                    if data.markets
+                    else f"{niche.label} near {city}"
+                ),
                 refill_policy=data.refill_policy,
                 batch_size=data.limit,
                 criteria_hash=_criteria_hash(criteria),
@@ -537,6 +585,50 @@ class TerritoryService:
     def update(self, territory_id: str, update: TerritoryUpdate):
         model = self.territories.get(territory_id)
         values = update.model_dump(mode="python", exclude_unset=True)
+        if "locations" in values:
+            locations = values["locations"] or []
+            normalized_locations: list[dict] = []
+            seen_location_ids: set[str] = set()
+            for location in locations:
+                location_id = normalize_text(str(location.get("id") or location.get("external_id") or ""))
+                city = normalize_text(str(location.get("city") or ""))
+                label = normalize_text(str(location.get("label") or city))
+                latitude = location.get("latitude")
+                longitude = location.get("longitude")
+                if not location_id or not city or latitude is None or longitude is None:
+                    raise ValidationError(
+                        "each selected city requires an id, name, and coordinates",
+                        {"location": location},
+                    )
+                if location_id in seen_location_ids:
+                    continue
+                seen_location_ids.add(location_id)
+                normalized_locations.append({
+                    "id": location_id,
+                    "city": city,
+                    "label": label,
+                    "provider": location.get("provider") or "geonames",
+                    "external_id": location.get("external_id") or location_id,
+                    "country_code": (str(location.get("country_code") or "").lower() or None),
+                    "region_code": location.get("region_code"),
+                    "region_name": location.get("region_name"),
+                    "latitude": float(latitude),
+                    "longitude": float(longitude),
+                })
+            if not normalized_locations:
+                raise ValidationError("select at least one city")
+            values["locations"] = normalized_locations
+            primary = normalized_locations[0]
+            values.update({
+                "city": primary["city"],
+                "place_label": primary["label"],
+                "place_provider": primary["provider"],
+                "place_external_id": primary["external_id"],
+                "country_code": primary["country_code"],
+                "latitude": primary["latitude"],
+                "longitude": primary["longitude"],
+                "market_key": semantic_key(primary["label"]) or model.market_key,
+            })
         if "niche_id" in values:
             niche = self.session.get(NicheModel, values["niche_id"])
             if niche is None or not niche.active:
@@ -556,7 +648,7 @@ class TerritoryService:
                     "audience folder belongs to another product",
                     {"folder_id": folder.id},
                 )
-        if "place_label" in values or "city" in values:
+        if "locations" not in values and ("place_label" in values or "city" in values):
             requested_place = normalize_text(
                 values.get("place_label") or values.get("city") or model.place_label or model.city
             )
@@ -606,7 +698,7 @@ class TerritoryService:
             values["signal_keys"] = self.services.signal_keys(service_keys)
         prospective_latitude = values.get("latitude", model.latitude)
         prospective_longitude = values.get("longitude", model.longitude)
-        location_changed = bool({"city", "place_label", "radius_km"} & values.keys())
+        location_changed = bool({"city", "place_label", "radius_km", "locations"} & values.keys())
         if location_changed and (prospective_latitude is None or prospective_longitude is None):
             raise ValidationError(
                 "market coordinates are unavailable",
@@ -620,6 +712,7 @@ class TerritoryService:
             "city",
             "place_label",
             "radius_km",
+            "locations",
             "customer_kind",
             "min_google_rating",
             "min_review_count",
@@ -657,6 +750,7 @@ class TerritoryService:
                 "niche_id": model.niche_id,
                 "city": model.city,
                 "radius_km": model.radius_km,
+                "locations": [location.get("id") for location in (model.locations or [])],
                 "customer_kind": model.customer_kind,
                 "min_google_rating": model.min_google_rating,
                 "min_review_count": model.min_review_count,
@@ -832,6 +926,7 @@ def _structured_profile_criteria(data: TerritoryCreate) -> dict:
         "max_review_count": data.max_review_count,
         "city": semantic_key(data.city or data.market_key),
         "radius_km": data.radius_km,
+        "locations": [location.get("id") for location in data.locations],
         "services": list(data.service_keys),
         "signals": list(data.signal_keys),
         "exclude": list(data.exclusion_keys),

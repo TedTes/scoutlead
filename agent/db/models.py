@@ -515,7 +515,12 @@ class AudienceResultModel(TimestampMixin, Base):
 class CoverageRequestModel(TimestampMixin, Base):
     __tablename__ = "coverage_requests"
     __table_args__ = (
-        UniqueConstraint("run_id", "niche_id", name="uq_coverage_requests_run_niche"),
+        UniqueConstraint(
+            "run_id",
+            "niche_id",
+            "market_key",
+            name="uq_coverage_requests_run_niche_market",
+        ),
         Index("ix_coverage_requests_status_created", "status", "created_at"),
     )
 
@@ -745,6 +750,9 @@ class TerritoryModel(TimestampMixin, Base):
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     radius_km: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    locations: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     customer_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="residential", index=True
     )

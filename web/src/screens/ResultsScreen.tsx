@@ -2943,7 +2943,7 @@ function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClo
         </header>
         <dl>
           <div><dt>Business type</dt><dd>{profile.niche_label || "Supported business type"}</dd></div>
-          <div><dt>Market</dt><dd>{profile.place_label || profile.city} · {profile.radius_km} km</dd></div>
+          <div><dt>Market</dt><dd>{profile.locations?.length ? (profile.locations.length === 1 ? profile.locations[0].label : `${profile.locations.length} cities`) : `${profile.place_label || profile.city} · ${profile.radius_km} km`}</dd></div>
           <div><dt>Batch size</dt><dd>{profile.batch_size} leads</dd></div>
           <div><dt>Refill</dt><dd>{refillPolicyLabel(profile.refill_policy)}</dd></div>
         </dl>

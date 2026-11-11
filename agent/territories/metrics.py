@@ -47,6 +47,7 @@ class AudiencePerformanceRead(BaseModel):
     niche_label: str | None = None
     place_label: str
     radius_km: int
+    location_count: int = 1
     state: str
     lead_count: int
     shortlisted_count: int
@@ -193,6 +194,7 @@ class TerritoryMetricsService:
                     niche_label=niche_labels.get(audience.id),
                     place_label=audience.place_label or audience.city,
                     radius_km=audience.radius_km,
+                    location_count=max(1, len(audience.locations or [])),
                     state=run.state if run else "setup",
                     lead_count=lead_count,
                     shortlisted_count=shortlisted_count,

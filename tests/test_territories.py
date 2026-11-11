@@ -762,6 +762,129 @@ def test_profile_persists_one_niche_and_supports_both_customer_kinds() -> None:
         assert profile.label == "Painting contractors near Toronto"
 
 
+def test_multi_city_profile_creates_city_specific_coverage_requests() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(
+            session,
+            slug="home_service_painting",
+            label="Painting contractors",
+        )
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                customer_kind="both",
+                markets=[
+                    {
+                        "city": "Toronto",
+                        "place_label": "Toronto, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6167865",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 43.70643,
+                        "longitude": -79.39864,
+                    },
+                    {
+                        "city": "Ottawa",
+                        "place_label": "Ottawa, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6094817",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 45.41117,
+                        "longitude": -75.69812,
+                    },
+                ],
+                services=[],
+                signals=[],
+                exclude=[],
+            )
+        )
+
+        assert profile.label == "Painting contractors in 2 cities"
+        assert [location["city"] for location in profile.locations] == [
+            "Toronto",
+            "Ottawa",
+        ]
+        runs = AudienceRunService(session, workspace_id="workspace:first")
+        run = runs.create(profile.id)
+        runs.process(run.id)
+        requests = list(
+            session.scalars(
+                select(CoverageRequestModel)
+                .where(CoverageRequestModel.run_id == run.id)
+                .order_by(CoverageRequestModel.market_key)
+            )
+        )
+        assert [request.market_key for request in requests] == [
+            "ottawa ontario canada",
+            "toronto ontario canada",
+        ]
+
+
+def test_multi_city_profile_can_replace_its_selected_cities() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(
+            session,
+            slug="home_service_painting",
+            label="Painting contractors",
+        )
+        service = TerritoryService(session, workspace_id="workspace:first")
+        profile = service.create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                customer_kind="both",
+                markets=[{
+                    "city": "Toronto",
+                    "place_label": "Toronto, Ontario, Canada",
+                    "place_provider": "geonames",
+                    "place_external_id": "geonames:6167865",
+                    "country_code": "ca",
+                    "region_code": "08",
+                    "region_name": "Ontario",
+                    "latitude": 43.70643,
+                    "longitude": -79.39864,
+                }],
+                services=[],
+                signals=[],
+                exclude=[],
+            )
+        )
+
+        updated = service.update(
+            profile.id,
+            TerritoryUpdate(
+                locations=[{
+                    "id": "geonames:6094817",
+                    "city": "Ottawa",
+                    "label": "Ottawa, Ontario, Canada",
+                    "provider": "geonames",
+                    "external_id": "geonames:6094817",
+                    "country_code": "ca",
+                    "region_code": "08",
+                    "region_name": "Ontario",
+                    "latitude": 45.41117,
+                    "longitude": -75.69812,
+                }]
+            ),
+        )
+
+        assert updated.city == "Ottawa"
+        assert updated.market_key == "ottawa ontario canada"
+        assert updated.locations[0]["id"] == "geonames:6094817"
+
+
 def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

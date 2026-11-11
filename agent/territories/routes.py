@@ -9,6 +9,8 @@ from audience_runs.service import AudienceRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from db.models import (
     AudienceRunModel,
+    BusinessIndexSegmentModel,
+    CoverageRequestModel,
     QueueJobModel,
 )
 from job_queue.schemas import JobStatus, JobType
@@ -32,6 +34,9 @@ from territories.schemas import (
     ProfileCreate,
     ProfileOptionsRead,
     PlaceRead,
+    LocationCityRead,
+    LocationCountryRead,
+    LocationRegionRead,
     ProfileQueuedRead,
     TerritoryCreate,
     TerritoryRead,
@@ -44,6 +49,7 @@ from territories.schemas import (
 )
 from territories.service import TerritoryService
 from territories.folders import AudienceFolderService
+from territories.location_catalog import cities, countries, regions
 
 
 audience_router = APIRouter(prefix="/audiences", tags=["audiences"])
@@ -286,6 +292,26 @@ def search_places(
     ]
 
 
+@audience_router.get("/location-catalog/countries", response_model=list[LocationCountryRead])
+def location_countries(session: DbSession, auth: CurrentAuth):
+    return countries()
+
+
+@audience_router.get("/location-catalog/regions", response_model=list[LocationRegionRead])
+def location_regions(country_code: str, session: DbSession, auth: CurrentAuth):
+    return regions(country_code)
+
+
+@audience_router.get("/location-catalog/cities", response_model=list[LocationCityRead])
+def location_cities(
+    country_code: str,
+    session: DbSession,
+    auth: CurrentAuth,
+    region_code: str | None = None,
+):
+    return cities(country_code, region_code)
+
+
 @audience_router.get("/{audience_id}", response_model=TerritoryRead)
 def get_audience(audience_id: str, session: DbSession, auth: CurrentAuth):
     return _service(session, auth).get_read(audience_id)
@@ -420,6 +446,35 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
         and lead.review_status.value != "not_fit"
         for lead in leads
     )
+    coverage_requests = (
+        list(
+            session.scalars(
+                select(CoverageRequestModel).where(
+                    CoverageRequestModel.run_id == latest_run.id
+                )
+            )
+        )
+        if latest_run is not None
+        else []
+    )
+    location_count = max(1, len(profile.locations or []))
+    refreshed_segments = {
+        (row.niche_id, row.market_key)
+        for row in session.execute(
+            select(
+                BusinessIndexSegmentModel.niche_id,
+                BusinessIndexSegmentModel.market_key,
+            ).where(BusinessIndexSegmentModel.last_refresh_at.is_not(None))
+        )
+    }
+    locations_completed = len(
+        {
+            request.market_key
+            for request in coverage_requests
+            if request.status in {"completed", "failed"}
+            or (request.niche_id, request.market_key) in refreshed_segments
+        }
+    )
     if active_job is not None and (
         active_job.attempts > 1
         or (
@@ -456,6 +511,8 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
         requested_count=profile.batch_size,
         result_count=len(leads),
         remaining_count=remaining,
+        location_count=location_count,
+        locations_completed=min(location_count, locations_completed),
         failure_class=(
             _failure_class(
                 latest_job.last_error

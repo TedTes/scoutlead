@@ -52,7 +52,7 @@ export function AudiencesOverviewScreen({ onOpenAudience }: { onOpenAudience: (i
               </div>
               {rows.map((row) => (
                 <button className="audiences-overview-row" key={row.audience_id} type="button" onClick={() => onOpenAudience(row.audience_id)}>
-                  <span className="audiences-overview-name"><Users size={16} /><span><strong>{row.label}</strong><small>{row.place_label} · {row.radius_km} km</small></span></span>
+                  <span className="audiences-overview-name"><Users size={16} /><span><strong>{row.label}</strong><small>{row.location_count && row.location_count > 1 ? `${row.location_count} cities` : `${row.place_label} · ${row.radius_km} km`}</small></span></span>
                   <strong>{row.lead_count}</strong>
                   <span><strong>{row.shortlisted_count}</strong><small>{formatRate(row.shortlist_rate)}</small></span>
                   <span><strong>{row.contacted_count}</strong><small>{formatRate(row.contact_rate)}</small></span>

@@ -1,9 +1,9 @@
-import { ArrowRight, Check, ChevronDown, Copy, LoaderCircle, MapPin, Pencil, Plus, Search, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Copy, LoaderCircle, Pencil, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useToast } from "../shared-ui";
 import { useAppData } from "../state/app-data";
-import type { PlaceOption, ProfileCreateInput, ProfileCustomerKind, ProfileExclusion, ProfileOptions, Territory } from "../types/domain";
+import type { LocationCity, LocationCountry, LocationRegion, ProfileCreateInput, ProfileCustomerKind, ProfileExclusion, ProfileOptions, Territory } from "../types/domain";
 
 const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
 const VISIBLE_OPPORTUNITY_KEYS = new Set(["website_availability", "website_upgrade"]);
@@ -19,12 +19,14 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const [name, setName] = useState("");
   const [nicheId, setNicheId] = useState("");
   const [tradeQuery, setTradeQuery] = useState("");
-  const [placeQuery, setPlaceQuery] = useState("");
-  const [selectedPlace, setSelectedPlace] = useState<PlaceOption | null>(null);
-  const [placeOptions, setPlaceOptions] = useState<PlaceOption[]>([]);
-  const [placeBusy, setPlaceBusy] = useState(false);
-  const [placeOpen, setPlaceOpen] = useState(false);
-  const [radiusKm, setRadiusKm] = useState(25);
+  const [countries, setCountries] = useState<LocationCountry[]>([]);
+  const [regions, setRegions] = useState<LocationRegion[]>([]);
+  const [cities, setCities] = useState<LocationCity[]>([]);
+  const [countryCode, setCountryCode] = useState("CA");
+  const [regionCode, setRegionCode] = useState("");
+  const [selectedCityIds, setSelectedCityIds] = useState<string[]>([]);
+  const [cityQuery, setCityQuery] = useState("");
+  const [citiesBusy, setCitiesBusy] = useState(false);
   const [customerKinds, setCustomerKinds] = useState<Array<Exclude<ProfileCustomerKind, "both">>>(["residential", "commercial"]);
   const [minGoogleRating, setMinGoogleRating] = useState("4.3");
   const [minReviewCount, setMinReviewCount] = useState("20");
@@ -99,20 +101,52 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   }, [defaultFolderId, editing, mode]);
 
   useEffect(() => {
-    if (!placeOpen || selectedPlace?.label === placeQuery || placeQuery.trim().length < 2) {
-      if (placeQuery.trim().length < 2) setPlaceOptions([]);
-      return;
-    }
     let active = true;
-    const timer = window.setTimeout(() => {
-      setPlaceBusy(true);
-      void territoryApi.searchPlaces(placeQuery.trim()).then(
-        (options) => { if (active) setPlaceOptions(options); },
-        () => { if (active) setPlaceOptions([]); },
-      ).finally(() => { if (active) setPlaceBusy(false); });
-    }, 300);
-    return () => { active = false; window.clearTimeout(timer); };
-  }, [placeOpen, placeQuery, selectedPlace?.label, territoryApi]);
+    setCitiesBusy(true);
+    void Promise.all([
+      territoryApi.listLocationCountries(),
+      territoryApi.listLocationRegions("CA"),
+      territoryApi.listLocationCities("CA"),
+    ]).then(([countryOptions, regionOptions, cityOptions]) => {
+      if (!active) return;
+      setCountries(countryOptions);
+      setRegions(regionOptions);
+      setCities(cityOptions);
+      setSelectedCityIds(cityOptions.map((city) => city.id));
+    }).catch(() => {
+      if (active) setOptionsError(true);
+    }).finally(() => {
+      if (active) setCitiesBusy(false);
+    });
+    return () => { active = false; };
+  }, [territoryApi]);
+
+  const loadLocationScope = async (nextCountry: string, nextRegion: string, selectedIds?: string[], selectedNames: string[] = []) => {
+    setCitiesBusy(true);
+    try {
+      const [regionOptions, cityOptions] = await Promise.all([
+        territoryApi.listLocationRegions(nextCountry),
+        territoryApi.listLocationCities(nextCountry, nextRegion || undefined),
+      ]);
+      setCountryCode(nextCountry);
+      setRegionCode(nextRegion);
+      setRegions(regionOptions);
+      setCities(cityOptions);
+      const available = new Set(cityOptions.map((city) => city.id));
+      const desiredNames = new Set(selectedNames.map((name) => name.trim().toLowerCase()).filter(Boolean));
+      const retained = selectedIds === undefined
+        ? cityOptions.map((city) => city.id)
+        : cityOptions
+          .filter((city) => available.has(city.id) && (selectedIds.includes(city.id) || desiredNames.has(city.name.toLowerCase())))
+          .map((city) => city.id);
+      setSelectedCityIds(retained);
+      setCityQuery("");
+    } catch (error) {
+      showToast({ title: "Cities could not be loaded", message: error instanceof Error ? error.message : String(error), tone: "red" });
+    } finally {
+      setCitiesBusy(false);
+    }
+  };
 
   const businessTypes = profileOptions?.business_types || [];
   const selectedNiche = businessTypes.find((option) => option.id === nicheId);
@@ -128,7 +162,9 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const enabledServiceKeys = new Set(enabledServices.map((service) => service.key));
   const activeService = serviceOptions.find((service) => service.key === hoveredService);
   const reviewRangeValid = !minReviewCount || !maxReviewCount || Number(minReviewCount) <= Number(maxReviewCount);
-  const valid = Boolean(selectedProductId && nicheId && selectedPlace && customerKinds.length && services.length && services.every((service) => enabledServiceKeys.has(service)) && reviewRangeValid);
+  const selectedCities = useMemo(() => { const selected = new Set(selectedCityIds); return cities.filter((city) => selected.has(city.id)); }, [cities, selectedCityIds]);
+  const visibleCities = useMemo(() => { const query = cityQuery.trim().toLowerCase(); return query ? cities.filter((city) => `${city.name} ${city.region_name || ""}`.toLowerCase().includes(query)) : cities; }, [cities, cityQuery]);
+  const valid = Boolean(selectedProductId && nicheId && selectedCities.length && customerKinds.length && services.length && services.every((service) => enabledServiceKeys.has(service)) && reviewRangeValid);
   const activeBatch = useMemo(() => profileBatch?.audience.id === selectedProfile?.id ? profileBatch : null, [profileBatch, selectedProfile?.id]);
 
   useEffect(() => {
@@ -143,10 +179,15 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     setEditing(true);
     setName(nextMode === "clone" ? `${selectedProfile.label} copy` : selectedProfile.label);
     setNicheId(selectedProfile.niche_id);
-    const place = profilePlace(selectedProfile);
-    setSelectedPlace(place);
-    setPlaceQuery(place?.label || selectedProfile.place_label || selectedProfile.city);
-    setRadiusKm(selectedProfile.radius_km);
+    const storedLocations = selectedProfile.locations || [];
+    const nextCountry = (storedLocations[0]?.country_code || selectedProfile.country_code || "CA").toUpperCase();
+    const nextRegion = storedLocations.length && storedLocations.every((location) => location.region_code === storedLocations[0]?.region_code) ? storedLocations[0]?.region_code || "" : "";
+    void loadLocationScope(
+      nextCountry,
+      nextRegion,
+      storedLocations.map((location) => location.id),
+      storedLocations.length ? storedLocations.map((location) => location.city) : [selectedProfile.city],
+    );
     setCustomerKinds(selectedProfile.customer_kind === "both" ? ["residential", "commercial"] : [selectedProfile.customer_kind]);
     setMinGoogleRating(optionalNumberInput(selectedProfile.min_google_rating));
     setMinReviewCount(optionalNumberInput(selectedProfile.min_review_count));
@@ -160,13 +201,13 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   if (selectedProfile && !editing) {
     const scoring = activeBatch?.state === "scoring" || activeBatch?.state === "retrying";
     return <section className="audience-status-screen">
-      <header className="audience-page-heading audience-status-heading"><div><span>Saved search</span><h1>{selectedProfile.label}</h1><p>{selectedProfile.niche_label || "Local businesses"} · {selectedProfile.place_label || selectedProfile.city} · {selectedProfile.radius_km} km</p></div><div className="audience-status-actions"><button className="secondary" type="button" onClick={() => beginEdit("clone")}><Copy size={14} /> Copy</button><button className="secondary" type="button" onClick={() => beginEdit("edit")}><Pencil size={14} /> Edit</button></div></header>
+      <header className="audience-page-heading audience-status-heading"><div><span>Saved search</span><h1>{selectedProfile.label}</h1><p>{selectedProfile.niche_label || "Local businesses"} · {profileLocationSummary(selectedProfile)}</p></div><div className="audience-status-actions"><button className="secondary" type="button" onClick={() => beginEdit("clone")}><Copy size={14} /> Copy</button><button className="secondary" type="button" onClick={() => beginEdit("edit")}><Pencil size={14} /> Edit</button></div></header>
       <div className="audience-status-panel"><span className={`audience-state is-${activeBatch?.state || "setup"}`}>{scoring ? <LoaderCircle className="sl-spin" size={15} /> : <Check size={15} />}{batchStateLabel(activeBatch?.state)}</span><strong>{activeBatch?.result_count || 0} leads in the current batch</strong><p>{batchStateCopy(activeBatch)}</p></div>
     </section>;
   }
 
   const submit = async () => {
-    if (!valid || !selectedPlace || submittingRef.current) return;
+    if (!valid || !selectedCities.length || submittingRef.current) return;
     submittingRef.current = true;
     setSaving(true);
     const fitFilters = {
@@ -175,14 +216,14 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
       min_review_count: optionalNumber(minReviewCount),
       max_review_count: optionalNumber(maxReviewCount),
     };
-    const market = { place_label: selectedPlace.label, place_provider: selectedPlace.provider, place_external_id: selectedPlace.external_id, country_code: selectedPlace.country_code, latitude: selectedPlace.latitude, longitude: selectedPlace.longitude, radius_km: radiusKm };
+    const markets = selectedCities.map((city) => ({ city: city.name, place_label: city.label, place_provider: "geonames", place_external_id: city.id, country_code: city.country_code, region_code: city.region_code, region_name: city.region_name, latitude: city.latitude, longitude: city.longitude }));
     try {
       if (mode === "edit" && selectedProfile) {
-        await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), folder_id: folderId || null, niche_id: nicheId, ...fitFilters, ...market, service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
+        await updateProfile(selectedProfile.id, { label: name.trim() || autoName(selectedNiche?.label, selectedCities, services, serviceOptions), folder_id: folderId || null, niche_id: nicheId, ...fitFilters, locations: markets.map((market) => ({ id: market.place_external_id, city: market.city, label: market.place_label, provider: market.place_provider, external_id: market.place_external_id, country_code: market.country_code, region_code: market.region_code, region_name: market.region_name, latitude: market.latitude, longitude: market.longitude })), service_keys: services, batch_size: batchSize, refill_policy: refillPolicy, exclusion_keys: SYSTEM_EXCLUSIONS });
         setEditing(false);
         showToast({ title: "Search updated", message: "New criteria will apply to the next batch.", tone: "green" });
       } else {
-        const input: ProfileCreateInput = { product_id: selectedProductId, folder_id: folderId || null, name: name.trim() || autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions), niche_id: nicheId, ...fitFilters, market, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
+        const input: ProfileCreateInput = { product_id: selectedProductId, folder_id: folderId || null, name: name.trim() || autoName(selectedNiche?.label, selectedCities, services, serviceOptions), niche_id: nicheId, ...fitFilters, markets, services, signals: [], exclude: SYSTEM_EXCLUSIONS, limit: batchSize, refill_policy: refillPolicy, exclude_already_delivered: true, ...(mode === "clone" && selectedProfile ? { clone_from_id: selectedProfile.id } : {}) };
         await createProfile(input);
         setEditing(false);
         setMode("create");
@@ -196,8 +237,8 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     }
   };
 
-  const formHint = getFormHint(nicheId, selectedPlace, customerKinds.length, services, reviewRangeValid);
-  const generatedName = autoName(selectedNiche?.label, selectedPlace, radiusKm, services, serviceOptions);
+  const formHint = getFormHint(nicheId, selectedCities.length, customerKinds.length, services, reviewRangeValid);
+  const generatedName = autoName(selectedNiche?.label, selectedCities, services, serviceOptions);
   const opportunityHelp = activeService ? opportunityDescription(activeService.key, activeService.description)
     : services.length ? `${services.length} selected — leads must match at least one website outcome.` : "Choose whether to find businesses with no website, a website that needs improvement, or both.";
 
@@ -235,19 +276,28 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
 
         <section className="audience-compact-section" aria-labelledby="audience-market-title">
           <header className="audience-section-heading"><span>02</span><h2 id="audience-market-title">Where to search</h2></header>
-          <div className="audience-compact-field audience-location-field">
-            <label htmlFor="audience-place-search">Location</label>
-            <div className={`audience-place-picker${selectedPlace ? " is-confirmed" : ""}`}>
-              {selectedPlace ? <Check aria-hidden="true" size={15} /> : <MapPin aria-hidden="true" size={15} />}
-              <input autoComplete="off" id="audience-place-search" placeholder="Search for a city" value={placeQuery} onFocus={() => setPlaceOpen(true)} onChange={(event) => { setPlaceQuery(event.target.value); setSelectedPlace(null); setPlaceOpen(true); }} />
-              {placeBusy ? <LoaderCircle className="sl-spin" size={14} /> : null}
-              {placeQuery ? <button aria-label="Clear place" type="button" onClick={() => { setPlaceQuery(""); setSelectedPlace(null); setPlaceOptions([]); }}><X size={14} /></button> : null}
-              {placeOpen && placeOptions.length ? <div className="audience-place-options" role="listbox">{placeOptions.map((place) => <button aria-selected="false" key={`${place.provider}:${place.external_id || place.label}`} role="option" type="button" onClick={() => { setSelectedPlace(place); setPlaceQuery(place.label); setPlaceOpen(false); setPlaceOptions([]); }}><MapPin size={14} /><span>{place.label}</span></button>)}</div> : null}
+          <div className="audience-compact-field audience-location-field audience-location-scope">
+            <div className="audience-location-selects">
+              <label><span>Country</span><select value={countryCode} onChange={(event) => void loadLocationScope(event.target.value, "")}>
+                {countries.map((country) => <option key={country.code} value={country.code}>{country.name}</option>)}
+              </select></label>
+              <label><span>Province or state</span><select value={regionCode} onChange={(event) => void loadLocationScope(countryCode, event.target.value)}>
+                <option value="">All {countryCode === "CA" ? "provinces and territories" : countryCode === "US" ? "states" : "regions"}</option>
+                {regions.map((region) => <option key={region.code} value={region.code}>{region.name}</option>)}
+              </select></label>
             </div>
-            {selectedPlace ? <p className="audience-place-resolved"><Check size={12} />Resolved to {selectedPlace.label} · {placeProviderLabel(selectedPlace.provider)}</p> : <p className="audience-field-help">Select a result to confirm the search center.</p>}
-            <div className="audience-radius-options audience-compact-radius" role="radiogroup" aria-label="Coverage radius">
-              {(profileOptions?.radius_presets || [10, 25, 50]).map((value) => <button aria-pressed={radiusKm === value} className={radiusKm === value ? "is-selected" : ""} disabled={!selectedPlace} key={value} type="button" onClick={() => setRadiusKm(value)}>{value} km</button>)}
+            <div className="audience-city-toolbar">
+              <label className="audience-city-search"><Search aria-hidden="true" size={14} /><input aria-label="Filter cities" placeholder="Filter cities" type="search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} /></label>
+              <strong>{selectedCities.length} of {cities.length} cities selected</strong>
+              <button type="button" onClick={() => setSelectedCityIds(cities.map((city) => city.id))}>Select all</button>
+              <button type="button" onClick={() => setSelectedCityIds([])}>Clear</button>
             </div>
+            <div className="audience-city-list" role="group" aria-label="Cities to search">
+              {citiesBusy ? <p className="audience-row-status"><LoaderCircle className="sl-spin" size={14} />Loading cities</p> : null}
+              {!citiesBusy && visibleCities.map((city) => { const selected = selectedCityIds.includes(city.id); return <label className={selected ? "is-selected" : ""} key={city.id}><input checked={selected} type="checkbox" onChange={() => setSelectedCityIds(toggleValue(selectedCityIds, city.id))} /><span><strong>{city.name}</strong>{city.region_name ? <small>{city.region_name}</small> : null}</span>{selected ? <Check size={13} /> : null}</label>; })}
+              {!citiesBusy && !visibleCities.length ? <p className="audience-empty-options">No cities match “{cityQuery}”.</p> : null}
+            </div>
+            <p className="audience-field-help">Each selected city is collected independently. One saved search tracks the combined progress.</p>
           </div>
         </section>
 
@@ -273,8 +323,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   </section>;
 }
 
-function profilePlace(profile: Territory): PlaceOption | null { if (profile.latitude == null || profile.longitude == null) return null; return { label: profile.place_label || profile.city, provider: profile.place_provider || "stored", external_id: profile.place_external_id, country_code: profile.country_code, latitude: profile.latitude, longitude: profile.longitude }; }
-function autoName(nicheLabel: string | undefined, place: PlaceOption | null, radiusKm: number, services: string[], serviceOptions: ProfileOptions["services"]) { const selected = serviceOptions.filter((service) => services.includes(service.key)); const opportunity = selected.length > 1 ? "Website opportunities" : selected[0] ? opportunityLabel(selected[0].key, selected[0].label) : null; return [nicheLabel && place ? `${shortTradeLabel(nicheLabel)} near ${place.label.split(",")[0]}` : nicheLabel ? shortTradeLabel(nicheLabel) : null, place ? `${radiusKm} km` : null, opportunity].filter(Boolean).join(" · "); }
+function autoName(nicheLabel: string | undefined, cities: LocationCity[], services: string[], serviceOptions: ProfileOptions["services"]) { const selected = serviceOptions.filter((service) => services.includes(service.key)); const opportunity = selected.length > 1 ? "Website opportunities" : selected[0] ? opportunityLabel(selected[0].key, selected[0].label) : null; const location = cities.length === 1 ? cities[0].name : cities.length > 1 ? `${cities.length} cities` : null; return [nicheLabel && location ? `${shortTradeLabel(nicheLabel)} in ${location}` : nicheLabel ? shortTradeLabel(nicheLabel) : null, opportunity].filter(Boolean).join(" · "); }
 function opportunityLabel(key: string, fallback: string) { if (key === "website_availability") return "No website"; if (key === "website_upgrade") return "Website needs improvement"; return fallback; }
 function opportunityDescription(key: string, fallback?: string | null) { if (key === "website_availability") return "Find active businesses without a verified owned website."; if (key === "website_upgrade") return "Find websites with measured technical, mobile, or customer-conversion gaps."; return fallback || "Find businesses that match this website opportunity."; }
 function shortTradeLabel(label: string) {
@@ -285,9 +334,9 @@ function shortTradeLabel(label: string) {
   return shortened.replace(/\bhvac\b/gi, "HVAC");
 }
 function toggleValue<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
-function getFormHint(nicheId: string, place: PlaceOption | null, customerKindCount: number, services: string[], reviewRangeValid: boolean) { if (!nicheId) return "Choose a trade to continue."; if (!customerKindCount) return "Choose at least one customer type."; if (!place) return "Select and confirm a city to continue."; if (!services.length) return "Choose a website opportunity to continue."; if (!reviewRangeValid) return "Minimum reviews cannot exceed maximum reviews."; return "Ready to find leads."; }
+function getFormHint(nicheId: string, cityCount: number, customerKindCount: number, services: string[], reviewRangeValid: boolean) { if (!nicheId) return "Choose a trade to continue."; if (!customerKindCount) return "Choose at least one customer type."; if (!cityCount) return "Select at least one city to continue."; if (!services.length) return "Choose a website opportunity to continue."; if (!reviewRangeValid) return "Minimum reviews cannot exceed maximum reviews."; return `Ready to search ${cityCount} ${cityCount === 1 ? "city" : "cities"}.`; }
 function optionalNumber(value: string): number | null { return value.trim() === "" ? null : Number(value); }
 function optionalNumberInput(value?: number | null): string { return value == null ? "" : String(value); }
-function placeProviderLabel(value: string) { if (value === "google_places") return "Google Places"; if (value === "openstreetmap_nominatim") return "OpenStreetMap"; return "ScoutLead"; }
+function profileLocationSummary(profile: Territory) { const locations = profile.locations || []; if (locations.length === 1) return locations[0].label || locations[0].city; if (locations.length > 1) return `${locations.length} cities`; return `${profile.place_label || profile.city} · ${profile.radius_km} km`; }
 function batchStateLabel(state?: string) { if (state === "scoring") return "Building"; if (state === "retrying") return "Retrying"; if (state === "ready") return "Ready"; if (state === "partial") return "Partial"; if (state === "empty") return "No matches"; if (state === "failed") return "Needs attention"; return "Set up"; }
-function batchStateCopy(batch: ReturnType<typeof useAppData>["profileBatch"]) { if (!batch) return "No lead batch has been generated for this saved search yet."; if (["scoring", "retrying"].includes(batch.state)) return "ScoutLead is collecting and evaluating businesses. You can leave this page."; if (["ready", "partial"].includes(batch.state)) return `${batch.remaining_count} leads remain for review.`; if (batch.state === "failed") return "The latest batch could not be completed."; return "No indexed businesses matched this search."; }
+function batchStateCopy(batch: ReturnType<typeof useAppData>["profileBatch"]) { if (!batch) return "No lead batch has been generated for this saved search yet."; const progress = batch.location_count && batch.location_count > 1 ? ` ${batch.locations_completed || 0} of ${batch.location_count} cities completed.` : ""; if (["scoring", "retrying"].includes(batch.state)) return `ScoutLead is collecting and evaluating businesses. You can leave this page.${progress}`; if (["ready", "partial"].includes(batch.state)) return `${batch.remaining_count} leads remain for review.${progress}`; if (batch.state === "failed") return `The latest batch could not be completed.${progress}`; return "No indexed businesses matched this search."; }

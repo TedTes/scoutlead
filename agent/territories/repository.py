@@ -45,6 +45,7 @@ class TerritoryRepository:
                 existing.latitude = data.latitude
                 existing.longitude = data.longitude
                 existing.radius_km = data.radius_km
+                existing.locations = data.locations
                 existing.customer_kind = data.customer_kind.value
                 existing.min_google_rating = data.min_google_rating
                 existing.min_review_count = data.min_review_count
@@ -91,6 +92,7 @@ class TerritoryRepository:
             latitude=data.latitude,
             longitude=data.longitude,
             radius_km=data.radius_km,
+            locations=data.locations,
             customer_kind=data.customer_kind.value,
             min_google_rating=data.min_google_rating,
             min_review_count=data.min_review_count,
