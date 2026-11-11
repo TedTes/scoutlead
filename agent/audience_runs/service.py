@@ -23,9 +23,11 @@ from db.models import (
     CoverageRequestModel,
     LeadModel,
     NicheModel,
+    QueueJobModel,
     SignalDefinitionModel,
     TerritoryModel,
 )
+from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from seeding.batches import active_membership_condition
 from signal_collection.requirements import fact_requires_collection
@@ -92,9 +94,17 @@ class AudienceRunService:
 
     def process(self, run_id: str) -> tuple[AudienceRunModel, bool]:
         run = self._run(run_id)
-        if run.state in {AudienceRunState.READY.value, AudienceRunState.PARTIAL.value}:
-            return run, False
         audience = self._audience(run.audience_id)
+        if run.state == AudienceRunState.READY.value:
+            return run, False
+        if run.state == AudienceRunState.PARTIAL.value:
+            active_segment_ids = self._active_coverage_segment_ids(run.id)
+            has_new_evidence = self._coverage_refreshed_after_snapshot(run)
+            if not active_segment_ids and not has_new_evidence:
+                return run, False
+            self._reopen_active_coverage(run.id, active_segment_ids)
+            run.state = AudienceRunState.WAITING_VALIDATION.value
+            run.completed_at = None
         if run.criteria_version != audience.criteria_version:
             run.state = AudienceRunState.FAILED.value
             run.failure_reason = "Audience criteria changed after this run was queued."
@@ -107,6 +117,13 @@ class AudienceRunService:
         run.index_snapshot_at = now
         self.session.commit()
         niches = _territory_niches(self.session, audience)
+        is_multi_city = bool(audience.locations)
+        if is_multi_city:
+            # A multi-city search promises coverage of every selected city. Create
+            # all city requests before matching so an already-populated city cannot
+            # prematurely satisfy the overall batch and skip the remaining cities.
+            self._request_coverage(run, audience, niches)
+        self._reconcile_coverage(run.id)
         self._enqueue_required_attribute_collection(audience, niches)
         rows = ProfileMatchService(self.session).match(
             profile=audience,
@@ -177,7 +194,15 @@ class AudienceRunService:
         run.result_count = inserted_count
         run.new_result_count = new_result_count
         needs_expansion = False
-        if run.result_count >= run.requested_count:
+        coverage_in_progress = self._coverage_in_progress(run.id)
+        if is_multi_city and coverage_in_progress:
+            # The deadline bounds a single-city attempt. It must not turn a large
+            # asynchronous multi-city search into an empty completed batch while
+            # provider, identity, or audit jobs are still running.
+            run.state = AudienceRunState.WAITING_VALIDATION.value
+            run.completed_at = None
+            needs_expansion = self._queued_coverage_exists(run.id)
+        elif run.result_count >= run.requested_count:
             run.state = AudienceRunState.READY.value
             run.failure_reason = None
             run.completed_at = now
@@ -546,6 +571,105 @@ class AudienceRunService:
             request.status = "completed"
             request.completed_at = utcnow()
 
+    def has_active_coverage_work(self, run_id: str) -> bool:
+        return bool(self._active_coverage_segment_ids(run_id))
+
+    def _reopen_active_coverage(
+        self,
+        run_id: str,
+        active_segment_ids: set[str],
+    ) -> None:
+        if not active_segment_ids:
+            return
+        segments = self._coverage_segments(run_id)
+        for request, segment in segments:
+            if segment is not None and segment.id in active_segment_ids:
+                request.status = "processing"
+                request.completed_at = None
+
+    def _reconcile_coverage(self, run_id: str) -> None:
+        active_segment_ids = self._active_coverage_segment_ids(run_id)
+        now = utcnow()
+        for request, segment in self._coverage_segments(run_id):
+            if request.status != "processing" or segment is None:
+                continue
+            if segment.id in active_segment_ids:
+                continue
+            if not segment.last_refresh_at or not _at_or_after(
+                segment.last_refresh_at,
+                request.created_at,
+            ):
+                continue
+            request.status = "completed"
+            request.completed_at = now
+
+    def _coverage_segments(
+        self,
+        run_id: str,
+    ) -> list[tuple[CoverageRequestModel, BusinessIndexSegmentModel | None]]:
+        requests = list(
+            self.session.scalars(
+                select(CoverageRequestModel).where(
+                    CoverageRequestModel.run_id == run_id
+                )
+            )
+        )
+        if not requests:
+            return []
+        niche_ids = {request.niche_id for request in requests}
+        market_keys = {request.market_key for request in requests}
+        segments = {
+            (segment.niche_id, segment.market_key): segment
+            for segment in self.session.scalars(
+                select(BusinessIndexSegmentModel).where(
+                    BusinessIndexSegmentModel.niche_id.in_(niche_ids),
+                    BusinessIndexSegmentModel.market_key.in_(market_keys),
+                )
+            )
+        }
+        return [
+            (request, segments.get((request.niche_id, request.market_key)))
+            for request in requests
+        ]
+
+    def _active_coverage_segment_ids(self, run_id: str) -> set[str]:
+        segment_ids = {
+            segment.id
+            for _, segment in self._coverage_segments(run_id)
+            if segment is not None
+        }
+        if not segment_ids:
+            return set()
+        stage_types = {
+            JobType.BUSINESS_INDEX_REFRESH.value,
+            JobType.SOURCE_FETCH.value,
+            JobType.BUSINESS_IDENTITY_RESOLVE.value,
+            JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
+        }
+        active_jobs = self.session.scalars(
+            select(QueueJobModel).where(
+                QueueJobModel.status.in_(
+                    [JobStatus.QUEUED.value, JobStatus.RUNNING.value]
+                ),
+                QueueJobModel.type.in_(stage_types),
+            )
+        )
+        return {
+            str(job.payload.get("segment_id"))
+            for job in active_jobs
+            if str(job.payload.get("segment_id") or "") in segment_ids
+        }
+
+    def _coverage_refreshed_after_snapshot(self, run: AudienceRunModel) -> bool:
+        if run.index_snapshot_at is None:
+            return False
+        return any(
+            segment is not None
+            and segment.last_refresh_at is not None
+            and _at_or_after(segment.last_refresh_at, run.index_snapshot_at)
+            for _, segment in self._coverage_segments(run.id)
+        )
+
     def _coverage_in_progress(self, run_id: str) -> bool:
         return (
             self.session.scalar(
@@ -772,6 +896,14 @@ def _before_deadline(now: datetime, deadline: datetime) -> bool:
     if deadline.tzinfo is None and now.tzinfo is not None:
         deadline = deadline.replace(tzinfo=now.tzinfo)
     return now < deadline
+
+
+def _at_or_after(value: datetime, reference: datetime) -> bool:
+    if value.tzinfo is None and reference.tzinfo is not None:
+        value = value.replace(tzinfo=reference.tzinfo)
+    elif reference.tzinfo is None and value.tzinfo is not None:
+        reference = reference.replace(tzinfo=value.tzinfo)
+    return value >= reference
 
 
 def _territory_niches(session: Session, territory: TerritoryModel) -> list[NicheModel]:

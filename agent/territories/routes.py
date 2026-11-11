@@ -9,7 +9,6 @@ from audience_runs.service import AudienceRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from db.models import (
     AudienceRunModel,
-    BusinessIndexSegmentModel,
     CoverageRequestModel,
     QueueJobModel,
 )
@@ -388,6 +387,9 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
     )
     if latest_run is not None and latest_job is not None:
         is_initial_run = _is_initial_profile_run(session, latest_run)
+        has_active_multi_city_work = bool(profile.locations) and (
+            run_service.has_active_coverage_work(latest_run.id)
+        )
         run_is_incomplete = latest_run.state not in {
             AudienceRunState.READY.value,
             AudienceRunState.PARTIAL.value,
@@ -401,6 +403,11 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
             or (
                 run_is_incomplete
                 and latest_run.state != AudienceRunState.WAITING_VALIDATION.value
+                and latest_job.status == JobStatus.COMPLETED.value
+            )
+            or (
+                latest_run.state == AudienceRunState.PARTIAL.value
+                and has_active_multi_city_work
                 and latest_job.status == JobStatus.COMPLETED.value
             )
             or (
@@ -458,21 +465,11 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
         else []
     )
     location_count = max(1, len(profile.locations or []))
-    refreshed_segments = {
-        (row.niche_id, row.market_key)
-        for row in session.execute(
-            select(
-                BusinessIndexSegmentModel.niche_id,
-                BusinessIndexSegmentModel.market_key,
-            ).where(BusinessIndexSegmentModel.last_refresh_at.is_not(None))
-        )
-    }
     locations_completed = len(
         {
             request.market_key
             for request in coverage_requests
             if request.status in {"completed", "failed"}
-            or (request.niche_id, request.market_key) in refreshed_segments
         }
     )
     if active_job is not None and (
