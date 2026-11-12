@@ -42,7 +42,7 @@ export function AdminApp({ accountSlot, adminEmail, getAuthToken }: AdminAppProp
         <div className="admin-shell-layout">
           <nav className="admin-section-nav" aria-label="Admin sections">
             <button className={view === "businesses" ? "active" : ""} title="Leads" type="button" onClick={() => setView("businesses")}><ListChecks size={15} /><span>Leads</span></button>
-            <button className={view === "jobs" ? "active" : ""} title="Sources" type="button" onClick={() => setView("jobs")}><Database size={15} /><span>Sources</span></button>
+            <button className={view === "jobs" ? "active" : ""} title="Collection" type="button" onClick={() => setView("jobs")}><Database size={15} /><span>Collection</span></button>
             <button className={view === "signals" ? "active" : ""} title="Attributes" type="button" onClick={() => setView("signals")}><Activity size={15} /><span>Attributes</span></button>
             <button className={view === "services" ? "active" : ""} title="Opportunities" type="button" onClick={() => setView("services")}><BriefcaseBusiness size={15} /><span>Opportunities</span></button>
             <button className={view === "outreach" ? "active" : ""} title="Outreach" type="button" onClick={() => setView("outreach")}><MessageSquareText size={15} /><span>Outreach</span></button>

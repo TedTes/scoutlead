@@ -1219,15 +1219,11 @@ export function ResultsScreen({
                 contacts.length,
                 visibleProfileBatch?.state,
                 visibleProfileBatch?.failure_class,
-                visibleProfileBatch?.locations_completed,
-                visibleProfileBatch?.location_count,
               ).title}</strong>
               <p>{isGlobalView ? "Create a lead search or choose another workflow view." : emptyBatchCopy(
                 contacts.length,
                 visibleProfileBatch?.state,
                 visibleProfileBatch?.failure_class,
-                visibleProfileBatch?.locations_completed,
-                visibleProfileBatch?.location_count,
               ).detail}</p>
               {!isGlobalView && visibleProfileBatch && ["scoring", "retrying"].includes(visibleProfileBatch.state) ? (
                 <button
@@ -5692,8 +5688,6 @@ function emptyBatchCopy(
   contactCount: number,
   state?: "setup" | "scoring" | "retrying" | "ready" | "empty" | "partial" | "failed",
   failureClass?: "rate_limit" | "quota" | "other" | null,
-  locationsCompleted = 0,
-  locationCount = 1,
 ) {
   if (contactCount) {
     return {
@@ -5708,22 +5702,15 @@ function emptyBatchCopy(
     };
   }
   if (state === "scoring") {
-    if (locationCount > 1) {
-      const currentLocation = Math.min(locationsCompleted + 1, locationCount);
-      return {
-        title: `Searching city ${currentLocation} of ${locationCount}.`,
-        detail: "Leads will appear as each city finishes. The remaining cities stay queued and run one at a time.",
-      };
-    }
     return {
-      title: "Building this saved search.",
-      detail: "ScoutLead is collecting businesses and evaluating their signals. You can leave this page while it finishes.",
+      title: "Stored-data matching has not finished.",
+      detail: "Run the saved search again. Data collection is controlled separately from the Admin Collection screen.",
     };
   }
   if (state === "setup") {
     return {
       title: "No lead batch has been generated yet.",
-      detail: "Run this saved search to evaluate indexed businesses against its current criteria.",
+      detail: "Run this saved search to match businesses already stored in the database.",
     };
   }
   if (state === "failed") {
@@ -5738,8 +5725,8 @@ function emptyBatchCopy(
     };
   }
   return {
-    title: "No eligible leads in this batch.",
-    detail: "No indexed business passed the saved-search criteria for this delivery.",
+    title: "No stored businesses match this search.",
+    detail: "The client search only reads the database. Run data collection from Admin if this market needs more coverage.",
   };
 }
 

@@ -568,7 +568,8 @@ export type QueueJob = {
 
 export type ProfileQueued = {
   audience: Territory;
-  job: QueueJob;
+  audience_run_id: string;
+  job?: QueueJob | null;
 };
 
 export type ProfileBatch = {

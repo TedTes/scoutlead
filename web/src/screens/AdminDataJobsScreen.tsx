@@ -109,7 +109,7 @@ export function AdminDataJobsScreen({ api }: { api: ApiClient }) {
           <Metric label="Failed fetches" value={totals.failed} tone={totals.failed ? "bad" : "good"} />
         </div>
         <button className="admin-primary-button" type="button" onClick={() => setShowCreate(true)}>
-          <Play size={15} /> Fetch sources
+          <Play size={15} /> Run collection
         </button>
       </header>
 
@@ -212,7 +212,7 @@ function Summary({ label, value }: { label: string; value: number }) {
 function CreateDataJobDialog({ api, segments, onClose, onCreated }: { api: ApiClient; segments: AdminDataSegment[]; onClose: () => void; onCreated: (job: AdminDataJob) => void }) {
   const activeSegments = segments.filter((segment) => segment.status === "active");
   const [segmentId, setSegmentId] = useState(activeSegments[0]?.id || "");
-  const [mode, setMode] = useState<"automatic" | "review_first">("review_first");
+  const [mode, setMode] = useState<"automatic" | "review_first">("automatic");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -221,7 +221,7 @@ function CreateDataJobDialog({ api, segments, onClose, onCreated }: { api: ApiCl
     try { onCreated(await api.createAdminDataJob({ segment_id: segmentId, processing_mode: mode, reason })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setSaving(false); }
   };
-  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-data-job-dialog" role="dialog" aria-modal="true"><header><div><h2>Fetch sources</h2><p>Fetch business records now, then optionally review them before indexing.</p></div><button className="admin-icon-button" title="Close" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-data-job-form"><label><span>Business segment</span><select value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>{activeSegments.map((segment) => <option key={segment.id} value={segment.id}>{segment.niche_label} · {segment.market_label} · {segment.source_count} sources</option>)}</select></label><fieldset><legend>After fetching</legend><label><input checked={mode === "review_first"} name="mode" type="radio" onChange={() => setMode("review_first")} /><span><strong>Review returned sources</strong><small>Choose selected sources or all sources to index.</small></span></label><label><input checked={mode === "automatic"} name="mode" type="radio" onChange={() => setMode("automatic")} /><span><strong>Index automatically</strong><small>Resolve businesses, index them, then collect signals.</small></span></label></fieldset><label><span>Reason</span><textarea placeholder="What sources are you fetching and why?" value={reason} onChange={(event) => setReason(event.target.value)} /></label></div>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-primary-button" disabled={saving || !segmentId || reason.trim().length < 3} type="button" onClick={() => void create()}>{saving ? "Fetching..." : "Fetch sources"}</button></footer></div></div>;
+  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-data-job-dialog" role="dialog" aria-modal="true"><header><div><h2>Run data collection</h2><p>Collect businesses for one trade and market independently from client searches.</p></div><button className="admin-icon-button" title="Close" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-data-job-form"><label><span>Business segment</span><select value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>{activeSegments.map((segment) => <option key={segment.id} value={segment.id}>{segment.niche_label} · {segment.market_label} · {segment.source_count} sources</option>)}</select></label><fieldset><legend>Processing</legend><label><input checked={mode === "automatic"} name="mode" type="radio" onChange={() => setMode("automatic")} /><span><strong>Automatic</strong><small>Collect, resolve, validate, index, and inspect signals.</small></span></label><label><input checked={mode === "review_first"} name="mode" type="radio" onChange={() => setMode("review_first")} /><span><strong>Review first</strong><small>Pause after collection so returned sources can be reviewed.</small></span></label></fieldset><label><span>Reason</span><textarea placeholder="What data are you collecting and why?" value={reason} onChange={(event) => setReason(event.target.value)} /></label></div>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-primary-button" disabled={saving || !segmentId || reason.trim().length < 3} type="button" onClick={() => void create()}>{saving ? "Starting..." : "Run collection"}</button></footer></div></div>;
 }
 
 function dataJobError(cause: unknown) {
