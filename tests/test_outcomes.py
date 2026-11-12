@@ -149,6 +149,31 @@ def test_outcomes_are_workspace_scoped() -> None:
             OutcomeService(session, workspace_id="workspace:other").list_for_lead(lead.id)
 
 
+def test_contact_attempt_moves_lead_to_contacted_and_preserves_follow_up() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        lead, _ = _territory_lead(session, workspace_id="workspace:first")
+        service = OutcomeService(session, workspace_id="workspace:first")
+        follow_up_at = utcnow() + timedelta(days=1)
+
+        outcome = service.record(
+            lead.id,
+            LeadOutcomeCreate(
+                outcome=LeadOutcome.NO_ANSWER,
+                channel=OutcomeChannel.PHONE,
+                note="No pickup. Try again tomorrow.",
+                follow_up_at=follow_up_at,
+            ),
+        )
+
+        session.refresh(lead)
+        assert lead.last_contacted_at == outcome.occurred_at
+        assert lead.latest_outcome == LeadOutcome.NO_ANSWER.value
+        assert outcome.note == "No pickup. Try again tomorrow."
+        assert outcome.follow_up_at == follow_up_at.replace(tzinfo=None)
+        assert service.list_for_lead(lead.id) == [outcome]
+
+
 def test_due_no_response_is_added_only_after_window() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -189,7 +214,7 @@ def test_learning_model_recomputes_after_ten_new_outcomes() -> None:
                 lead.id,
                 LeadOutcomeCreate(
                     outcome=(
-                        LeadOutcome.CONTACTED
+                        LeadOutcome.NO_ANSWER
                         if index == 0
                         else LeadOutcome.NO_RESPONSE
                     ),

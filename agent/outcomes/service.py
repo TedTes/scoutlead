@@ -13,7 +13,7 @@ from db.models import (
     ProductModel,
     TerritoryModel,
 )
-from outcomes.policy import no_response_due
+from outcomes.policy import CONTACT_ATTEMPT_OUTCOMES, no_response_due
 from outcomes.repository import OutcomeRepository
 from outcomes.schemas import (
     LeadOutcome,
@@ -64,13 +64,14 @@ class OutcomeService:
             source=data.source.value,
             note=" ".join(data.note.split()) if data.note else None,
             occurred_at=occurred_at,
+            follow_up_at=data.follow_up_at,
             recorded_by=self.recorded_by,
         )
         self.session.add(model)
         if lead.latest_outcome_at is None or occurred_at >= _aware(lead.latest_outcome_at):
             lead.latest_outcome = data.outcome.value
             lead.latest_outcome_at = occurred_at
-        if data.outcome == LeadOutcome.CONTACTED:
+        if data.outcome in CONTACT_ATTEMPT_OUTCOMES:
             lead.last_contacted_at = occurred_at
             audience_result = self.session.scalar(
                 select(AudienceResultModel)

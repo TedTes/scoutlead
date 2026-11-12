@@ -18,7 +18,7 @@ from db.models import (
     SignalDefinitionModel,
     WorkspaceNichePreferenceModel,
 )
-from outcomes.policy import POSITIVE_OUTCOMES
+from outcomes.policy import CONTACT_ATTEMPT_OUTCOMES, POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
 from niches.resolver import resolve_niche
 from products.repository import DEFAULT_WORKSPACE_ID, ProductRepository
@@ -813,7 +813,7 @@ class TerritoryService:
         contacted = {
             outcome.lead_id
             for outcome in outcomes
-            if outcome.outcome == LeadOutcome.CONTACTED.value
+            if LeadOutcome(outcome.outcome) in CONTACT_ATTEMPT_OUTCOMES
         }
         positive = {
             outcome.lead_id

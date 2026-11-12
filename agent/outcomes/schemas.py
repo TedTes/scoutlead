@@ -6,6 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class LeadOutcome(StrEnum):
     CONTACTED = "contacted"
+    NO_ANSWER = "no_answer"
+    VOICEMAIL = "voicemail"
+    MESSAGE_SENT = "message_sent"
+    REACHED = "reached"
     NO_RESPONSE = "no_response"
     REPLIED_POSITIVE = "replied_positive"
     REPLIED_NEGATIVE = "replied_negative"
@@ -21,6 +25,8 @@ class LeadOutcome(StrEnum):
 class OutcomeChannel(StrEnum):
     EMAIL = "email"
     PHONE = "phone"
+    TEXT = "text"
+    INSTAGRAM = "instagram"
     VISIT = "visit"
     CONTACT_FORM = "contact_form"
     OTHER = "other"
@@ -41,6 +47,7 @@ class LeadOutcomeCreate(BaseModel):
     source: OutcomeSource = OutcomeSource.MANUAL
     note: str | None = Field(default=None, max_length=2000)
     occurred_at: datetime | None = None
+    follow_up_at: datetime | None = None
 
 
 class LeadOutcomeRead(BaseModel):
@@ -59,6 +66,7 @@ class LeadOutcomeRead(BaseModel):
     source: OutcomeSource
     note: str | None = None
     occurred_at: datetime
+    follow_up_at: datetime | None = None
     recorded_by: str | None = None
     created_at: datetime
     updated_at: datetime

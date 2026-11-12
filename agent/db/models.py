@@ -1070,6 +1070,9 @@ class LeadOutcomeModel(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    follow_up_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     recorded_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 

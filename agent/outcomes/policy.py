@@ -9,6 +9,14 @@ POSITIVE_OUTCOMES = {
     LeadOutcome.WON,
 }
 
+CONTACT_ATTEMPT_OUTCOMES = {
+    LeadOutcome.CONTACTED,
+    LeadOutcome.NO_ANSWER,
+    LeadOutcome.VOICEMAIL,
+    LeadOutcome.MESSAGE_SENT,
+    LeadOutcome.REACHED,
+}
+
 DATA_QUALITY_OUTCOMES = {
     LeadOutcome.BOUNCED,
     LeadOutcome.WRONG_CONTACT,

@@ -11,7 +11,7 @@ from evaluation.outcome_learning import (
     outcome_adjustment,
 )
 from leads.schemas import AgentFitStatus
-from outcomes.policy import POSITIVE_OUTCOMES
+from outcomes.policy import CONTACT_ATTEMPT_OUTCOMES, POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
 from shared.utils import new_id, utcnow
 
@@ -39,7 +39,7 @@ class OutcomeLearningService:
         samples: list[OutcomeSample] = []
         for lead_id, events in by_lead.items():
             event_types = {LeadOutcome(event.outcome) for event in events}
-            if LeadOutcome.CONTACTED not in event_types:
+            if not event_types & CONTACT_ATTEMPT_OUTCOMES:
                 continue
             lead = self.session.get(LeadModel, lead_id)
             qualification = lead.qualification if lead and isinstance(lead.qualification, dict) else {}
