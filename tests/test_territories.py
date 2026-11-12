@@ -948,6 +948,91 @@ def test_multi_city_partial_run_reopens_while_city_pipeline_is_active() -> None:
         assert statuses[segments[0].market_key] == "processing"
 
 
+def test_multi_city_run_retains_visible_results_until_collection_finishes(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(
+            session,
+            slug="home_service_hvac",
+            label="HVAC contractors",
+        )
+        _seed_hvac_businesses(session)
+        business = session.scalar(select(BusinessModel).order_by(BusinessModel.id))
+        assert business is not None
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                customer_kind="both",
+                markets=[
+                    {
+                        "city": "Toronto",
+                        "place_label": "Toronto, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6167865",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 43.70643,
+                        "longitude": -79.39864,
+                    },
+                    {
+                        "city": "Ottawa",
+                        "place_label": "Ottawa, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6094817",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 45.41117,
+                        "longitude": -75.69812,
+                    },
+                ],
+                services=[],
+                signals=[],
+                exclude=[],
+            )
+        )
+        responses = iter(
+            [
+                [{"raw": {"canonical_business_id": business.id}}],
+                [],
+            ]
+        )
+        monkeypatch.setattr(
+            ProfileMatchService,
+            "match",
+            lambda *args, **kwargs: next(responses),
+        )
+        runs = AudienceRunService(session, workspace_id="workspace:first")
+        run = runs.create(profile.id)
+
+        run, _ = runs.process(run.id)
+        assert run.state == "waiting_validation"
+        assert run.result_count == 1
+        assert session.scalar(
+            select(func.count(AudienceResultModel.id)).where(
+                AudienceResultModel.run_id == run.id
+            )
+        ) == 1
+
+        run, _ = runs.process(run.id)
+
+        assert run.state == "waiting_validation"
+        assert run.result_count == 1
+        assert session.scalar(
+            select(func.count(AudienceResultModel.id)).where(
+                AudienceResultModel.run_id == run.id
+            )
+        ) == 1
+
+
 def test_multi_city_profile_can_replace_its_selected_cities() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

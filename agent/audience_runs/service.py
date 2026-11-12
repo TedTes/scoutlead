@@ -124,6 +124,7 @@ class AudienceRunService:
             # prematurely satisfy the overall batch and skip the remaining cities.
             self._request_coverage(run, audience, niches)
         self._reconcile_coverage(run.id)
+        coverage_in_progress = self._coverage_in_progress(run.id)
         self._enqueue_required_attribute_collection(audience, niches)
         rows = ProfileMatchService(self.session).match(
             profile=audience,
@@ -160,6 +161,26 @@ class AudienceRunService:
                 select(AudienceResultModel).where(AudienceResultModel.run_id == run.id)
             )
         }
+        if is_multi_city and coverage_in_progress and len(selected) < run.requested_count:
+            # Evidence changes while provider and audit jobs are running. A
+            # transient rematch can therefore return fewer rows than the previous
+            # pass. Keep already accepted rows visible until every city finishes;
+            # the final pass below remains authoritative and removes rows that no
+            # longer qualify.
+            selected_business_ids = {_business_id(row) for row in selected}
+            retained = sorted(
+                existing_results.values(),
+                key=lambda result: result.rank_position,
+            )
+            for result in retained:
+                if result.business_id in selected_business_ids:
+                    continue
+                if result.business_id in dismissed_business_ids:
+                    continue
+                selected.append(dict(result.match_snapshot or {}))
+                selected_business_ids.add(result.business_id)
+                if len(selected) >= run.requested_count:
+                    break
         for temporary_rank, result in enumerate(existing_results.values(), start=1):
             result.rank_position = -temporary_rank
         self.session.flush()
@@ -194,7 +215,6 @@ class AudienceRunService:
         run.result_count = inserted_count
         run.new_result_count = new_result_count
         needs_expansion = False
-        coverage_in_progress = self._coverage_in_progress(run.id)
         if is_multi_city and coverage_in_progress:
             # The deadline bounds a single-city attempt. It must not turn a large
             # asynchronous multi-city search into an empty completed batch while
