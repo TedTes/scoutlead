@@ -19,7 +19,7 @@ from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import SOURCE_NAME as WEBSITE_AUDIT_SOURCE
-from db.models import BusinessModel, CampaignModel, SourceObservationModel
+from db.models import BusinessModel, CampaignModel, BusinessAttributeModel
 from products.schemas import ProductRead, QualificationCriterion
 from run_diagnostics.repository import RunPipelineEventRepository
 from shared.utils import new_id, utcnow
@@ -200,7 +200,7 @@ class BusinessIndexRefreshService:
                     self.segments.assign_business(
                         segment,
                         business_id=link.business_id,
-                        source_observation_id=link.source_observation_id,
+                        source_evidence_id=link.source_evidence_id,
                     )
                     source_items.add_decision(
                         source_item.id,
@@ -426,9 +426,9 @@ class BusinessIndexRefreshService:
         }
         observations = list(
             self.session.scalars(
-                select(SourceObservationModel).where(
-                    SourceObservationModel.business_id.in_(business_ids),
-                    SourceObservationModel.source.in_(
+                select(BusinessAttributeModel).where(
+                    BusinessAttributeModel.business_id.in_(business_ids),
+                    BusinessAttributeModel.source.in_(
                         [
                             WEBSITE_AUDIT_SOURCE,
                             WEBSITE_PRESENCE_SOURCE,
@@ -437,7 +437,7 @@ class BusinessIndexRefreshService:
                         ]
                     ),
                 )
-                .order_by(SourceObservationModel.observed_at.desc())
+                .order_by(BusinessAttributeModel.observed_at.desc())
             )
         )
         audited_ids = {

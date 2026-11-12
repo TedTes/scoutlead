@@ -30,7 +30,6 @@ def fact_requires_collection(fact, *, now: datetime | None = None):
     current_time = now or utcnow()
     return or_(
         fact.id.is_(None),
-        fact.quality_state == "staged",
         fact.resolution_state != "confirmed",
         fact.expires_at.is_(None),
         fact.expires_at <= current_time,

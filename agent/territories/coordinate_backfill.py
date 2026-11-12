@@ -6,7 +6,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from canonical.attributes import extract_business_attributes
-from db.models import BusinessModel, SourceObservationModel, TerritoryModel
+from db.models import BusinessModel, BusinessAttributeModel, TerritoryModel
 from shared.geospatial import coordinates_are_valid, haversine_distance_km
 from territories.geocoding import MarketGeocoder
 
@@ -107,9 +107,9 @@ class CoordinateBackfillService:
                 summary.invalid_business_coordinates += 1
             observations = list(
                 self.session.scalars(
-                    select(SourceObservationModel)
-                    .where(SourceObservationModel.business_id == business.id)
-                    .order_by(SourceObservationModel.observed_at.desc())
+                    select(BusinessAttributeModel)
+                    .where(BusinessAttributeModel.business_id == business.id)
+                    .order_by(BusinessAttributeModel.observed_at.desc())
                 )
             )
             coordinate_candidates = [

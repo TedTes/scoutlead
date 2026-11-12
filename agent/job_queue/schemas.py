@@ -11,10 +11,7 @@ class JobType(StrEnum):
     SOURCE_FETCH = "source.fetch"
     BUSINESS_IDENTITY_RESOLVE = "business.identity_resolve"
     BUSINESS_OPPORTUNITY_AUDIT = "business.opportunity_audit"
-    BUSINESS_SEARCH_EVALUATE = "business.search_evaluate"
-    BUSINESS_SEARCH_EVALUATE_BATCH = "business.search_evaluate_batch"
     SIGNAL_COLLECTION = "signal.collection"
-    SIGNAL_VALIDATION = "signal.validation"
 
 
 class JobStatus(StrEnum):

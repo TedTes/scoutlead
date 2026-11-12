@@ -1122,7 +1122,7 @@ export type AdminLeadOpportunity = {
   value: unknown;
   score?: number | null;
   evidence_confidence?: number | null;
-  source_observation_id?: string | null;
+  source_evidence_id?: string | null;
   observed_at?: string | null;
 };
 
@@ -1166,7 +1166,7 @@ export type AdminLeadAssessment = {
     value: unknown;
     score?: number | null;
     evidence_confidence?: number | null;
-    source_observation_id?: string | null;
+    source_evidence_id?: string | null;
   } | null;
   verified_opportunity_count: number;
   evidence_coverage: {
@@ -1219,12 +1219,12 @@ export type AdminBusinessSummary = {
       evidence_state?: string;
       resolution_state?: string;
       quality_state?: string;
-      source_observation_id?: string | null;
+      source_evidence_id?: string | null;
       observed_at?: string | null;
       expires_at?: string | null;
     }>;
     scored_attribute_count: number;
-    fact_count: number;
+    attribute_count: number;
     limitations: string[];
     quality_reasons: Array<{
       code: string;
@@ -1247,17 +1247,6 @@ export type AdminBusinessSummary = {
   last_seen_at: string;
 };
 
-export type AdminValidation = {
-  id: string;
-  type: string;
-  status: string;
-  confidence: number;
-  reason: string;
-  evidence: Array<Record<string, unknown>>;
-  observed_at: string;
-  expires_at: string;
-};
-
 export type AdminBusinessDetail = AdminBusinessSummary & {
   normalized_name: string;
   latitude?: number | null;
@@ -1268,8 +1257,7 @@ export type AdminBusinessDetail = AdminBusinessSummary & {
   is_directory?: boolean | null;
   is_agency?: boolean | null;
   memberships: Array<Record<string, unknown>>;
-  validations: AdminValidation[];
-  facts: Array<Record<string, unknown>>;
+  attributes: Array<Record<string, unknown>>;
   signals: AdminBusinessSignal[];
   sources: Array<Record<string, unknown>>;
   contacts: Array<{
@@ -1305,20 +1293,7 @@ export type AdminBusinessSignal = {
   expires_at?: string | null;
 };
 
-export type AdminFactLineageValidation = {
-  id: string;
-  type: string;
-  status: string;
-  confidence: number;
-  reason: string;
-  evidence: Array<Record<string, unknown>>;
-  validator: string;
-  validator_version: number;
-  observed_at: string;
-  expires_at: string;
-};
-
-export type AdminFactLineageService = {
+export type AdminAttributeLineageService = {
   id: string;
   key: string;
   label: string;
@@ -1326,7 +1301,7 @@ export type AdminFactLineageService = {
   weight: number;
 };
 
-export type AdminFactLineageSignal = {
+export type AdminAttributeLineageSignal = {
   definition_id: string;
   key: string;
   label: string;
@@ -1335,10 +1310,10 @@ export type AdminFactLineageSignal = {
   opportunity_direction: string;
   matches_opportunity_value: boolean;
   eligible_for_matching: boolean;
-  services: AdminFactLineageService[];
+  services: AdminAttributeLineageService[];
 };
 
-export type AdminFactLineageFact = {
+export type AdminAttributeLineageValue = {
   id: string;
   key: string;
   value: unknown;
@@ -1349,13 +1324,12 @@ export type AdminFactLineageFact = {
   evidence_confidence?: number | null;
   confidence: number;
   resolution_state: string;
-  quality_state: string;
+  evidence_state: string;
   observed_at: string;
   expires_at?: string | null;
-  source_observation_id?: string | null;
-  supporting_claim_ids: string[];
-  validation?: AdminFactLineageValidation | null;
-  signal?: AdminFactLineageSignal | null;
+  source_evidence_id?: string | null;
+  supporting_evidence_ids: string[];
+  signal?: AdminAttributeLineageSignal | null;
 };
 
 export type AdminAttributeDefinition = {
@@ -1369,36 +1343,22 @@ export type AdminAttributeDefinition = {
   status: string;
 };
 
-export type AdminFactLineageClaim = {
-  id: string;
-  fact_key: string;
-  signal_definition_id?: string | null;
-  value: unknown;
-  source_observation_id: string;
-  confidence: number;
-  extractor: string;
-  extractor_version: number;
-  observed_at: string;
-  expires_at: string;
-};
-
-export type AdminFactLineageObservation = {
+export type AdminEvidenceRecord = {
   id: string;
   source: string;
   external_id?: string | null;
   query_signature?: string | null;
   content_hash: string;
   source_url?: string | null;
-  raw_payload: Record<string, unknown>;
+  payload: Record<string, unknown>;
   observed_at: string;
 };
 
-export type AdminFactLineage = {
+export type AdminAttributeLineage = {
   business_id: string;
   attribute_definitions: AdminAttributeDefinition[];
-  facts: AdminFactLineageFact[];
-  claims: AdminFactLineageClaim[];
-  observations: AdminFactLineageObservation[];
+  attributes: AdminAttributeLineageValue[];
+  evidence_records: AdminEvidenceRecord[];
 };
 
 export type AdminBusinessPage = {

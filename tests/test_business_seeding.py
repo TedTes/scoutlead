@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from canonical.repository import CanonicalRepository
 from db.models import (
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     CampaignModel,
@@ -12,8 +12,6 @@ from db.models import (
     LeadModel,
     NicheModel,
     SeedBatchModel,
-    SourceObservationModel,
-    ValidationResultModel,
 )
 from db.session import create_database
 from seeding.schemas import BusinessSeedInput
@@ -48,10 +46,10 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert summary.businesses_created == 1
         assert summary.businesses_updated == 0
         assert summary.contacts_created == 1
-        assert summary.source_observations_created == 1
+        assert summary.evidence_records_created == 1
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
-        assert _count(session, SourceObservationModel) == 1
+        assert _evidence_count(session) == 1
         assert _count(session, NicheModel) == 1
         assert _count(session, SeedBatchModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
@@ -71,7 +69,11 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert contact.name == "Alex Painter"
         assert contact.role == "Owner/Operator"
 
-        observation = session.scalar(select(SourceObservationModel))
+        observation = session.scalar(
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.row_type == "evidence"
+            )
+        )
         assert observation is not None
         assert observation.business_id == business.id
         assert observation.source == "manual_seed"
@@ -95,14 +97,13 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert seed_batch.found_count == 1
         assert seed_batch.inserted_count == 1
         assert seed_batch.updated_count == 0
-        assert seed_batch.source_observation_count == 1
+        assert seed_batch.evidence_record_count == 1
 
         membership = session.scalar(select(BusinessNicheMembershipModel))
         assert membership is not None
         assert membership.business_id == business.id
         assert membership.niche_id == niche.id
         assert membership.seed_batch_id == seed_batch.id
-        assert membership.source_observation_id == observation.id
         assert membership.market_key == "toronto gta"
         assert membership.confidence == 1.0
         assert membership.evidence[0]["type"] == "seed_import"
@@ -121,16 +122,16 @@ def test_business_seed_import_is_idempotent() -> None:
         assert second.businesses_created == 0
         assert second.businesses_updated == 1
         assert second.contacts_created == 0
-        assert second.source_observations_created == 0
+        assert second.evidence_records_created == 0
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
-        assert _count(session, SourceObservationModel) == 1
+        assert _evidence_count(session) == 1
         assert _count(session, NicheModel) == 1
         assert _count(session, SeedBatchModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
 
 
-def test_seed_import_records_validation_and_rejects_generic_listing_title() -> None:
+def test_seed_import_keeps_source_evidence_without_a_parallel_validation_log() -> None:
     session_factory = _session_factory()
 
     with session_factory() as session:
@@ -145,17 +146,14 @@ def test_seed_import_records_validation_and_rejects_generic_listing_title() -> N
             batch_id="generic-painting-v1",
         )
 
-        results = {
-            row.validation_type: row.status
-            for row in session.scalars(select(ValidationResultModel))
-        }
-
-        assert results == {
-            "identity": "passed",
-            "business_identity": "failed",
-            "trade": "passed",
-            "location": "passed",
-        }
+        evidence = session.scalar(
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.row_type == "evidence"
+            )
+        )
+        assert evidence is not None
+        assert evidence.source == "manual_seed"
+        assert evidence.raw_payload["company_name"] == "Professional Painter for hire"
 
 
 def test_quarantined_external_identity_is_not_reused() -> None:
@@ -292,7 +290,13 @@ def test_business_seed_import_persists_match_columns_without_inventing_form_fact
         assert business.is_chain is True
         assert business.is_franchise is True
 
-        fact_keys = set(session.scalars(select(BusinessFactModel.fact_key)))
+        fact_keys = set(
+            session.scalars(
+                select(BusinessAttributeModel.attribute_key).where(
+                    BusinessAttributeModel.row_type == "attribute"
+                )
+            )
+        )
         assert "website_status" in fact_keys
         assert "quote_or_booking_form_present" not in fact_keys
         assert "contact_form_present" not in fact_keys
@@ -564,3 +568,14 @@ def _session_factory():
 
 def _count(session, model) -> int:
     return int(session.scalar(select(func.count()).select_from(model)) or 0)
+
+
+def _evidence_count(session) -> int:
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(BusinessAttributeModel)
+            .where(BusinessAttributeModel.row_type == "evidence")
+        )
+        or 0
+    )

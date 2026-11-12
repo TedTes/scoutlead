@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_facts.repository import BusinessFactRepository, fact_value
-from business_facts.service import reconcile_business_facts
+from business_attributes.repository import BusinessAttributeRepository, attribute_value
+from business_attributes.service import reconcile_business_attributes
 from business_index.schemas import (
     BusinessIndexSearch,
     FactOperator,
@@ -18,10 +18,9 @@ from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
-from search_evaluations.repository import SearchEvaluationRepository
 from seeding.batches import active_membership_condition, observation_is_quarantined
 
 
@@ -87,8 +86,8 @@ class BusinessIndexSearchService:
         # Older indexed businesses may predate the fact table. Reconciliation is
         # database-only and makes the canonical record and observations queryable.
         for business_id in businesses:
-            reconcile_business_facts(self.session, business_id)
-        facts_by_business = BusinessFactRepository(self.session).map_for_businesses(
+            reconcile_business_attributes(self.session, business_id)
+        facts_by_business = BusinessAttributeRepository(self.session).map_for_businesses(
             business_ids
         )
         contacts: dict[str, list[ContactModel]] = defaultdict(list)
@@ -96,28 +95,30 @@ class BusinessIndexSearchService:
             select(ContactModel).where(ContactModel.business_id.in_(business_ids))
         ):
             contacts[contact.business_id].append(contact)
-        observations: dict[str, list[SourceObservationModel]] = defaultdict(list)
+        observations: dict[str, list[BusinessAttributeModel]] = defaultdict(list)
         for observation in self.session.scalars(
-            select(SourceObservationModel)
+            select(BusinessAttributeModel)
             .where(
-                SourceObservationModel.business_id.in_(business_ids),
-                SourceObservationModel.observed_at >= request.evidence_fresh_after,
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.row_type == "evidence",
+                BusinessAttributeModel.observed_at >= request.evidence_fresh_after,
             )
-            .order_by(SourceObservationModel.observed_at.desc())
+            .order_by(BusinessAttributeModel.observed_at.desc())
         ):
             if observation_is_quarantined(self.session, observation):
                 continue
             observations[observation.business_id].append(observation)
-        latest_listings: dict[str, SourceObservationModel] = {}
+        latest_listings: dict[str, BusinessAttributeModel] = {}
         for observation in self.session.scalars(
-            select(SourceObservationModel)
+            select(BusinessAttributeModel)
             .where(
-                SourceObservationModel.business_id.in_(business_ids),
-                SourceObservationModel.source.notin_(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.row_type == "evidence",
+                BusinessAttributeModel.source.notin_(
                     ["website_presence_check", "company_website_seed"]
                 ),
             )
-            .order_by(SourceObservationModel.observed_at.desc())
+            .order_by(BusinessAttributeModel.observed_at.desc())
         ):
             if observation_is_quarantined(self.session, observation):
                 continue
@@ -125,7 +126,6 @@ class BusinessIndexSearchService:
 
         ranked: list[tuple[tuple, dict]] = []
         unresolved: list[tuple[tuple, dict]] = []
-        evaluations = SearchEvaluationRepository(self.session)
         for membership in memberships:
             business = businesses.get(membership.business_id)
             if business is None:
@@ -139,9 +139,9 @@ class BusinessIndexSearchService:
                 )
                 continue
             business_observations = observations.get(business.id, [])
-            business_facts = facts_by_business.get(business.id, {})
+            business_attributes = facts_by_business.get(business.id, {})
             contract_status, match_reason, opportunity_score, matched_at = _evaluate_contract(
-                business_facts,
+                business_attributes,
                 request=request,
             )
             if contract_status == "not_matched":
@@ -182,39 +182,12 @@ class BusinessIndexSearchService:
                 opportunity_observation,
             )
             contact = _best_contact(business_contacts)
-            semantic_evaluation = None
             candidate_status = contract_status
-            evaluation_required = False
-            if request.contract.requires_semantic_evaluation:
-                semantic_evaluation = evaluations.current(
-                    business_id=business.id,
-                    contract_hash=request.contract_hash,
-                )
-                if semantic_evaluation is None:
-                    candidate_status = "unknown"
-                    evaluation_required = True
-                elif semantic_evaluation.status == "rejected":
-                    decisions.append(
-                        _decision(
-                            business.id,
-                            business.display_name,
-                            "rejected",
-                            semantic_evaluation.rationale,
-                        )
-                    )
-                    continue
-                elif semantic_evaluation.status == "unknown":
-                    candidate_status = "unknown"
-                if semantic_evaluation is not None and (
-                    matched_at is None
-                    or _aware(semantic_evaluation.evaluated_at) > _aware(matched_at)
-                ):
-                    matched_at = _aware(semantic_evaluation.evaluated_at)
             raw = {
                 **(listing_observation.raw_payload or {} if listing_observation else {}),
                 "match_origin": "business_index",
                 "canonical_business_id": business.id,
-                "source_observation_id": listing_observation.id if listing_observation else None,
+                "source_evidence_id": listing_observation.id if listing_observation else None,
                 "business_index_opportunity_evidence": (
                     opportunity_observation.raw_payload
                     if opportunity_observation is not None
@@ -223,7 +196,7 @@ class BusinessIndexSearchService:
                 "business_index_evidence_observed_at": (
                     matched_at.isoformat() if matched_at is not None else None
                 ),
-                "business_facts": _serialize_facts(business_facts),
+                "business_attributes": _serialize_facts(business_attributes),
                 "search_contract": request.contract.as_dict(),
                 "search_contract_hash": request.contract_hash,
                 "search_match": {
@@ -234,19 +207,6 @@ class BusinessIndexSearchService:
                         else "Matched current evidence."
                     ),
                 },
-                "search_evaluation": (
-                    {
-                        "status": semantic_evaluation.status,
-                        "confidence": semantic_evaluation.confidence,
-                        "rationale": semantic_evaluation.rationale,
-                        "criteria": semantic_evaluation.criterion_results,
-                        "evidence": semantic_evaluation.evidence,
-                        "missing_evidence": semantic_evaluation.missing_evidence,
-                        "evaluated_at": semantic_evaluation.evaluated_at.isoformat(),
-                    }
-                    if semantic_evaluation is not None
-                    else None
-                ),
                 "niche_membership": {
                     "id": membership.id,
                     "niche_id": membership.niche_id,
@@ -265,7 +225,7 @@ class BusinessIndexSearchService:
             }
             rank = (
                 opportunity_score,
-                semantic_evaluation.confidence if semantic_evaluation is not None else 100,
+                100,
                 _contact_rank(contact, business),
                 membership.confidence,
                 matched_at.timestamp() if matched_at is not None else 0,
@@ -275,15 +235,8 @@ class BusinessIndexSearchService:
                     _decision(
                         business.id,
                         business.display_name,
-                        "pending" if evaluation_required else "unknown",
-                        (
-                            "Nuanced criteria are waiting for evidence-backed evaluation."
-                            if evaluation_required
-                            else (
-                                "Current evidence is incomplete for one or more "
-                                "requested criteria."
-                            )
-                        ),
+                        "unknown",
+                        "Current evidence is incomplete for one or more requested criteria.",
                     )
                 )
                 unresolved.append((rank, row))
@@ -389,7 +342,7 @@ def _evaluate_contract(
 
 
 def _predicate_matches(fact, predicate: FactPredicate) -> bool:
-    value = fact_value(fact)
+    value = attribute_value(fact)
     if value is None:
         return False
     expected = predicate.value
@@ -412,7 +365,7 @@ def _predicate_matches(fact, predicate: FactPredicate) -> bool:
 
 
 def _predicate_status(fact, predicate: FactPredicate) -> str:
-    value = fact_value(fact)
+    value = attribute_value(fact)
     if value is None or value == "unknown":
         return "unknown"
     if (
@@ -438,19 +391,19 @@ def _predicate_unknown_reason(predicate: FactPredicate) -> str:
 
 def _opportunity_score(facts: dict) -> int:
     score = 0
-    website_status = fact_value(facts.get("website_status"))
+    website_status = attribute_value(facts.get("website_status"))
     if website_status == "missing":
         score += 65
     elif website_status in {"unavailable", "parked"}:
         score += 55
-    if fact_value(facts.get("quote_or_booking_form_present")) is False:
+    if attribute_value(facts.get("quote_or_booking_form_present")) is False:
         score += 30
-    if fact_value(facts.get("contact_form_present")) is False:
+    if attribute_value(facts.get("contact_form_present")) is False:
         score += 15
-    rating = fact_value(facts.get("google_rating"))
+    rating = attribute_value(facts.get("google_rating"))
     if isinstance(rating, (int, float)) and rating < 4.3:
         score += 20
-    reviews = fact_value(facts.get("google_review_count"))
+    reviews = attribute_value(facts.get("google_review_count"))
     if isinstance(reviews, (int, float)) and reviews < 20:
         score += 15
     return min(score, 100)
@@ -459,10 +412,10 @@ def _opportunity_score(facts: dict) -> int:
 def _serialize_facts(facts: dict) -> dict:
     return {
         key: {
-            "value": fact_value(fact),
+            "value": attribute_value(fact),
             "observed_at": fact.observed_at.isoformat(),
             "confidence": fact.confidence,
-            "source_observation_id": fact.source_observation_id,
+            "source_evidence_id": fact.source_evidence_id,
             "resolver_version": fact.resolver_version,
         }
         for key, fact in facts.items()

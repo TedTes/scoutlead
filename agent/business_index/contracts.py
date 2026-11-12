@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any
 
-from business_facts.repository import BusinessFactKey
+from business_attributes.repository import BusinessAttributeKey
 from business_index.schemas import FactOperator, FactPredicate, SearchContract
 from source_requests.schemas import (
     SearchCriterionMode,
@@ -14,28 +14,28 @@ from source_requests.schemas import (
 
 
 SUPPORTED_FACTS: dict[str, dict[str, Any]] = {
-    BusinessFactKey.WEBSITE_STATUS.value: {
+    BusinessAttributeKey.WEBSITE_STATUS.value: {
         "type": "enum",
         "values": ["present", "missing", "not_listed", "unavailable", "parked", "unknown"],
         "operators": ["equals", "in"],
     },
-    BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value: {
+    BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value: {
         "type": "boolean",
         "operators": ["equals"],
     },
-    BusinessFactKey.CONTACT_FORM_PRESENT.value: {
+    BusinessAttributeKey.CONTACT_FORM_PRESENT.value: {
         "type": "boolean",
         "operators": ["equals"],
     },
-    BusinessFactKey.GOOGLE_RATING.value: {
+    BusinessAttributeKey.GOOGLE_RATING.value: {
         "type": "number",
         "operators": ["less_than", "less_than_or_equal", "greater_than", "greater_than_or_equal"],
     },
-    BusinessFactKey.GOOGLE_REVIEW_COUNT.value: {
+    BusinessAttributeKey.GOOGLE_REVIEW_COUNT.value: {
         "type": "number",
         "operators": ["less_than", "less_than_or_equal", "greater_than", "greater_than_or_equal"],
     },
-    BusinessFactKey.BUSINESS_OPERATIONAL.value: {
+    BusinessAttributeKey.BUSINESS_OPERATIONAL.value: {
         "type": "boolean",
         "operators": ["equals"],
     },
@@ -62,8 +62,8 @@ def compile_search_contract(intent: SourceRequestIntent) -> SearchContract:
             else:
                 semantic_exclusions.append(criterion.description)
             continue
-        if criterion.fact_key:
-            unsupported.append(f"{criterion.description} ({criterion.fact_key})")
+        if criterion.attribute_key:
+            unsupported.append(f"{criterion.description} ({criterion.attribute_key})")
         if criterion.mode == SearchCriterionMode.REQUIRED:
             semantic_all_of.append(criterion.description)
         elif criterion.mode == SearchCriterionMode.ALTERNATIVE:
@@ -115,9 +115,9 @@ def fact_catalog_for_prompt() -> dict[str, dict[str, Any]]:
 
 
 def _known_fact_predicate(criterion: SearchIntentCriterion) -> FactPredicate | None:
-    if not criterion.fact_key or criterion.fact_key not in SUPPORTED_FACTS:
+    if not criterion.attribute_key or criterion.attribute_key not in SUPPORTED_FACTS:
         return None
-    definition = SUPPORTED_FACTS[criterion.fact_key]
+    definition = SUPPORTED_FACTS[criterion.attribute_key]
     operator_value = (criterion.operator or "").strip().lower()
     if operator_value not in definition["operators"]:
         return None
@@ -147,7 +147,7 @@ def _known_fact_predicate(criterion: SearchIntentCriterion) -> FactPredicate | N
         values = normalized_value if isinstance(normalized_value, tuple) else (normalized_value,)
         if any(item not in allowed for item in values):
             return None
-    return FactPredicate(criterion.fact_key, operator, normalized_value)
+    return FactPredicate(criterion.attribute_key, operator, normalized_value)
 
 
 def _unique_predicates(values: list[FactPredicate]) -> list[FactPredicate]:

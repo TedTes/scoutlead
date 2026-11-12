@@ -107,6 +107,6 @@ class BusinessSeedImportSummary(BaseModel):
     businesses_created: int = 0
     businesses_updated: int = 0
     contacts_created: int = 0
-    source_observations_created: int = 0
+    evidence_records_created: int = 0
     skipped_rows: int = 0
     errors: list[BusinessSeedRowError] = Field(default_factory=list)

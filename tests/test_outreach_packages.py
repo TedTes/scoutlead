@@ -526,7 +526,7 @@ def test_outreach_package_refreshes_when_evidence_snapshot_changes() -> None:
         raw = dict(snapshot["raw"])
         profile_match = dict(raw["profile_match"])
         matched = [dict(item) for item in profile_match["matched_signals"]]
-        matched[0]["source_observation_id"] = "source_observation:new"
+        matched[0]["source_evidence_id"] = "business_evidence:new"
         profile_match["matched_signals"] = matched
         raw["profile_match"] = profile_match
         snapshot["raw"] = raw

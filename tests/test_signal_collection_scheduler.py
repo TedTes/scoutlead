@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -9,7 +7,6 @@ from db.models import (
     NicheModel,
     QueueJobModel,
     SignalDefinitionModel,
-    ValidationResultModel,
 )
 from db.session import create_database
 from shared.utils import new_id, utcnow
@@ -68,30 +65,6 @@ def test_standing_refresh_queues_missing_website_evidence() -> None:
                 last_seen_at=now,
             )
         )
-        for validation_type, confidence in {
-            "identity": 100,
-            "business_identity": 100,
-            "trade": 100,
-            "location": 100,
-        }.items():
-            session.add(
-                ValidationResultModel(
-                    id=new_id("validation"),
-                    idempotency_key=f"test:{business.id}:{validation_type}",
-                    business_id=business.id,
-                    niche_id=niche.id,
-                    market_key="toronto",
-                    validation_type=validation_type,
-                    status="passed",
-                    confidence=confidence,
-                    reason="Test evidence supports the business.",
-                    evidence=[],
-                    validator="test",
-                    validator_version=1,
-                    observed_at=now,
-                    expires_at=now + timedelta(days=30),
-                )
-            )
         session.commit()
 
         queued = enqueue_due_signal_collections(session, limit=50, batch_size=10)

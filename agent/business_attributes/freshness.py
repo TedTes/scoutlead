@@ -13,8 +13,8 @@ FACT_TTL_DAYS = {
 }
 
 
-def fact_expires_at(fact_key: str, observed_at: datetime) -> datetime:
-    return observed_at + timedelta(days=FACT_TTL_DAYS.get(fact_key, 30))
+def attribute_expires_at(attribute_key: str, observed_at: datetime) -> datetime:
+    return observed_at + timedelta(days=FACT_TTL_DAYS.get(attribute_key, 30))
 
 
 def fact_is_current(*, expires_at: datetime | None, now: datetime) -> bool:

@@ -7,26 +7,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from business_facts.repository import (
-    BusinessFactKey,
-    BusinessFactRepository,
-    BusinessFactValue,
+from business_attributes.repository import (
+    BusinessAttributeKey,
+    BusinessAttributeRepository,
+    BusinessAttributeValue,
 )
-from business_facts.claims import FactClaim, FactClaimRepository
-from business_facts.freshness import fact_expires_at
+from business_attributes.freshness import attribute_expires_at
 from canonical.normalization import normalize_domain
 from canonical.website_evidence import (
+    assess_website_ownership,
     best_trusted_website_evidence,
 )
-from business_validation.validation import BusinessValidationService
 from db.models import (
     BusinessModel,
     LeadModel,
-    SourceObservationModel,
-    ValidationResultModel,
+    BusinessAttributeModel,
 )
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
-from quality.fact_policy import FactQualityPolicyService
 from seeding.batches import observation_is_quarantined
 from shared.utils import normalize_url, utcnow
 
@@ -35,44 +32,32 @@ RESOLVER_VERSION = 4
 GOOGLE_REPUTATION_SOURCES = frozenset({"google_places", "google_places_seed"})
 
 
-def reconcile_business_facts(session: Session, business_id: str) -> dict[str, Any]:
+def reconcile_business_attributes(session: Session, business_id: str) -> dict[str, Any]:
     business = session.get(BusinessModel, business_id)
     if business is None:
         return {}
     observations = [
         observation
         for observation in session.scalars(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id == business_id)
-            .order_by(SourceObservationModel.observed_at.desc())
+            select(BusinessAttributeModel)
+            .where(
+                BusinessAttributeModel.business_id == business_id,
+                BusinessAttributeModel.row_type == "evidence",
+            )
+            .order_by(BusinessAttributeModel.observed_at.desc())
         )
         if not observation_is_quarantined(session, observation)
     ]
-    validator = BusinessValidationService(session)
+    ownership_confidence_by_observation: dict[str, int] = {}
     for observation in observations:
-        validator.record_website_ownership(
-            business=business,
-            observation=observation,
-            commit=False,
+        assessment = assess_website_ownership(
+            source=observation.source or "",
+            payload=observation.raw_payload or {},
+            business_name=business.display_name,
+            business_phone=business.phone,
         )
-    now = utcnow()
-    ownership_validations = list(
-        session.scalars(
-            select(ValidationResultModel).where(
-                ValidationResultModel.business_id == business.id,
-                ValidationResultModel.validation_type == "website_ownership",
-                ValidationResultModel.status == "passed",
-                ValidationResultModel.confidence >= 90,
-                ValidationResultModel.expires_at >= now,
-                ValidationResultModel.source_observation_id.is_not(None),
-            )
-        )
-    )
-    ownership_confidence_by_observation = {
-        validation.source_observation_id: validation.confidence
-        for validation in ownership_validations
-        if validation.source_observation_id is not None
-    }
+        if assessment and assessment.status == "passed" and assessment.confidence >= 90:
+            ownership_confidence_by_observation[observation.id] = assessment.confidence
     trusted_observation_ids = set(ownership_confidence_by_observation)
     trusted = best_trusted_website_evidence(
         [
@@ -91,34 +76,18 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
     if website_reconciled:
         business.website_url = trusted_url
         business.domain = normalize_domain(trusted_url)
-    claim_repository = FactClaimRepository(session)
-    for observation in observations:
-        for claim in _claims_from_observation(
-            business,
-            observation,
-            website_ownership_confidence=ownership_confidence_by_observation.get(
-                observation.id
-            ),
-        ):
-            claim_repository.record(claim)
-    claims = claim_repository.current_for_business(business.id, now=utcnow())
     resolved = _resolve_facts(
         business,
         observations,
         ownership_confidence_by_observation=ownership_confidence_by_observation,
     )
-    resolved = {
-        key: _attach_claim_resolution(fact, claims)
-        for key, fact in resolved.items()
-    }
-    repository = BusinessFactRepository(session)
+    repository = BusinessAttributeRepository(session)
     website_fact_changed = False
     for fact in resolved.values():
-        model, value_changed = repository.upsert_with_value_change(business.id, fact)
-        FactQualityPolicyService(session).evaluate(model, commit=False)
-        if fact.key == BusinessFactKey.WEBSITE_STATUS:
+        _model, value_changed = repository.upsert_with_value_change(business.id, fact)
+        if fact.key == BusinessAttributeKey.WEBSITE_STATUS:
             website_fact_changed = value_changed
-    website_fact = resolved.get(BusinessFactKey.WEBSITE_STATUS.value)
+    website_fact = resolved.get(BusinessAttributeKey.WEBSITE_STATUS.value)
     if website_fact is not None and (website_reconciled or website_fact_changed):
         _synchronize_lead_website_state(
             session,
@@ -130,11 +99,11 @@ def reconcile_business_facts(session: Session, business_id: str) -> dict[str, An
 
 def _resolve_facts(
     business: BusinessModel,
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     *,
     ownership_confidence_by_observation: dict[str, int],
-) -> dict[str, BusinessFactValue]:
-    facts: dict[str, BusinessFactValue] = {}
+) -> dict[str, BusinessAttributeValue]:
+    facts: dict[str, BusinessAttributeValue] = {}
     website = _website_status_fact(
         business,
         observations,
@@ -157,117 +126,13 @@ def _resolve_facts(
     return facts
 
 
-def _claims_from_observation(
-    business: BusinessModel,
-    observation: SourceObservationModel,
-    *,
-    website_ownership_confidence: int | None,
-) -> list[FactClaim]:
-    payload = observation.raw_payload or {}
-    values: list[BusinessFactValue] = []
-    status, confidence = _website_status_from_payload(payload)
-    if status == "present":
-        if website_ownership_confidence is None:
-            status = None
-        else:
-            confidence = min(confidence, website_ownership_confidence)
-    if status is not None:
-        values.append(
-            BusinessFactValue(
-                key=BusinessFactKey.WEBSITE_STATUS,
-                value=status,
-                observed_at=observation.observed_at,
-                source_observation_id=observation.id,
-                confidence=confidence,
-                expires_at=fact_expires_at(
-                    BusinessFactKey.WEBSITE_STATUS.value,
-                    observation.observed_at,
-                ),
-                resolver_version=RESOLVER_VERSION,
-            )
-        )
-    for resolver in (_quote_form_fact, _contact_form_fact):
-        value = resolver(
-            business,
-            [observation],
-            ownership_confidence_by_observation=(
-                {observation.id: website_ownership_confidence}
-                if website_ownership_confidence is not None
-                else {}
-            ),
-        )
-        if value is not None:
-            values.append(value)
-    for resolver in (_google_rating_fact, _google_review_count_fact, _operational_fact):
-        value = resolver([observation])
-        if value is not None:
-            values.append(value)
-    return [
-        FactClaim(
-            business_id=business.id,
-            fact_key=value.key.value,
-            value=value.value,
-            source_observation_id=observation.id,
-            confidence=value.confidence,
-            extractor="business_fact_resolver",
-            extractor_version=RESOLVER_VERSION,
-            observed_at=value.observed_at,
-            expires_at=value.expires_at
-            or fact_expires_at(value.key.value, value.observed_at),
-        )
-        for value in values
-    ]
-
-
-def _attach_claim_resolution(
-    fact: BusinessFactValue,
-    claims: list,
-) -> BusinessFactValue:
-    supporting = [
-        claim
-        for claim in claims
-        if claim.fact_key == fact.key.value and claim.value == fact.value
-    ]
-    competing = [
-        claim
-        for claim in claims
-        if claim.fact_key == fact.key.value
-        and claim.value != fact.value
-        and claim.confidence >= 90
-    ]
-    state = (
-        "unknown"
-        if fact.value == "unknown"
-        else "conflicted"
-        if competing and fact.confidence >= 90
-        else "confirmed"
-        if fact.confidence >= 90
-        else "probable"
-    )
-    value = "unknown" if state == "conflicted" else fact.value
-    confidence = 0 if state == "conflicted" else fact.confidence
-    return BusinessFactValue(
-        key=fact.key,
-        value=value,
-        observed_at=fact.observed_at,
-        source_observation_id=fact.source_observation_id,
-        confidence=confidence,
-        resolution_state=state,
-        supporting_claim_ids=tuple(claim.id for claim in supporting),
-        quality_state="staged",
-        quality_policy_version=1,
-        expires_at=fact.expires_at,
-        resolver_version=fact.resolver_version,
-    )
-
-
 def _website_status_fact(
     business: BusinessModel,
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     *,
     ownership_confidence_by_observation: dict[str, int],
-) -> BusinessFactValue | None:
-    candidates: list[BusinessFactValue] = []
+) -> BusinessAttributeValue | None:
+    candidates: list[BusinessAttributeValue] = []
     for observation in observations:
         payload = observation.raw_payload or {}
         status, confidence = _website_status_from_payload(payload)
@@ -278,14 +143,14 @@ def _website_status_fact(
             confidence = min(confidence, ownership_confidence)
         if status is not None:
             candidates.append(
-                BusinessFactValue(
-                    key=BusinessFactKey.WEBSITE_STATUS,
+                BusinessAttributeValue(
+                    key=BusinessAttributeKey.WEBSITE_STATUS,
                     value=status,
                     observed_at=observation.observed_at,
-                    source_observation_id=observation.id,
+                    source_evidence_id=observation.id,
                     confidence=confidence,
-                    expires_at=fact_expires_at(
-                        BusinessFactKey.WEBSITE_STATUS.value,
+                    expires_at=attribute_expires_at(
+                        BusinessAttributeKey.WEBSITE_STATUS.value,
                         observation.observed_at,
                     ),
                     resolver_version=RESOLVER_VERSION,
@@ -305,14 +170,14 @@ def _website_status_fact(
             business.website_url = None
             business.domain = None
         else:
-            present = BusinessFactValue(
-                key=BusinessFactKey.WEBSITE_STATUS,
+            present = BusinessAttributeValue(
+                key=BusinessAttributeKey.WEBSITE_STATUS,
                 value="present",
                 observed_at=evidence.observed_at,
-                source_observation_id=evidence.id,
+                source_evidence_id=evidence.id,
                 confidence=ownership_confidence_by_observation[evidence.id],
-                expires_at=fact_expires_at(
-                    BusinessFactKey.WEBSITE_STATUS.value,
+                expires_at=attribute_expires_at(
+                    BusinessAttributeKey.WEBSITE_STATUS.value,
                     evidence.observed_at,
                 ),
                 resolver_version=RESOLVER_VERSION,
@@ -324,9 +189,9 @@ def _website_status_fact(
                     candidate
                     for candidate in candidates
                     if candidate.value in {"unavailable", "parked"}
-                    and candidate.source_observation_id
+                    and candidate.source_evidence_id
                     and any(
-                        observation.id == candidate.source_observation_id
+                        observation.id == candidate.source_evidence_id
                         and observation.source == "website_presence_check"
                         for observation in observations
                     )
@@ -430,10 +295,10 @@ def _verified_missing_website(presence: dict[str, Any]) -> bool:
 
 def _quote_form_fact(
     business: BusinessModel,
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     *,
     ownership_confidence_by_observation: dict[str, int],
-) -> BusinessFactValue | None:
+) -> BusinessAttributeValue | None:
     for observation in observations:
         enrichment = (observation.raw_payload or {}).get("website_enrichment")
         if (
@@ -450,14 +315,14 @@ def _quote_form_fact(
             value = False
         else:
             continue
-        return BusinessFactValue(
-            key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+        return BusinessAttributeValue(
+            key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
             value=value,
             observed_at=observation.observed_at,
-            source_observation_id=observation.id,
+            source_evidence_id=observation.id,
             confidence=ownership_confidence_by_observation[observation.id],
-            expires_at=fact_expires_at(
-                BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
+            expires_at=attribute_expires_at(
+                BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
                 observation.observed_at,
             ),
             resolver_version=RESOLVER_VERSION,
@@ -467,10 +332,10 @@ def _quote_form_fact(
 
 def _contact_form_fact(
     business: BusinessModel,
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     *,
     ownership_confidence_by_observation: dict[str, int],
-) -> BusinessFactValue | None:
+) -> BusinessAttributeValue | None:
     for observation in observations:
         enrichment = (observation.raw_payload or {}).get("website_enrichment")
         if (
@@ -482,14 +347,14 @@ def _contact_form_fact(
         value = enrichment.get("has_contact_form")
         if not isinstance(value, bool):
             continue
-        return BusinessFactValue(
-            key=BusinessFactKey.CONTACT_FORM_PRESENT,
+        return BusinessAttributeValue(
+            key=BusinessAttributeKey.CONTACT_FORM_PRESENT,
             value=value,
             observed_at=observation.observed_at,
-            source_observation_id=observation.id,
+            source_evidence_id=observation.id,
             confidence=ownership_confidence_by_observation[observation.id],
-            expires_at=fact_expires_at(
-                BusinessFactKey.CONTACT_FORM_PRESENT.value,
+            expires_at=attribute_expires_at(
+                BusinessAttributeKey.CONTACT_FORM_PRESENT.value,
                 observation.observed_at,
             ),
             resolver_version=RESOLVER_VERSION,
@@ -498,34 +363,34 @@ def _contact_form_fact(
 
 
 def _google_rating_fact(
-    observations: list[SourceObservationModel],
-) -> BusinessFactValue | None:
+    observations: list[BusinessAttributeModel],
+) -> BusinessAttributeValue | None:
     return _number_fact(
         observations,
-        key=BusinessFactKey.GOOGLE_RATING,
+        key=BusinessAttributeKey.GOOGLE_RATING,
         field_names={"google_rating", "rating"},
         allowed_sources=GOOGLE_REPUTATION_SOURCES,
     )
 
 
 def _google_review_count_fact(
-    observations: list[SourceObservationModel],
-) -> BusinessFactValue | None:
+    observations: list[BusinessAttributeModel],
+) -> BusinessAttributeValue | None:
     return _number_fact(
         observations,
-        key=BusinessFactKey.GOOGLE_REVIEW_COUNT,
+        key=BusinessAttributeKey.GOOGLE_REVIEW_COUNT,
         field_names={"google_review_count", "userRatingCount", "review_count"},
         allowed_sources=GOOGLE_REPUTATION_SOURCES,
     )
 
 
 def _number_fact(
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     *,
-    key: BusinessFactKey,
+    key: BusinessAttributeKey,
     field_names: set[str],
     allowed_sources: frozenset[str] | None = None,
-) -> BusinessFactValue | None:
+) -> BusinessAttributeValue | None:
     for observation in observations:
         if allowed_sources is not None and observation.source not in allowed_sources:
             continue
@@ -536,21 +401,21 @@ def _number_fact(
             number = None
         if number is None:
             continue
-        return BusinessFactValue(
+        return BusinessAttributeValue(
             key=key,
             value=number,
             observed_at=observation.observed_at,
-            source_observation_id=observation.id,
+            source_evidence_id=observation.id,
             confidence=95,
-            expires_at=fact_expires_at(key.value, observation.observed_at),
+            expires_at=attribute_expires_at(key.value, observation.observed_at),
             resolver_version=RESOLVER_VERSION,
         )
     return None
 
 
 def _operational_fact(
-    observations: list[SourceObservationModel],
-) -> BusinessFactValue | None:
+    observations: list[BusinessAttributeModel],
+) -> BusinessAttributeValue | None:
     for observation in observations:
         value = _first_value(observation.raw_payload or {}, {"businessStatus"})
         if value is None:
@@ -558,14 +423,14 @@ def _operational_fact(
         normalized = str(value).strip().upper()
         if normalized not in {"OPERATIONAL", "CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY"}:
             continue
-        return BusinessFactValue(
-            key=BusinessFactKey.BUSINESS_OPERATIONAL,
+        return BusinessAttributeValue(
+            key=BusinessAttributeKey.BUSINESS_OPERATIONAL,
             value=normalized == "OPERATIONAL",
             observed_at=observation.observed_at,
-            source_observation_id=observation.id,
+            source_evidence_id=observation.id,
             confidence=100,
-            expires_at=fact_expires_at(
-                BusinessFactKey.BUSINESS_OPERATIONAL.value,
+            expires_at=attribute_expires_at(
+                BusinessAttributeKey.BUSINESS_OPERATIONAL.value,
                 observation.observed_at,
             ),
             resolver_version=RESOLVER_VERSION,
@@ -625,15 +490,15 @@ def _synchronize_lead_website_state(
 def _replace_website_fact(value: Any, website_status: str) -> bool:
     changed = False
     if isinstance(value, dict):
-        facts = value.get("business_facts")
-        if isinstance(facts, dict):
-            current = facts.get("website_status")
+        attributes = value.get("business_attributes")
+        if isinstance(attributes, dict):
+            current = attributes.get("website_status")
             if isinstance(current, dict):
                 if current.get("value") != website_status:
                     current["value"] = website_status
                     changed = True
             elif current != website_status:
-                facts["website_status"] = website_status
+                attributes["website_status"] = website_status
                 changed = True
         for entry in value.values():
             changed = _replace_website_fact(entry, website_status) or changed

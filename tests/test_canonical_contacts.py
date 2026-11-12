@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, LeadSeedInput
 from canonical.repository import CanonicalRepository
-from db.models import BusinessModel, ContactModel, SourceObservationModel
+from db.models import BusinessAttributeModel, BusinessModel, ContactModel
 from db.session import create_database
 from leads.repository import LeadRepository
 from leads.schemas import ContactVerificationStatus, LeadVerification
@@ -31,7 +31,7 @@ def test_untrusted_raw_email_is_observed_but_not_promoted_to_contact() -> None:
             allow_raw_contact_email=False,
         )
 
-        observation = session.get(SourceObservationModel, link.source_observation_id)
+        observation = session.get(BusinessAttributeModel, link.source_evidence_id)
         assert link.contact_id is None
         assert session.scalar(select(func.count()).select_from(ContactModel)) == 0
         assert observation is not None
@@ -74,7 +74,14 @@ def test_leads_from_repeat_runs_share_canonical_business_and_contact() -> None:
         assert first_lead.contact_id == second_lead.contact_id
         assert session.scalar(select(func.count()).select_from(BusinessModel)) == 1
         assert session.scalar(select(func.count()).select_from(ContactModel)) == 1
-        assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(BusinessAttributeModel)
+                .where(BusinessAttributeModel.row_type == "evidence")
+            )
+            == 1
+        )
 
 
 def test_lead_verification_updates_canonical_contact() -> None:

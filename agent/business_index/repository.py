@@ -139,7 +139,7 @@ class BusinessIndexRepository:
         segment: BusinessIndexSegmentModel,
         *,
         business_id: str,
-        source_observation_id: str | None,
+        source_evidence_id: str | None,
     ) -> BusinessNicheMembershipModel:
         membership = self.session.scalar(
             select(BusinessNicheMembershipModel)
@@ -154,7 +154,7 @@ class BusinessIndexRepository:
         evidence = {
             "type": "business_index_segment",
             "segment_id": segment.id,
-            "source_observation_id": source_observation_id,
+            "source_evidence_id": source_evidence_id,
         }
         if membership is None:
             membership = BusinessNicheMembershipModel(
@@ -164,7 +164,6 @@ class BusinessIndexRepository:
                 market_key=segment.market_key,
                 confidence=1.0,
                 evidence=[evidence],
-                source_observation_id=source_observation_id,
                 seed_batch_id=None,
                 first_seen_at=now,
                 last_seen_at=now,
@@ -175,9 +174,6 @@ class BusinessIndexRepository:
             if evidence not in current_evidence:
                 membership.evidence = [*current_evidence, evidence]
             membership.confidence = max(membership.confidence, 1.0)
-            membership.source_observation_id = (
-                source_observation_id or membership.source_observation_id
-            )
             membership.last_seen_at = now
         self.session.flush()
         return membership

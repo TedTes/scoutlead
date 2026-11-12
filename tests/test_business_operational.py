@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from business_facts.operational import assess_business_operational
-from db.models import BusinessModel, SourceObservationModel
+from business_attributes.operational import assess_business_operational
+from db.models import BusinessAttributeModel, BusinessModel
 from db.session import create_database
 from shared.utils import new_id, utcnow
 
@@ -22,16 +22,24 @@ def _assessment(status: str):
             first_seen_at=now,
             last_seen_at=now,
         )
-        observation = SourceObservationModel(
+        observation = BusinessAttributeModel(
             id=new_id("observation"),
             business_id=business.id,
+            row_type="evidence",
+            attribute_key="source:google_places:mobile-painter",
+            value_type="json",
+            value_json={"businessStatus": status},
+            confidence=100,
+            resolution_state="observed",
+            supporting_evidence_ids=[],
             source="google_places",
-            external_id="places/mobile-painter",
-            query_signature=None,
-            content_hash="b" * 64,
+            source_external_id="places/mobile-painter",
+            source_query_signature=None,
+            source_content_hash="b" * 64,
             source_url="https://maps.example/mobile-painter",
-            raw_payload={"businessStatus": status},
+            evidence={"businessStatus": status},
             observed_at=now,
+            resolver_version=1,
         )
         session.add_all([business, observation])
         session.commit()

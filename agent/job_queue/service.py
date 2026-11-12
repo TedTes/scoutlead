@@ -120,32 +120,6 @@ class QueueService:
             commit=commit,
         )
 
-    def enqueue_signal_validation(
-        self,
-        *,
-        signal_definition_id: str,
-        signal_version: int,
-        business_ids: list[str],
-        collection_job_id: str | None,
-        commit: bool = True,
-    ):
-        business_key = sha256(
-            "\0".join(sorted(set(business_ids))).encode("utf-8")
-        ).hexdigest()
-        return self.queue.enqueue_once(
-            JobType.SIGNAL_VALIDATION,
-            {
-                "signal_definition_id": signal_definition_id,
-                "signal_version": signal_version,
-                "business_ids": business_ids,
-                "collection_job_id": collection_job_id,
-            },
-            dedupe_key=f"{signal_definition_id}:{signal_version}:{business_key}",
-            parent_run_id=collection_job_id,
-            max_attempts=3,
-            commit=commit,
-        )
-
     def enqueue_business_opportunity_audit(
         self,
         *,
@@ -166,48 +140,4 @@ class QueueService:
             dedupe_key=f"{segment_id}:{business_id}:{source_item_id or 'index'}",
             max_attempts=3,
             commit=commit,
-        )
-
-    def enqueue_business_search_evaluation(
-        self,
-        *,
-        business_id: str,
-        contract_hash: str,
-        contract: dict,
-        campaign_id: str,
-        evidence_fresh_after: str,
-    ):
-        return self.queue.enqueue_once(
-            JobType.BUSINESS_SEARCH_EVALUATE,
-            {
-                "business_id": business_id,
-                "contract_hash": contract_hash,
-                "contract": contract,
-                "campaign_id": campaign_id,
-                "evidence_fresh_after": evidence_fresh_after,
-            },
-            dedupe_key=f"{business_id}:{contract_hash}",
-            max_attempts=3,
-        )
-
-    def enqueue_business_search_evaluation_batch(
-        self,
-        *,
-        business_ids: list[str],
-        contract_hash: str,
-        contract: dict,
-        campaign_id: str,
-        evidence_fresh_after: str,
-    ):
-        return self.queue.enqueue_once(
-            JobType.BUSINESS_SEARCH_EVALUATE_BATCH,
-            {
-                "business_ids": list(dict.fromkeys(business_ids))[:25],
-                "contract_hash": contract_hash,
-                "contract": contract,
-                "campaign_id": campaign_id,
-                "evidence_fresh_after": evidence_fresh_after,
-            },
-            dedupe_key=f"{campaign_id}:{contract_hash}",
-            max_attempts=3,
         )

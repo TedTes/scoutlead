@@ -229,7 +229,7 @@ def print_summary(summary: BusinessSeedImportSummary) -> None:
     print(f"Businesses created: {summary.businesses_created}")
     print(f"Businesses updated: {summary.businesses_updated}")
     print(f"Contacts created: {summary.contacts_created}")
-    print(f"Source observations created: {summary.source_observations_created}")
+    print(f"Evidence records created: {summary.evidence_records_created}")
     print(f"Skipped rows: {summary.skipped_rows}")
     if summary.errors:
         print()

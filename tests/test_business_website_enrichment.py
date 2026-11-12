@@ -2,7 +2,7 @@ import httpx
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from db.models import BusinessModel, ContactModel, SeedBatchModel, SourceObservationModel
+from db.models import BusinessAttributeModel, BusinessModel, ContactModel, SeedBatchModel
 from db.session import create_database
 from canonical.normalization import stable_content_hash
 from canonical.website_enrichment import (
@@ -14,6 +14,13 @@ from canonical.website_enrichment import (
 )
 from seeding.service import BusinessSeedService
 from tests.test_business_seeding import painting_seed
+
+
+def _website_evidence_query():
+    return select(BusinessAttributeModel).where(
+        BusinessAttributeModel.row_type == "evidence",
+        BusinessAttributeModel.source == SOURCE_NAME,
+    )
 
 
 def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) -> None:
@@ -62,7 +69,7 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert contact.business_id == business.id
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.business_id == business.id
@@ -197,7 +204,7 @@ def test_website_enrichment_records_review_and_conversion_opportunity(monkeypatc
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         opportunity = observation.raw_payload["digital_opportunity"]
@@ -240,7 +247,7 @@ def test_website_enrichment_dry_run_does_not_write(monkeypatch) -> None:
         assert summary.written == 0
         assert session.scalar(select(ContactModel).where(ContactModel.email.is_not(None))) is None
         assert (
-            session.scalar(select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME))
+            session.scalar(_website_evidence_query())
             is None
         )
 
@@ -278,7 +285,7 @@ def test_website_enrichment_records_opportunity_without_contact_signal(monkeypat
         assert summary.written == 1
         assert session.scalar(select(ContactModel).where(ContactModel.email.is_not(None))) is None
         assert (
-            session.scalar(select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME))
+            session.scalar(_website_evidence_query())
             is not None
         )
 
@@ -342,7 +349,7 @@ def test_unavailable_website_is_high_opportunity_in_availability_lane(monkeypatc
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.raw_payload["website_enrichment"]["availability_status"] == "unavailable"
@@ -382,7 +389,7 @@ def test_active_website_is_excluded_from_availability_lane(monkeypatch) -> None:
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.raw_payload["website_enrichment"]["availability_status"] == "active"
@@ -419,7 +426,7 @@ def test_weak_or_missing_lane_keeps_active_site_with_no_conversion_form(monkeypa
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         opportunity = observation.raw_payload["digital_opportunity"]
@@ -462,7 +469,7 @@ def test_parked_website_is_high_opportunity_in_availability_lane(monkeypatch) ->
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.raw_payload["website_enrichment"]["availability_status"] == "parked"
@@ -502,7 +509,7 @@ def test_timeouts_are_inconclusive_not_dead_website_evidence(monkeypatch) -> Non
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.raw_payload["website_enrichment"]["availability_status"] == (
@@ -542,7 +549,7 @@ def test_weak_or_missing_timeout_is_inconclusive(monkeypatch) -> None:
         )
 
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.raw_payload["website_enrichment"]["availability_status"] == (
@@ -593,7 +600,7 @@ def test_website_enrichment_can_target_exact_business_ids(monkeypatch) -> None:
 
         observations = list(
             session.scalars(
-                select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+                _website_evidence_query()
             )
         )
         assert summary.selected == 1
@@ -691,7 +698,7 @@ def test_cleanup_placeholder_emails_removes_existing_bad_values() -> None:
         assert summary["contacts_changed"] == 1
         assert session.scalar(select(ContactModel).where(ContactModel.email == "your@email.com")) is None
         observation = session.scalar(
-            select(SourceObservationModel).where(SourceObservationModel.source == SOURCE_NAME)
+            _website_evidence_query()
         )
         assert observation is not None
         assert observation.content_hash == stable_content_hash(observation.raw_payload)

@@ -19,8 +19,8 @@ import type {
   AdminAttributeDefinition,
   AdminBusinessDetail,
   AdminBusinessSummary,
-  AdminFactLineageFact,
-  AdminFactLineage,
+  AdminAttributeLineageValue,
+  AdminAttributeLineage,
   AdminLeadOpportunity,
   AdminOverview,
 } from "../types/domain";
@@ -159,7 +159,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
               selectedBusinesses[businessId]?.niche_slug || nicheSlug,
               selectedBusinesses[businessId]?.market_key || "",
             ),
-            api.getAdminBusinessFactLineage(businessId),
+            api.getAdminBusinessAttributeLineage(businessId),
           ]);
           return buildBusinessJsonPayload(businessDetail, businessLineage);
         }));
@@ -378,7 +378,7 @@ function BusinessInspector({
   api: ApiClient;
   detail: AdminBusinessDetail | null;
 }) {
-  const [lineage, setLineage] = useState<AdminFactLineage | null>(null);
+  const [lineage, setLineage] = useState<AdminAttributeLineage | null>(null);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [lineageError, setLineageError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -391,7 +391,7 @@ function BusinessInspector({
     setLineageLoading(true);
     setLineageError("");
     try {
-      setLineage(await api.getAdminBusinessFactLineage(detail.id));
+      setLineage(await api.getAdminBusinessAttributeLineage(detail.id));
     } catch (cause) {
       setLineageError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -526,9 +526,9 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
   );
 }
 
-function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFactLineage) {
-  const factsByKey = new Map(lineage.facts.map((fact) => [fact.key, fact]));
-  const observationsById = new Map(lineage.observations.map((observation) => [observation.id, observation]));
+function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminAttributeLineage) {
+  const attributesByKey = new Map(lineage.attributes.map((attribute) => [attribute.key, attribute]));
+  const evidenceById = new Map(lineage.evidence_records.map((evidence) => [evidence.id, evidence]));
   const definitions = lineage.attribute_definitions.length
     ? lineage.attribute_definitions
     : FALLBACK_ATTRIBUTE_DEFINITIONS;
@@ -546,27 +546,27 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
     is_franchise: detail.is_franchise,
   };
   const attributes = Object.fromEntries(definitions.map((definition) => {
-    const fact = factsByKey.get(definition.key);
-    const value = fact?.value ?? fallbackValues[definition.key] ?? null;
-    const observation = fact?.source_observation_id
-      ? observationsById.get(fact.source_observation_id)
+    const attribute = attributesByKey.get(definition.key);
+    const value = attribute?.value ?? fallbackValues[definition.key] ?? null;
+    const evidence = attribute?.source_evidence_id
+      ? evidenceById.get(attribute.source_evidence_id)
       : undefined;
     return [definition.key, {
       label: definition.label,
       category: definition.category,
       observed: value !== null && value !== "",
       value,
-      opportunity_score: fact?.opportunity_score ?? null,
-      score_reason: fact?.score_reason ?? null,
-      evidence_confidence: fact?.evidence_confidence ?? null,
-      resolution_state: fact?.resolution_state ?? null,
-      quality_state: fact?.quality_state ?? null,
-      observed_at: fact?.observed_at ?? null,
-      expires_at: fact?.expires_at ?? null,
-      source: observation ? {
-        observation_id: observation.id,
-        provider: observation.source,
-        url: observation.source_url,
+      opportunity_score: attribute?.opportunity_score ?? null,
+      score_reason: attribute?.score_reason ?? null,
+      evidence_confidence: attribute?.evidence_confidence ?? null,
+      resolution_state: attribute?.resolution_state ?? null,
+      evidence_state: attribute?.evidence_state ?? null,
+      observed_at: attribute?.observed_at ?? null,
+      expires_at: attribute?.expires_at ?? null,
+      source: evidence ? {
+        evidence_id: evidence.id,
+        provider: evidence.source,
+        url: evidence.source_url,
       } : null,
     }];
   }));
@@ -588,11 +588,7 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminFac
     lead_assessment: detail.lead_assessment,
     attributes,
     contacts: detail.contacts,
-    evidence: {
-      facts: lineage.facts,
-      claims: lineage.claims,
-      observations: lineage.observations,
-    },
+    evidence: { records: lineage.evidence_records },
   };
 }
 
@@ -603,7 +599,7 @@ function BusinessAttributeRecord({
   error,
 }: {
   detail: AdminBusinessDetail;
-  lineage: AdminFactLineage | null;
+  lineage: AdminAttributeLineage | null;
   loading: boolean;
   error: string;
 }) {
@@ -613,8 +609,8 @@ function BusinessAttributeRecord({
   const definitions = lineage?.attribute_definitions?.length
     ? lineage.attribute_definitions
     : FALLBACK_ATTRIBUTE_DEFINITIONS;
-  const factsByKey = new Map((lineage?.facts || []).map((fact) => [fact.key, fact]));
-  const observationsById = new Map((lineage?.observations || []).map((observation) => [observation.id, observation]));
+  const attributesByKey = new Map((lineage?.attributes || []).map((attribute) => [attribute.key, attribute]));
+  const evidenceById = new Map((lineage?.evidence_records || []).map((evidence) => [evidence.id, evidence]));
   const fallbackValues: Record<string, unknown> = {
     business_name: detail.display_name,
     trade_category: detail.niche_label || detail.niche_slug,
@@ -642,17 +638,17 @@ function BusinessAttributeRecord({
     <div className="admin-inspector-content admin-business-record">
       {groups.map((group) => <AttributeSection title={group.label} key={group.key}>
         {group.definitions.map((definition) => {
-          const fact = factsByKey.get(definition.key);
+          const attribute = attributesByKey.get(definition.key);
           const fallbackValue = fallbackValues[definition.key];
-          const observation = fact?.source_observation_id
-            ? observationsById.get(fact.source_observation_id)
+          const evidence = attribute?.source_evidence_id
+            ? evidenceById.get(attribute.source_evidence_id)
             : undefined;
           return <TrackedAttributeRow
             definition={definition}
-            fact={fact}
+            attribute={attribute}
             fallbackValue={fallbackValue}
             key={definition.key}
-            source={observation?.source}
+            source={evidence?.source}
           />;
         })}
       </AttributeSection>)}
@@ -664,48 +660,48 @@ function AttributeSection({ title, children }: { title: string; children: ReactN
   return <section className="admin-attribute-section"><h3>{title}</h3>{children}</section>;
 }
 
-function AttributeCoverage({ lineage }: { lineage: AdminFactLineage | null }) {
+function AttributeCoverage({ lineage }: { lineage: AdminAttributeLineage | null }) {
   const definitions = lineage?.attribute_definitions?.length
     ? lineage.attribute_definitions
     : FALLBACK_ATTRIBUTE_DEFINITIONS;
   const trackedKeys = new Set(definitions.map((definition) => definition.key));
   const total = definitions.length;
-  const observed = lineage?.facts.filter((fact) => trackedKeys.has(fact.key) && fact.value != null).length || 0;
+  const observed = lineage?.attributes.filter((attribute) => trackedKeys.has(attribute.key) && attribute.value != null).length || 0;
   return <span className="admin-attribute-coverage"><strong>{observed}</strong> / {total} observed</span>;
 }
 
 function TrackedAttributeRow({
   definition,
-  fact,
+  attribute,
   fallbackValue,
   source,
 }: {
   definition: AdminAttributeDefinition;
-  fact?: AdminFactLineageFact;
+  attribute?: AdminAttributeLineageValue;
   fallbackValue?: unknown;
   source?: string;
 }) {
-  const value = fact?.value ?? fallbackValue;
+  const value = attribute?.value ?? fallbackValue;
   const observed = value !== null && value !== undefined && value !== "";
-  const confidence = fact?.evidence_confidence ?? fact?.confidence;
+  const confidence = attribute?.evidence_confidence ?? attribute?.confidence;
   return <article className={`admin-business-attribute tracked-attribute${observed ? "" : " is-unobserved"}`}>
     <div>
       <span><strong>{definition.label}</strong><code>{definition.key}</code></span>
-      <AttributeEvidenceBadge confidence={confidence} observed={observed} qualityState={fact?.quality_state} />
+      <AttributeEvidenceBadge confidence={confidence} observed={observed} evidenceState={attribute?.evidence_state} />
     </div>
     <p>{observed ? formatAttributeValue(definition.key, value) : "Not observed"}</p>
     <small>
-      {fact
-        ? <>{humanizeKey(fact.quality_state)}{source ? ` · ${humanizeKey(source)}` : ""}{fact.score_reason ? ` · ${fact.score_reason}` : ""}</>
+      {attribute
+        ? <>{humanizeKey(attribute.evidence_state)}{source ? ` · ${humanizeKey(source)}` : ""}{attribute.score_reason ? ` · ${attribute.score_reason}` : ""}</>
         : observed ? "Stored on the business record; no linked fact evidence" : definition.status === "not_configured" ? "Attribute is not configured in this deployment" : "No observation collected"}
     </small>
   </article>;
 }
 
-function AttributeEvidenceBadge({ confidence, observed, qualityState }: { confidence?: number | null; observed: boolean; qualityState?: string }) {
+function AttributeEvidenceBadge({ confidence, observed, evidenceState }: { confidence?: number | null; observed: boolean; evidenceState?: string }) {
   if (!observed) return <span className="admin-attribute-evidence is-missing">Not observed</span>;
   if (confidence == null) return <span className="admin-attribute-evidence">Stored</span>;
-  return <span className={`admin-attribute-evidence is-${qualityState || "observed"}`}><strong>{confidence}%</strong> evidence</span>;
+  return <span className={`admin-attribute-evidence is-${evidenceState || "observed"}`}><strong>{confidence}%</strong> evidence</span>;
 }
 
 function formatAttributeValue(key: string, value: unknown) {
@@ -782,5 +778,5 @@ function BulkDeleteDialog({ api, businesses, onClose, onDeleted }: { api: ApiCli
   const [confirmation, setConfirmation] = useState(""); const [reason, setReason] = useState(""); const [error, setError] = useState(""); const [deleting, setDeleting] = useState(false);
   const expected = `DELETE ${businesses.length} BUSINESSES`;
   const remove = async () => { setDeleting(true); setError(""); try { await api.bulkDeleteAdminBusinesses(businesses.map((business) => business.id), confirmation, reason); onDeleted(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setDeleting(false); } };
-  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-delete-dialog" role="dialog" aria-modal="true"><header><div><h2>Delete {businesses.length} businesses permanently</h2><p>This removes the selected businesses and all attached facts, observations, memberships, and workflow records. Audit entries are retained.</p></div><button className="admin-icon-button" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-bulk-delete-list">{businesses.slice(0, 8).map((business) => <span key={business.id}>{business.display_name}</span>)}{businesses.length > 8 ? <span>+ {businesses.length - 8} more</span> : null}</div><Field label={`Type “${expected}”`} value={confirmation} onChange={setConfirmation} /><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-danger-button" disabled={deleting || confirmation !== expected || !reason.trim()} type="button" onClick={() => void remove()}><Trash2 size={14} /> {deleting ? "Deleting…" : `Delete ${businesses.length} businesses`}</button></footer></div></div>;
+  return <div className="admin-dialog-backdrop"><div className="admin-dialog admin-delete-dialog" role="dialog" aria-modal="true"><header><div><h2>Delete {businesses.length} businesses permanently</h2><p>This removes the selected businesses and all attached attributes, evidence, memberships, and workflow records. Audit entries are retained.</p></div><button className="admin-icon-button" type="button" onClick={onClose}><X size={16} /></button></header><div className="admin-bulk-delete-list">{businesses.slice(0, 8).map((business) => <span key={business.id}>{business.display_name}</span>)}{businesses.length > 8 ? <span>+ {businesses.length - 8} more</span> : null}</div><Field label={`Type “${expected}”`} value={confirmation} onChange={setConfirmation} /><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>{error ? <div className="admin-error">{error}</div> : null}<footer><button type="button" onClick={onClose}>Cancel</button><button className="admin-danger-button" disabled={deleting || confirmation !== expected || !reason.trim()} type="button" onClick={() => void remove()}><Trash2 size={14} /> {deleting ? "Deleting…" : `Delete ${businesses.length} businesses`}</button></footer></div></div>;
 }

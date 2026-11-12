@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from db.models import BusinessNicheMembershipModel, SeedBatchModel, SourceObservationModel
+from db.models import BusinessNicheMembershipModel, SeedBatchModel, BusinessAttributeModel
 
 
 QUARANTINED_BATCH_STATUSES = frozenset({"quarantined", "retired"})
@@ -28,7 +28,7 @@ def active_membership_condition():
 
 def observation_is_quarantined(
     session: Session,
-    observation: SourceObservationModel,
+    observation: BusinessAttributeModel,
 ) -> bool:
     batch_id = observation_batch_id(observation.raw_payload)
     if not batch_id:

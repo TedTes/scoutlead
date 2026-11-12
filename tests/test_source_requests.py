@@ -3,7 +3,6 @@ from sqlalchemy.orm import sessionmaker
 import pytest
 
 from campaign_sources.repository import CampaignSourceRepository
-from business_index.schemas import SearchContract
 from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from db.models import NicheModel, QueueJobModel
@@ -26,13 +25,6 @@ from source_requests.schemas import (
     SourceRequestIntent,
 )
 from source_requests.intent import normalize_search_intent
-from search_evaluations.schemas import (
-    BusinessSearchEvaluationResult,
-    SearchCriterionEvaluation,
-    SearchEvaluationBatchResult,
-    SearchEvaluationStatus,
-)
-from search_evaluations.service import SearchEvaluationService
 from source_requests.service import SourceRequestService
 from tests.test_smoke_campaign import FakeWorkflowLLM
 from tools.browser import DirectHttpBrowserTool
@@ -420,7 +412,7 @@ def test_search_intent_keeps_scope_out_of_criteria_and_website_out_of_contacts()
                     id="website",
                     description="Has a public website",
                     mode=SearchCriterionMode.REQUIRED,
-                    fact_key="website_status",
+                    attribute_key="website_status",
                     operator="equals",
                     value="present",
                 ),
@@ -513,78 +505,6 @@ def test_dynamic_website_search_returns_existing_business_without_semantic_gate(
             for lead in LeadRepository(session).list_by_campaign(result.run.id)
         ] == ["Current Website Painter"]
         assert session.query(QueueJobModel).count() == 0
-
-
-def test_semantic_candidates_stay_on_run_until_batch_evaluation_finishes() -> None:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    create_database(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    with session_factory() as session:
-        session.add(
-            NicheModel(
-                id="niche_residential_painters",
-                slug="residential_painting_contractors",
-                label="Residential painting contractors",
-                category="residential painting contractors",
-                default_query="residential painting contractors",
-                active=True,
-            )
-        )
-        session.commit()
-        product = ProductRepository(session).create(_product())
-        business = CanonicalRepository(session).upsert_from_discovery_result(
-            company_name="Independent Painter",
-            geography="Toronto",
-            description="Owner-operated residential painting contractor",
-            source="google_places",
-            raw={
-                "id": "places/independent-painter",
-                "nationalPhoneNumber": "416-555-0101",
-                "source_request_intent": {
-                    "business_category": "residential painting contractors",
-                    "location": "Toronto",
-                },
-            },
-        )
-        llm = SemanticIntentAndBatchLLM()
-        campaigns = CampaignService(
-            session=session,
-            llm=llm,
-            search_tool=SearchTool(),
-            browser=DirectHttpBrowserTool(timeout_seconds=0.1),
-        )
-        service = SourceRequestService(
-            products=ProductRepository(session),
-            campaigns=campaigns,
-            llm=llm,
-        )
-        created = service.create(
-            SourceRequestCreate(
-                product_id=product.id,
-                prompt="Independent residential painting contractors in Toronto",
-                max_results=25,
-            )
-        )
-
-        queued = session.query(QueueJobModel).one()
-        leads = LeadRepository(session).list_by_campaign(created.run.id)
-        assert created.state == "expanding"
-        assert created.run.status == "expanding"
-        assert queued.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
-        assert [lead.business_id for lead in leads] == [business.business_id]
-        assert leads[0].status == "researching"
-
-        SearchEvaluationService(session=session, llm=llm).evaluate_batch(
-            business_ids=queued.payload["business_ids"],
-            contract_hash=queued.payload["contract_hash"],
-            contract=SearchContract.from_dict(queued.payload["contract"]),
-            evidence_fresh_after=None,
-        )
-        completed = service.finalize_search_evaluations(created.run.id)
-
-        assert completed.status == "completed"
-        assert campaigns.results(created.run.id)[0].company_name == "Independent Painter"
 
 
 def test_source_request_rerun_clones_saved_prompt_and_source_without_running() -> None:
@@ -960,7 +880,7 @@ class ScopeDuplicatingIntentLLM(FakeWorkflowLLM):
                         id="website",
                         description="Has a public website",
                         mode=SearchCriterionMode.REQUIRED,
-                        fact_key="website_status",
+                        attribute_key="website_status",
                         operator="equals",
                         value="present",
                     ),
@@ -990,25 +910,6 @@ class SemanticIntentAndBatchLLM(FakeWorkflowLLM):
                 search_query="residential painting contractors in Toronto",
                 confidence=90,
                 rationale="Parsed request",
-            )
-        if response_model is SearchEvaluationBatchResult:
-            return SearchEvaluationBatchResult(
-                results=[
-                    BusinessSearchEvaluationResult(
-                        business_id=business["id"],
-                        status=SearchEvaluationStatus.MATCHED,
-                        confidence=90,
-                        rationale="Evidence describes an owner-operated business.",
-                        criteria=[
-                            SearchCriterionEvaluation(
-                                criterion="Independent owner-operated business",
-                                matched=True,
-                                evidence=[business.get("description") or business["name"]],
-                            )
-                        ],
-                    )
-                    for business in kwargs["context"]["businesses"]
-                ]
             )
         return super().generate_object(**kwargs)
 

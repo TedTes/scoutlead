@@ -3,9 +3,8 @@ from datetime import timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from business_facts.claims import FactClaim, FactClaimRepository
-from business_facts.repository import BusinessFactKey, BusinessFactRepository, BusinessFactValue
-from db.models import BusinessModel, SignalDefinitionModel, SourceObservationModel
+from business_attributes.repository import BusinessAttributeKey, BusinessAttributeRepository, BusinessAttributeValue
+from db.models import BusinessAttributeModel, BusinessModel, SignalDefinitionModel
 from db.session import create_database
 from shared.utils import new_id, utcnow
 from signal_definitions.repository import SignalDefinitionRepository
@@ -64,48 +63,54 @@ def test_definition_can_be_looked_up_by_key() -> None:
         assert found.id == definition.id
 
 
-def test_claim_and_resolved_fact_link_to_definition() -> None:
+def _evidence(business_id: str, payload: dict, *, source: str = "test") -> BusinessAttributeModel:
+    now = utcnow()
+    return BusinessAttributeModel(
+        id=new_id("business_evidence"),
+        business_id=business_id,
+        row_type="evidence",
+        attribute_key=f"evidence:{source}:{new_id('record')}",
+        value_type="json",
+        value_json=payload,
+        confidence=100,
+        resolution_state="confirmed",
+        observed_at=now,
+        source=source,
+        source_content_hash=new_id("hash")[:64],
+        evidence=payload,
+    )
+
+
+def _attribute(business: BusinessModel, key: str) -> BusinessAttributeModel:
+    return next(
+        item
+        for item in business.attributes
+        if item.row_type == "attribute" and item.attribute_key == key
+    )
+
+
+def test_resolved_attribute_links_to_definition_and_evidence() -> None:
     factory = _session_factory()
     with factory() as session:
         definition = _definition(session)
         business = _business(session)
         now = utcnow()
-        observation = SourceObservationModel(
-            id=new_id("observation"),
-            business_id=business.id,
-            source="website_enrichment",
-            content_hash="signal-definition-test",
-            raw_payload={},
-            observed_at=now,
-        )
+        observation = _evidence(business.id, {}, source="website_enrichment")
         session.add(observation)
         session.commit()
 
-        claim = FactClaimRepository(session).record(
-            FactClaim(
-                business_id=business.id,
-                fact_key="website_status",
-                value="present",
-                source_observation_id=observation.id,
-                confidence=100,
-                extractor="test",
-                extractor_version=1,
-                observed_at=now,
-                expires_at=now + timedelta(days=30),
-            )
-        )
-        fact = BusinessFactRepository(session).upsert(
+        fact = BusinessAttributeRepository(session).upsert(
             business.id,
-            BusinessFactValue(
-                key=BusinessFactKey.WEBSITE_STATUS,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.WEBSITE_STATUS,
                 value="present",
                 observed_at=now,
-                source_observation_id=observation.id,
+                    source_evidence_id=observation.id,
             ),
         )
 
-        assert claim.signal_definition_id == definition.id
         assert fact.signal_definition_id == definition.id
+        assert fact.supporting_evidence_ids == [observation.id]
 
 
 def test_dynamic_signal_collects_from_existing_observation() -> None:
@@ -126,13 +131,10 @@ def test_dynamic_signal_collects_from_existing_observation() -> None:
             version=1,
         )
         business = _business(session)
-        observation = SourceObservationModel(
-            id=new_id("observation"),
-            business_id=business.id,
+        observation = _evidence(
+            business.id,
+            {"website_enrichment": {"has_mobile_viewport": False}},
             source="company_website_seed",
-            content_hash="dynamic-signal-test",
-            raw_payload={"website_enrichment": {"has_mobile_viewport": False}},
-            observed_at=utcnow(),
         )
         session.add_all([definition, observation])
         session.commit()
@@ -144,10 +146,9 @@ def test_dynamic_signal_collects_from_existing_observation() -> None:
         )
 
         assert summary == {"requested": 1, "observed": 1, "claimed": 1, "unknown": 0}
-        fact = next(fact for fact in business.facts if fact.fact_key == definition.key)
+        fact = _attribute(business, definition.key)
         assert fact.value_boolean is False
         assert fact.signal_definition_id == definition.id
-        assert fact.quality_state == "staged"
 
 
 def test_incomplete_javascript_crawl_does_not_claim_signal_absence(monkeypatch) -> None:
@@ -195,7 +196,11 @@ def test_incomplete_javascript_crawl_does_not_claim_signal_absence(monkeypatch) 
         )
 
         assert summary == {"requested": 1, "observed": 1, "claimed": 0, "unknown": 1}
-        assert all(fact.fact_key != definition.key for fact in business.facts)
+        assert all(
+            fact.attribute_key != definition.key
+            for fact in business.attributes
+            if fact.row_type == "attribute"
+        )
 
 
 def test_domain_age_signal_collects_registration_age_from_rdap(monkeypatch) -> None:
@@ -247,9 +252,8 @@ def test_domain_age_signal_collects_registration_age_from_rdap(monkeypatch) -> N
         )
 
         assert summary == {"requested": 1, "observed": 1, "claimed": 1, "unknown": 0}
-        fact = next(fact for fact in business.facts if fact.fact_key == definition.key)
+        fact = _attribute(business, definition.key)
         assert fact.value_number > 2000
-        assert fact.quality_state == "staged"
 
 
 def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
@@ -343,10 +347,13 @@ def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
             )
 
         assert len(calls) == 1
-        facts = {fact.fact_key: fact for fact in business.facts}
+        facts = {
+            fact.attribute_key: fact
+            for fact in business.attributes
+            if fact.row_type == "attribute"
+        }
         assert facts["mobile_performance_score"].value_number == 64
         assert facts["accessibility_score"].value_number == 91
-        assert facts["mobile_performance_score"].quality_state == "published"
 
 
 def test_review_recency_uses_the_newest_observed_review() -> None:

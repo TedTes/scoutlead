@@ -7,7 +7,6 @@ from db.session import create_database
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
-from job_queue.worker import _consolidate_legacy_search_evaluations
 from shared.utils import utcnow
 
 
@@ -173,57 +172,3 @@ def test_signal_collection_idempotency_key_is_bounded_for_large_batches() -> Non
         assert second.id == first.id
         assert len(first.idempotency_key or "") <= 500
         assert first.payload["business_ids"] == business_ids
-
-
-def test_signal_validation_job_is_idempotent_for_a_collection_batch() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        business_ids = ["business_2", "business_1"]
-
-        first = QueueService(session).enqueue_signal_validation(
-            signal_definition_id="signal_mobile_viewport_present",
-            signal_version=2,
-            business_ids=business_ids,
-            collection_job_id="job_collection",
-        )
-        second = QueueService(session).enqueue_signal_validation(
-            signal_definition_id="signal_mobile_viewport_present",
-            signal_version=2,
-            business_ids=list(reversed(business_ids)),
-            collection_job_id="job_collection",
-        )
-
-        assert second.id == first.id
-        assert first.type == JobType.SIGNAL_VALIDATION.value
-        assert first.parent_run_id == "job_collection"
-
-
-def test_legacy_search_evaluation_jobs_are_consolidated_into_one_batch() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        queue = QueueRepository(session)
-        payload = {
-            "campaign_id": "campaign_1",
-            "contract_hash": "contract_1",
-            "contract": {"version": 2, "semantic_all_of": ["Independent business"]},
-            "evidence_fresh_after": "2026-09-01T00:00:00+00:00",
-        }
-        for index in range(3):
-            queue.enqueue(
-                JobType.BUSINESS_SEARCH_EVALUATE,
-                {**payload, "business_id": f"business_{index}"},
-            )
-        current = queue.claim_next()
-        assert current is not None
-
-        _consolidate_legacy_search_evaluations(session, current)
-
-        jobs = session.query(type(current)).all()
-        batch = next(job for job in jobs if job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH)
-        siblings = [
-            job
-            for job in jobs
-            if job.type == JobType.BUSINESS_SEARCH_EVALUATE and job.id != current.id
-        ]
-        assert batch.payload["business_ids"] == ["business_0", "business_1", "business_2"]
-        assert all(job.status == JobStatus.COMPLETED for job in siblings)

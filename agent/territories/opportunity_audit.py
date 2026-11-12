@@ -28,7 +28,7 @@ from db.models import (
     CampaignModel,
     ContactModel,
     LeadModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from shared.utils import normalize_url, utcnow
 from tools.discovery.google_places import GooglePlacesDiscoveryAdapter
@@ -223,9 +223,9 @@ class BusinessOpportunityAuditor:
         )
         observations: dict[str, list[dict]] = defaultdict(list)
         for observation in self.session.scalars(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id.in_(unique_ids))
-            .order_by(SourceObservationModel.observed_at.desc())
+            select(BusinessAttributeModel)
+            .where(BusinessAttributeModel.business_id.in_(unique_ids))
+            .order_by(BusinessAttributeModel.observed_at.desc())
         ):
             observations[observation.business_id].append(
                 {
@@ -806,14 +806,14 @@ class BusinessOpportunityAuditor:
             return
         observations = list(
             self.session.scalars(
-                select(SourceObservationModel)
+                select(BusinessAttributeModel)
                 .where(
-                    SourceObservationModel.business_id.in_(business_ids),
-                    SourceObservationModel.source.in_(
+                    BusinessAttributeModel.business_id.in_(business_ids),
+                    BusinessAttributeModel.source.in_(
                         [SOURCE_NAME, WEBSITE_PRESENCE_SOURCE]
                     ),
                 )
-                .order_by(SourceObservationModel.observed_at.desc())
+                .order_by(BusinessAttributeModel.observed_at.desc())
             )
         )
         latest_observation = {}
@@ -836,7 +836,7 @@ class BusinessOpportunityAuditor:
                     {
                         "source": observation.source,
                         "source_url": observation.source_url,
-                        "source_observation_id": observation.id,
+                        "source_evidence_id": observation.id,
                         "raw": observation.raw_payload,
                     },
                 ]
@@ -880,7 +880,7 @@ def _best_contact(contacts: list[ContactModel]) -> ContactModel | None:
 def _has_observation(lead: LeadModel, observation_id: str) -> bool:
     return any(
         isinstance(source, dict)
-        and source.get("source_observation_id") == observation_id
+        and source.get("source_evidence_id") == observation_id
         for source in lead.raw_sources or []
     )
 

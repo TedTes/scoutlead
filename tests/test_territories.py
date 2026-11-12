@@ -13,10 +13,10 @@ from audience_runs.service import AudienceRunService, _territory_niches
 from audience_runs.outreach import AudienceOutreachService
 from audience_runs.schemas import AudienceResultUpdate
 from campaigns.service import CampaignService
-from business_facts.repository import (
-    BusinessFactKey,
-    BusinessFactRepository,
-    BusinessFactValue,
+from business_attributes.repository import (
+    BusinessAttributeKey,
+    BusinessAttributeRepository,
+    BusinessAttributeValue,
 )
 from business_index.schemas import SearchContract
 from business_index.pipeline import BusinessIndexPipelineService
@@ -25,7 +25,7 @@ from canonical.repository import CanonicalRepository
 from db.models import (
     AudienceFolderModel,
     BusinessIndexSegmentModel,
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     AudienceResultModel,
@@ -41,9 +41,7 @@ from db.models import (
     SignalDefinitionModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
-    SourceObservationModel,
     TerritoryModel,
-    ValidationResultModel,
     WorkspaceNichePreferenceModel,
 )
 from db.session import create_database
@@ -65,7 +63,6 @@ from territories.schemas import (
     TerritoryUpdate,
 )
 from territories.service import TerritoryService
-from territories.changes import ProfileChangeService
 from territories.refill import enqueue_refill_if_depleted
 from territories.scheduler import enqueue_due_territories
 from territories.source_expansion import enqueue_profile_source_expansion
@@ -1240,28 +1237,28 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
         )
         businesses[0].customer_kind = "residential"
         businesses[1].customer_kind = "commercial"
-        facts = BusinessFactRepository(session)
+        facts = BusinessAttributeRepository(session)
         for business, rating, reviews in (
             (businesses[0], 4.8, 24),
             (businesses[1], 4.9, 80),
         ):
-            source_observation_id = _latest_observation_id(session, business.id)
+            source_evidence_id = _latest_evidence_id(session, business.id)
             facts.upsert(
                 business.id,
-                BusinessFactValue(
-                    key=BusinessFactKey.GOOGLE_RATING,
+                BusinessAttributeValue(
+                    key=BusinessAttributeKey.GOOGLE_RATING,
                     value=rating,
                     observed_at=utcnow(),
-                    source_observation_id=source_observation_id,
+                    source_evidence_id=source_evidence_id,
                 ),
             )
             facts.upsert(
                 business.id,
-                BusinessFactValue(
-                    key=BusinessFactKey.GOOGLE_REVIEW_COUNT,
+                BusinessAttributeValue(
+                    key=BusinessAttributeKey.GOOGLE_REVIEW_COUNT,
                     value=reviews,
                     observed_at=utcnow(),
-                    source_observation_id=source_observation_id,
+                    source_evidence_id=source_evidence_id,
                 ),
             )
         session.commit()
@@ -1589,23 +1586,23 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
         businesses = list(
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
-        facts = BusinessFactRepository(session)
+        facts = BusinessAttributeRepository(session)
         facts.upsert(
             businesses[0].id,
-            BusinessFactValue(
-                key=BusinessFactKey.GOOGLE_RATING,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.GOOGLE_RATING,
                 value=4.8,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_evidence_id=None,
             ),
         )
         facts.upsert(
             businesses[0].id,
-            BusinessFactValue(
-                key=BusinessFactKey.GOOGLE_REVIEW_COUNT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.GOOGLE_REVIEW_COUNT,
                 value=37,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_evidence_id=None,
             ),
             commit=True,
         )
@@ -1706,11 +1703,7 @@ def test_dismissed_business_stays_out_of_refills_and_can_be_restored() -> None:
         visible = service.latest_leads_for_audience(profile.id)
         assert {lead.business_id for lead in visible} == {
             replacement[0].business_id,
-            dismissed.business_id,
         }
-        assert next(
-            lead for lead in visible if lead.business_id == dismissed.business_id
-        ).review_status.value == "not_fit"
 
         service.update_result(
             dismissed.id,
@@ -1721,6 +1714,114 @@ def test_dismissed_business_stays_out_of_refills_and_can_be_restored() -> None:
         assert next(
             lead for lead in restored if lead.business_id == dismissed.business_id
         ).review_status.value == "unreviewed"
+
+
+def test_dismissed_business_stays_out_of_other_saved_searches_in_workspace() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        territory_service = TerritoryService(session, workspace_id="workspace:first")
+        first_profile = territory_service.create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=1,
+            )
+        )
+        second_profile = territory_service.create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=1,
+            )
+        )
+        first_profile.batch_size = 1
+        second_profile.batch_size = 1
+        session.commit()
+        service = AudienceRunService(session, workspace_id="workspace:first")
+
+        first_run = service.create(first_profile.id)
+        service.process(first_run.id)
+        dismissed = service.get_read(first_run.id).results[0]
+        service.update_result(
+            dismissed.id,
+            AudienceResultUpdate(review_status="not_fit"),
+        )
+
+        second_run = service.create(second_profile.id)
+        service.process(second_run.id)
+        second_results = service.get_read(second_run.id).results
+
+        assert len(second_results) == 1
+        assert second_results[0].business_id != dismissed.business_id
+
+
+def test_dismissing_promoted_lead_blocks_business_from_other_saved_searches() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        territory_service = TerritoryService(session, workspace_id="workspace:first")
+        first_profile = territory_service.create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=1,
+            )
+        )
+        second_profile = territory_service.create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=[],
+                exclude=[],
+                limit=1,
+            )
+        )
+        first_profile.batch_size = 1
+        second_profile.batch_size = 1
+        session.commit()
+        run_service = AudienceRunService(session, workspace_id="workspace:first")
+
+        first_run = run_service.create(first_profile.id)
+        run_service.process(first_run.id)
+        first_result = run_service.get_read(first_run.id).results[0]
+        promoted = AudienceOutreachService(
+            session,
+            workspace_id="workspace:first",
+        ).promote(first_result.id)
+        LeadRepository(session, workspace_id="workspace:first").update(
+            promoted.id,
+            LeadUpdate(review_status="not_fit"),
+        )
+
+        second_run = run_service.create(second_profile.id)
+        run_service.process(second_run.id)
+        second_results = run_service.get_read(second_run.id).results
+
+        assert len(second_results) == 1
+        assert second_results[0].business_id != first_result.business_id
 
 
 def test_audience_run_returns_partial_stored_results_without_collection() -> None:
@@ -1956,13 +2057,13 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         businesses = list(
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             businesses[1].id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, businesses[1].id),
+                source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
         )
         session.commit()
@@ -1992,48 +2093,22 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         assert rows[0]["raw"]["profile_match"]["matched_signal_count"] == 1
         assert rows[0]["raw"]["profile_match"]["signals"]["no_quote_flow"]["matched"] is True
         matched_signal = rows[0]["raw"]["profile_match"]["matched_signals"][0]
-        assert matched_signal["source_observation_id"]
+        assert matched_signal["source_evidence_id"]
         assert matched_signal["source"] == "google_places"
         assert matched_signal["pitch_eligible"] is False
         assert {
             "signal_key": matched_signal["signal_key"],
-            "fact_key": matched_signal["fact_key"],
+            "attribute_key": matched_signal["attribute_key"],
             "value": matched_signal["value"],
             "confidence": matched_signal["confidence"],
         } == {
             "signal_key": "no_quote_flow",
-            "fact_key": "quote_or_booking_form_present",
+            "attribute_key": "quote_or_booking_form_present",
             "value": False,
             "confidence": "confirmed",
         }
 
-        fact = session.scalar(
-            select(BusinessFactModel).where(
-                BusinessFactModel.business_id == businesses[1].id,
-                BusinessFactModel.fact_key == "quote_or_booking_form_present",
-            )
-        )
-        session.add(
-            ValidationResultModel(
-                id=new_id("validation"),
-                idempotency_key=f"test:{fact.id}:newer-failure",
-                business_id=fact.business_id,
-                source_observation_id=fact.source_observation_id,
-                validation_type="signal:quote_or_booking_form_present",
-                status="failed",
-                confidence=0,
-                reason="Newer validation failed.",
-                evidence=[],
-                validator="test",
-                validator_version=1,
-                observed_at=utcnow() + timedelta(minutes=1),
-                expires_at=utcnow() + timedelta(days=30),
-            )
-        )
-        session.commit()
-
-        # Publication is the eligibility stamp. A separate validation row is
-        # review evidence and no longer overrides the canonical published fact.
+        # No parallel validation log participates in matching.
         assert len(ProfileMatchService(session).match(
             profile=profile,
             niche_ids=[profile.niche_id],
@@ -2069,13 +2144,13 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
                 "pagespeed_mobile": {"performance_score": 62},
             },
         )
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             business.id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=website_evidence.source_observation_id,
+                source_evidence_id=website_evidence.source_evidence_id,
             ),
         )
         session.commit()
@@ -2104,7 +2179,7 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
         assert rows[0]["source"] == "company_website_signal"
         matched = rows[0]["raw"]["profile_match"]["matched_signals"][0]
         assert matched["source"] == "company_website_signal"
-        assert matched["source_observation_id"] == website_evidence.source_observation_id
+        assert matched["source_evidence_id"] == website_evidence.source_evidence_id
         assert matched["source_url"] == "https://hvac.example/contact"
 
 
@@ -2133,14 +2208,13 @@ def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
         )
         session.add(definition)
         session.flush()
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             businesses[0].id,
-            BusinessFactValue(
+            BusinessAttributeValue(
                 key=definition.key,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=None,
-                quality_state="staged",
+                source_evidence_id=None,
             ),
         )
         session.commit()
@@ -2324,16 +2398,15 @@ def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
         )
         session.add(definition)
         session.flush()
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             business.id,
-            BusinessFactValue(
+            BusinessAttributeValue(
                 key=definition.key,
                 value="not_listed",
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_evidence_id=None,
                 confidence=65,
                 resolution_state="probable",
-                quality_state="staged",
             ),
         )
         session.commit()
@@ -2445,14 +2518,13 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
         )
         session.add(service_definition)
         session.flush()
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             business.id,
-            BusinessFactValue(
+            BusinessAttributeValue(
                 key=signal.key,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, business.id),
-                quality_state="published",
+                source_evidence_id=_latest_evidence_id(session, business.id),
             ),
         )
         session.commit()
@@ -2485,7 +2557,7 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
                 "supporting_evidence": [
                     {
                         "signal_key": signal.key,
-                        "fact_key": signal.key,
+                        "attribute_key": signal.key,
                         "value": False,
                         "confidence": "confirmed",
                         "weight": 1.5,
@@ -2504,23 +2576,23 @@ def test_profile_learning_reorders_only_already_eligible_matches() -> None:
         businesses = list(
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
-        facts = BusinessFactRepository(session)
+        facts = BusinessAttributeRepository(session)
         facts.upsert(
             businesses[0].id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, businesses[0].id),
+                source_evidence_id=_latest_evidence_id(session, businesses[0].id),
             ),
         )
         facts.upsert(
             businesses[1].id,
-            BusinessFactValue(
-                key=BusinessFactKey.CONTACT_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.CONTACT_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, businesses[1].id),
+                source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
         )
         profile = TerritoryService(
@@ -2578,13 +2650,13 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
         businesses = list(
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             businesses[0].id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow() - timedelta(days=60),
-                source_observation_id=None,
+                source_evidence_id=None,
             ),
         )
         session.commit()
@@ -2612,60 +2684,6 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
         assert rows == []
 
 
-def test_profile_change_feed_reports_entering_and_exiting_selected_signal() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        offer = _offer(session, workspace_id="workspace:first")
-        _niche(session, slug="home_service_hvac", label="HVAC contractors")
-        _seed_hvac_businesses(session)
-        business = session.scalar(
-            select(BusinessModel).order_by(BusinessModel.display_name).limit(1)
-        )
-        assert business is not None
-        profile = TerritoryService(
-            session,
-            workspace_id="workspace:first",
-        ).create_profile(
-            _profile_create(session,
-                product_id=offer.id,
-                trades=["hvac"],
-                customer_kind="residential",
-                market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow"],
-                exclude=[],
-            )
-        )
-        observed_at = utcnow()
-        facts = BusinessFactRepository(session)
-        facts.upsert(
-            business.id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=False,
-                observed_at=observed_at,
-                source_observation_id=None,
-            ),
-        )
-        facts.upsert(
-            business.id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=True,
-                observed_at=observed_at + timedelta(minutes=1),
-                source_observation_id=None,
-            ),
-        )
-        session.commit()
-
-        changes = ProfileChangeService(
-            session,
-            workspace_id="workspace:first",
-        ).list(profile.id)
-
-        relevant = [change for change in changes if change.business_id == business.id]
-        assert [change.kind.value for change in relevant] == ["exited", "entered"]
-
-
 def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -2675,13 +2693,13 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
         businesses = list(
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             businesses[1].id,
-            BusinessFactValue(
-                key=BusinessFactKey.WEBSITE_STATUS,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.WEBSITE_STATUS,
                 value="missing",
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, businesses[1].id),
+                source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
         )
         session.commit()
@@ -2712,17 +2730,17 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
             "website_unavailable"
         ]
         assert {
-            "fact_key": website_evidence["fact_key"],
+            "attribute_key": website_evidence["attribute_key"],
             "value": website_evidence["value"],
             "matched": website_evidence["matched"],
             "confidence": website_evidence["confidence"],
         } == {
-            "fact_key": "website_status",
+            "attribute_key": "website_status",
             "value": "missing",
             "matched": True,
             "confidence": "confirmed",
         }
-        assert website_evidence["source_observation_id"]
+        assert website_evidence["source_evidence_id"]
         campaign = CampaignRepository(
             session,
             workspace_id="workspace:first",
@@ -2761,24 +2779,24 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
         businesses = list(
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
-        facts = BusinessFactRepository(session)
+        facts = BusinessAttributeRepository(session)
         for business in businesses:
             facts.upsert(
                 business.id,
-                BusinessFactValue(
-                    key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+                BusinessAttributeValue(
+                    key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                     value=False,
                     observed_at=utcnow(),
-                        source_observation_id=_latest_observation_id(session, business.id),
+                        source_evidence_id=_latest_evidence_id(session, business.id),
                 ),
             )
         facts.upsert(
             businesses[1].id,
-            BusinessFactValue(
-                key=BusinessFactKey.CONTACT_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.CONTACT_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, businesses[1].id),
+                source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
         )
         session.commit()
@@ -2829,13 +2847,13 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
             select(BusinessModel).order_by(BusinessModel.display_name).limit(1)
         )
         assert business is not None
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             business.id,
-            BusinessFactValue(
-                key=BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
                 value=False,
                 observed_at=utcnow(),
-                source_observation_id=_latest_observation_id(session, business.id),
+                source_evidence_id=_latest_evidence_id(session, business.id),
             ),
         )
         session.commit()
@@ -2943,13 +2961,13 @@ def test_profile_closed_filter_uses_canonical_business_status() -> None:
             session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
         )
         businesses[0].status = "closed"
-        BusinessFactRepository(session).upsert(
+        BusinessAttributeRepository(session).upsert(
             businesses[0].id,
-            BusinessFactValue(
-                key=BusinessFactKey.BUSINESS_OPERATIONAL,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.BUSINESS_OPERATIONAL,
                 value=True,
                 observed_at=utcnow(),
-                source_observation_id=None,
+                source_evidence_id=None,
             ),
         )
         session.commit()
@@ -3510,78 +3528,25 @@ def _seed_hvac_businesses(session) -> None:
     _validate_business_memberships(session)
 
 
-def _latest_observation_id(session, business_id: str) -> str:
-    observation_id = session.scalar(
-        select(SourceObservationModel.id)
-        .where(SourceObservationModel.business_id == business_id)
-        .order_by(SourceObservationModel.observed_at.desc())
+def _latest_evidence_id(session, business_id: str) -> str:
+    evidence_id = session.scalar(
+        select(BusinessAttributeModel.id)
+        .where(
+            BusinessAttributeModel.business_id == business_id,
+            BusinessAttributeModel.row_type == "evidence",
+        )
+        .order_by(BusinessAttributeModel.observed_at.desc())
         .limit(1)
     )
-    assert observation_id is not None
-    return observation_id
+    assert evidence_id is not None
+    return evidence_id
 
 
 def _validate_business_memberships(session) -> None:
-    now = utcnow()
-    for membership in session.scalars(select(BusinessNicheMembershipModel)):
-        for dimension, confidence in {
-            "identity": 90,
-            "business_identity": 85,
-            "trade": 90,
-            "location": 85,
-        }.items():
-            session.add(
-                ValidationResultModel(
-                    id=new_id("validation"),
-                    idempotency_key=(
-                        f"{membership.business_id}:{membership.niche_id}:"
-                        f"{membership.market_key}:{dimension}"
-                    ),
-                    business_id=membership.business_id,
-                    niche_id=membership.niche_id,
-                    market_key=membership.market_key,
-                    validation_type=dimension,
-                    status="passed",
-                    confidence=confidence,
-                    reason="Test validation passed.",
-                    evidence=[],
-                    validator="test",
-                    validator_version=1,
-                    observed_at=now,
-                    expires_at=now + timedelta(days=30),
-                )
-            )
-    session.commit()
+    # Membership is itself the canonical trade/market relationship.
+    session.flush()
 
 
 def _validate_signal_facts(session) -> None:
-    now = utcnow()
-    for fact in session.scalars(select(BusinessFactModel)):
-        if fact.source_observation_id is None:
-            continue
-        existing = session.scalar(
-            select(ValidationResultModel.id).where(
-                ValidationResultModel.idempotency_key
-                == f"test:{fact.id}:signal-validation",
-            )
-        )
-        if existing is not None:
-            continue
-        session.add(
-            ValidationResultModel(
-                id=new_id("validation"),
-                idempotency_key=f"test:{fact.id}:signal-validation",
-                business_id=fact.business_id,
-                source_observation_id=fact.source_observation_id,
-                validation_type=f"signal:{fact.fact_key}",
-                status="passed",
-                confidence=fact.confidence,
-                reason="Test signal validation passed.",
-                evidence=[],
-                validator="test",
-                validator_version=1,
-                observed_at=now + timedelta(minutes=1),
-                expires_at=fact.expires_at or now + timedelta(days=30),
-            )
-        )
-    session.commit()
+    # Canonical attributes carry their own evidence and confidence.
+    session.flush()

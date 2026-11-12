@@ -8,20 +8,17 @@ from typing import Any, Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_index.eligibility import REQUIRED_VALIDATIONS
 from canonical.normalization import normalize_domain, normalize_phone
 from db.models import (
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
     NicheModel,
-    SourceObservationModel,
-    ValidationResultModel,
 )
 from shared.geospatial import haversine_distance_km
 from shared.utils import utcnow
-from source_observations.integrity import evaluate_observation_integrity
+from business_evidence.integrity import evaluate_evidence_integrity
 
 
 @dataclass(frozen=True)
@@ -93,33 +90,26 @@ def export_city_category(
     scoped = scoped[: max(1, candidate_limit)]
 
     business_ids = [business.id for business, _, _ in scoped]
-    validations = _group_by_business(
-        session.scalars(
-            select(ValidationResultModel)
-            .where(ValidationResultModel.business_id.in_(business_ids))
-            .order_by(
-                ValidationResultModel.observed_at.desc(),
-                ValidationResultModel.created_at.desc(),
-                ValidationResultModel.id.desc(),
-            )
-        )
-        if business_ids
-        else []
-    )
     observations = _group_by_business(
         session.scalars(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id.in_(business_ids))
-            .order_by(SourceObservationModel.observed_at.desc())
+            select(BusinessAttributeModel)
+            .where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.row_type == "evidence",
+            )
+            .order_by(BusinessAttributeModel.observed_at.desc())
         )
         if business_ids
         else []
     )
     facts = _group_by_business(
         session.scalars(
-            select(BusinessFactModel)
-            .where(BusinessFactModel.business_id.in_(business_ids))
-            .order_by(BusinessFactModel.fact_key)
+            select(BusinessAttributeModel)
+            .where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.row_type == "attribute",
+            )
+            .order_by(BusinessAttributeModel.attribute_key)
         )
         if business_ids
         else []
@@ -142,13 +132,7 @@ def export_city_category(
     source_counts: Counter[str] = Counter()
     issue_counts: Counter[str] = Counter()
     for business, membership, distance_km in scoped:
-        current = _latest_scoped_validations(
-            validations.get(business.id, []),
-            niche_id=niche.id,
-            market_key=membership.market_key,
-            now=checked_at,
-        )
-        state, reasons = _quality_state(business, current)
+        state, reasons = _quality_state(business)
         business_observations = observations.get(business.id, [])
         source_counts.update(row.source for row in business_observations)
         integrity = _observation_summary(business_observations, now=checked_at)
@@ -160,7 +144,6 @@ def export_city_category(
                 distance_km=distance_km,
                 quality_state=state,
                 quality_reasons=reasons,
-                validations=current,
                 observations=business_observations,
                 observation_summary=integrity,
                 facts=facts.get(business.id, []),
@@ -232,10 +215,9 @@ def export_city_category(
                 ),
             },
             "quality_gate": {
-                "required_validations": dict(REQUIRED_VALIDATIONS),
-                "unknown_is_publishable": False,
-                "failed_is_publishable": False,
-                "only_validated_records_are_searchable": True,
+                "model": "canonical_business_attributes",
+                "confirmed_attributes_are_searchable": True,
+                "separate_validation_rows_required": False,
             },
         },
         **buckets,
@@ -249,68 +231,14 @@ def _group_by_business(rows: Iterable[Any]) -> dict[str, list[Any]]:
     return grouped
 
 
-def _latest_scoped_validations(
-    rows: list[ValidationResultModel],
-    *,
-    niche_id: str,
-    market_key: str,
-    now: datetime,
-) -> dict[str, ValidationResultModel]:
-    scoped = [
-        row
-        for row in rows
-        if _aware(row.expires_at) >= _aware(now)
-        and row.niche_id in {None, niche_id}
-        and row.market_key in {None, market_key}
-    ]
-    scoped.sort(
-        key=lambda row: (
-            row.niche_id == niche_id,
-            row.market_key == market_key,
-            _aware(row.observed_at),
-            _aware(row.created_at),
-            row.id,
-        ),
-        reverse=True,
-    )
-    latest: dict[str, ValidationResultModel] = {}
-    for row in scoped:
-        latest.setdefault(row.validation_type, row)
-    return latest
-
-
 def _quality_state(
     business: BusinessModel,
-    validations: dict[str, ValidationResultModel],
 ) -> tuple[str, list[str]]:
     if business.status != "active":
         return "rejected", [f"Business status is {business.status}."]
-    failed = [
-        (validation_type, validations.get(validation_type))
-        for validation_type in REQUIRED_VALIDATIONS
-        if validations.get(validation_type) is not None
-        and validations[validation_type].status == "failed"
-    ]
-    if failed:
-        return "rejected", [
-            f"{validation_type}: {row.reason}"
-            for validation_type, row in failed
-            if row is not None
-        ]
-    reasons = []
-    for validation_type, minimum_confidence in REQUIRED_VALIDATIONS.items():
-        row = validations.get(validation_type)
-        if row is None:
-            reasons.append(f"Missing current {validation_type} validation.")
-        elif row.status != "passed":
-            reasons.append(f"{validation_type} validation is {row.status}: {row.reason}")
-        elif row.confidence < minimum_confidence:
-            reasons.append(
-                f"{validation_type} confidence {row.confidence} is below {minimum_confidence}."
-            )
-    if reasons:
-        return "uncertain", reasons
-    return "validated", ["All required current validations passed."]
+    if business.is_directory is True:
+        return "rejected", ["Record represents a directory rather than a business."]
+    return "validated", ["Active canonical business record."]
 
 
 def _business_record(
@@ -320,43 +248,29 @@ def _business_record(
     distance_km: float,
     quality_state: str,
     quality_reasons: list[str],
-    validations: dict[str, ValidationResultModel],
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     observation_summary: dict[str, Any],
-    facts: list[BusinessFactModel],
+    facts: list[BusinessAttributeModel],
     contacts: list[ContactModel],
     now: datetime,
 ) -> dict[str, Any]:
-    signal_validations = {
-        key.removeprefix("signal:"): row
-        for key, row in validations.items()
-        if key.startswith("signal:")
-    }
     eligible_facts = []
     for fact in facts:
-        validation = signal_validations.get(fact.fact_key)
         eligible = bool(
-            fact.quality_state == "published"
-            and fact.resolution_state == "confirmed"
+            fact.resolution_state == "confirmed"
             and fact.confidence >= 90
-            and fact.expires_at is not None
-            and _aware(fact.expires_at) > _aware(now)
-            and fact.source_observation_id
-            and validation is not None
-            and validation.status == "passed"
-            and validation.confidence >= 90
-            and validation.source_observation_id == fact.source_observation_id
+            and (fact.expires_at is None or _aware(fact.expires_at) > _aware(now))
+            and bool(fact.source or fact.source_url or fact.supporting_evidence_ids)
         )
         eligible_facts.append(
             {
-                "key": fact.fact_key,
-                "value": _fact_value(fact),
+                "key": fact.attribute_key,
+                "value": _attribute_value(fact),
                 "confidence": fact.confidence,
-                "quality_state": fact.quality_state,
                 "resolution_state": fact.resolution_state,
                 "observed_at": fact.observed_at.isoformat(),
                 "expires_at": fact.expires_at.isoformat() if fact.expires_at else None,
-                "source_observation_id": fact.source_observation_id,
+                "supporting_evidence_ids": fact.supporting_evidence_ids,
                 "eligible": eligible,
             }
         )
@@ -376,22 +290,11 @@ def _business_record(
             "id": membership.id,
             "market_key": membership.market_key,
             "confidence": membership.confidence,
-            "source_observation_id": membership.source_observation_id,
         },
         "quality": {
             "state": quality_state,
             "reasons": quality_reasons,
-            "validations": {
-                key: {
-                    "status": row.status,
-                    "confidence": row.confidence,
-                    "reason": row.reason,
-                    "observed_at": row.observed_at.isoformat(),
-                    "expires_at": row.expires_at.isoformat(),
-                    "source_observation_id": row.source_observation_id,
-                }
-                for key, row in sorted(validations.items())
-            },
+            "attribute_model": "canonical",
         },
         "facts": eligible_facts,
         "contacts": [
@@ -420,14 +323,14 @@ def _business_record(
 
 
 def _observation_summary(
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
     *,
     now: datetime,
 ) -> dict[str, Any]:
     status_counts: Counter[str] = Counter()
     issue_counts: Counter[str] = Counter()
     for observation in observations:
-        result = evaluate_observation_integrity(observation, now=now, require_locator=True)
+        result = evaluate_evidence_integrity(observation, now=now, require_locator=True)
         status_counts[result.status] += 1
         issue_counts.update(
             f"{check.status}:{check.name}"
@@ -474,7 +377,7 @@ def _duplicate_summary(
     }
 
 
-def _fact_value(fact: BusinessFactModel) -> Any:
+def _attribute_value(fact: BusinessAttributeModel) -> Any:
     if fact.value_type == "boolean":
         return fact.value_boolean
     if fact.value_type == "number":

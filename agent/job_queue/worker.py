@@ -12,7 +12,6 @@ from app.service_factory import (
     campaign_service,
 )
 from business_index.scheduler import enqueue_due_business_index_refreshes
-from business_facts.maintenance import enforce_fact_publication_invariants
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
@@ -26,11 +25,8 @@ from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from messages.service import MessageService
-from search_evaluations.service import SearchEvaluationService
 from signal_collection.service import SignalCollectionService
 from signal_collection.scheduler import enqueue_due_signal_collections
-from signal_validation.service import SignalValidationService
-from business_index.schemas import SearchContract
 from products.repository import ProductRepository
 from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
@@ -104,16 +100,6 @@ def run_once() -> bool:
                 _fail_expanding_campaigns(
                     session,
                     segment_id=str(job_payload["segment_id"]),
-                    reason=str(exc),
-                )
-            if (
-                failed_job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
-                and job_type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
-                and job_payload.get("campaign_id")
-            ):
-                _fail_campaign(
-                    session,
-                    campaign_id=str(job_payload["campaign_id"]),
                     reason=str(exc),
                 )
             if (
@@ -195,7 +181,7 @@ def _execute_job(
             job_id=job.id,
         )
     elif job.type == JobType.SIGNAL_COLLECTION.value:
-        summary = SignalCollectionService(
+        SignalCollectionService(
             session,
             timeout_seconds=services.settings.request_timeout_seconds,
             browser_render_endpoint=services.settings.browser_render_endpoint,
@@ -207,58 +193,12 @@ def _execute_job(
             expected_version=int(job.payload["signal_version"]),
             business_ids=_job_business_ids(job),
         )
-        if summary["claimed"]:
-            QueueService(session).enqueue_signal_validation(
-                signal_definition_id=str(
-                    job.payload["signal_definition_id"]
-                ),
-                signal_version=int(job.payload["signal_version"]),
-                business_ids=_job_business_ids(job),
-                collection_job_id=job.id,
-            )
-    elif job.type == JobType.SIGNAL_VALIDATION.value:
-        SignalValidationService(session).validate(
-            str(job.payload["signal_definition_id"]),
-            expected_version=int(job.payload["signal_version"]),
-            business_ids=_job_business_ids(job),
-        )
-    elif job.type == JobType.BUSINESS_SEARCH_EVALUATE.value:
-        if job.payload.get("campaign_id"):
-            _consolidate_legacy_search_evaluations(session, job)
-        else:
-            SearchEvaluationService(
-                session=session,
-                llm=services.llm,
-            ).evaluate(
-                business_id=str(job.payload["business_id"]),
-                contract_hash=str(job.payload["contract_hash"]),
-                contract=SearchContract.from_dict(dict(job.payload["contract"])),
-                evidence_fresh_after=_job_evidence_fresh_after(job),
-            )
-    elif job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value:
-        SearchEvaluationService(
-            session=session,
-            llm=services.llm,
-        ).evaluate_batch(
-            business_ids=_job_business_ids(job),
-            contract_hash=str(job.payload["contract_hash"]),
-            contract=SearchContract.from_dict(dict(job.payload["contract"])),
-            evidence_fresh_after=_job_evidence_fresh_after(job),
-        )
-        _source_request_service(session, services).finalize_search_evaluations(
-            str(job.payload["campaign_id"])
-        )
     else:
         raise ValueError(f"unknown job type: {job.type}")
 
 
 def _job_business_ids(job: QueueJobModel) -> list[str]:
     return [str(value) for value in job.payload.get("business_ids", [])]
-
-
-def _job_evidence_fresh_after(job: QueueJobModel) -> datetime | None:
-    value = job.payload.get("evidence_fresh_after")
-    return datetime.fromisoformat(str(value)) if value else None
 
 
 def run() -> None:
@@ -284,59 +224,6 @@ def _source_request_service(
         apify_source_label=services.settings.apify_source_label,
         apify_sources=services.settings.apify_source_configs,
         source_recipes=services.settings.source_template_configs,
-    )
-
-
-def _consolidate_legacy_search_evaluations(
-    session: Session,
-    current_job: QueueJobModel,
-) -> None:
-    """Convert pre-batch evaluation jobs left in the queue by an older deployment."""
-    campaign_id = str(current_job.payload["campaign_id"])
-    contract_hash = str(current_job.payload["contract_hash"])
-    active = list(
-        session.scalars(
-            select(QueueJobModel)
-            .where(
-                QueueJobModel.type == JobType.BUSINESS_SEARCH_EVALUATE.value,
-                QueueJobModel.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
-            )
-            .order_by(QueueJobModel.created_at, QueueJobModel.id)
-        )
-    )
-    legacy_jobs = [
-        job
-        for job in active
-        if str(job.payload.get("campaign_id") or "") == campaign_id
-        and str(job.payload.get("contract_hash") or "") == contract_hash
-    ]
-    business_ids = [
-        str(job.payload["business_id"])
-        for job in legacy_jobs
-        if job.payload.get("business_id")
-    ]
-    if not business_ids:
-        business_ids = [str(current_job.payload["business_id"])]
-    QueueService(session).enqueue_business_search_evaluation_batch(
-        business_ids=business_ids,
-        contract_hash=contract_hash,
-        contract=dict(current_job.payload["contract"]),
-        campaign_id=campaign_id,
-        evidence_fresh_after=str(current_job.payload.get("evidence_fresh_after") or ""),
-    )
-    completed_at = datetime.now(timezone.utc)
-    for job in legacy_jobs:
-        if job.id == current_job.id:
-            continue
-        job.status = JobStatus.COMPLETED.value
-        job.completed_at = completed_at
-        job.last_error = "Consolidated into a batch evaluation job."
-    session.commit()
-    logger.info(
-        "legacy_search_evaluations_consolidated campaign_id=%s job_count=%s business_count=%s",
-        campaign_id,
-        len(legacy_jobs),
-        len(set(business_ids)),
     )
 
 
@@ -371,16 +258,6 @@ def _recover_interrupted_jobs() -> None:
                 )
             if (
                 job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
-                and job.type == JobType.BUSINESS_SEARCH_EVALUATE_BATCH.value
-                and job.payload.get("campaign_id")
-            ):
-                _fail_campaign(
-                    session,
-                    campaign_id=str(job.payload["campaign_id"]),
-                    reason=job.last_error or "Search evaluation stopped before completion.",
-                )
-            if (
-                job.status in {JobStatus.FAILED.value, JobStatus.DEAD_LETTER.value}
                 and job.type == JobType.AUDIENCE_RUN.value
                 and job.payload.get("audience_run_id")
             ):
@@ -411,17 +288,6 @@ def _fail_expanding_campaigns(session: Session, *, segment_id: str, reason: str)
             commit=False,
         )
     session.commit()
-
-
-def _fail_campaign(session: Session, *, campaign_id: str, reason: str) -> None:
-    campaigns = CampaignRepository(session)
-    campaign = campaigns.get(campaign_id)
-    if campaign.status == CampaignStatus.EXPANDING.value:
-        campaigns.update_status(
-            campaign_id,
-            CampaignStatus.FAILED,
-            failure_reason=reason,
-        )
 
 
 def _fail_audience_run(session: Session, *, run_id: str, reason: str) -> None:
@@ -485,7 +351,6 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
         enqueue_due_business_index_refreshes(session)
         _last_business_index_scheduler_tick = now
     if now - _last_evidence_expiry_tick >= 3600:
-        enforce_fact_publication_invariants(session)
         _last_evidence_expiry_tick = now
     if (
         services.settings.signal_collection_scheduler_enabled

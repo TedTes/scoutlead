@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
@@ -19,7 +18,6 @@ from territories.metrics import (
     territory_metrics_csv,
 )
 from leads.workspace import WorkspaceLeadService
-from territories.changes import ProfileChangeService, ProfileFactChangeRead
 from territories.schemas import (
     AudienceFolderCreate,
     AudienceFolderRead,
@@ -336,23 +334,6 @@ def location_cities(
 @audience_router.get("/{audience_id}", response_model=TerritoryRead)
 def get_audience(audience_id: str, session: DbSession, auth: CurrentAuth):
     return _service(session, auth).get_read(audience_id)
-
-
-@audience_router.get(
-    "/{audience_id}/changes",
-    response_model=list[ProfileFactChangeRead],
-)
-def list_audience_changes(
-    audience_id: str,
-    session: DbSession,
-    auth: CurrentAuth,
-    since: datetime | None = None,
-    limit: int = 100,
-):
-    return ProfileChangeService(
-        session,
-        workspace_id=auth.workspace_id,
-    ).list(audience_id, since=since, limit=limit)
 
 
 @audience_router.patch("/{audience_id}", response_model=TerritoryRead)

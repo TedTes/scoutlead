@@ -34,7 +34,7 @@ class SearchIntentCriterion(BaseModel):
     id: str = Field(min_length=1)
     description: str = Field(min_length=1)
     mode: SearchCriterionMode
-    fact_key: str | None = None
+    attribute_key: str | None = None
     operator: str | None = None
     value: str | float | bool | list[str] | None = None
     evidence_requirement: str = Field(default="Public business evidence", min_length=1)

@@ -14,7 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from db.base import Base, TimestampMixin
 from db.types import EmbeddingVector
@@ -205,7 +205,10 @@ class BusinessModel(TimestampMixin, Base):
     niche_memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
         back_populates="business"
     )
-    facts: Mapped[list["BusinessFactModel"]] = relationship(back_populates="business")
+    attributes: Mapped[list["BusinessAttributeModel"]] = relationship(
+        back_populates="business",
+        cascade="all, delete-orphan",
+    )
 
 
 class SignalDefinitionModel(TimestampMixin, Base):
@@ -213,7 +216,7 @@ class SignalDefinitionModel(TimestampMixin, Base):
 
     The physical table and class name are retained for migration/API
     compatibility. They do not store a signal assigned to a business; that
-    state lives only in ``business_facts``.
+    state lives only in ``business_attributes``.
     """
     __tablename__ = "signal_definitions"
     __table_args__ = (
@@ -291,25 +294,37 @@ class ServiceSignalMappingModel(TimestampMixin, Base):
     signal_definition: Mapped[SignalDefinitionModel] = relationship()
 
 
-class BusinessFactModel(TimestampMixin, Base):
-    __tablename__ = "business_facts"
+class BusinessAttributeModel(TimestampMixin, Base):
+    """Current business attributes and the evidence that produced them.
+
+    ``row_type='attribute'`` rows are the canonical values used by matching.
+    ``row_type='evidence'`` rows retain immutable provider payloads so every
+    canonical value remains inspectable without a parallel observation table.
+    """
+
+    __tablename__ = "business_attributes"
     __table_args__ = (
         UniqueConstraint(
             "business_id",
-            "fact_key",
-            name="uq_business_facts_business_key",
+            "row_type",
+            "attribute_key",
+            name="uq_business_attributes_business_type_key",
         ),
-        Index("ix_business_facts_key_text", "fact_key", "value_text"),
-        Index("ix_business_facts_key_number", "fact_key", "value_number"),
-        Index("ix_business_facts_key_boolean", "fact_key", "value_boolean"),
-        Index("ix_business_facts_business_observed", "business_id", "observed_at"),
+        Index("ix_business_attributes_key_text", "attribute_key", "value_text"),
+        Index("ix_business_attributes_key_number", "attribute_key", "value_number"),
+        Index("ix_business_attributes_key_boolean", "attribute_key", "value_boolean"),
+        Index("ix_business_attributes_business_observed", "business_id", "observed_at"),
+        Index("ix_business_attributes_source_hash", "source", "source_content_hash"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     business_id: Mapped[str] = mapped_column(
         ForeignKey("businesses.id"), nullable=False, index=True
     )
-    fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    row_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="attribute", index=True
+    )
+    attribute_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     signal_definition_id: Mapped[str | None] = mapped_column(
         ForeignKey("signal_definitions.id"), nullable=True, index=True
     )
@@ -317,6 +332,7 @@ class BusinessFactModel(TimestampMixin, Base):
     value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
     value_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    value_json: Mapped[Any | None] = mapped_column(JSON, nullable=True)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     # Legacy column name: this stores opportunity severity (0=no opportunity,
     # 100=strong opportunity). Confidence separately describes the evidence.
@@ -326,121 +342,47 @@ class BusinessFactModel(TimestampMixin, Base):
     resolution_state: Mapped[str] = mapped_column(
         String(32), nullable=False, default="unknown", index=True
     )
-    supporting_claim_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    quality_state: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="staged", index=True
+    supporting_evidence_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
     )
-    quality_policy_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_observation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("source_observations.id"), nullable=True, index=True
-    )
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_query_signature: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     resolver_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    business: Mapped[BusinessModel] = relationship(back_populates="facts")
-    source_observation: Mapped["SourceObservationModel | None"] = relationship()
+    # Evidence rows expose the familiar provider-field names while storing all
+    # provenance in this one table.
+    external_id = synonym("source_external_id")
+    query_signature = synonym("source_query_signature")
+    content_hash = synonym("source_content_hash")
+
+    business: Mapped[BusinessModel] = relationship(back_populates="attributes")
     signal_definition: Mapped["SignalDefinitionModel | None"] = relationship()
 
+    @property
+    def raw_payload(self) -> dict[str, Any]:
+        return self.evidence or self.value_json or {}
 
-class BusinessFactChangeModel(TimestampMixin, Base):
-    __tablename__ = "business_fact_changes"
-    __table_args__ = (
-        Index(
-            "ix_business_fact_changes_business_changed",
-            "business_id",
-            "changed_at",
-        ),
-        Index(
-            "ix_business_fact_changes_key_changed",
-            "fact_key",
-            "changed_at",
-        ),
-    )
+    @raw_payload.setter
+    def raw_payload(self, value: dict[str, Any]) -> None:
+        self.evidence = value
+        if self.row_type == "evidence":
+            self.value_json = value
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    previous_value: Mapped[Any | None] = mapped_column(JSON, nullable=True)
-    current_value: Mapped[Any] = mapped_column(JSON, nullable=False)
-    previous_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    current_confidence: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_observation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("source_observations.id"), nullable=True, index=True
-    )
-    changed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-    acknowledged_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    @property
+    def source_evidence_id(self) -> str | None:
+        if self.row_type == "evidence":
+            return self.id
+        return next(iter(self.supporting_evidence_ids or []), None)
 
-
-class FactClaimModel(TimestampMixin, Base):
-    __tablename__ = "fact_claims"
-    __table_args__ = (
-        UniqueConstraint("idempotency_key", name="uq_fact_claims_idempotency_key"),
-        Index("ix_fact_claims_business_key_observed", "business_id", "fact_key", "observed_at"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    idempotency_key: Mapped[str] = mapped_column(String(500), nullable=False)
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    fact_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    signal_definition_id: Mapped[str | None] = mapped_column(
-        ForeignKey("signal_definitions.id"), nullable=True, index=True
-    )
-    value: Mapped[Any] = mapped_column(JSON, nullable=False)
-    source_observation_id: Mapped[str] = mapped_column(
-        ForeignKey("source_observations.id"), nullable=False, index=True
-    )
-    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
-    extractor: Mapped[str] = mapped_column(String(128), nullable=False)
-    extractor_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class ValidationResultModel(TimestampMixin, Base):
-    __tablename__ = "validation_results"
-    __table_args__ = (
-        UniqueConstraint("idempotency_key", name="uq_validation_results_idempotency_key"),
-        Index(
-            "ix_validation_results_business_type_observed",
-            "business_id",
-            "validation_type",
-            "observed_at",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    idempotency_key: Mapped[str] = mapped_column(String(500), nullable=False)
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    source_item_id: Mapped[str | None] = mapped_column(
-        ForeignKey("source_items.id"), nullable=True, index=True
-    )
-    source_observation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("source_observations.id"), nullable=True, index=True
-    )
-    niche_id: Mapped[str | None] = mapped_column(
-        ForeignKey("niches.id"), nullable=True, index=True
-    )
-    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    validation_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    validator: Mapped[str] = mapped_column(String(128), nullable=False)
-    validator_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    @source_evidence_id.setter
+    def source_evidence_id(self, value: str | None) -> None:
+        self.supporting_evidence_ids = [value] if value else []
 
 
 class AudienceRunModel(TimestampMixin, Base):
@@ -619,42 +561,6 @@ class OutreachEventModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class BusinessSearchEvaluationModel(TimestampMixin, Base):
-    __tablename__ = "business_search_evaluations"
-    __table_args__ = (
-        UniqueConstraint(
-            "business_id",
-            "contract_hash",
-            "evidence_fingerprint",
-            name="uq_business_search_evaluations_evidence",
-        ),
-        Index(
-            "ix_business_search_evaluations_contract_status",
-            "contract_hash",
-            "status",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    contract_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    evidence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    rationale: Mapped[str] = mapped_column(Text, nullable=False)
-    criterion_results: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON, nullable=False, default=list
-    )
-    evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    missing_evidence: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    business: Mapped[BusinessModel] = relationship()
-
-
 class NicheModel(TimestampMixin, Base):
     __tablename__ = "niches"
 
@@ -802,7 +708,7 @@ class SeedBatchModel(TimestampMixin, Base):
     found_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     inserted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    source_observation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    evidence_record_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     niche: Mapped[NicheModel | None] = relationship(back_populates="seed_batches")
@@ -842,11 +748,6 @@ class BusinessNicheMembershipModel(TimestampMixin, Base):
     )
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
-    source_observation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("source_observations.id"),
-        nullable=True,
-        index=True,
-    )
     seed_batch_id: Mapped[str | None] = mapped_column(
         ForeignKey("seed_batches.id"),
         nullable=True,
@@ -857,9 +758,6 @@ class BusinessNicheMembershipModel(TimestampMixin, Base):
 
     business: Mapped[BusinessModel] = relationship(back_populates="niche_memberships")
     niche: Mapped[NicheModel] = relationship(back_populates="memberships")
-    source_observation: Mapped["SourceObservationModel | None"] = relationship(
-        "SourceObservationModel"
-    )
     seed_batch: Mapped[SeedBatchModel | None] = relationship(back_populates="memberships")
 
 
@@ -918,29 +816,6 @@ class ContactModel(TimestampMixin, Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     business: Mapped[BusinessModel] = relationship(back_populates="contacts")
-
-
-class SourceObservationModel(TimestampMixin, Base):
-    __tablename__ = "source_observations"
-    __table_args__ = (
-        Index(
-            "ix_source_observations_business_observed",
-            "business_id",
-            "observed_at",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), nullable=False, index=True)
-    source: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    query_signature: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    raw_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    business: Mapped[BusinessModel] = relationship()
 
 
 class SourceItemModel(TimestampMixin, Base):

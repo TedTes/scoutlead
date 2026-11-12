@@ -8,7 +8,7 @@ from canonical.website_enrichment import (
     BusinessWebsiteEnrichment,
     EnrichmentSummary,
 )
-from db.models import BusinessModel, SourceObservationModel
+from db.models import BusinessAttributeModel, BusinessModel
 from db.session import create_database
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
 from leads.repository import LeadRepository
@@ -279,7 +279,7 @@ def test_business_audit_restores_nested_google_website(monkeypatch) -> None:
         )
 
         session.refresh(business)
-        latest = session.query(SourceObservationModel).filter_by(
+        latest = session.query(BusinessAttributeModel).filter_by(row_type="evidence",
             business_id=business.id,
             source="website_presence_check",
         ).one()
@@ -367,7 +367,7 @@ def test_failed_confirmation_keeps_website_status_unknown(monkeypatch) -> None:
             opportunity_policy="weak_or_missing",
         )
 
-        latest = session.query(SourceObservationModel).filter_by(
+        latest = session.query(BusinessAttributeModel).filter_by(row_type="evidence",
             business_id=business.id,
             source="website_presence_check",
         ).one()
@@ -454,12 +454,12 @@ def test_osm_candidate_is_cross_checked_with_google_places(monkeypatch) -> None:
         session.refresh(business)
         assert business.website_url == "https://salivanlandscape.com/"
         assert "Salivan Landscape Ltd" in google.queries[0]
-        google_observation = session.query(SourceObservationModel).filter_by(
+        google_observation = session.query(BusinessAttributeModel).filter_by(row_type="evidence",
             business_id=business.id,
             source="google_places",
         ).one()
         assert google_observation.raw_payload["verification_scope"] == "entity"
-        presence = session.query(SourceObservationModel).filter_by(
+        presence = session.query(BusinessAttributeModel).filter_by(row_type="evidence",
             business_id=business.id,
             source="website_presence_check",
         ).one()
@@ -513,7 +513,7 @@ def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatc
         )
 
         session.refresh(business)
-        latest = session.query(SourceObservationModel).filter_by(
+        latest = session.query(BusinessAttributeModel).filter_by(row_type="evidence",
             business_id=business.id,
             source="website_presence_check",
         ).one()
@@ -569,7 +569,7 @@ def test_google_omission_preserves_url_supported_by_trusted_observation(monkeypa
 
         session.refresh(business)
         assert business.website_url == "https://lukekushspainting.example"
-        assert not session.query(SourceObservationModel).filter_by(
+        assert not session.query(BusinessAttributeModel).filter_by(row_type="evidence",
             business_id=business.id,
             source="website_presence_check",
         ).all()

@@ -9,16 +9,14 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_facts.claims import FactClaim, FactClaimRepository
-from business_facts.repository import BusinessFactRepository, BusinessFactValue
-from business_facts.core_attributes import sync_observed_business_attributes
+from business_attributes.repository import BusinessAttributeRepository, BusinessAttributeValue
+from business_attributes.core_attributes import sync_observed_business_attributes
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import BusinessWebsiteEnrichment, WebsiteEnrichmentClient
 from db.models import (
     BusinessModel,
-    FactClaimModel,
     SignalDefinitionModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import utcnow
@@ -117,26 +115,13 @@ class SignalCollectionService:
                 summary["unknown"] += 1
                 self.session.commit()
                 continue
-            claim = FactClaimRepository(self.session).record(
-                FactClaim(
-                    business_id=business.id,
-                    fact_key=definition.key,
-                    value=value,
-                    source_observation_id=observation.id,
-                    confidence=int((definition.config or {}).get("confidence", 100)),
-                    extractor=definition.extractor_key or "configured_extractor",
-                    extractor_version=(
-                        WEBSITE_EXTRACTOR_VERSION
-                        if definition.collector_key in WEBSITE_COLLECTORS
-                        else definition.version
-                    ),
-                    observed_at=observation.observed_at,
-                    expires_at=observation.observed_at
-                    + timedelta(days=definition.freshness_days),
-                    signal_definition_id=definition.id,
-                )
+            self._resolve(
+                definition,
+                business.id,
+                observation=observation,
+                value=value,
+                confidence=int((definition.config or {}).get("confidence", 100)),
             )
-            self._resolve(definition, business.id, claim)
             summary["claimed"] += 1
             # Bound each business to its own transaction. A large collection
             # batch must not block schema changes for the duration of every
@@ -148,7 +133,7 @@ class SignalCollectionService:
         self,
         definition: SignalDefinitionModel,
         business: BusinessModel,
-    ) -> SourceObservationModel | None:
+    ) -> BusinessAttributeModel | None:
         if definition.collector_key in WEBSITE_COLLECTORS:
             if definition.collector_key == "website_dom" and not business.website_url:
                 return None
@@ -178,18 +163,19 @@ class SignalCollectionService:
                 raw=raw,
                 contact_email=enrichment.best_email,
             )
-            return self.session.get(SourceObservationModel, link.source_observation_id)
+            return self.session.get(BusinessAttributeModel, link.source_evidence_id)
         if definition.collector_key in PAGESPEED_COLLECTORS:
             return self._pagespeed_observation(definition, business)
         if definition.collector_key in DOMAIN_COLLECTORS:
             return self._domain_observation(definition, business)
-        statement = select(SourceObservationModel).where(
-            SourceObservationModel.business_id == business.id
+        statement = select(BusinessAttributeModel).where(
+            BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.row_type == "evidence",
         )
         if definition.collector_key == "google_places":
-            statement = statement.where(SourceObservationModel.source.in_(GOOGLE_SOURCES))
+            statement = statement.where(BusinessAttributeModel.source.in_(GOOGLE_SOURCES))
         return self.session.scalar(
-            statement.order_by(SourceObservationModel.observed_at.desc()).limit(1)
+            statement.order_by(BusinessAttributeModel.observed_at.desc()).limit(1)
         )
 
     def _recent_observation(
@@ -198,16 +184,17 @@ class SignalCollectionService:
         *,
         sources: set[str],
         freshness_days: int,
-    ) -> SourceObservationModel | None:
+    ) -> BusinessAttributeModel | None:
         return self.session.scalar(
-            select(SourceObservationModel)
+            select(BusinessAttributeModel)
             .where(
-                SourceObservationModel.business_id == business_id,
-                SourceObservationModel.source.in_(sources),
-                SourceObservationModel.observed_at
+                BusinessAttributeModel.business_id == business_id,
+                BusinessAttributeModel.row_type == "evidence",
+                BusinessAttributeModel.source.in_(sources),
+                BusinessAttributeModel.observed_at
                 >= utcnow() - timedelta(days=freshness_days),
             )
-            .order_by(SourceObservationModel.observed_at.desc())
+            .order_by(BusinessAttributeModel.observed_at.desc())
             .limit(1)
         )
 
@@ -225,7 +212,7 @@ class SignalCollectionService:
         self,
         definition: SignalDefinitionModel,
         business: BusinessModel,
-    ) -> SourceObservationModel | None:
+    ) -> BusinessAttributeModel | None:
         existing = self._recent_observation(
             business.id,
             sources={PAGESPEED_SOURCE},
@@ -295,7 +282,7 @@ class SignalCollectionService:
         definition: SignalDefinitionModel,
         business: BusinessModel,
         normalized: dict[str, Any],
-    ) -> SourceObservationModel:
+    ) -> BusinessAttributeModel:
         raw = {
             "company_name": business.display_name,
             "website_url": business.website_url,
@@ -315,13 +302,13 @@ class SignalCollectionService:
             source=PAGESPEED_SOURCE,
             raw=raw,
         )
-        return self.session.get(SourceObservationModel, link.source_observation_id)
+        return self.session.get(BusinessAttributeModel, link.source_evidence_id)
 
     def _domain_observation(
         self,
         definition: SignalDefinitionModel,
         business: BusinessModel,
-    ) -> SourceObservationModel | None:
+    ) -> BusinessAttributeModel | None:
         domain = _business_domain(business)
         if not domain:
             return None
@@ -365,57 +352,33 @@ class SignalCollectionService:
             source="domain_rdap",
             raw=raw,
         )
-        return self.session.get(SourceObservationModel, link.source_observation_id)
+        return self.session.get(BusinessAttributeModel, link.source_evidence_id)
 
     def _resolve(
         self,
         definition: SignalDefinitionModel,
         business_id: str,
-        newest: FactClaimModel,
+        *,
+        observation: BusinessAttributeModel,
+        value: str | float | bool,
+        confidence: int,
     ) -> None:
-        claims = list(
-            self.session.scalars(
-                select(FactClaimModel)
-                .where(
-                    FactClaimModel.business_id == business_id,
-                    FactClaimModel.signal_definition_id == definition.id,
-                    FactClaimModel.expires_at >= newest.observed_at,
-                    FactClaimModel.extractor_version >= newest.extractor_version,
-                )
-                .order_by(FactClaimModel.observed_at.desc(), FactClaimModel.confidence.desc())
-            )
-        )
-        supporting = tuple(claim.id for claim in claims if claim.value == newest.value)
-        conflicting = any(
-            claim.value != newest.value and claim.confidence >= 90 for claim in claims
-        )
-        config = definition.config or {}
-        requires_validation = bool(config.get("requires_validation", True))
-        quality_state = (
-            "published"
-            if not requires_validation and bool(config.get("auto_publish"))
-            else "staged"
-        )
-        fact = BusinessFactRepository(self.session).upsert(
+        BusinessAttributeRepository(self.session).upsert(
             business_id,
-            BusinessFactValue(
+            BusinessAttributeValue(
                 key=definition.key,
-                value=newest.value,
-                observed_at=newest.observed_at,
-                source_observation_id=newest.source_observation_id,
-                confidence=newest.confidence,
-                resolution_state="conflicted" if conflicting else "confirmed",
-                supporting_claim_ids=supporting,
-                quality_state=quality_state,
-                expires_at=newest.expires_at,
+                value=value,
+                observed_at=observation.observed_at,
+                source_evidence_id=observation.id,
+                confidence=confidence,
+                resolution_state="confirmed",
+                supporting_evidence_ids=(observation.id,),
+                expires_at=observation.observed_at
+                + timedelta(days=definition.freshness_days),
                 resolver_version=RESOLVER_VERSION,
             ),
         )
-        from quality.fact_policy import FactQualityPolicyService
-
-        FactQualityPolicyService(self.session).evaluate(fact, commit=False)
         business = self.session.get(BusinessModel, business_id)
-        observation = self.session.get(SourceObservationModel, newest.source_observation_id)
         if business is not None and observation is not None:
             sync_observed_business_attributes(
                 self.session,

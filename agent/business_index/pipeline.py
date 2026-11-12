@@ -7,8 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient
-from business_validation.policy import publication_decision
-from business_validation.validation import BusinessValidationService
 from business_index.refresh import (
     BusinessIndexRefreshService,
     _campaign_source,
@@ -25,7 +23,7 @@ from campaigns.service import CampaignService
 from canonical.repository import CanonicalRepository
 from db.models import (
     AudienceRunModel,
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessIndexSegmentModel,
     BusinessModel,
     CoverageRequestModel,
@@ -33,7 +31,7 @@ from db.models import (
     SignalDefinitionModel,
     SourceItemDecisionModel,
     SourceItemModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
     TerritoryModel,
 )
 from evaluation.digital_opportunity import opportunity_evidence_from_sources
@@ -48,7 +46,7 @@ from source_items.schemas import (
     SourceItemStage,
     SourceItemState,
 )
-from business_facts.repository import BusinessFactRepository, fact_value
+from business_attributes.repository import BusinessAttributeRepository, attribute_value
 from source_requests.schemas import SourceTask
 from source_providers.catalog import CONFIGURED_SEARCH_PROVIDER_ID
 from territories.opportunity_audit import BusinessOpportunityAuditor
@@ -368,7 +366,7 @@ class BusinessIndexPipelineService:
                 details={
                     "business_id": link.business_id,
                     "resolution": link.identity_resolution,
-                    "source_observation_id": link.source_observation_id,
+                    "source_evidence_id": link.source_evidence_id,
                 },
             ),
             next_state=SourceItemState.AUDIT_PENDING,
@@ -402,56 +400,10 @@ class BusinessIndexPipelineService:
             business = self.session.get(BusinessModel, business_id)
             if business is None:
                 raise ValueError(f"business not found: {business_id}")
-            validator = BusinessValidationService(self.session)
-            validation_candidates = validator.evaluate(
-                business=business,
-                source_item=item,
-                segment=segment,
-            )
-            validation_results = validator.record(validation_candidates, commit=False)
-            decision = publication_decision(validation_results)
-            if not decision.publishable:
-                source_decision = (
-                    SourceItemDecisionValue.REJECTED
-                    if decision.status == "rejected"
-                    else SourceItemDecisionValue.NEEDS_REVIEW
-                )
-                next_state = (
-                    SourceItemState.REJECTED
-                    if decision.status == "rejected"
-                    else SourceItemState.NEEDS_REVIEW
-                )
-                self.items.add_decision(
-                    item.id,
-                    SourceItemDecisionCreate(
-                        stage=SourceItemStage.RELEVANCE,
-                        decision=source_decision,
-                        reason=" ".join(decision.reasons)
-                        or "Business validation requires review.",
-                        details={
-                            "business_id": business_id,
-                            "publication_status": decision.status,
-                            "missing_validations": list(decision.missing),
-                            "validation_results": {
-                                result.validation_type: result.status
-                                for result in validation_results
-                            },
-                        },
-                    ),
-                    next_state=next_state,
-                    business_id=business_id,
-                )
-                if job_id:
-                    self._maybe_complete(segment, current_job_id=job_id)
-                return {
-                    "business_id": business_id,
-                    "state": decision.status,
-                    "reasons": list(decision.reasons),
-                }
             self.segments.assign_business(
                 segment,
                 business_id=business_id,
-                source_observation_id=_source_observation_id(self.session, item),
+                source_evidence_id=_source_evidence_id(self.session, item),
             )
         self.auditor.audit_businesses(
             [business_id],
@@ -465,9 +417,9 @@ class BusinessIndexPipelineService:
         )
         opportunity_evidence = None
         observations = self.session.scalars(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id == business_id)
-            .order_by(SourceObservationModel.observed_at.desc())
+            select(BusinessAttributeModel)
+            .where(BusinessAttributeModel.business_id == business_id)
+            .order_by(BusinessAttributeModel.observed_at.desc())
         )
         for observation in observations:
             opportunity_evidence = opportunity_evidence_from_sources(
@@ -485,9 +437,9 @@ class BusinessIndexPipelineService:
                     details={
                         "business_id": business_id,
                         "opportunity_evidence": opportunity_evidence,
-                        "business_facts": {
-                            key: fact_value(fact)
-                            for key, fact in BusinessFactRepository(self.session)
+                        "business_attributes": {
+                            key: attribute_value(fact)
+                            for key, fact in BusinessAttributeRepository(self.session)
                             .map_for_businesses([business_id])
                             .get(business_id, {})
                             .items()
@@ -575,9 +527,9 @@ class BusinessIndexPipelineService:
         current = {
             row.business_id: row
             for row in self.session.scalars(
-                select(BusinessFactModel).where(
-                    BusinessFactModel.business_id.in_(business_ids),
-                    BusinessFactModel.fact_key == "website_status",
+                select(BusinessAttributeModel).where(
+                    BusinessAttributeModel.business_id.in_(business_ids),
+                    BusinessAttributeModel.attribute_key == "website_status",
                 )
             )
         }
@@ -590,15 +542,15 @@ class BusinessIndexPipelineService:
             )
         )
         fact_observation_ids = {
-            fact.source_observation_id
+            fact.source_evidence_id
             for fact in current.values()
-            if fact.source_observation_id
+            if fact.source_evidence_id
         }
         fact_observations = {
             observation.id: observation
             for observation in self.session.scalars(
-                select(SourceObservationModel).where(
-                    SourceObservationModel.id.in_(fact_observation_ids)
+                select(BusinessAttributeModel).where(
+                    BusinessAttributeModel.id.in_(fact_observation_ids)
                 )
             )
         }
@@ -614,7 +566,7 @@ class BusinessIndexPipelineService:
             or current[business_id].value_text in {"unknown", "not_listed"}
             or _unverified_missing_fact(
                 current[business_id],
-                fact_observations.get(current[business_id].source_observation_id),
+                fact_observations.get(current[business_id].source_evidence_id),
             )
         ]
         limit = min(max(int(segment.target_business_count or 25), 1), 100)
@@ -652,8 +604,8 @@ class BusinessIndexPipelineService:
 
 
 def _unverified_missing_fact(
-    fact: BusinessFactModel,
-    observation: SourceObservationModel | None,
+    fact: BusinessAttributeModel,
+    observation: BusinessAttributeModel | None,
 ) -> bool:
     if fact.value_text != "missing" or observation is None:
         return False
@@ -672,14 +624,14 @@ def _aware(value):
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
-def _source_observation_id(session: Session, item: SourceItemModel) -> str | None:
+def _source_evidence_id(session: Session, item: SourceItemModel) -> str | None:
     decisions = session.scalars(
         select(SourceItemDecisionModel)
         .where(SourceItemDecisionModel.source_item_id == item.id)
         .order_by(SourceItemDecisionModel.created_at.desc())
     )
     for decision in decisions:
-        value = (decision.details or {}).get("source_observation_id")
+        value = (decision.details or {}).get("source_evidence_id")
         if value:
             return str(value)
     return None

@@ -25,7 +25,6 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup, Tag
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -36,7 +35,7 @@ from db.models import (
     BusinessNicheMembershipModel,
     ContactModel,
     NicheModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from db.session import Database
 from evaluation.digital_opportunity import (
@@ -936,8 +935,8 @@ def select_businesses(
         )
     if source:
         pattern = _like_pattern(source)
-        source_business_ids = select(SourceObservationModel.business_id).where(
-            func.lower(SourceObservationModel.source).like(pattern)
+        source_business_ids = select(BusinessAttributeModel.business_id).where(
+            func.lower(BusinessAttributeModel.source).like(pattern)
         )
         statement = statement.where(BusinessModel.id.in_(source_business_ids))
     statement = statement.order_by(BusinessModel.last_seen_at.desc(), BusinessModel.display_name)
@@ -1881,9 +1880,12 @@ def cleanup_placeholder_emails(session: Session, *, dry_run: bool = False) -> di
     bad_emails_by_business: dict[str, set[str]] = defaultdict(set)
     observations_changed = 0
     observations = session.execute(
-        select(SourceObservationModel, BusinessModel)
-        .join(BusinessModel, BusinessModel.id == SourceObservationModel.business_id)
-        .where(SourceObservationModel.source == SOURCE_NAME)
+        select(BusinessAttributeModel, BusinessModel)
+        .join(BusinessModel, BusinessModel.id == BusinessAttributeModel.business_id)
+        .where(
+            BusinessAttributeModel.row_type == "evidence",
+            BusinessAttributeModel.source == SOURCE_NAME,
+        )
     )
     for observation, business in observations:
         raw_payload = observation.raw_payload or {}
@@ -1897,7 +1899,6 @@ def cleanup_placeholder_emails(session: Session, *, dry_run: bool = False) -> di
         if not dry_run:
             observation.raw_payload = cleaned_payload
             observation.content_hash = stable_content_hash(cleaned_payload)
-            flag_modified(observation, "raw_payload")
 
     contacts_changed = 0
     contacts_deleted = 0
@@ -2074,9 +2075,9 @@ def _business_ids_with_website_observation(session: Session, business_ids: list[
         return set()
     return set(
         session.scalars(
-            select(SourceObservationModel.business_id).where(
-                SourceObservationModel.business_id.in_(business_ids),
-                SourceObservationModel.source == SOURCE_NAME,
+            select(BusinessAttributeModel.business_id).where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.source == SOURCE_NAME,
             )
         )
     )
@@ -2153,12 +2154,12 @@ def _google_places_reputation(
     business_id: str,
 ) -> tuple[float | None, int | None, str | None]:
     observations = session.scalars(
-        select(SourceObservationModel)
+        select(BusinessAttributeModel)
         .where(
-            SourceObservationModel.business_id == business_id,
-            SourceObservationModel.source == "google_places_seed",
+            BusinessAttributeModel.business_id == business_id,
+            BusinessAttributeModel.source == "google_places_seed",
         )
-        .order_by(SourceObservationModel.observed_at.desc())
+        .order_by(BusinessAttributeModel.observed_at.desc())
     )
     for observation in observations:
         if observation_is_quarantined(session, observation):

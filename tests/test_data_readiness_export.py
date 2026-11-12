@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from data_readiness.export import (
@@ -6,13 +6,13 @@ from data_readiness.export import (
     ProviderBudget,
     export_city_category,
 )
-from db.models import BusinessModel, ValidationResultModel
+from db.models import BusinessModel
 from db.session import create_database
 from seeding.service import BusinessSeedService
 from tests.test_business_seeding import FakeEmbeddingClient, painting_seed
 
 
-def test_city_category_export_separates_quality_states_without_writes() -> None:
+def test_city_category_export_separates_business_states_without_writes() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         BusinessSeedService(session, embedding=FakeEmbeddingClient()).import_seeds(
@@ -26,7 +26,7 @@ def test_city_category_export_separates_quality_states_without_writes() -> None:
                     longitude=-79.3832,
                 ),
                 painting_seed(
-                    company_name="Uncertain Painter",
+                    company_name="Directory Painter",
                     website_url="https://uncertain-painter.test",
                     phone="416-555-0102",
                     contact_email="owner@uncertain-painter.test",
@@ -55,23 +55,8 @@ def test_city_category_export_separates_quality_states_without_writes() -> None:
         businesses = {
             row.display_name: row for row in session.scalars(select(BusinessModel))
         }
-        session.execute(
-            delete(ValidationResultModel).where(
-                ValidationResultModel.business_id
-                == businesses["Uncertain Painter"].id,
-                ValidationResultModel.validation_type == "location",
-            )
-        )
-        rejected_trade = session.scalar(
-            select(ValidationResultModel).where(
-                ValidationResultModel.business_id
-                == businesses["Rejected Painter"].id,
-                ValidationResultModel.validation_type == "trade",
-            )
-        )
-        assert rejected_trade is not None
-        rejected_trade.status = "failed"
-        rejected_trade.reason = "The provider category conflicts with painting."
+        businesses["Directory Painter"].is_directory = True
+        businesses["Rejected Painter"].status = "archived"
         session.commit()
 
         before = session.query(BusinessModel).count()
@@ -90,16 +75,19 @@ def test_city_category_export_separates_quality_states_without_writes() -> None:
 
     assert before == after == 4
     assert [row["name"] for row in bundle["validated"]] == ["Validated Painter"]
-    assert [row["name"] for row in bundle["uncertain"]] == ["Uncertain Painter"]
-    assert [row["name"] for row in bundle["rejected"]] == ["Rejected Painter"]
+    assert bundle["uncertain"] == []
+    assert [row["name"] for row in bundle["rejected"]] == [
+        "Directory Painter",
+        "Rejected Painter",
+    ]
     assert bundle["manifest"]["counts"] == {
         "memberships_considered": 4,
         "within_radius": 3,
         "within_radius_before_limit": 3,
         "candidate_limit_reached": False,
         "validated": 1,
-        "uncertain": 1,
-        "rejected": 1,
+        "uncertain": 0,
+        "rejected": 2,
         "coverage_deficit": 99,
         "excluded_missing_coordinates": 0,
         "excluded_outside_radius": 1,

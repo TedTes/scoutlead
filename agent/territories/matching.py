@@ -8,13 +8,13 @@ from typing import Any
 from sqlalchemy import and_, case, exists, func, literal, literal_column, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from business_facts.eligibility import (
+from business_attributes.eligibility import (
     DEFAULT_MINIMUM_FACT_CONFIDENCE,
     eligible_fact_condition,
     fact_is_eligible,
 )
-from business_facts.attribute_scoring import audience_match_config
-from business_facts.repository import fact_value
+from business_attributes.attribute_scoring import audience_match_config
+from business_attributes.repository import attribute_value
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import (
     email_from_raw,
@@ -24,7 +24,7 @@ from canonical.normalization import (
 )
 from canonical.semantics import semantic_key
 from db.models import (
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
@@ -32,7 +32,7 @@ from db.models import (
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     SignalDefinitionModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adjustment
 from shared.errors import ConflictError
@@ -60,7 +60,7 @@ LEGACY_SIGNAL_CONFIG = {
 @dataclass(frozen=True)
 class SignalMatchSpec:
     key: str
-    fact_key: str
+    attribute_key: str
     opportunity_direction: str
     config: dict[str, Any]
 
@@ -131,7 +131,7 @@ class ProfileMatchService:
             statement = statement.where(
                 _numeric_fact_exists(
                     business_id=BusinessModel.id,
-                    fact_key="google_rating",
+                    attribute_key="google_rating",
                     cutoff=cutoff,
                     minimum=float(profile.min_google_rating),
                 )
@@ -140,7 +140,7 @@ class ProfileMatchService:
             statement = statement.where(
                 _numeric_fact_exists(
                     business_id=BusinessModel.id,
-                    fact_key="google_review_count",
+                    attribute_key="google_review_count",
                     cutoff=cutoff,
                     minimum=(
                         float(profile.min_review_count)
@@ -175,13 +175,13 @@ class ProfileMatchService:
                 )
         weighted_match_score = literal(0.0)
         for spec in signal_specs:
-            fact = aliased(BusinessFactModel, name=f"profile_fact_{spec.key}")
+            fact = aliased(BusinessAttributeModel, name=f"profile_fact_{spec.key}")
             signal_aliases[spec.key] = fact
             statement = statement.outerjoin(
                 fact,
                 and_(
                     fact.business_id == BusinessModel.id,
-                    fact.fact_key == spec.fact_key,
+                    fact.attribute_key == spec.attribute_key,
                     fact.observed_at >= cutoff,
                     or_(fact.expires_at.is_(None), fact.expires_at >= utcnow()),
                 ),
@@ -237,7 +237,7 @@ class ProfileMatchService:
                     # SQLite happens to accept the previous, incomplete set.
                     fact.id,
                     fact.business_id,
-                    fact.fact_key,
+                    fact.attribute_key,
                     fact.value_type,
                     fact.value_text,
                     fact.value_number,
@@ -246,9 +246,9 @@ class ProfileMatchService:
                     fact.attribute_score,
                     fact.score_version,
                     fact.resolution_state,
-                    fact.quality_state,
                     fact.expires_at,
-                    fact.source_observation_id,
+                    fact.source,
+                    fact.source_url,
                 ]
             )
         group_columns.extend(
@@ -341,7 +341,7 @@ class ProfileMatchService:
                 specs.append(
                     SignalMatchSpec(
                         key=key,
-                        fact_key=SIGNAL_FACTS[key],
+                        attribute_key=SIGNAL_FACTS[key],
                         opportunity_direction="legacy",
                         config=audience_match_config(
                             SIGNAL_FACTS[key],
@@ -356,7 +356,7 @@ class ProfileMatchService:
                 specs.append(
                     SignalMatchSpec(
                         key=key,
-                        fact_key=definition.key,
+                        attribute_key=definition.key,
                         opportunity_direction=definition.opportunity_direction,
                         config=audience_match_config(
                             definition.key,
@@ -462,14 +462,14 @@ class ProfileMatchService:
         if business is None:
             raise ValueError(f"business not found during profile match: {business_id}")
         facts = {
-            fact.fact_key: fact
+            fact.attribute_key: fact
             for fact in self.session.scalars(
-                select(BusinessFactModel).where(
-                    BusinessFactModel.business_id == business_id,
-                    BusinessFactModel.observed_at >= cutoff,
+                select(BusinessAttributeModel).where(
+                    BusinessAttributeModel.business_id == business_id,
+                    BusinessAttributeModel.observed_at >= cutoff,
                     or_(
-                        BusinessFactModel.expires_at.is_(None),
-                        BusinessFactModel.expires_at >= utcnow(),
+                        BusinessAttributeModel.expires_at.is_(None),
+                        BusinessAttributeModel.expires_at >= utcnow(),
                     ),
                 )
             )
@@ -477,9 +477,9 @@ class ProfileMatchService:
         observations = [
             candidate
             for candidate in self.session.scalars(
-                select(SourceObservationModel)
-                .where(SourceObservationModel.business_id == business_id)
-                .order_by(SourceObservationModel.observed_at.desc())
+                select(BusinessAttributeModel)
+                .where(BusinessAttributeModel.business_id == business_id)
+                .order_by(BusinessAttributeModel.observed_at.desc())
             )
             if not observation_is_quarantined(self.session, candidate)
         ]
@@ -502,7 +502,7 @@ class ProfileMatchService:
         )
         signal_evidence = {}
         for spec in signal_specs:
-            fact = facts.get(spec.fact_key)
+            fact = facts.get(spec.attribute_key)
             minimum_confidence = int(
                 spec.config.get(
                     "minimum_confidence", DEFAULT_MINIMUM_FACT_CONFIDENCE
@@ -515,13 +515,13 @@ class ProfileMatchService:
             )
             match_confidence = _signal_match_confidence(spec, fact)
             fact_observation = (
-                observations_by_id.get(fact.source_observation_id)
-                if fact is not None and fact.source_observation_id
+                observations_by_id.get(fact.source_evidence_id)
+                if fact is not None and fact.source_evidence_id
                 else None
             )
             evidence = {
-                "fact_key": spec.fact_key,
-                "value": fact_value(fact),
+                "attribute_key": spec.attribute_key,
+                "value": attribute_value(fact),
                 "evaluated": eligible and fact.attribute_score is not None,
                 "matched": match_confidence is not None,
                 "confidence": match_confidence,
@@ -530,13 +530,13 @@ class ProfileMatchService:
             }
             if fact_observation is not None:
                 pitch_eligible, pitch_reason = pitch_scope_decision(
-                    spec.fact_key,
-                    fact_value(fact),
+                    spec.attribute_key,
+                    attribute_value(fact),
                     fact_observation.raw_payload or {},
                 )
                 evidence.update(
                     {
-                        "source_observation_id": fact_observation.id,
+                        "source_evidence_id": fact_observation.id,
                         "source": fact_observation.source,
                         "source_url": fact_observation.source_url,
                         "observed_at": fact_observation.observed_at.isoformat(),
@@ -555,7 +555,7 @@ class ProfileMatchService:
         matched_signals = [
             {
                 "signal_key": signal,
-                "fact_key": evidence["fact_key"],
+                "attribute_key": evidence["attribute_key"],
                 "value": evidence["value"],
                 "confidence": evidence["confidence"],
                 "evidence_confidence": evidence["evidence_confidence"],
@@ -564,12 +564,12 @@ class ProfileMatchService:
                 "pitch_reason": evidence["pitch_reason"],
                 **(
                     {
-                        "source_observation_id": evidence["source_observation_id"],
+                        "source_evidence_id": evidence["source_evidence_id"],
                         "source": evidence["source"],
                         "source_url": evidence["source_url"],
                         "observed_at": evidence["observed_at"],
                     }
-                    if evidence.get("source_observation_id")
+                    if evidence.get("source_evidence_id")
                     else {}
                 ),
             }
@@ -577,9 +577,9 @@ class ProfileMatchService:
             if evidence["matched"] is True
         ]
         matched_observations = [
-            observations_by_id[item["source_observation_id"]]
+            observations_by_id[item["source_evidence_id"]]
             for item in matched_signals
-            if item.get("source_observation_id") in observations_by_id
+            if item.get("source_evidence_id") in observations_by_id
         ]
         observation = (
             matched_observations[0]
@@ -606,7 +606,7 @@ class ProfileMatchService:
             supporting_evidence = [
                 {
                     "signal_key": signal_key,
-                    "fact_key": signal_evidence[signal_key]["fact_key"],
+                    "attribute_key": signal_evidence[signal_key]["attribute_key"],
                     "value": signal_evidence[signal_key]["value"],
                     "confidence": signal_evidence[signal_key]["confidence"],
                     "weight": weight,
@@ -658,20 +658,20 @@ class ProfileMatchService:
                 spec.key: {
                     "matched": signal_evidence[spec.key]["matched"],
                     "confidence_score": (
-                        facts[spec.fact_key].confidence
-                        if spec.fact_key in facts
+                        facts[spec.attribute_key].confidence
+                        if spec.attribute_key in facts
                         else None
                     ),
                     "observed_at": (
-                        facts[spec.fact_key].observed_at.isoformat()
-                        if spec.fact_key in facts
+                        facts[spec.attribute_key].observed_at.isoformat()
+                        if spec.attribute_key in facts
                         else None
                     ),
                     "severity": _signal_severity(
                         spec,
                         service_specs,
-                        facts[spec.fact_key].attribute_score
-                        if spec.fact_key in facts
+                        facts[spec.attribute_key].attribute_score
+                        if spec.attribute_key in facts
                         else None,
                     ),
                 }
@@ -683,12 +683,12 @@ class ProfileMatchService:
         opportunity_checks = [
             {
                 "key": spec.key,
-                "fact_key": spec.fact_key,
+                "attribute_key": spec.attribute_key,
                 "state": (
                     "verified"
                     if signal_evidence[spec.key]["matched"]
                     else "not_evaluated"
-                    if facts.get(spec.fact_key) is None
+                    if facts.get(spec.attribute_key) is None
                     else "no_gap"
                 ),
                 "value": signal_evidence[spec.key]["value"],
@@ -727,9 +727,9 @@ class ProfileMatchService:
             **(observation.raw_payload if observation else {}),
             "match_origin": "profile_sql",
             "canonical_business_id": business.id,
-            "source_observation_id": observation.id if observation else None,
-            "business_facts": {
-                key: fact_value(value) for key, value in facts.items()
+            "source_evidence_id": observation.id if observation else None,
+            "business_attributes": {
+                key: attribute_value(value) for key, value in facts.items()
             },
             "profile_match": {
                 "status": "matched",
@@ -830,16 +830,16 @@ def _usable_evidence_condition(
 def _numeric_fact_exists(
     *,
     business_id,
-    fact_key: str,
+    attribute_key: str,
     cutoff: datetime,
     minimum: float | None = None,
     maximum: float | None = None,
 ) -> Any:
     """Require current, publishable numeric evidence for an explicit search filter."""
-    fact = aliased(BusinessFactModel, name=f"filter_fact_{fact_key}")
+    fact = aliased(BusinessAttributeModel, name=f"filter_fact_{attribute_key}")
     conditions: list[Any] = [
         fact.business_id == business_id,
-        fact.fact_key == fact_key,
+        fact.attribute_key == attribute_key,
         fact.value_number.is_not(None),
         fact.observed_at >= cutoff,
         or_(fact.expires_at.is_(None), fact.expires_at >= utcnow()),
@@ -859,7 +859,7 @@ def _numeric_fact_exists(
 
 def _signal_match_confidence(
     spec: SignalMatchSpec,
-    fact: BusinessFactModel | None,
+    fact: BusinessAttributeModel | None,
 ) -> str | None:
     if not fact_is_eligible(
         fact,
@@ -881,7 +881,7 @@ def _signal_match_confidence(
 def _contact_has_active_support(
     contact: ContactModel,
     business: BusinessModel,
-    observations: list[SourceObservationModel],
+    observations: list[BusinessAttributeModel],
 ) -> bool:
     supported_phones = {
         value
@@ -908,7 +908,7 @@ def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
     distance = profile_match.get("distance_km")
     matched_signals = profile_match.get("matched_signals") or []
     verified_missing_website = any(
-        signal.get("fact_key") == "website_status"
+        signal.get("attribute_key") == "website_status"
         and signal.get("value") == "missing"
         for signal in matched_signals
     )

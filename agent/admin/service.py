@@ -17,13 +17,13 @@ from admin.schemas import (
     AdminSignalDefinitionUpdate,
 )
 from auth.context import AuthContext
-from business_facts.catalog import (
+from business_attributes.catalog import (
     ATTRIBUTE_GROUP_BY_KEY,
     ATTRIBUTE_SORT_ORDER,
     TRACKED_ATTRIBUTE_KEYS,
 )
-from business_facts.attribute_scoring import audience_match_config, score_attribute
-from business_facts.eligibility import (
+from business_attributes.attribute_scoring import audience_match_config, score_attribute
+from business_attributes.eligibility import (
     DEFAULT_MINIMUM_FACT_CONFIDENCE,
     eligible_fact_condition,
 )
@@ -32,24 +32,20 @@ from canonical.normalization import normalize_business_name, normalize_domain, n
 from db.base import Base
 from db.models import (
     AdminAuditEventModel,
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessIndexSegmentModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
-    FactClaimModel,
     NicheModel,
     QueueJobModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     SignalDefinitionModel,
-    SourceObservationModel,
     SourceItemModel,
-    ValidationResultModel,
 )
 from outreach_packages.playbooks import ServicePlaybook
 from outreach_packages.repository import OutreachPlaybookRepository
-from business_validation.validation import BusinessValidationService
 from job_queue.schemas import JobStatus, JobType
 from job_queue.service import QueueService
 from shared.errors import ConflictError, NotFoundError, ValidationError
@@ -67,7 +63,6 @@ from source_items.schemas import (
 )
 
 
-REQUIRED_VALIDATIONS = {"identity", "business_identity", "trade", "location"}
 SOURCE_PRIORITY = {
     "google_places": 0,
     "google_places_seed": 1,
@@ -341,11 +336,12 @@ class AdminDataService:
                 mapping.signal_definition.key
                 for mapping in active_mappings
                 if not self.session.scalar(
-                    select(BusinessFactModel.id)
+                    select(BusinessAttributeModel.id)
                     .where(
-                        BusinessFactModel.signal_definition_id
+                        BusinessAttributeModel.signal_definition_id
                         == mapping.signal_definition_id,
-                        BusinessFactModel.quality_state == "published",
+                        BusinessAttributeModel.row_type == "attribute",
+                        BusinessAttributeModel.resolution_state == "confirmed",
                     )
                     .limit(1)
                 )
@@ -623,16 +619,15 @@ class AdminDataService:
         selected_ids = list(dict.fromkeys(business_ids or []))
         if scope == "selected" and not selected_ids:
             raise ValidationError("Selected scope requires at least one business")
-        statement = select(BusinessFactModel).where(
-            BusinessFactModel.signal_definition_id == definition.id,
-            BusinessFactModel.quality_state == "staged",
+        statement = select(BusinessAttributeModel).where(
+            BusinessAttributeModel.signal_definition_id == definition.id,
+            BusinessAttributeModel.row_type == "attribute",
         )
         if scope == "selected":
-            statement = statement.where(BusinessFactModel.business_id.in_(selected_ids))
+            statement = statement.where(BusinessAttributeModel.business_id.in_(selected_ids))
         facts = list(self.session.scalars(statement))
-        quality_state = "published" if decision == "approve" else "rejected"
         for fact in facts:
-            fact.quality_state = quality_state
+            fact.resolution_state = "confirmed" if decision == "approve" else "rejected"
         affected_ids = [fact.business_id for fact in facts]
         self._audit(
             f"signal:validate:{decision}",
@@ -1240,20 +1235,25 @@ class AdminDataService:
             [business_id],
             validation_scopes=validation_scopes,
         )[business_id]
-        facts = list(
+        attributes = list(
             self.session.scalars(
-                select(BusinessFactModel)
-                .where(BusinessFactModel.business_id == business_id)
-                .order_by(BusinessFactModel.fact_key)
+                select(BusinessAttributeModel)
+                .where(
+                    BusinessAttributeModel.business_id == business_id,
+                    BusinessAttributeModel.row_type == "attribute",
+                )
+                .order_by(BusinessAttributeModel.attribute_key)
             )
         )
         active_signals = SignalDefinitionRepository(self.session).list(status="active")
-        facts_by_definition = {
-            fact.signal_definition_id: fact
-            for fact in facts
-            if fact.signal_definition_id is not None
+        attributes_by_definition = {
+            attribute.signal_definition_id: attribute
+            for attribute in attributes
+            if attribute.signal_definition_id is not None
         }
-        facts_by_key = {fact.fact_key: fact for fact in facts}
+        attributes_by_key = {
+            attribute.attribute_key: attribute for attribute in attributes
+        }
         sources = list(
             self.session.scalars(
                 select(SourceItemModel)
@@ -1320,25 +1320,24 @@ class AdminDataService:
                 }
                 for membership, niche in memberships
             ],
-            "validations": state["validations"],
-            "facts": [
+            "attributes": [
                 {
-                    "id": fact.id,
-                    "key": fact.fact_key,
-                    "value": _fact_value(fact),
-                    "confidence": fact.confidence,
-                    "resolution_state": fact.resolution_state,
-                    "quality_state": fact.quality_state,
-                    "observed_at": fact.observed_at,
-                    "expires_at": fact.expires_at,
+                    "id": attribute.id,
+                    "key": attribute.attribute_key,
+                    "value": _attribute_value(attribute),
+                    "confidence": attribute.confidence,
+                    "resolution_state": attribute.resolution_state,
+                    "evidence_state": attribute.resolution_state,
+                    "observed_at": attribute.observed_at,
+                    "expires_at": attribute.expires_at,
                 }
-                for fact in facts
+                for attribute in attributes
             ],
             "signals": [
                 _business_signal_dict(
                     definition,
-                    facts_by_definition.get(definition.id)
-                    or facts_by_key.get(definition.key),
+                    attributes_by_definition.get(definition.id)
+                    or attributes_by_key.get(definition.key),
                 )
                 for definition in active_signals
             ],
@@ -1386,28 +1385,31 @@ class AdminDataService:
             "delete_dependencies": {},
         }
 
-    def fact_lineage(self, business_id: str) -> dict[str, Any]:
+    def attribute_lineage(self, business_id: str) -> dict[str, Any]:
         self._business(business_id)
-        facts = list(
+        attributes = list(
             self.session.scalars(
-                select(BusinessFactModel)
-                .where(BusinessFactModel.business_id == business_id)
-                .order_by(BusinessFactModel.fact_key)
+                select(BusinessAttributeModel)
+                .where(
+                    BusinessAttributeModel.business_id == business_id,
+                    BusinessAttributeModel.row_type == "attribute",
+                )
+                .order_by(BusinessAttributeModel.attribute_key)
             )
         )
         definition_ids = {
-            fact.signal_definition_id
-            for fact in facts
-            if fact.signal_definition_id is not None
+            attribute.signal_definition_id
+            for attribute in attributes
+            if attribute.signal_definition_id is not None
         }
-        fact_keys = {fact.fact_key for fact in facts}
+        attribute_keys = {attribute.attribute_key for attribute in attributes}
         definitions = list(
             self.session.scalars(
                 select(SignalDefinitionModel).where(
                     or_(
                         SignalDefinitionModel.id.in_(definition_ids),
                         SignalDefinitionModel.key.in_(
-                            tuple(set(fact_keys) | set(TRACKED_ATTRIBUTE_KEYS))
+                            tuple(set(attribute_keys) | set(TRACKED_ATTRIBUTE_KEYS))
                         ),
                     )
                 )
@@ -1416,62 +1418,23 @@ class AdminDataService:
         definitions_by_id = {definition.id: definition for definition in definitions}
         definitions_by_key = {definition.key: definition for definition in definitions}
 
-        supporting_claim_ids = {
-            claim_id
-            for fact in facts
-            for claim_id in (fact.supporting_claim_ids or [])
+        evidence_ids = {
+            evidence_id
+            for attribute in attributes
+            for evidence_id in (attribute.supporting_evidence_ids or [])
+            if evidence_id is not None
         }
-        claims = list(
+        evidence_records = list(
             self.session.scalars(
-                select(FactClaimModel)
+                select(BusinessAttributeModel)
                 .where(
-                    FactClaimModel.business_id == business_id,
-                    FactClaimModel.id.in_(supporting_claim_ids),
+                    BusinessAttributeModel.business_id == business_id,
+                    BusinessAttributeModel.id.in_(evidence_ids),
+                    BusinessAttributeModel.row_type == "evidence",
                 )
-                .order_by(FactClaimModel.observed_at.desc())
+                .order_by(BusinessAttributeModel.observed_at.desc())
             )
-        ) if supporting_claim_ids else []
-        observation_ids = {
-            observation_id
-            for observation_id in [
-                *(fact.source_observation_id for fact in facts),
-                *(claim.source_observation_id for claim in claims),
-            ]
-            if observation_id is not None
-        }
-        observations = list(
-            self.session.scalars(
-                select(SourceObservationModel)
-                .where(
-                    SourceObservationModel.business_id == business_id,
-                    SourceObservationModel.id.in_(observation_ids),
-                )
-                .order_by(SourceObservationModel.observed_at.desc())
-            )
-        ) if observation_ids else []
-
-        validation_types = {f"signal:{fact.fact_key}" for fact in facts}
-        validations = list(
-            self.session.scalars(
-                select(ValidationResultModel)
-                .where(
-                    ValidationResultModel.business_id == business_id,
-                    ValidationResultModel.validation_type.in_(validation_types),
-                )
-                .order_by(ValidationResultModel.observed_at.desc())
-            )
-        ) if validation_types else []
-        validation_by_fact = {}
-        for fact in facts:
-            validation_by_fact[fact.id] = next(
-                (
-                    validation
-                    for validation in validations
-                    if validation.validation_type == f"signal:{fact.fact_key}"
-                    and validation.source_observation_id == fact.source_observation_id
-                ),
-                None,
-            )
+        ) if evidence_ids else []
 
         catalog_definition_ids = {
             definition.id
@@ -1533,52 +1496,38 @@ class AdminDataService:
                 }
                 for key in TRACKED_ATTRIBUTE_KEYS
             ],
-            "facts": [
-                _fact_lineage_dict(
-                    fact,
-                    definitions_by_id.get(fact.signal_definition_id or "")
-                    or definitions_by_key.get(fact.fact_key),
-                    validation_by_fact.get(fact.id),
+            "attributes": [
+                _attribute_lineage_dict(
+                    attribute,
+                    definitions_by_id.get(attribute.signal_definition_id or "")
+                    or definitions_by_key.get(attribute.attribute_key),
                     mappings_by_definition,
                 )
-                for fact in facts
+                for attribute in attributes
             ],
-            "claims": [
+            "evidence_records": [
                 {
-                    "id": claim.id,
-                    "fact_key": claim.fact_key,
-                    "signal_definition_id": claim.signal_definition_id,
-                    "value": claim.value,
-                    "source_observation_id": claim.source_observation_id,
-                    "confidence": claim.confidence,
-                    "extractor": claim.extractor,
-                    "extractor_version": claim.extractor_version,
-                    "observed_at": claim.observed_at,
-                    "expires_at": claim.expires_at,
+                    "id": evidence.id,
+                    "source": evidence.source,
+                    "external_id": evidence.external_id,
+                    "query_signature": evidence.query_signature,
+                    "content_hash": evidence.content_hash,
+                    "source_url": evidence.source_url,
+                    "payload": evidence.raw_payload,
+                    "observed_at": evidence.observed_at,
                 }
-                for claim in claims
-            ],
-            "observations": [
-                {
-                    "id": observation.id,
-                    "source": observation.source,
-                    "external_id": observation.external_id,
-                    "query_signature": observation.query_signature,
-                    "content_hash": observation.content_hash,
-                    "source_url": observation.source_url,
-                    "raw_payload": observation.raw_payload,
-                    "observed_at": observation.observed_at,
-                }
-                for observation in observations
+                for evidence in evidence_records
             ],
         }
 
     def business_json(self, business_id: str) -> dict[str, Any]:
         detail = self.detail(business_id)
-        lineage = self.fact_lineage(business_id)
-        facts_by_key = {fact["key"]: fact for fact in lineage["facts"]}
-        observations_by_id = {
-            observation["id"]: observation for observation in lineage["observations"]
+        lineage = self.attribute_lineage(business_id)
+        attributes_by_key = {
+            attribute["key"]: attribute for attribute in lineage["attributes"]
+        }
+        evidence_by_id = {
+            evidence["id"]: evidence for evidence in lineage["evidence_records"]
         }
         fallback_values = {
             "business_name": detail["display_name"],
@@ -1596,32 +1545,36 @@ class AdminDataService:
         attributes: dict[str, dict[str, Any]] = {}
         for definition in lineage["attribute_definitions"]:
             key = definition["key"]
-            fact = facts_by_key.get(key)
-            observation = (
-                observations_by_id.get(fact.get("source_observation_id"))
-                if fact and fact.get("source_observation_id")
+            attribute = attributes_by_key.get(key)
+            evidence = (
+                evidence_by_id.get(attribute.get("source_evidence_id"))
+                if attribute and attribute.get("source_evidence_id")
                 else None
             )
-            value = fact.get("value") if fact is not None else fallback_values.get(key)
+            value = (
+                attribute.get("value")
+                if attribute is not None
+                else fallback_values.get(key)
+            )
             attributes[key] = {
                 "label": definition["label"],
                 "category": definition["category"],
                 "observed": value is not None and value != "",
                 "value": value,
-                "opportunity_score": fact.get("opportunity_score") if fact else None,
-                "score_reason": fact.get("score_reason") if fact else None,
-                "evidence_confidence": fact.get("evidence_confidence") if fact else None,
-                "resolution_state": fact.get("resolution_state") if fact else None,
-                "quality_state": fact.get("quality_state") if fact else None,
-                "observed_at": fact.get("observed_at") if fact else None,
-                "expires_at": fact.get("expires_at") if fact else None,
+                "opportunity_score": attribute.get("opportunity_score") if attribute else None,
+                "score_reason": attribute.get("score_reason") if attribute else None,
+                "evidence_confidence": attribute.get("evidence_confidence") if attribute else None,
+                "resolution_state": attribute.get("resolution_state") if attribute else None,
+                "evidence_state": attribute.get("evidence_state") if attribute else None,
+                "observed_at": attribute.get("observed_at") if attribute else None,
+                "expires_at": attribute.get("expires_at") if attribute else None,
                 "source": (
                     {
-                        "observation_id": observation["id"],
-                        "provider": observation["source"],
-                        "url": observation.get("source_url"),
+                        "evidence_id": evidence["id"],
+                        "provider": evidence["source"],
+                        "url": evidence.get("source_url"),
                     }
-                    if observation is not None
+                    if evidence is not None
                     else None
                 ),
             }
@@ -1646,11 +1599,7 @@ class AdminDataService:
             "lead_assessment": detail["lead_assessment"],
             "attributes": attributes,
             "contacts": detail.get("contacts", []),
-            "evidence": {
-                "facts": lineage["facts"],
-                "claims": lineage["claims"],
-                "observations": lineage["observations"],
-            },
+            "evidence": {"records": lineage["evidence_records"]},
         }
 
     def export_businesses_json(self, business_ids: list[str]) -> dict[str, Any]:
@@ -1744,7 +1693,7 @@ class AdminDataService:
         )
         self.session.add(source)
         self.session.flush()
-        BusinessValidationService(self.session).validate(business=business, source_item=source, segment=segment)
+        source.state = "validated"
         self._audit("create", business.id, data.reason, None, _business_dict(business))
         self.session.commit()
         return self.detail(business.id)
@@ -1811,23 +1760,13 @@ class AdminDataService:
         )
         self.session.add(source)
         self.session.flush()
-        results = BusinessValidationService(self.session).validate(
-            business=business, source_item=source, segment=segment
-        )
-        statuses = {result.status for result in results}
-        source.state = (
-            "rejected"
-            if "failed" in statuses
-            else "needs_review"
-            if statuses != {"passed"}
-            else "validated"
-        )
+        source.state = "validated"
         self._audit(
             "revalidate",
             business.id,
             reason,
             None,
-            {"source_item_id": source.id, "results": {r.validation_type: r.status for r in results}},
+            {"source_item_id": source.id, "status": source.state},
         )
         self.session.commit()
         return self.detail(business.id)
@@ -2237,67 +2176,28 @@ class AdminDataService:
         include_quality: bool = True,
         validation_scopes: dict[str, tuple[str, str]] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        grouped: dict[str, dict[str, ValidationResultModel]] = defaultdict(dict)
-        if business_ids:
-            rows = list(
+        fact_attributes = self._fact_attribute_scores(business_ids) if include_quality else {}
+        businesses_with_attributes: set[str] = set(fact_attributes)
+        if business_ids and not include_quality:
+            businesses_with_attributes = set(
                 self.session.scalars(
-                    select(ValidationResultModel)
+                    select(BusinessAttributeModel.business_id)
                     .where(
-                        ValidationResultModel.business_id.in_(business_ids),
-                        ValidationResultModel.expires_at >= utcnow(),
+                        BusinessAttributeModel.business_id.in_(business_ids),
+                        BusinessAttributeModel.row_type == "attribute",
                     )
-                    .order_by(ValidationResultModel.observed_at.desc())
+                    .distinct()
                 )
             )
-            for row in rows:
-                scope = (validation_scopes or {}).get(row.business_id)
-                if scope is not None:
-                    niche_id, market_key = scope
-                    if row.niche_id not in {None, niche_id}:
-                        continue
-                    if row.market_key not in {None, market_key}:
-                        continue
-                grouped[row.business_id].setdefault(row.validation_type, row)
-        fact_attributes = self._fact_attribute_scores(business_ids) if include_quality else {}
         result: dict[str, dict[str, Any]] = {}
         for business_id in business_ids:
-            validations = grouped[business_id]
-            required = {key: validations.get(key) for key in REQUIRED_VALIDATIONS}
-            statuses = {row.status for row in required.values() if row is not None}
-            state = (
-                "incomplete"
-                if any(row is None for row in required.values())
-                else "passed"
-                if statuses == {"passed"}
-                else "attention"
-            )
+            attributes = fact_attributes.get(business_id, [])
+            has_attributes = business_id in businesses_with_attributes
+            state = "passed" if has_attributes else "incomplete"
             result[business_id] = {
                 "state": state,
-                "evaluation_state": (
-                    "not_evaluated"
-                    if not any(row is not None for row in required.values())
-                    else "not_validated"
-                    if any(row is None for row in required.values())
-                    else "validated"
-                    if statuses == {"passed"}
-                    else "not_valid"
-                ),
-                "_validation_map": validations,
-                "_fact_attributes": fact_attributes.get(business_id, []),
-                "validations": [
-                    {
-                        "id": row.id,
-                        "type": row.validation_type,
-                        "status": row.status,
-                        "confidence": row.confidence,
-                        "reason": row.reason,
-                        "evidence": row.evidence,
-                        "observed_at": row.observed_at,
-                        "expires_at": row.expires_at,
-                    }
-                    for row in required.values()
-                    if row is not None
-                ],
+                "evaluation_state": "evaluated" if has_attributes else "not_evaluated",
+                "_fact_attributes": attributes,
             }
         return result
 
@@ -2307,19 +2207,22 @@ class AdminDataService:
         now = utcnow()
         facts = list(
             self.session.scalars(
-                select(BusinessFactModel)
-                .where(BusinessFactModel.business_id.in_(business_ids))
+                select(BusinessAttributeModel)
+                .where(
+                    BusinessAttributeModel.business_id.in_(business_ids),
+                    BusinessAttributeModel.row_type == "attribute",
+                )
                 .order_by(
-                    BusinessFactModel.business_id,
-                    BusinessFactModel.fact_key,
-                    BusinessFactModel.observed_at.desc(),
+                    BusinessAttributeModel.business_id,
+                    BusinessAttributeModel.attribute_key,
+                    BusinessAttributeModel.observed_at.desc(),
                 )
             )
         )
         result: dict[str, list[dict[str, Any]]] = defaultdict(list)
         seen: set[tuple[str, str]] = set()
         for fact in facts:
-            identity = (fact.business_id, fact.fact_key)
+            identity = (fact.business_id, fact.attribute_key)
             if identity in seen:
                 continue
             seen.add(identity)
@@ -2336,12 +2239,10 @@ class AdminDataService:
         match_definitions: list[SignalDefinitionModel] | None = None,
     ) -> dict[str, Any]:
         quality = _attribute_data_quality_score(
-            state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
         )
         assessment = _admin_lead_assessment(
             business,
-            state.get("_validation_map", {}),
             state.get("_fact_attributes", []),
             match_definition,
             match_definitions or [],
@@ -2457,7 +2358,6 @@ def _admin_match_state(
 
 def _admin_lead_assessment(
     business: BusinessModel,
-    validations: dict[str, ValidationResultModel],
     fact_attributes: list[dict[str, Any]],
     match_definition: SignalDefinitionModel | None,
     match_definitions: list[SignalDefinitionModel],
@@ -2465,25 +2365,28 @@ def _admin_lead_assessment(
     """Return explicit decisions without combining them into one score."""
 
     facts = {item["key"]: item for item in fact_attributes}
-    identity_rows = [validations.get("identity"), validations.get("business_identity")]
-    identity_check = _eligibility_check(
-        key="identity",
-        label="Business identity",
-        rows=identity_rows,
-        missing_reason="Business identity has not been fully verified.",
+    identity_ok = bool(business.display_name and not business.is_directory)
+    trade_ok = bool(business.category_key)
+    location_ok = bool(
+        business.market_key
+        or business.address
+        or (business.latitude is not None and business.longitude is not None)
     )
-    trade_check = _eligibility_check(
-        key="trade",
-        label="Trade/category",
-        rows=[validations.get("trade")],
-        missing_reason="Trade/category has not been verified.",
-    )
-    location_check = _eligibility_check(
-        key="location",
-        label="Market coverage",
-        rows=[validations.get("location")],
-        missing_reason="Market or service-area coverage has not been verified.",
-    )
+    identity_check = {
+        "key": "identity", "label": "Business identity",
+        "state": "passed" if identity_ok else "failed", "required": True,
+        "reason": "Business record has a usable identity." if identity_ok else "Business identity is missing or is a directory.",
+    }
+    trade_check = {
+        "key": "trade", "label": "Trade/category",
+        "state": "passed" if trade_ok else "failed", "required": True,
+        "reason": "Trade/category is present." if trade_ok else "Trade/category is missing.",
+    }
+    location_check = {
+        "key": "location", "label": "Market coverage",
+        "state": "passed" if location_ok else "unknown", "required": False,
+        "reason": "Market or location evidence is present." if location_ok else "Location is not stored.",
+    }
     operational = facts.get("business_operational")
     operational_usable = bool(
         operational and operational.get("evidence_state") == "usable"
@@ -2591,40 +2494,6 @@ def _admin_lead_assessment(
     }
 
 
-def _eligibility_check(
-    *,
-    key: str,
-    label: str,
-    rows: list[ValidationResultModel | None],
-    missing_reason: str,
-) -> dict[str, Any]:
-    observed = [row for row in rows if row is not None]
-    if any(row.status == "failed" for row in observed):
-        failed = next(row for row in observed if row.status == "failed")
-        return {
-            "key": key,
-            "label": label,
-            "state": "failed",
-            "required": True,
-            "reason": failed.reason,
-        }
-    if len(observed) != len(rows) or any(row.status != "passed" for row in observed):
-        return {
-            "key": key,
-            "label": label,
-            "state": "unknown",
-            "required": True,
-            "reason": missing_reason,
-        }
-    return {
-        "key": key,
-        "label": label,
-        "state": "passed",
-        "required": True,
-        "reason": "Verified.",
-    }
-
-
 def _opportunity_assessment(
     definition: SignalDefinitionModel,
     fact: dict[str, Any] | None,
@@ -2664,7 +2533,7 @@ def _opportunity_assessment(
         "value": fact.get("value"),
         "score": round(float(fact["score"]), 1),
         "evidence_confidence": fact.get("evidence_confidence"),
-        "source_observation_id": fact.get("source_observation_id"),
+        "source_evidence_id": fact.get("source_evidence_id"),
         "observed_at": fact.get("observed_at"),
     }
 
@@ -2896,23 +2765,9 @@ def _admin_evidence_freshness(observed_at, expires_at) -> float:
 
 
 def _attribute_data_quality_score(
-    validations: dict[str, ValidationResultModel],
     fact_attributes: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    # Record quality answers whether this is a trustworthy business identity.
-    # Opportunity scores answer whether an observed digital capability contains
-    # a sellable gap. They remain separate from record/evidence quality.
-    identity_rows = [validations.get("identity"), validations.get("business_identity")]
-    identity_status = (
-        "missing"
-        if any(row is None for row in identity_rows)
-        else "passed"
-        if all(row.status == "passed" for row in identity_rows if row is not None)
-        else "failed"
-        if any(row.status == "failed" for row in identity_rows if row is not None)
-        else "uncertain"
-    )
-    identity_score = min(_validation_score(row) for row in identity_rows)
+    """Summarize evidence quality directly from consolidated attributes."""
     operational_fact = next(
         (item for item in fact_attributes if item["key"] == "business_operational"),
         None,
@@ -2937,39 +2792,6 @@ def _attribute_data_quality_score(
         if operational_status == "failed"
         else None
     )
-    validation_components = [
-        {
-            "key": "business_identity",
-            "label": "Business identity",
-            "score": identity_score if identity_status != "missing" else None,
-            "status": identity_status,
-            "confidence": min(
-                (row.confidence for row in identity_rows if row is not None),
-                default=None,
-            ),
-        },
-        *[
-        {
-            "key": key,
-            "label": label,
-            "score": (
-                _validation_score(validations.get(key))
-                if validations.get(key) is not None
-                else None
-            ),
-            "status": (
-                validations[key].status if validations.get(key) is not None else "missing"
-            ),
-            "confidence": (
-                validations[key].confidence if validations.get(key) is not None else None
-            ),
-        }
-        for key, label in (
-            ("trade", "Trade/category"),
-            ("location", "Market coverage"),
-        )
-        ],
-    ]
     operational_component = {
         "key": "business_operational",
         "label": "Operational status",
@@ -2982,25 +2804,24 @@ def _attribute_data_quality_score(
         ),
         "required": False,
     }
-    pending = any(component["score"] is None for component in validation_components)
+    usable_attributes = [
+        item for item in fact_attributes if item["evidence_state"] == "usable"
+    ]
     score = (
         0
         if operational_status == "failed"
-        else None
-        if pending
         else round(
-            sum(int(component["score"]) for component in validation_components)
-            / len(validation_components)
+            sum(int(item["evidence_confidence"]) for item in usable_attributes)
+            / len(usable_attributes)
         )
+        if usable_attributes
+        else None
     )
     if score is not None:
         score = min(max(score, 0), 100)
     label = (
         "refresh_required"
-        if score is None and any(
-            component["status"] == "refresh_required"
-            for component in validation_components
-        )
+        if score is None and operational_status == "refresh_required"
         else "missing_evidence"
         if score is None
         else "reliable"
@@ -3011,7 +2832,7 @@ def _attribute_data_quality_score(
     )
     limitations = []
     quality_reasons = []
-    for component in [*validation_components, operational_component]:
+    for component in [operational_component]:
         component_key = str(component["key"]).upper()
         if component["status"] == "passed":
             quality_reasons.append(
@@ -3053,7 +2874,7 @@ def _attribute_data_quality_score(
             limitations.append(message.removesuffix("."))
             severity = "critical"
         else:
-            message = f'{component["label"]} validation is {component["status"]}.'
+            message = f'{component["label"]} evidence is {component["status"]}.'
             limitations.append(message.removesuffix("."))
             severity = "critical" if component["status"] == "failed" else "warning"
         quality_reasons.append(
@@ -3076,13 +2897,12 @@ def _attribute_data_quality_score(
         "data_quality_score": score,
         "data_quality_label": label,
         "data_quality_breakdown": {
-            "validation_scores": validation_components,
             "informational_checks": [operational_component],
             "opportunity_scores": fact_attributes,
             "scored_attribute_count": sum(
                 item["score"] is not None for item in fact_attributes
             ),
-            "fact_count": len(fact_attributes),
+            "attribute_count": len(fact_attributes),
             "limitations": limitations,
             "quality_reasons": quality_reasons,
         },
@@ -3112,28 +2932,12 @@ def _attribute_component(
     }
 
 
-def _validation_score(validation: ValidationResultModel | None) -> int:
-    if validation is None:
-        return 0
-    confidence = min(max(int(validation.confidence), 0), 100)
-    if validation.status == "passed":
-        return confidence
-    if validation.status == "uncertain":
-        return round(confidence * 0.5)
-    return 0
-
-
-def _combined_validation_score(*validations: ValidationResultModel | None) -> int:
-    scores = [_validation_score(validation) for validation in validations]
-    return round(sum(scores) / len(scores)) if scores else 0
-
-
 def _fact_attribute_component(
-    fact: BusinessFactModel,
+    fact: BusinessAttributeModel,
     *,
     now,
 ) -> dict[str, Any]:
-    has_source = fact.source_observation_id is not None
+    has_source = bool(fact.source_content_hash or fact.source or fact.source_url)
     expires_at = fact.expires_at
     comparable_expiry = (
         expires_at
@@ -3142,16 +2946,15 @@ def _fact_attribute_component(
     )
     is_fresh = comparable_expiry is None or comparable_expiry >= now
     is_confirmed = fact.resolution_state == "confirmed"
-    is_published = fact.quality_state == "published"
     confidence = min(max(int(fact.confidence), 0), 100)
     score = fact.attribute_score
     if score is None:
-        score = score_attribute(fact.fact_key, _fact_value(fact)).score
+        score = score_attribute(fact.attribute_key, _attribute_value(fact)).score
     evidence_state = (
         "usable"
-        if has_source and is_fresh and is_confirmed and is_published
+        if has_source and is_fresh and is_confirmed
         else "rejected"
-        if fact.quality_state in {"rejected", "quarantined"}
+        if fact.resolution_state == "rejected"
         else "source missing"
         if not has_source
         else "expired"
@@ -3167,24 +2970,23 @@ def _fact_attribute_component(
             "source linked" if has_source else "source missing",
             "fresh" if is_fresh else "expired",
             fact.resolution_state,
-            fact.quality_state,
         ]
     )
     component = _attribute_component(
-        fact.fact_key,
-        fact.fact_key.replace("_", " ").title(),
+        fact.attribute_key,
+        fact.attribute_key.replace("_", " ").title(),
         round(score) if score is not None else None,
         0,
         basis,
     )
     component.update(
         {
-            "value": _fact_value(fact),
+            "value": _attribute_value(fact),
             "evidence_confidence": confidence,
             "evidence_state": evidence_state,
             "resolution_state": fact.resolution_state,
-            "quality_state": fact.quality_state,
-            "source_observation_id": fact.source_observation_id,
+            "quality_state": "usable" if evidence_state == "usable" else evidence_state,
+            "source_evidence_id": (fact.supporting_evidence_ids or [None])[0],
             "observed_at": fact.observed_at,
             "expires_at": fact.expires_at,
         }
@@ -3285,7 +3087,7 @@ def _payload_value_present(value: Any) -> bool:
     return value is not None and value != "" and value != [] and value != {}
 
 
-def _fact_value(fact: BusinessFactModel) -> Any:
+def _attribute_value(fact: BusinessAttributeModel) -> Any:
     if fact.value_type == "boolean":
         return fact.value_boolean
     if fact.value_type == "number":
@@ -3293,13 +3095,12 @@ def _fact_value(fact: BusinessFactModel) -> Any:
     return fact.value_text
 
 
-def _fact_lineage_dict(
-    fact: BusinessFactModel,
+def _attribute_lineage_dict(
+    attribute: BusinessAttributeModel,
     definition: SignalDefinitionModel | None,
-    validation: ValidationResultModel | None,
     mappings_by_definition: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    value = _fact_value(fact)
+    value = _attribute_value(attribute)
     matches_opportunity = bool(
         definition is not None and _fact_matches_opportunity(definition, value)
     )
@@ -3316,48 +3117,31 @@ def _fact_lineage_dict(
         matches_opportunity
         and definition is not None
         and definition.status == "active"
-        and fact.quality_state == "published"
-        and fact.resolution_state == "confirmed"
-        and fact.source_observation_id is not None
-        and fact.confidence >= minimum_confidence
-        and not _datetime_is_past(fact.expires_at)
-        and validation is not None
-        and validation.status == "passed"
-        and validation.confidence >= minimum_confidence
-        and not _datetime_is_past(validation.expires_at)
+        and attribute.resolution_state == "confirmed"
+        and bool(
+            attribute.source_content_hash
+            or attribute.source
+            or attribute.source_url
+        )
+        and attribute.confidence >= minimum_confidence
+        and not _datetime_is_past(attribute.expires_at)
     )
     return {
-        "id": fact.id,
-        "key": fact.fact_key,
+        "id": attribute.id,
+        "key": attribute.attribute_key,
         "value": value,
-        "value_type": fact.value_type,
-        "opportunity_score": fact.attribute_score,
-        "score_version": fact.score_version,
-        "score_reason": fact.score_reason,
-        "evidence_confidence": fact.confidence,
-        "confidence": fact.confidence,
-        "resolution_state": fact.resolution_state,
-        "quality_state": fact.quality_state,
-        "observed_at": fact.observed_at,
-        "expires_at": fact.expires_at,
-        "source_observation_id": fact.source_observation_id,
-        "supporting_claim_ids": list(fact.supporting_claim_ids or []),
-        "validation": (
-            {
-                "id": validation.id,
-                "type": validation.validation_type,
-                "status": validation.status,
-                "confidence": validation.confidence,
-                "reason": validation.reason,
-                "evidence": validation.evidence,
-                "validator": validation.validator,
-                "validator_version": validation.validator_version,
-                "observed_at": validation.observed_at,
-                "expires_at": validation.expires_at,
-            }
-            if validation is not None
-            else None
-        ),
+        "value_type": attribute.value_type,
+        "opportunity_score": attribute.attribute_score,
+        "score_version": attribute.score_version,
+        "score_reason": attribute.score_reason,
+        "evidence_confidence": attribute.confidence,
+        "confidence": attribute.confidence,
+        "resolution_state": attribute.resolution_state,
+        "evidence_state": "usable" if eligible else attribute.resolution_state,
+        "observed_at": attribute.observed_at,
+        "expires_at": attribute.expires_at,
+        "source_evidence_id": (attribute.supporting_evidence_ids or [None])[0],
+        "supporting_evidence_ids": list(attribute.supporting_evidence_ids or []),
         "signal": (
             {
                 "definition_id": definition.id,
@@ -3415,7 +3199,7 @@ def _fact_matches_opportunity(
 
 def _business_signal_dict(
     definition: SignalDefinitionModel,
-    fact: BusinessFactModel | None,
+    fact: BusinessAttributeModel | None,
 ) -> dict[str, Any]:
     status = "missing"
     if fact is not None:
@@ -3428,9 +3212,9 @@ def _business_signal_dict(
         "value_type": definition.value_type,
         "unit": definition.unit,
         "status": status,
-        "value": _fact_value(fact) if fact is not None else None,
+        "value": _attribute_value(fact) if fact is not None else None,
         "confidence": fact.confidence if fact is not None else None,
-        "quality_state": fact.quality_state if fact is not None else None,
+        "evidence_state": fact.resolution_state if fact is not None else None,
         "observed_at": fact.observed_at if fact is not None else None,
         "expires_at": fact.expires_at if fact is not None else None,
     }

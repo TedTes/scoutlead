@@ -6180,8 +6180,8 @@ function contactResolvedWebsiteStatus(contact: DiscoveryResult) {
   let storedStatus = "";
   for (const raw of getRawObjects(contact)) {
     const status = rawValueToString(
-      getRawValue(raw, "business_facts.website_status.value")
-      ?? getRawValue(raw, "business_facts.website_status"),
+      getRawValue(raw, "business_attributes.website_status.value")
+      ?? getRawValue(raw, "business_attributes.website_status"),
     );
     if (["unavailable", "parked"].includes(status)) return status;
     if (status && !storedStatus) storedStatus = status;

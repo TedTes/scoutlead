@@ -822,7 +822,7 @@ def _outreach_eligible_matched_signals(
 def _shortlisted_interest_signal() -> dict[str, Any]:
     return {
         "signal_key": "shortlisted_interest",
-        "fact_key": None,
+        "attribute_key": None,
         "value": True,
         "confidence": "user_selected",
         "pitch_eligible": True,
@@ -884,10 +884,10 @@ def _evidence_fingerprint(result: AudienceResultModel) -> str:
     normalized = [
         {
             "signal_key": item.get("signal_key"),
-            "fact_key": item.get("fact_key"),
+            "attribute_key": item.get("attribute_key"),
             "value": item.get("value"),
             "confidence": item.get("confidence"),
-            "source_observation_id": item.get("source_observation_id"),
+            "source_evidence_id": item.get("source_evidence_id"),
             "observed_at": item.get("observed_at"),
             "pitch_eligible": item.get("pitch_eligible"),
         }
@@ -928,7 +928,7 @@ def _optional_string(value: object) -> str | None:
 
 def _positive_business_detail(snapshot: dict[str, Any]) -> str:
     raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
-    facts = raw.get("business_facts") if isinstance(raw.get("business_facts"), dict) else {}
+    facts = _snapshot_attributes(raw)
     rating = _fact_scalar(facts.get("google_rating"))
     reviews = _fact_scalar(facts.get("google_review_count"))
     if (
@@ -945,10 +945,15 @@ def _positive_business_detail(snapshot: dict[str, Any]) -> str:
 
 def _fact_scalar(value: object) -> object:
     if isinstance(value, dict):
-        for key in ("value", "current_value", "fact_value"):
+        for key in ("value", "current_value", "attribute_value"):
             if key in value:
                 return value[key]
     return value
+
+
+def _snapshot_attributes(raw: dict[str, Any]) -> dict[str, Any]:
+    attributes = raw.get("business_attributes")
+    return attributes if isinstance(attributes, dict) else {}
 
 
 def _business_generation_context(
@@ -956,7 +961,7 @@ def _business_generation_context(
     snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
-    facts = raw.get("business_facts") if isinstance(raw.get("business_facts"), dict) else {}
+    facts = _snapshot_attributes(raw)
     return {
         "id": business.id,
         "name": business.display_name,

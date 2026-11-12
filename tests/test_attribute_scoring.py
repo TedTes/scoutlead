@@ -1,4 +1,4 @@
-from business_facts.attribute_scoring import score_attribute
+from business_attributes.attribute_scoring import score_attribute
 
 
 def test_boolean_gap_score_is_separate_from_evidence_confidence() -> None:

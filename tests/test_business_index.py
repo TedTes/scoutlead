@@ -450,7 +450,10 @@ def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:
     }
     assert all(item.state == "eligible" for item in items)
     assert memberships
-    assert all(membership.source_observation_id for membership in memberships)
+    assert all(
+        any(item.get("source_evidence_id") for item in membership.evidence)
+        for membership in memberships
+    )
     assert segment is not None
     assert segment.next_refresh_at > segment.last_refresh_at
 
@@ -600,6 +603,7 @@ def test_unconfirmed_missing_listing_is_returned_only_as_unresolved() -> None:
     raw = leads[0].raw_sources[0]["raw"]
     assert raw["search_match"] == {
         "status": "unknown",
-        "reason": "Current fact is unavailable: website_status.",
+        "reason": "Website presence has not been verified.",
     }
-    assert "website_status" not in raw["business_facts"]
+    assert raw["business_attributes"]["website_status"]["value"] == "unknown"
+    assert raw["business_attributes"]["website_status"]["confidence"] == 0

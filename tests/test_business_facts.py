@@ -3,31 +3,22 @@ from datetime import timedelta
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from business_facts.repository import BusinessFactKey, BusinessFactRepository, fact_value
-from business_facts.maintenance import enforce_fact_publication_invariants
-from business_facts.repository import BusinessFactValue
-from business_facts.service import _replace_website_fact
-from business_index.contracts import compile_search_contract, search_contract_hash
+from business_attributes.repository import BusinessAttributeKey, BusinessAttributeRepository, attribute_value
+from business_attributes.repository import BusinessAttributeValue
+from business_attributes.service import _replace_website_fact
+from business_index.contracts import compile_search_contract
 from business_index.schemas import BusinessIndexSearch, OpportunityType
 from business_index.search import BusinessIndexSearchService
 from canonical.repository import CanonicalRepository
 from db.models import (
     BusinessModel,
-    BusinessFactModel,
-    BusinessFactChangeModel,
+    BusinessAttributeModel,
     BusinessNicheMembershipModel,
     NicheModel,
     SignalDefinitionModel,
-    SourceObservationModel,
 )
 from db.session import create_database
 from shared.utils import new_id, utcnow
-from search_evaluations.schemas import (
-    SearchCriterionEvaluation,
-    SearchEvaluationResult,
-    SearchEvaluationStatus,
-)
-from search_evaluations.service import SearchEvaluationService
 from source_requests.schemas import (
     SearchCriterionMode,
     SearchIntentCriterion,
@@ -75,103 +66,6 @@ def _source_payload(
     }
 
 
-def test_publication_maintenance_demotes_expired_and_unknown_facts() -> None:
-    factory = _session_factory()
-    with factory() as session:
-        _add_painting_niche(session)
-        link = CanonicalRepository(session).upsert_from_discovery_result(
-            company_name="Publication Maintenance Painter",
-            geography="Toronto",
-            source="google_places",
-            raw=_source_payload("no_website_listed", external_id="places/maintenance"),
-        )
-        repository = BusinessFactRepository(session)
-        expired = repository.upsert(
-            link.business_id,
-            BusinessFactValue(
-                key="expired_test_signal",
-                value=True,
-                observed_at=utcnow() - timedelta(days=30),
-                expires_at=utcnow() - timedelta(days=1),
-                source_observation_id=link.source_observation_id,
-            ),
-        )
-        unknown = repository.upsert(
-            link.business_id,
-            BusinessFactValue(
-                key="website_status",
-                value="unknown",
-                observed_at=utcnow(),
-                expires_at=utcnow() + timedelta(days=1),
-                source_observation_id=link.source_observation_id,
-            ),
-        )
-        unknown.quality_state = "published"
-        unknown.resolution_state = "confirmed"
-        session.commit()
-
-        summary = enforce_fact_publication_invariants(session)
-
-        assert summary["demoted"] == 3
-        assert summary["expired"] == 1
-        assert summary["unknown"] == 1
-        assert summary["missing_validation"] == 1
-        assert expired.quality_state == "staged"
-        assert expired.resolution_state == "stale"
-        assert unknown.quality_state == "staged"
-        assert unknown.resolution_state == "unknown"
-
-
-def test_deterministic_attribute_does_not_require_duplicate_validation_stamp() -> None:
-    factory = _session_factory()
-    with factory() as session:
-        _add_painting_niche(session)
-        definition = SignalDefinitionModel(
-            id="attribute_contact_form_present",
-            key="contact_form_present",
-            label="Contact form present",
-            value_type="boolean",
-            category="conversion",
-            status="active",
-            collector_key="website_dom",
-            extractor_key="contact_form",
-            freshness_days=30,
-            opportunity_direction="false_is_opportunity",
-            config={"auto_publish": True, "requires_validation": False},
-            version=1,
-        )
-        session.add(definition)
-        session.commit()
-        link = CanonicalRepository(session).upsert_from_discovery_result(
-            company_name="Deterministic Form Painter",
-            geography="Toronto",
-            source="google_places",
-            raw=_source_payload("present", external_id="places/deterministic-form"),
-        )
-        fact = BusinessFactRepository(session).upsert(
-            link.business_id,
-            BusinessFactValue(
-                key="contact_form_present",
-                value=False,
-                observed_at=utcnow(),
-                source_observation_id=link.source_observation_id,
-                quality_state="published",
-            ),
-        )
-        for other in list(
-            session.scalars(
-                select(BusinessFactModel).where(BusinessFactModel.id != fact.id)
-            )
-        ):
-            session.delete(other)
-        session.commit()
-
-        summary = enforce_fact_publication_invariants(session)
-
-        assert fact.quality_state == "published"
-        assert summary["missing_validation"] == 0
-
-
 def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_identity() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -191,8 +85,12 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
         )
 
         assert first.business_id == second.business_id
-        assert first.source_observation_id == second.source_observation_id
-        assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 1
+        assert first.source_evidence_id == second.source_evidence_id
+        assert session.scalar(
+            select(func.count()).select_from(BusinessAttributeModel).where(
+                BusinessAttributeModel.row_type == "evidence"
+            )
+        ) == 1
 
         changed = canonical.upsert_from_discovery_result(
             company_name="Test Painter",
@@ -201,8 +99,12 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
             raw={**_source_payload("no_website_listed"), "rating": 4.8},
         )
 
-        assert changed.source_observation_id != first.source_observation_id
-        assert session.scalar(select(func.count()).select_from(SourceObservationModel)) == 2
+        assert changed.source_evidence_id != first.source_evidence_id
+        assert session.scalar(
+            select(func.count()).select_from(BusinessAttributeModel).where(
+                BusinessAttributeModel.row_type == "evidence"
+            )
+        ) == 2
 
 
 def test_canonical_business_attributes_are_materialized_and_scored() -> None:
@@ -253,16 +155,16 @@ def test_canonical_business_attributes_are_materialized_and_scored() -> None:
             },
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses(
+        facts = BusinessAttributeRepository(session).map_for_businesses(
             [link.business_id]
         )[link.business_id]
 
-        assert fact_value(facts["business_name"]) == "Scored Painting Co."
-        assert fact_value(facts["provider_business_id"]) == "places/scored-painting"
-        assert fact_value(facts["city"]) == "Toronto"
-        assert fact_value(facts["region"]) == "Ontario"
-        assert fact_value(facts["postal_code"]) == "M5V 1A1"
-        assert fact_value(facts["google_business_profile_present"]) is True
+        assert attribute_value(facts["business_name"]) == "Scored Painting Co."
+        assert attribute_value(facts["provider_business_id"]) == "places/scored-painting"
+        assert attribute_value(facts["city"]) == "Toronto"
+        assert attribute_value(facts["region"]) == "Ontario"
+        assert attribute_value(facts["postal_code"]) == "M5V 1A1"
+        assert attribute_value(facts["google_business_profile_present"]) is True
         assert facts["business_name"].attribute_score == 0
         assert facts["google_business_profile_present"].attribute_score == 0
         assert facts["business_name"].confidence == 95
@@ -284,7 +186,7 @@ def test_google_reputation_facts_require_google_places_provenance() -> None:
             },
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses(
+        facts = BusinessAttributeRepository(session).map_for_businesses(
             [website_seed.business_id]
         ).get(website_seed.business_id, {})
         assert "google_rating" not in facts
@@ -301,11 +203,11 @@ def test_google_reputation_facts_require_google_places_provenance() -> None:
             },
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses(
+        facts = BusinessAttributeRepository(session).map_for_businesses(
             [website_seed.business_id]
         )[website_seed.business_id]
-        assert fact_value(facts["google_rating"]) == 4.7
-        assert fact_value(facts["google_review_count"]) == 28.0
+        assert attribute_value(facts["google_rating"]) == 4.7
+        assert attribute_value(facts["google_review_count"]) == 28.0
 
 
 def test_reconciliation_does_not_materialize_unknown_placeholder_facts() -> None:
@@ -319,7 +221,7 @@ def test_reconciliation_does_not_materialize_unknown_placeholder_facts() -> None
             raw={"id": "osm/uninspected-painter", "name": "Uninspected Painter"},
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses(
+        facts = BusinessAttributeRepository(session).map_for_businesses(
             [link.business_id]
         ).get(link.business_id, {})
 
@@ -385,16 +287,16 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
             source="google_places",
             raw=_source_payload("no_website_listed"),
         )
-        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
-        assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "not_listed"
+        facts = BusinessAttributeRepository(session).map_for_businesses([link.business_id])
+        assert attribute_value(facts[link.business_id][BusinessAttributeKey.WEBSITE_STATUS.value]) == "not_listed"
 
         canonical.record_business_evidence(
-            business=session.get(SourceObservationModel, link.source_observation_id).business,
+            business=session.get(BusinessAttributeModel, link.source_evidence_id).business,
             source="website_presence_check",
             raw={"website_presence": {"status": "no_website_found"}},
         )
-        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
-        assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "not_listed"
+        facts = BusinessAttributeRepository(session).map_for_businesses([link.business_id])
+        assert attribute_value(facts[link.business_id][BusinessAttributeKey.WEBSITE_STATUS.value]) == "not_listed"
 
         canonical.upsert_from_discovery_result(
             company_name="Test Painter",
@@ -403,19 +305,10 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
             source="google_places",
             raw={**_source_payload("website_found_during_confirmation"), "websiteUri": "https://testpainter.example"},
         )
-        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
-        assert fact_value(facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
-        fact = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
+        facts = BusinessAttributeRepository(session).map_for_businesses([link.business_id])
+        assert attribute_value(facts[link.business_id][BusinessAttributeKey.WEBSITE_STATUS.value]) == "present"
+        fact = facts[link.business_id][BusinessAttributeKey.WEBSITE_STATUS.value]
         assert fact.expires_at is not None
-        changes = list(
-            session.scalars(
-                select(BusinessFactChangeModel).where(
-                    BusinessFactChangeModel.business_id == link.business_id,
-                    BusinessFactChangeModel.fact_key == "website_status",
-                )
-            )
-        )
-        assert [change.current_value for change in changes] == ["not_listed", "present"]
 
 
 def test_late_website_evidence_is_routed_to_existing_canonical_business() -> None:
@@ -483,7 +376,7 @@ def test_completed_independent_search_resolves_missing_website_fact() -> None:
 
         canonical.record_business_evidence(
             business=session.get(
-                SourceObservationModel, link.source_observation_id
+                BusinessAttributeModel, link.source_evidence_id
             ).business,
             source="website_presence_check",
             raw={
@@ -502,9 +395,9 @@ def test_completed_independent_search_resolves_missing_website_fact() -> None:
             },
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
-        website = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
-        assert fact_value(website) == "missing"
+        facts = BusinessAttributeRepository(session).map_for_businesses([link.business_id])
+        website = facts[link.business_id][BusinessAttributeKey.WEBSITE_STATUS.value]
+        assert attribute_value(website) == "missing"
         assert website.attribute_score == 100
 
 
@@ -520,9 +413,9 @@ def test_unverified_no_website_found_remains_listing_gap() -> None:
             raw={"website_presence": {"status": "no_website_found"}},
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses([link.business_id])
-        website = facts[link.business_id][BusinessFactKey.WEBSITE_STATUS.value]
-        assert fact_value(website) == "not_listed"
+        facts = BusinessAttributeRepository(session).map_for_businesses([link.business_id])
+        website = facts[link.business_id][BusinessAttributeKey.WEBSITE_STATUS.value]
+        assert attribute_value(website) == "not_listed"
         assert website.attribute_score is None
 
 
@@ -537,7 +430,7 @@ def test_verified_website_enrichment_promotes_canonical_url() -> None:
             source="google_places",
             raw=_source_payload("no_website_listed"),
         )
-        business = session.get(SourceObservationModel, link.source_observation_id).business
+        business = session.get(BusinessAttributeModel, link.source_evidence_id).business
 
         canonical.record_business_evidence(
             business=business,
@@ -553,8 +446,8 @@ def test_verified_website_enrichment_promotes_canonical_url() -> None:
         )
 
         assert business.website_url == "https://lukekushspainting.example"
-        facts = BusinessFactRepository(session).map_for_businesses([business.id])
-        assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "present"
+        facts = BusinessAttributeRepository(session).map_for_businesses([business.id])
+        assert attribute_value(facts[business.id][BusinessAttributeKey.WEBSITE_STATUS.value]) == "present"
 
 
 def test_missing_url_does_not_become_a_missing_website_fact() -> None:
@@ -584,8 +477,8 @@ def test_missing_url_does_not_become_a_missing_website_fact() -> None:
             },
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses([business.id])
-        assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == (
+        facts = BusinessAttributeRepository(session).map_for_businesses([business.id])
+        assert attribute_value(facts[business.id][BusinessAttributeKey.WEBSITE_STATUS.value]) == (
             "unknown"
         )
 
@@ -620,11 +513,11 @@ def test_verified_website_replaces_stale_canonical_url() -> None:
             },
         )
 
-        facts = BusinessFactRepository(session).map_for_businesses([business.id])
-        website_fact = facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]
+        facts = BusinessAttributeRepository(session).map_for_businesses([business.id])
+        website_fact = facts[business.id][BusinessAttributeKey.WEBSITE_STATUS.value]
         assert business.website_url == "https://northstarpainting.example"
         assert business.domain == "northstarpainting.example"
-        assert website_fact.source_observation_id == evidence.source_observation_id
+        assert website_fact.source_evidence_id == evidence.source_evidence_id
         assert website_fact.confidence == 95
         assert website_fact.resolution_state == "confirmed"
 
@@ -640,7 +533,7 @@ def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:
             source="google_places",
             raw=_source_payload("no_website_listed", phone="416-555-0101"),
         )
-        business = session.get(SourceObservationModel, link.source_observation_id).business
+        business = session.get(BusinessAttributeModel, link.source_evidence_id).business
 
         canonical.record_business_evidence(
             business=business,
@@ -658,28 +551,28 @@ def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:
         )
 
         assert business.website_url is None
-        facts = BusinessFactRepository(session).map_for_businesses([business.id])
-        assert fact_value(facts[business.id][BusinessFactKey.WEBSITE_STATUS.value]) == "not_listed"
-        assert BusinessFactKey.CONTACT_FORM_PRESENT.value not in facts[business.id]
-        assert BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value not in facts[business.id]
+        facts = BusinessAttributeRepository(session).map_for_businesses([business.id])
+        assert attribute_value(facts[business.id][BusinessAttributeKey.WEBSITE_STATUS.value]) == "not_listed"
+        assert BusinessAttributeKey.CONTACT_FORM_PRESENT.value not in facts[business.id]
+        assert BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value not in facts[business.id]
 
 
 def test_reconciliation_updates_materialized_lead_fact_snapshot() -> None:
     raw_sources = [
         {
             "match_origin": "profile_sql",
-            "business_facts": {"website_status": "not_listed"},
+            "business_attributes": {"website_status": "not_listed"},
         },
         {
             "nested": {
-                "business_facts": {"website_status": {"value": "missing"}}
+                "business_attributes": {"website_status": {"value": "missing"}}
             }
         },
     ]
 
     assert _replace_website_fact(raw_sources, "present") is True
-    assert raw_sources[0]["business_facts"]["website_status"] == "present"
-    assert raw_sources[1]["nested"]["business_facts"]["website_status"]["value"] == "present"
+    assert raw_sources[0]["business_attributes"]["website_status"] == "present"
+    assert raw_sources[1]["nested"]["business_attributes"]["website_status"]["value"] == "present"
     assert _replace_website_fact(raw_sources, "present") is False
 
 
@@ -714,7 +607,7 @@ def test_search_contract_matches_only_current_supported_facts() -> None:
                     id="missing_website",
                     description="Website is missing",
                     mode=SearchCriterionMode.REQUIRED,
-                    fact_key="website_status",
+                    attribute_key="website_status",
                     operator="equals",
                     value="missing",
                 )
@@ -726,10 +619,10 @@ def test_search_contract_matches_only_current_supported_facts() -> None:
             )
         )
         assert membership is not None
-        current_facts = BusinessFactRepository(session).map_for_businesses(
+        current_facts = BusinessAttributeRepository(session).map_for_businesses(
             [missing.business_id]
         )[missing.business_id]
-        assert fact_value(current_facts[BusinessFactKey.WEBSITE_STATUS.value]) == "missing"
+        assert attribute_value(current_facts[BusinessAttributeKey.WEBSITE_STATUS.value]) == "missing"
 
         rows, decisions = BusinessIndexSearchService(session).search_with_diagnostics(
             BusinessIndexSearch(
@@ -752,7 +645,7 @@ def test_dynamic_contract_reports_unsupported_criteria() -> None:
                 id="few_reviews",
                 description="Fewer than 12 reviews",
                 mode=SearchCriterionMode.ALTERNATIVE,
-                fact_key="google_review_count",
+                attribute_key="google_review_count",
                 operator="less_than",
                 value=12,
             ),
@@ -760,7 +653,7 @@ def test_dynamic_contract_reports_unsupported_criteria() -> None:
                 id="no_quote_form",
                 description="No quote form",
                 mode=SearchCriterionMode.ALTERNATIVE,
-                fact_key="quote_or_booking_form_present",
+                attribute_key="quote_or_booking_form_present",
                 operator="equals",
                 value=False,
             ),
@@ -778,69 +671,12 @@ def test_dynamic_contract_reports_unsupported_criteria() -> None:
     )
 
     assert {predicate.key for predicate in contract.any_of} == {
-        BusinessFactKey.GOOGLE_REVIEW_COUNT.value,
-        BusinessFactKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
+        BusinessAttributeKey.GOOGLE_REVIEW_COUNT.value,
+        BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
     }
     assert contract.semantic_all_of == ("Independent business",)
     assert contract.semantic_exclusions == ("National chains and franchises",)
     assert contract.unsupported == ()
-
-
-def test_semantic_search_evaluation_is_reused_until_business_evidence_changes() -> None:
-    session_factory = _session_factory()
-    with session_factory() as session:
-        niche = _add_painting_niche(session)
-        canonical = CanonicalRepository(session)
-        business = canonical.upsert_from_discovery_result(
-            company_name="Alpha Brushworks",
-            geography="Toronto",
-            description="Independent residential painting contractor",
-            source="google_places",
-            raw=_source_payload("no_website_found", external_id="places/alpha"),
-        )
-        intent = _intent(
-            SearchIntentCriterion(
-                id="independent",
-                description="Independent owner-operated business",
-                mode=SearchCriterionMode.REQUIRED,
-            )
-        )
-        contract = compile_search_contract(intent)
-        contract_hash = search_contract_hash(intent, contract)
-        request = BusinessIndexSearch(
-            niche_id=niche.id,
-            market_key="toronto",
-            opportunity_type=OpportunityType.ANY,
-            evidence_fresh_after=utcnow() - timedelta(days=30),
-            result_count=10,
-            contract=contract,
-            contract_hash=contract_hash,
-        )
-
-        rows, decisions = BusinessIndexSearchService(session).search_with_diagnostics(request)
-        assert rows == []
-        assert [decision["status"] for decision in decisions] == ["pending"]
-
-        llm = MatchingEvaluationLLM()
-        SearchEvaluationService(session=session, llm=llm).evaluate(
-            business_id=business.business_id,
-            contract_hash=contract_hash,
-            contract=contract,
-        )
-        rows = BusinessIndexSearchService(session).search(request)
-        assert [row["raw"]["canonical_business_id"] for row in rows] == [business.business_id]
-        assert llm.calls == 1
-
-        canonical.upsert_from_discovery_result(
-            company_name="Alpha Brushworks",
-            geography="Toronto",
-            description="Updated public listing",
-            source="google_places",
-            raw=_source_payload("no_website_found", external_id="places/alpha"),
-        )
-        rows, decisions = BusinessIndexSearchService(session).search_with_diagnostics(request)
-        assert rows == []
-        assert [decision["status"] for decision in decisions] == ["pending"]
 
 
 def test_explicit_present_website_contract_does_not_use_opportunity_fallback() -> None:
@@ -850,7 +686,7 @@ def test_explicit_present_website_contract_does_not_use_opportunity_fallback() -
                 id="website_present",
                 description="Business has a website",
                 mode=SearchCriterionMode.REQUIRED,
-                fact_key="website_status",
+                attribute_key="website_status",
                 operator="equals",
                 value="present",
             )
@@ -858,7 +694,7 @@ def test_explicit_present_website_contract_does_not_use_opportunity_fallback() -
     )
 
     assert [(predicate.key, predicate.value) for predicate in contract.all_of] == [
-        (BusinessFactKey.WEBSITE_STATUS.value, "present")
+        (BusinessAttributeKey.WEBSITE_STATUS.value, "present")
     ]
     assert contract.any_of == ()
 
@@ -894,7 +730,7 @@ def test_explicit_present_website_contract_returns_current_present_website() -> 
                     id="website_present",
                     description="Business has a website",
                     mode=SearchCriterionMode.REQUIRED,
-                    fact_key="website_status",
+                    attribute_key="website_status",
                     operator="equals",
                     value="present",
                 )
@@ -934,7 +770,7 @@ def test_unconfirmed_website_absence_is_unknown_not_rejected() -> None:
                     id="website_present",
                     description="Business has a website",
                     mode=SearchCriterionMode.REQUIRED,
-                    fact_key="website_status",
+                    attribute_key="website_status",
                     operator="equals",
                     value="present",
                 )
@@ -973,25 +809,3 @@ def _intent(*criteria: SearchIntentCriterion) -> SourceRequestIntent:
         confidence=100,
         rationale="Test intent",
     )
-
-
-class MatchingEvaluationLLM:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def generate_object(self, **kwargs):
-        self.calls += 1
-        assert kwargs["response_model"] is SearchEvaluationResult
-        return SearchEvaluationResult(
-            status=SearchEvaluationStatus.MATCHED,
-            confidence=92,
-            rationale="Current public evidence supports the criterion.",
-            criteria=[
-                SearchCriterionEvaluation(
-                    criterion="Independent owner-operated business",
-                    matched=True,
-                    evidence=["Independent residential painting contractor"],
-                )
-            ],
-            evidence=["Independent residential painting contractor"],
-        )

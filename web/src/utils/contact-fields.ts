@@ -18,7 +18,7 @@ export function getRating(contact: DiscoveryResult) {
     return contact.google_rating.toFixed(1);
   }
   const value = getRawNumber(contact, [
-    "business_facts.google_rating",
+    "business_attributes.google_rating",
     "rating",
     "averageRating",
     "stars",
@@ -36,7 +36,7 @@ export function getReviewCount(contact: DiscoveryResult) {
     return String(contact.google_review_count);
   }
   const value = getRawNumber(contact, [
-    "business_facts.google_review_count",
+    "business_attributes.google_review_count",
     "userRatingCount",
     "user_ratings_total",
     "reviewCount",

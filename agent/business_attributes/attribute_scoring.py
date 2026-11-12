@@ -15,7 +15,7 @@ class AttributeScore:
 
     `score` uses one direction everywhere: 0=no opportunity, 100=strong opportunity.
     It deliberately does not describe whether the evidence is trustworthy;
-    evidence confidence remains on `business_facts.confidence`.
+    evidence confidence remains on `business_attributes.confidence`.
     """
 
     score: float | None

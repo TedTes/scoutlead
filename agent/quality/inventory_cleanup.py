@@ -1,19 +1,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_validation.validation import is_generic_business_title
 from canonical.website_evidence import BLOCKED_WEBSITE_HOSTS
 from db.models import (
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
-    SourceObservationModel,
 )
-from source_observations.families import source_family
+from business_evidence.families import source_family
+
+
+GENERIC_TITLES = {
+    "renovation",
+    "professional painter for hire",
+    "home painting wall renovation services",
+    "professional toronto house painters",
+}
+
+
+def is_generic_business_title(value: str) -> bool:
+    title = " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+    return bool(
+        title in GENERIC_TITLES
+        or len(title) < 4
+        or re.match(r"^find\s+(?:a\s+|an\s+)?[^|]+\s+in\s+", title)
+        or re.match(r"^(?:the\s+)?(?:top|best)\s+\d+\s+", title)
+        or re.search(r"\b(?:ads?|listings?)\s+for\s+", title)
+        or re.search(r"\br\s+ask[a-z0-9]*\b", title)
+        or title.endswith(" marketplaces")
+        or re.search(r"\b(service|services|contractor|contractors)\s+near\s+me$", title)
+        or re.search(r"\bfor\s+hire$", title)
+    )
 
 
 @dataclass
@@ -50,8 +72,9 @@ def cleanup_search_origin_inventory(
     business_ids = [business.id for business in businesses]
     observations = list(
         session.scalars(
-            select(SourceObservationModel).where(
-                SourceObservationModel.business_id.in_(business_ids)
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.row_type == "evidence",
             )
         )
     )
@@ -121,11 +144,10 @@ def cleanup_search_origin_inventory(
         ):
             membership.confidence = 0.0
         for fact in session.scalars(
-            select(BusinessFactModel).where(
-                BusinessFactModel.business_id == business.id
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id == business.id
             )
         ):
-            fact.quality_state = "rejected"
             fact.resolution_state = "invalid_source"
             fact.confidence = 0
 

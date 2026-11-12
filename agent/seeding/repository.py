@@ -16,7 +16,7 @@ from db.models import (
     ContactModel,
     NicheModel,
     SeedBatchModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from niches.catalog import search_config_for_slug
 from seeding.schemas import BusinessSeedInput
@@ -49,8 +49,15 @@ class BusinessSeedRepository:
     def contact_ids(self) -> set[str]:
         return set(self.session.scalars(select(ContactModel.id)))
 
-    def source_observation_count(self) -> int:
-        return int(self.session.scalar(select(func.count()).select_from(SourceObservationModel)) or 0)
+    def evidence_record_count(self) -> int:
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(BusinessAttributeModel)
+                .where(BusinessAttributeModel.row_type == "evidence")
+            )
+            or 0
+        )
 
     def niche_count(self) -> int:
         return int(self.session.scalar(select(func.count()).select_from(NicheModel)) or 0)
@@ -70,7 +77,7 @@ class BusinessSeedRepository:
         found_count: int,
         inserted_count: int,
         updated_count: int,
-        source_observation_count: int,
+        evidence_record_count: int,
     ) -> None:
         seed_batch = self.session.get(SeedBatchModel, batch_id)
         if seed_batch is None:
@@ -80,7 +87,7 @@ class BusinessSeedRepository:
         seed_batch.found_count = found_count
         seed_batch.inserted_count = inserted_count
         seed_batch.updated_count = updated_count
-        seed_batch.source_observation_count = source_observation_count
+        seed_batch.evidence_record_count = evidence_record_count
         self.session.flush()
 
     def _record_seed_membership(
@@ -97,7 +104,7 @@ class BusinessSeedRepository:
             business_id=link.business_id,
             niche_id=niche.id,
             seed_batch_id=seed_batch.id,
-            source_observation_id=link.source_observation_id,
+            source_evidence_id=link.source_evidence_id,
         )
 
     def _upsert_niche(self, seed: BusinessSeedInput) -> NicheModel:
@@ -146,7 +153,7 @@ class BusinessSeedRepository:
                 found_count=0,
                 inserted_count=0,
                 updated_count=0,
-                source_observation_count=0,
+                evidence_record_count=0,
             )
             self.session.add(seed_batch)
             self.session.flush()
@@ -172,7 +179,7 @@ class BusinessSeedRepository:
         business_id: str,
         niche_id: str,
         seed_batch_id: str,
-        source_observation_id: str | None,
+        source_evidence_id: str | None,
     ) -> BusinessNicheMembershipModel:
         now = utcnow()
         market_key = _seed_market_key(seed)
@@ -188,7 +195,7 @@ class BusinessSeedRepository:
         evidence = _membership_evidence(
             seed,
             batch_id=seed_batch_id,
-            source_observation_id=source_observation_id,
+            source_evidence_id=source_evidence_id,
         )
         if membership is None:
             membership = BusinessNicheMembershipModel(
@@ -198,7 +205,6 @@ class BusinessSeedRepository:
                 market_key=market_key,
                 confidence=1.0,
                 evidence=[evidence],
-                source_observation_id=source_observation_id,
                 seed_batch_id=seed_batch_id,
                 first_seen_at=now,
                 last_seen_at=now,
@@ -209,7 +215,6 @@ class BusinessSeedRepository:
 
         membership.confidence = max(membership.confidence, 1.0)
         membership.evidence = _append_unique_evidence(membership.evidence or [], evidence)
-        membership.source_observation_id = source_observation_id or membership.source_observation_id
         membership.seed_batch_id = seed_batch_id or membership.seed_batch_id
         membership.last_seen_at = now
         self.session.flush()
@@ -302,7 +307,7 @@ def _membership_evidence(
     seed: BusinessSeedInput,
     *,
     batch_id: str,
-    source_observation_id: str | None,
+    source_evidence_id: str | None,
 ) -> dict:
     return {
         "type": "seed_import",
@@ -310,7 +315,7 @@ def _membership_evidence(
         "batch_id": batch_id,
         "query": seed.query,
         "signals": seed.signals,
-        "source_observation_id": source_observation_id,
+        "source_evidence_id": source_evidence_id,
     }
 
 
@@ -319,14 +324,14 @@ def _append_unique_evidence(existing: list[dict], evidence: dict) -> list[dict]:
         evidence.get("type"),
         evidence.get("source"),
         evidence.get("batch_id"),
-        evidence.get("source_observation_id"),
+        evidence.get("source_evidence_id"),
     )
     for item in existing:
         item_key = (
             item.get("type"),
             item.get("source"),
             item.get("batch_id"),
-            item.get("source_observation_id"),
+            item.get("source_evidence_id"),
         )
         if item_key == evidence_key:
             return existing

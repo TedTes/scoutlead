@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from canonical.semantics import business_semantic_profile
-from db.models import BusinessModel, SourceObservationModel
+from db.models import BusinessModel, BusinessAttributeModel
 from shared.utils import normalize_text, utcnow
 
 
@@ -163,9 +163,9 @@ class BusinessEmbeddingBackfillService:
 
     def _semantic_text_for_business(self, business: BusinessModel) -> str:
         observation = self.session.scalar(
-            select(SourceObservationModel)
-            .where(SourceObservationModel.business_id == business.id)
-            .order_by(SourceObservationModel.observed_at.desc())
+            select(BusinessAttributeModel)
+            .where(BusinessAttributeModel.business_id == business.id)
+            .order_by(BusinessAttributeModel.observed_at.desc())
             .limit(1)
         )
         raw = observation.raw_payload if observation is not None else {}

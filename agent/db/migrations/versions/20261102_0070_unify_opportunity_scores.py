@@ -12,7 +12,7 @@ strong opportunity. Evidence confidence remains a separate value.
 from alembic import op
 import sqlalchemy as sa
 
-from business_facts.attribute_scoring import score_attribute
+from business_attributes.attribute_scoring import score_attribute
 
 
 revision = "20261102_0070"

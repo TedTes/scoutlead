@@ -23,6 +23,7 @@ from db.models import (
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 from canonical.normalization import normalize_domain, normalize_email, normalize_phone
+from leads.disposition import apply_business_review_status, dismissed_business_ids
 from leads.schemas import LeadContactPolicyUpdate, ContactPolicyStatus
 from suppressions.repository import ContactSuppressionRepository
 from territories.matching import ProfileMatchService
@@ -108,17 +109,13 @@ class AudienceRunService:
             niche_ids=[niche.id for niche in niches],
             limit=min(max(run.requested_count * 8, 100), 500),
         )
-        dismissed_business_ids = set(
-            self.session.scalars(
-                select(AudienceResultModel.business_id).where(
-                    AudienceResultModel.audience_id == audience.id,
-                    AudienceResultModel.review_status == "not_fit",
-                )
-            )
+        workspace_dismissed_business_ids = dismissed_business_ids(
+            self.session,
+            workspace_id=audience.workspace_id,
         )
         rows = [
             row for row in rows
-            if _business_id(row) not in dismissed_business_ids
+            if _business_id(row) not in workspace_dismissed_business_ids
         ]
         previously_delivered = set(
             self.session.scalars(
@@ -191,6 +188,11 @@ class AudienceRunService:
                 .order_by(AudienceResultModel.rank_position)
             )
         )
+        dismissed = dismissed_business_ids(
+            self.session,
+            workspace_id=run.workspace_id or self._audience(run.audience_id).workspace_id,
+        )
+        results = [result for result in results if result.business_id not in dismissed]
         return AudienceRunRead.model_validate(run).model_copy(
             update={"results": [AudienceResultRead.model_validate(row) for row in results]}
         )
@@ -229,6 +231,10 @@ class AudienceRunService:
         )
         if run is None:
             return []
+        dismissed = dismissed_business_ids(
+            self.session,
+            workspace_id=self._audience(audience_id).workspace_id,
+        )
         current_results = list(
             self.session.scalars(
                 select(AudienceResultModel)
@@ -236,6 +242,10 @@ class AudienceRunService:
                 .order_by(AudienceResultModel.rank_position)
             )
         )
+        current_results = [
+            result for result in current_results
+            if result.business_id not in dismissed
+        ]
         current_business_ids = {result.business_id for result in current_results}
         managed_history: list[AudienceResultModel] = []
         managed_business_ids: set[str] = set()
@@ -254,7 +264,8 @@ class AudienceRunService:
             .order_by(AudienceResultModel.updated_at.desc())
         ):
             if (
-                result.business_id in current_business_ids
+                result.business_id in dismissed
+                or result.business_id in current_business_ids
                 or result.business_id in managed_business_ids
             ):
                 continue
@@ -275,19 +286,14 @@ class AudienceRunService:
             normalized_review_status = str(
                 review_status.value if hasattr(review_status, "value") else review_status
             )
-            related_results = list(
-                self.session.scalars(
-                    select(AudienceResultModel).where(
-                        AudienceResultModel.audience_id == result.audience_id,
-                        AudienceResultModel.business_id == result.business_id,
-                    )
-                )
+            audience = self._audience(result.audience_id)
+            apply_business_review_status(
+                self.session,
+                workspace_id=audience.workspace_id,
+                business_id=result.business_id,
+                review_status=normalized_review_status,
+                reviewed_at=now,
             )
-            for related_result in related_results:
-                related_result.review_status = normalized_review_status
-                related_result.reviewed_at = now
-                if normalized_review_status == "not_fit":
-                    related_result.shortlisted_at = None
         if "review_note" in values:
             result.review_note = values["review_note"]
         if "shortlisted" in values:
@@ -395,11 +401,7 @@ class AudienceRunService:
         )
         contact_email = _optional_string(snapshot.get("contact_email"))
         business = self.session.get(BusinessModel, result.business_id)
-        business_facts = (
-            raw.get("business_facts")
-            if isinstance(raw.get("business_facts"), dict)
-            else {}
-        )
+        business_attributes = _snapshot_attributes(raw)
         outreach_lead = (
             self.session.get(LeadModel, result.outreach_lead_id)
             if result.outreach_lead_id
@@ -426,9 +428,9 @@ class AudienceRunService:
             contact_phone=(
                 _optional_string(business.phone) if business is not None else None
             ),
-            google_rating=_optional_float(business_facts.get("google_rating")),
+            google_rating=_optional_float(business_attributes.get("google_rating")),
             google_review_count=_optional_int(
-                business_facts.get("google_review_count")
+                business_attributes.get("google_review_count")
             ),
             geography=_optional_string(snapshot.get("geography")),
             description=_optional_string(snapshot.get("snippet")),
@@ -540,6 +542,11 @@ def _territory_niches(session: Session, territory: TerritoryModel) -> list[Niche
 def _optional_string(value) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+def _snapshot_attributes(raw: dict[str, Any]) -> dict[str, Any]:
+    attributes = raw.get("business_attributes")
+    return attributes if isinstance(attributes, dict) else {}
 
 
 def _optional_float(value) -> float | None:

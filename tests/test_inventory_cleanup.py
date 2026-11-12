@@ -2,10 +2,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from canonical.repository import CanonicalRepository
-from db.models import BusinessFactModel, BusinessModel
+from db.models import BusinessAttributeModel, BusinessModel
 from db.session import create_database
 from quality.inventory_cleanup import cleanup_search_origin_inventory
-from source_observations.families import source_family
+from business_evidence.families import source_family
 
 
 def _factory():
@@ -55,7 +55,15 @@ def test_search_origin_cleanup_is_dry_run_first_and_preserves_structured_entitie
         assert session.get(BusinessModel, result_page.business_id).status == "archived"
         assert session.get(BusinessModel, plausible.business_id).status == "quarantined"
         assert session.get(BusinessModel, structured.business_id).status == "active"
-        assert list(session.scalars(select(BusinessFactModel))) == []
+        invalidated = list(
+            session.scalars(
+                select(BusinessAttributeModel).where(
+                    BusinessAttributeModel.business_id == result_page.business_id,
+                    BusinessAttributeModel.resolution_state == "invalid_source",
+                )
+            )
+        )
+        assert invalidated
 
 
 def test_source_families_do_not_count_inspections_as_independent_discovery() -> None:

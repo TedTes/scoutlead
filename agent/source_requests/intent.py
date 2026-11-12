@@ -35,7 +35,7 @@ class SearchIntentInterpreter:
             system=(
                 "Translate a flexible lead-search request into the supplied structured schema. "
                 "The user's request has priority over product defaults. Preserve nuanced criteria "
-                "as plain-language criteria with fact_key=null. Use a fact_key only when the "
+                "as plain-language criteria with attribute_key=null. Use a attribute_key only when the "
                 "criterion exactly matches a supported fact definition. Do not invent facts, "
                 "business categories, locations, thresholds, or exclusions. When the request omits "
                 "a business category or location, inherit it from the product target customer or "
@@ -213,12 +213,12 @@ def _normalize_criteria(criteria, *, category: str, location: str):
     seen: set[tuple] = set()
     for criterion in criteria:
         description_tokens = _meaningful_tokens(criterion.description)
-        if not criterion.fact_key and description_tokens and description_tokens <= scope_tokens:
+        if not criterion.attribute_key and description_tokens and description_tokens <= scope_tokens:
             continue
         key = (
             criterion.mode.value,
             normalize_text(criterion.description).casefold(),
-            criterion.fact_key,
+            criterion.attribute_key,
             criterion.operator,
             json.dumps(criterion.value, sort_keys=True),
         )

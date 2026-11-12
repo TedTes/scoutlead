@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, aliased
 
 from business_index.eligibility import searchable_business_conditions
 from db.models import (
-    BusinessFactModel,
+    BusinessAttributeModel,
     BusinessModel,
     BusinessNicheMembershipModel,
     SignalDefinitionModel,
@@ -30,7 +30,7 @@ def enqueue_due_signal_collections(
     if limit <= 0:
         return 0
     now = utcnow()
-    fact = aliased(BusinessFactModel, name="scheduled_attribute_fact")
+    fact = aliased(BusinessAttributeModel, name="scheduled_attribute_fact")
     statement = (
         select(
             SignalDefinitionModel,

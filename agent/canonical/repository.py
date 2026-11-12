@@ -34,15 +34,14 @@ from canonical.semantics import (
     semantic_key,
 )
 from canonical.website_evidence import trusted_website_evidence
-from business_facts.service import reconcile_business_facts
-from business_facts.core_attributes import sync_observed_business_attributes
+from business_attributes.service import reconcile_business_attributes
+from business_attributes.core_attributes import sync_observed_business_attributes
 from business_validation.policy import business_is_publishable
-from business_validation.validation import BusinessValidationService
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
-    SourceObservationModel,
+    BusinessAttributeModel,
 )
 from niches.resolver import (
     lexical_resolution_has_taxonomy_evidence,
@@ -58,7 +57,7 @@ from shared.geospatial import haversine_distance_km
 class CanonicalLeadLink:
     business_id: str | None
     contact_id: str | None
-    source_observation_id: str | None = None
+    source_evidence_id: str | None = None
     identity_resolution: str = "unknown"
     identity_conflict: bool = False
     identity_conflict_reason: str | None = None
@@ -126,7 +125,7 @@ class CanonicalRepository:
             raw=raw_payload,
             allow_raw_email=allow_raw_contact_email,
         )
-        observation = self._record_source_observation(
+        observation = self._record_evidence(
             business=business,
             source=source_name,
             query=_query_from_raw(raw_payload),
@@ -147,12 +146,7 @@ class CanonicalRepository:
             source=source_name,
             raw=raw_payload,
         )
-        BusinessValidationService(self.session).record_website_ownership(
-            business=business,
-            observation=observation,
-            commit=False,
-        )
-        reconcile_business_facts(self.session, business.id)
+        reconcile_business_attributes(self.session, business.id)
         sync_observed_business_attributes(
             self.session,
             business=business,
@@ -162,7 +156,7 @@ class CanonicalRepository:
         return CanonicalLeadLink(
             business_id=business.id,
             contact_id=contact.id if contact else None,
-            source_observation_id=observation.id,
+            source_evidence_id=observation.id,
             identity_resolution=identity.method,
             identity_conflict=identity.conflict,
             identity_conflict_reason=identity.conflict_reason,
@@ -201,18 +195,13 @@ class CanonicalRepository:
             email=contact_email,
             raw=raw,
         )
-        observation = self._record_source_observation(
+        observation = self._record_evidence(
             business=business,
             source=source,
             query=_query_from_raw(raw),
             raw=raw,
         )
-        BusinessValidationService(self.session).record_website_ownership(
-            business=business,
-            observation=observation,
-            commit=False,
-        )
-        reconcile_business_facts(self.session, business.id)
+        reconcile_business_attributes(self.session, business.id)
         sync_observed_business_attributes(
             self.session,
             business=business,
@@ -222,7 +211,7 @@ class CanonicalRepository:
         return CanonicalLeadLink(
             business_id=business.id,
             contact_id=contact.id if contact else None,
-            source_observation_id=observation.id,
+            source_evidence_id=observation.id,
         )
 
     def business_for_website_evidence(
@@ -272,22 +261,23 @@ class CanonicalRepository:
             return []
         statement = (
             select(
-                SourceObservationModel,
+                BusinessAttributeModel,
                 BusinessModel,
                 BusinessNicheMembershipModel,
             )
-            .join(BusinessModel, BusinessModel.id == SourceObservationModel.business_id)
+            .join(BusinessModel, BusinessModel.id == BusinessAttributeModel.business_id)
             .join(
                 BusinessNicheMembershipModel,
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
             .where(
-                SourceObservationModel.source == source,
-                SourceObservationModel.query_signature == signature,
+                BusinessAttributeModel.row_type == "evidence",
+                BusinessAttributeModel.source == source,
+                BusinessAttributeModel.query_signature == signature,
                 BusinessNicheMembershipModel.niche_id == resolution.niche_id,
             )
             .where(active_membership_condition())
-            .order_by(SourceObservationModel.observed_at.desc())
+            .order_by(BusinessAttributeModel.observed_at.desc())
         )
         rows: list[dict[str, Any]] = []
         seen_business_ids: set[str] = set()
@@ -315,7 +305,6 @@ class CanonicalRepository:
                 "market_key": membership.market_key,
                 "confidence": membership.confidence,
                 "evidence": membership.evidence,
-                "source_observation_id": membership.source_observation_id,
                 "seed_batch_id": membership.seed_batch_id,
                 "resolution_type": resolution.match_type,
                 "resolution_score": resolution.score,
@@ -410,7 +399,6 @@ class CanonicalRepository:
                 "market_key": membership.market_key,
                 "confidence": membership.confidence,
                 "evidence": membership.evidence,
-                "source_observation_id": membership.source_observation_id,
                 "seed_batch_id": membership.seed_batch_id,
                 "resolution_type": resolution.match_type,
                 "resolution_score": resolution.score,
@@ -564,12 +552,13 @@ class CanonicalRepository:
     ) -> IdentityResolution:
         if external_id:
             observations = self.session.scalars(
-                select(SourceObservationModel)
+                select(BusinessAttributeModel)
                 .where(
-                    SourceObservationModel.source == source,
-                    SourceObservationModel.external_id == external_id,
+                    BusinessAttributeModel.row_type == "evidence",
+                    BusinessAttributeModel.source == source,
+                    BusinessAttributeModel.external_id == external_id,
                 )
-                .order_by(SourceObservationModel.observed_at.desc())
+                .order_by(BusinessAttributeModel.observed_at.desc())
             )
             for observation in observations:
                 if not observation_is_quarantined(self.session, observation):
@@ -768,7 +757,7 @@ class CanonicalRepository:
             )
         return None
 
-    def _record_source_observation(
+    def _record_evidence(
         self,
         *,
         business: BusinessModel,
@@ -776,7 +765,7 @@ class CanonicalRepository:
         query: str | None,
         raw: dict[str, Any],
         append: bool = False,
-    ) -> SourceObservationModel:
+    ) -> BusinessAttributeModel:
         now = utcnow()
         # An observation is an immutable evidence snapshot. Keep it independent
         # from caller-owned dictionaries that may be enriched after this method.
@@ -787,16 +776,17 @@ class CanonicalRepository:
 
         if not append:
             candidates = self.session.scalars(
-                select(SourceObservationModel)
+                select(BusinessAttributeModel)
                 .where(
-                    SourceObservationModel.business_id == business.id,
-                    SourceObservationModel.source == source,
+                    BusinessAttributeModel.business_id == business.id,
+                    BusinessAttributeModel.row_type == "evidence",
+                    BusinessAttributeModel.source == source,
                     or_(
-                        SourceObservationModel.external_id == external_id,
-                        SourceObservationModel.query_signature == signature,
+                        BusinessAttributeModel.external_id == external_id,
+                        BusinessAttributeModel.query_signature == signature,
                     ),
                 )
-                .order_by(SourceObservationModel.observed_at.desc())
+                .order_by(BusinessAttributeModel.observed_at.desc())
                 .limit(25)
             )
             fingerprint = meaningful_observation_hash(snapshot)
@@ -804,16 +794,28 @@ class CanonicalRepository:
                 if meaningful_observation_hash(existing.raw_payload or {}) == fingerprint:
                     return existing
 
-        observation = SourceObservationModel(
+        observation = BusinessAttributeModel(
             id=new_id("sourceobs"),
             business_id=business.id,
+            row_type="evidence",
+            attribute_key=f"source:{source}:{content_hash}",
+            value_type="json",
+            value_json=snapshot,
+            confidence=100,
+            attribute_score=None,
+            score_version=None,
+            score_reason=None,
+            resolution_state="observed",
+            supporting_evidence_ids=[],
             source=source,
-            external_id=external_id,
-            query_signature=signature,
-            content_hash=content_hash,
+            source_external_id=external_id,
+            source_query_signature=signature,
+            source_content_hash=content_hash,
             source_url=source_url_from_raw(snapshot),
-            raw_payload=snapshot,
+            evidence=snapshot,
             observed_at=now,
+            expires_at=None,
+            resolver_version=1,
         )
         self.session.add(observation)
         self.session.flush()
@@ -899,14 +901,17 @@ class CanonicalRepository:
         ]
         return matches[:limit]
 
-    def _latest_observation_for_business(self, business_id: str) -> SourceObservationModel | None:
+    def _latest_observation_for_business(self, business_id: str) -> BusinessAttributeModel | None:
         return next(
             (
                 observation
                 for observation in self.session.scalars(
-                    select(SourceObservationModel)
-                    .where(SourceObservationModel.business_id == business_id)
-                    .order_by(SourceObservationModel.observed_at.desc())
+                    select(BusinessAttributeModel)
+                    .where(
+                        BusinessAttributeModel.business_id == business_id,
+                        BusinessAttributeModel.row_type == "evidence",
+                    )
+                    .order_by(BusinessAttributeModel.observed_at.desc())
                 )
                 if not observation_is_quarantined(self.session, observation)
             ),
@@ -963,18 +968,20 @@ class CanonicalRepository:
     def _membership_observation(
         self,
         membership: BusinessNicheMembershipModel,
-    ) -> SourceObservationModel | None:
-        if membership.source_observation_id:
-            observation = self.session.get(SourceObservationModel, membership.source_observation_id)
-            if observation is not None:
-                return observation
+    ) -> BusinessAttributeModel | None:
+        for evidence in reversed(membership.evidence or []):
+            evidence_id = evidence.get("source_evidence_id")
+            if evidence_id:
+                observation = self.session.get(BusinessAttributeModel, evidence_id)
+                if observation is not None and observation.row_type == "evidence":
+                    return observation
         return self._latest_observation_for_business(membership.business_id)
 
     def _record_discovered_membership(
         self,
         *,
         business: BusinessModel,
-        observation: SourceObservationModel,
+        observation: BusinessAttributeModel,
         source: str,
         raw: dict[str, Any],
     ) -> None:
@@ -1009,7 +1016,7 @@ class CanonicalRepository:
             "type": "discovery_association",
             "source": source,
             "query": source_input,
-            "source_observation_id": observation.id,
+            "source_evidence_id": observation.id,
             "resolution_type": resolution.match_type,
             "resolution_score": resolution.score,
         }
@@ -1023,7 +1030,6 @@ class CanonicalRepository:
                     market_key=market_key,
                     confidence=resolution.score,
                     evidence=[evidence],
-                    source_observation_id=observation.id,
                     seed_batch_id=None,
                     first_seen_at=now,
                     last_seen_at=now,
@@ -1033,7 +1039,6 @@ class CanonicalRepository:
             return
         membership.confidence = max(membership.confidence, resolution.score)
         membership.evidence = _append_unique_membership_evidence(membership.evidence, evidence)
-        membership.source_observation_id = observation.id
         membership.last_seen_at = now
         self.session.flush()
 
@@ -1133,7 +1138,7 @@ def _business_names_are_compatible(first: str, second: str) -> bool:
 
 
 def _observation_to_search_result(
-    observation: SourceObservationModel,
+    observation: BusinessAttributeModel,
     business: BusinessModel,
 ) -> dict[str, Any]:
     raw = observation.raw_payload or {}
@@ -1169,7 +1174,7 @@ def _observation_to_search_result(
             **raw,
             "match_origin": "business_index",
             "canonical_business_id": business.id,
-            "source_observation_id": observation.id,
+            "source_evidence_id": observation.id,
         },
     }
 
@@ -1219,13 +1224,13 @@ def _append_unique_membership_evidence(
     evidence_key = (
         evidence.get("type"),
         evidence.get("source"),
-        evidence.get("source_observation_id"),
+        evidence.get("source_evidence_id"),
     )
     for row in rows:
         row_key = (
             row.get("type"),
             row.get("source"),
-            row.get("source_observation_id"),
+            row.get("source_evidence_id"),
         )
         if row_key == evidence_key:
             return rows

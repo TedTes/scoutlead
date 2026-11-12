@@ -5,17 +5,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from business_facts.repository import BusinessFactRepository, BusinessFactValue, fact_value
-from business_facts.operational import assess_business_operational
-from quality.fact_policy import FactQualityPolicyService
+from business_attributes.repository import BusinessAttributeRepository, BusinessAttributeValue, attribute_value
+from business_attributes.operational import assess_business_operational
 from canonical.normalization import external_id_from_raw, first_raw_text, nested_raw
+from canonical.website_evidence import assess_website_ownership
 from db.models import (
-    BusinessFactModel,
     BusinessModel,
     BusinessAttributeDefinitionModel,
     ContactModel,
-    SourceObservationModel,
-    ValidationResultModel,
+    BusinessAttributeModel,
 )
 
 
@@ -26,7 +24,7 @@ def sync_observed_business_attributes(
     session: Session,
     *,
     business: BusinessModel,
-    observation: SourceObservationModel,
+    observation: BusinessAttributeModel,
     track_changes: bool = True,
 ) -> int:
     """Materialize observed canonical attributes as scored business facts.
@@ -70,14 +68,11 @@ def sync_observed_business_attributes(
     if observation.source in {"google_places", "google_places_seed"}:
         values["google_business_profile_present"] = True
 
-    ownership = session.scalar(
-        select(ValidationResultModel)
-        .where(
-            ValidationResultModel.business_id == business.id,
-            ValidationResultModel.validation_type == "website_ownership",
-        )
-        .order_by(ValidationResultModel.observed_at.desc(), ValidationResultModel.created_at.desc())
-        .limit(1)
+    ownership = assess_website_ownership(
+        source=observation.source or "",
+        payload=observation.raw_payload or {},
+        business_name=business.display_name,
+        business_phone=business.phone,
     )
     if ownership is not None:
         values["website_ownership"] = ownership.status
@@ -100,12 +95,13 @@ def sync_observed_business_attributes(
     values["verified_email"] = verified_email
 
     contact_form = session.scalar(
-        select(BusinessFactModel).where(
-            BusinessFactModel.business_id == business.id,
-            BusinessFactModel.fact_key == "contact_form_url",
+        select(BusinessAttributeModel).where(
+            BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.row_type == "attribute",
+            BusinessAttributeModel.attribute_key == "contact_form_url",
         )
     )
-    contact_form_url = fact_value(contact_form)
+    contact_form_url = attribute_value(contact_form)
     preferred_channel = (
         "email"
         if verified_email
@@ -115,7 +111,7 @@ def sync_observed_business_attributes(
     )
     values["preferred_contact_channel"] = preferred_channel
 
-    repository = BusinessFactRepository(session)
+    repository = BusinessAttributeRepository(session)
     defined_keys = set(
         session.scalars(
             select(BusinessAttributeDefinitionModel.key).where(
@@ -130,26 +126,23 @@ def sync_observed_business_attributes(
         if key not in defined_keys or value is None or value == "":
             continue
         fact_confidence = operational.confidence if key == "business_operational" and operational else confidence
-        fact_source_observation_id = (
-            operational.source_observation_id
+        source_evidence_id = (
+            operational.source_evidence_id
             if key == "business_operational" and operational
             else observation.id
         )
         model = repository.upsert(
             business.id,
-            BusinessFactValue(
+            BusinessAttributeValue(
                 key=key,
                 value=value,
                 observed_at=observation.observed_at,
-                source_observation_id=fact_source_observation_id,
+                source_evidence_id=source_evidence_id,
                 confidence=fact_confidence,
                 resolution_state="confirmed",
-                quality_state=("published" if key == "business_operational" else "staged"),
             ),
             track_change=track_changes,
         )
-        if model.signal_definition_id is not None:
-            FactQualityPolicyService(session).evaluate(model, commit=False)
         written += 1
     return written
 

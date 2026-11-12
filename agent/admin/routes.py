@@ -370,9 +370,9 @@ def business_detail(
     )
 
 
-@router.get("/businesses/{business_id}/fact-lineage")
-def business_fact_lineage(business_id: str, session: DbSession, auth: AdminAuth):
-    return _service(session, auth).fact_lineage(business_id)
+@router.get("/businesses/{business_id}/attribute-lineage")
+def business_attribute_lineage(business_id: str, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).attribute_lineage(business_id)
 
 
 @router.get("/businesses/{business_id}/json")

@@ -414,7 +414,7 @@ class CampaignService:
 def _profile_signal_evidence(signal_key: str, evidence: Any) -> str:
     if not isinstance(evidence, dict):
         return signal_key
-    fact_key = str(evidence.get("fact_key") or signal_key)
+    attribute_key = str(evidence.get("attribute_key") or signal_key)
     value = evidence.get("value")
     if isinstance(value, bool):
         rendered_value = str(value).lower()
@@ -422,7 +422,7 @@ def _profile_signal_evidence(signal_key: str, evidence: Any) -> str:
         rendered_value = "unknown"
     else:
         rendered_value = str(value)
-    return f"{signal_key}: {fact_key}={rendered_value}"
+    return f"{signal_key}: {attribute_key}={rendered_value}"
 
 
 def _optional_text(value: Any) -> str | None:

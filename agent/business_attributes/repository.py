@@ -10,15 +10,14 @@ from sqlalchemy.orm import Session
 
 from db.models import (
     BusinessAttributeDefinitionModel,
-    BusinessFactChangeModel,
-    BusinessFactModel,
+    BusinessAttributeModel,
 )
-from business_facts.attribute_scoring import score_attribute
-from business_facts.freshness import fact_expires_at
+from business_attributes.attribute_scoring import score_attribute
+from business_attributes.freshness import attribute_expires_at
 from shared.utils import new_id
 
 
-class BusinessFactKey(StrEnum):
+class BusinessAttributeKey(StrEnum):
     WEBSITE_STATUS = "website_status"
     QUOTE_OR_BOOKING_FORM_PRESENT = "quote_or_booking_form_present"
     CONTACT_FORM_PRESENT = "contact_form_present"
@@ -28,32 +27,30 @@ class BusinessFactKey(StrEnum):
 
 
 @dataclass(frozen=True)
-class BusinessFactValue:
-    key: BusinessFactKey | str
+class BusinessAttributeValue:
+    key: BusinessAttributeKey | str
     value: str | float | bool
     observed_at: datetime
-    source_observation_id: str | None
+    source_evidence_id: str | None
     confidence: int = 100
     resolution_state: str = "confirmed"
-    supporting_claim_ids: tuple[str, ...] = ()
-    quality_state: str = "published"
-    quality_policy_version: int = 1
+    supporting_evidence_ids: tuple[str, ...] = ()
     expires_at: datetime | None = None
     resolver_version: int = 1
 
 
-class BusinessFactRepository:
+class BusinessAttributeRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
     def upsert(
         self,
         business_id: str,
-        fact: BusinessFactValue,
+        fact: BusinessAttributeValue,
         *,
         commit: bool = False,
         track_change: bool = True,
-    ) -> BusinessFactModel:
+    ) -> BusinessAttributeModel:
         model, _ = self.upsert_with_value_change(
             business_id,
             fact,
@@ -65,17 +62,18 @@ class BusinessFactRepository:
     def upsert_with_value_change(
         self,
         business_id: str,
-        fact: BusinessFactValue,
+        fact: BusinessAttributeValue,
         *,
         commit: bool = False,
         track_change: bool = True,
-    ) -> tuple[BusinessFactModel, bool]:
-        fact_key = _fact_key(fact.key)
-        expires_at = fact.expires_at or fact_expires_at(fact_key, fact.observed_at)
+    ) -> tuple[BusinessAttributeModel, bool]:
+        attribute_key = _fact_key(fact.key)
+        expires_at = fact.expires_at or attribute_expires_at(attribute_key, fact.observed_at)
         existing = self.session.scalar(
-            select(BusinessFactModel).where(
-                BusinessFactModel.business_id == business_id,
-                BusinessFactModel.fact_key == fact_key,
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id == business_id,
+                BusinessAttributeModel.row_type == "attribute",
+                BusinessAttributeModel.attribute_key == attribute_key,
             )
         )
         if (
@@ -84,22 +82,29 @@ class BusinessFactRepository:
             and existing.resolver_version >= fact.resolver_version
         ):
             return existing, False
-        previous_value = fact_value(existing)
-        previous_confidence = existing.confidence if existing is not None else None
+        previous_value = attribute_value(existing)
         value_changed = existing is None or previous_value != fact.value
         value_type, value_text, value_number, value_boolean = _typed_value(fact.value)
-        definition = self._attribute_definition(fact_key)
+        definition = self._attribute_definition(attribute_key)
         scored = score_attribute(
-            fact_key,
+            attribute_key,
             fact.value,
             opportunity_direction=(definition.opportunity_direction if definition else None),
             config=(definition.config if definition else None),
         )
+        source_evidence = (
+            self.session.get(BusinessAttributeModel, fact.source_evidence_id)
+            if fact.source_evidence_id
+            else None
+        )
+        if source_evidence is not None and source_evidence.row_type != "evidence":
+            source_evidence = None
         if existing is None:
-            existing = BusinessFactModel(
-                id=new_id("business_fact"),
+            existing = BusinessAttributeModel(
+                id=new_id("business_attribute"),
                 business_id=business_id,
-                fact_key=fact_key,
+                row_type="attribute",
+                attribute_key=attribute_key,
                 signal_definition_id=definition.id if definition else None,
                 value_type=value_type,
                 value_text=value_text,
@@ -110,12 +115,24 @@ class BusinessFactRepository:
                 score_version=scored.version,
                 score_reason=scored.reason,
                 resolution_state=fact.resolution_state,
-                supporting_claim_ids=list(fact.supporting_claim_ids),
-                quality_state=fact.quality_state,
-                quality_policy_version=fact.quality_policy_version,
+                supporting_evidence_ids=list(
+                    fact.supporting_evidence_ids
+                    or ((fact.source_evidence_id,) if fact.source_evidence_id else ())
+                ),
                 observed_at=fact.observed_at,
                 expires_at=expires_at,
-                source_observation_id=fact.source_observation_id,
+                source=source_evidence.source if source_evidence else None,
+                source_external_id=(
+                    source_evidence.source_external_id if source_evidence else None
+                ),
+                source_query_signature=(
+                    source_evidence.source_query_signature if source_evidence else None
+                ),
+                source_content_hash=(
+                    source_evidence.source_content_hash if source_evidence else None
+                ),
+                source_url=source_evidence.source_url if source_evidence else None,
+                evidence=source_evidence.evidence if source_evidence else {},
                 resolver_version=fact.resolver_version,
             )
             self.session.add(existing)
@@ -131,27 +148,20 @@ class BusinessFactRepository:
             existing.score_version = scored.version
             existing.score_reason = scored.reason
             existing.resolution_state = fact.resolution_state
-            existing.supporting_claim_ids = list(fact.supporting_claim_ids)
-            existing.quality_state = fact.quality_state
-            existing.quality_policy_version = fact.quality_policy_version
+            existing.supporting_evidence_ids = list(
+                fact.supporting_evidence_ids
+                or ((fact.source_evidence_id,) if fact.source_evidence_id else ())
+            )
             existing.observed_at = fact.observed_at
             existing.expires_at = expires_at
-            existing.source_observation_id = fact.source_observation_id
+            if source_evidence is not None:
+                existing.source = source_evidence.source
+                existing.source_external_id = source_evidence.source_external_id
+                existing.source_query_signature = source_evidence.source_query_signature
+                existing.source_content_hash = source_evidence.source_content_hash
+                existing.source_url = source_evidence.source_url
+                existing.evidence = source_evidence.evidence
             existing.resolver_version = fact.resolver_version
-        if value_changed and track_change:
-            self.session.add(
-                BusinessFactChangeModel(
-                    id=new_id("fact_change"),
-                    business_id=business_id,
-                    fact_key=fact_key,
-                    previous_value=previous_value,
-                    current_value=fact.value,
-                    previous_confidence=previous_confidence,
-                    current_confidence=fact.confidence,
-                    source_observation_id=fact.source_observation_id,
-                    changed_at=fact.observed_at,
-                )
-            )
         if commit:
             self.session.commit()
             self.session.refresh(existing)
@@ -160,30 +170,33 @@ class BusinessFactRepository:
         return existing, value_changed
 
     def _attribute_definition(
-        self, fact_key: str
+        self, attribute_key: str
     ) -> BusinessAttributeDefinitionModel | None:
         return self.session.scalar(
             select(BusinessAttributeDefinitionModel)
-            .where(BusinessAttributeDefinitionModel.key == fact_key)
+            .where(BusinessAttributeDefinitionModel.key == attribute_key)
             .limit(1)
         )
 
     def map_for_businesses(
         self,
         business_ids: list[str],
-    ) -> dict[str, dict[str, BusinessFactModel]]:
+    ) -> dict[str, dict[str, BusinessAttributeModel]]:
         if not business_ids:
             return {}
         rows = self.session.scalars(
-            select(BusinessFactModel).where(BusinessFactModel.business_id.in_(business_ids))
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.row_type == "attribute",
+            )
         )
-        result: dict[str, dict[str, BusinessFactModel]] = {}
+        result: dict[str, dict[str, BusinessAttributeModel]] = {}
         for row in rows:
-            result.setdefault(row.business_id, {})[row.fact_key] = row
+            result.setdefault(row.business_id, {})[row.attribute_key] = row
         return result
 
 
-def fact_value(fact: BusinessFactModel | None) -> Any:
+def attribute_value(fact: BusinessAttributeModel | None) -> Any:
     if fact is None:
         return None
     if fact.value_type == "boolean":
@@ -193,8 +206,8 @@ def fact_value(fact: BusinessFactModel | None) -> Any:
     return fact.value_text
 
 
-def _fact_key(key: BusinessFactKey | str) -> str:
-    return key.value if isinstance(key, BusinessFactKey) else key
+def _fact_key(key: BusinessAttributeKey | str) -> str:
+    return key.value if isinstance(key, BusinessAttributeKey) else key
 
 
 def _typed_value(value: str | float | bool) -> tuple[str, str | None, float | None, bool | None]:

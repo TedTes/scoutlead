@@ -4,14 +4,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from business_index.eligibility import searchable_business_conditions
-from db.models import (
-    BusinessFactModel,
-    BusinessModel,
-    BusinessNicheMembershipModel,
-    NicheModel,
-    SourceObservationModel,
-    ValidationResultModel,
-)
+from db.models import BusinessAttributeModel, BusinessModel, BusinessNicheMembershipModel, NicheModel
 from db.session import create_database
 from shared.utils import new_id, utcnow
 
@@ -55,7 +48,7 @@ def _eligible_scope(session):
         )
     )
     session.commit()
-    return business, niche, now
+    return business, now
 
 
 def _searchable_ids(session) -> list[str]:
@@ -71,161 +64,84 @@ def _searchable_ids(session) -> list[str]:
     )
 
 
-def _add_passed_validations(
-    session,
-    business,
-    niche,
-    observed_at,
-    *,
-    operational: bool | None = True,
-) -> None:
-    for validation_type, confidence in {
-        "identity": 90,
-        "business_identity": 85,
-        "trade": 90,
-        "location": 85,
-    }.items():
-        session.add(
-            ValidationResultModel(
-                id=new_id("validation"),
-                idempotency_key=f"{business.id}:{validation_type}:passed",
-                business_id=business.id,
-                niche_id=niche.id,
-                market_key="toronto",
-                validation_type=validation_type,
-                status="passed",
-                confidence=confidence,
-                reason="Current validation passed.",
-                evidence=[],
-                validator="test",
-                validator_version=1,
-                observed_at=observed_at,
-                expires_at=observed_at + timedelta(days=30),
-            )
-        )
-    if operational is None:
-        session.commit()
-        return
-    observation = SourceObservationModel(
-        id=new_id("observation"),
+def _add_operational_attribute(session, business, observed_at, value: bool) -> None:
+    payload = {"businessStatus": "OPERATIONAL" if value else "CLOSED_PERMANENTLY"}
+    evidence = BusinessAttributeModel(
+        id=new_id("business_evidence"),
         business_id=business.id,
-        source="google_places",
-        external_id=f"place-{business.id}",
-        query_signature=None,
-        content_hash="a" * 64,
-        source_url=f"https://maps.example/{business.id}",
-        raw_payload={
-            "businessStatus": "OPERATIONAL" if operational else "CLOSED_PERMANENTLY"
-        },
+        row_type="evidence",
+        attribute_key=f"evidence:google_places:{business.id}",
+        value_type="json",
+        value_json=payload,
+        confidence=100,
+        resolution_state="confirmed",
         observed_at=observed_at,
+        expires_at=observed_at + timedelta(days=90),
+        source="google_places",
+        source_external_id=f"place-{business.id}",
+        source_content_hash="a" * 64,
+        source_url=f"https://maps.example/{business.id}",
+        evidence=payload,
     )
-    session.add(observation)
+    session.add(evidence)
     session.flush()
     session.add(
-        BusinessFactModel(
-            id=new_id("fact"),
+        BusinessAttributeModel(
+            id=new_id("business_attribute"),
             business_id=business.id,
-            fact_key="business_operational",
+            row_type="attribute",
+            attribute_key="business_operational",
             value_type="boolean",
-            value_boolean=operational,
+            value_boolean=value,
             confidence=100,
             attribute_score=100,
-            score_version=1,
-            score_reason="present",
             resolution_state="confirmed",
-            supporting_claim_ids=[],
-            quality_state="published",
-            quality_policy_version=1,
+            supporting_evidence_ids=[evidence.id],
             observed_at=observed_at,
             expires_at=observed_at + timedelta(days=90),
-            source_observation_id=observation.id,
-            resolver_version=1,
+            source="google_places",
+            source_content_hash=evidence.source_content_hash,
+            source_url=evidence.source_url,
+            evidence=payload,
         )
     )
     session.commit()
 
 
-def test_active_business_membership_is_not_searchable_without_validations() -> None:
+def test_active_business_membership_is_searchable_without_validation_log() -> None:
     factory = _session_factory()
     with factory() as session:
-        _eligible_scope(session)
-
-        assert _searchable_ids(session) == []
-
-
-def test_active_business_membership_is_searchable_with_current_validations() -> None:
-    factory = _session_factory()
-    with factory() as session:
-        business, niche, observed_at = _eligible_scope(session)
-        _add_passed_validations(session, business, niche, observed_at)
-
+        business, _ = _eligible_scope(session)
         assert _searchable_ids(session) == [business.id]
 
 
-def test_unverified_operational_status_does_not_block_search() -> None:
+def test_unknown_operational_status_does_not_block_search() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, niche, observed_at = _eligible_scope(session)
-        _add_passed_validations(
-            session,
-            business,
-            niche,
-            observed_at,
-            operational=None,
-        )
-
+        business, _ = _eligible_scope(session)
         assert _searchable_ids(session) == [business.id]
 
 
-def test_confirmed_inactive_business_is_not_searchable() -> None:
+def test_confirmed_inactive_attribute_blocks_search() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, niche, observed_at = _eligible_scope(session)
-        _add_passed_validations(
-            session,
-            business,
-            niche,
-            observed_at,
-            operational=False,
-        )
-
+        business, observed_at = _eligible_scope(session)
+        _add_operational_attribute(session, business, observed_at, False)
         assert _searchable_ids(session) == []
 
 
-def test_failed_quality_validation_does_not_remove_membership_from_search() -> None:
+def test_expired_inactive_attribute_does_not_block_search() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, niche, observed_at = _eligible_scope(session)
-        _add_passed_validations(session, business, niche, observed_at)
-        session.add(
-            ValidationResultModel(
-                id=new_id("validation"),
-                idempotency_key=f"{business.id}:trade:failed",
-                business_id=business.id,
-                niche_id=niche.id,
-                market_key="toronto",
-                validation_type="trade",
-                status="failed",
-                confidence=95,
-                reason="Wrong trade",
-                evidence=[],
-                validator="test",
-                validator_version=1,
-                observed_at=observed_at + timedelta(seconds=1),
-                expires_at=observed_at + timedelta(days=30),
-            )
-        )
-        session.commit()
-
-        assert _searchable_ids(session) == []
+        business, _ = _eligible_scope(session)
+        _add_operational_attribute(session, business, utcnow() - timedelta(days=120), False)
+        assert _searchable_ids(session) == [business.id]
 
 
 def test_closed_business_is_not_searchable() -> None:
     factory = _session_factory()
     with factory() as session:
-        business, niche, observed_at = _eligible_scope(session)
-        _add_passed_validations(session, business, niche, observed_at)
+        business, _ = _eligible_scope(session)
         business.status = "closed"
         session.commit()
-
         assert _searchable_ids(session) == []

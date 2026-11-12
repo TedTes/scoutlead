@@ -24,6 +24,7 @@ from leads.policy import (
     controlled_signal_tags,
     normalize_qualification_result,
 )
+from leads.disposition import apply_business_review_status
 from leads.schemas import (
     ContactPolicyStatus,
     ContactVerificationStatus,
@@ -344,10 +345,23 @@ class LeadRepository:
         if "review_status" in data:
             status = data["review_status"]
             next_review_status = status if isinstance(status, LeadReviewStatus) else LeadReviewStatus(status)
+            reviewed_at = utcnow()
             model.review_status = next_review_status.value
-            model.reviewed_at = utcnow()
+            model.reviewed_at = reviewed_at
             if next_review_status == LeadReviewStatus.NOT_FIT:
                 model.shortlisted_at = None
+            if model.business_id:
+                workspace_id = self.workspace_id or self.session.scalar(
+                    select(ProductModel.workspace_id).where(ProductModel.id == model.product_id)
+                )
+                if workspace_id:
+                    apply_business_review_status(
+                        self.session,
+                        workspace_id=workspace_id,
+                        business_id=model.business_id,
+                        review_status=next_review_status.value,
+                        reviewed_at=reviewed_at,
+                    )
         if "review_note" in data:
             note = data["review_note"]
             model.review_note = note.strip() if isinstance(note, str) and note.strip() else None

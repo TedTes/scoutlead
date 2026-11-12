@@ -1,6 +1,6 @@
 import type {
   AdminBusinessDetail,
-  AdminFactLineage,
+  AdminAttributeLineage,
   AdminBusinessPage,
   AdminOverview,
   AdminDataJob,
@@ -93,8 +93,8 @@ export class ApiClient {
     return this.request<AdminBusinessDetail>(`/admin/businesses/${id}${suffix}`);
   }
 
-  getAdminBusinessFactLineage(id: string) {
-    return this.request<AdminFactLineage>(`/admin/businesses/${id}/fact-lineage`);
+  getAdminBusinessAttributeLineage(id: string) {
+    return this.request<AdminAttributeLineage>(`/admin/businesses/${id}/attribute-lineage`);
   }
 
   getAdminBusinessJson(id: string) {

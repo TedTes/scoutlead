@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from canonical.business_entity import assess_provider_business_entity
 from canonical.normalization import first_raw_text, nested_raw
-from db.models import BusinessModel, ContactModel, SourceObservationModel, ValidationResultModel
+from canonical.website_evidence import assess_website_ownership
+from db.models import BusinessModel, ContactModel, BusinessAttributeModel
 from shared.utils import utcnow
 
 
@@ -29,14 +30,14 @@ class OperationalAssessment:
     value: bool
     confidence: int
     reason: str
-    source_observation_id: str
+    source_evidence_id: str
 
 
 def assess_business_operational(
     session: Session,
     *,
     business: BusinessModel,
-    observation: SourceObservationModel,
+    observation: BusinessAttributeModel,
 ) -> OperationalAssessment | None:
     """Resolve current operation without requiring a Google Business Profile.
 
@@ -77,29 +78,32 @@ def assess_business_operational(
     cutoff = utcnow() - timedelta(days=90)
     observations = list(
         session.scalars(
-            select(SourceObservationModel)
+            select(BusinessAttributeModel)
             .where(
-                SourceObservationModel.business_id == business.id,
-                SourceObservationModel.observed_at >= cutoff,
+                BusinessAttributeModel.business_id == business.id,
+                BusinessAttributeModel.row_type == "evidence",
+                BusinessAttributeModel.observed_at >= cutoff,
             )
-            .order_by(SourceObservationModel.observed_at.desc())
+            .order_by(BusinessAttributeModel.observed_at.desc())
         )
     )
     families: set[str] = set()
     supporting_observation = observation
 
-    ownership = session.scalar(
-        select(ValidationResultModel)
-        .where(
-            ValidationResultModel.business_id == business.id,
-            ValidationResultModel.validation_type == "website_ownership",
-            ValidationResultModel.status == "passed",
-            ValidationResultModel.expires_at >= utcnow(),
-        )
-        .order_by(ValidationResultModel.observed_at.desc())
-        .limit(1)
+    ownership = next(
+        (
+            assess_website_ownership(
+                source=candidate.source or "",
+                payload=candidate.raw_payload or {},
+                business_name=business.display_name,
+                business_phone=business.phone,
+            )
+            for candidate in observations
+            if candidate.source == "company_website_signal"
+        ),
+        None,
     )
-    if ownership is not None and business.website_url and any(
+    if ownership is not None and ownership.status == "passed" and business.website_url and any(
         candidate.source == "company_website_signal"
         and _website_is_reachable(candidate.raw_payload or {})
         for candidate in observations

@@ -6,7 +6,7 @@ from canonical.website_evidence import (
     trusted_website_evidence,
 )
 from canonical.repository import CanonicalRepository
-from db.models import BusinessModel, ValidationResultModel
+from db.models import BusinessAttributeModel, BusinessModel
 from db.session import create_database
 
 
@@ -103,7 +103,7 @@ def test_failed_enrichment_identity_rejects_only_the_website_claim() -> None:
     assert "identity" in assessment.reason.lower()
 
 
-def test_canonical_ingest_records_ownership_and_does_not_promote_uncertain_url() -> None:
+def test_canonical_ingest_keeps_evidence_and_does_not_promote_uncertain_url() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -122,16 +122,16 @@ def test_canonical_ingest_records_ownership_and_does_not_promote_uncertain_url()
         )
 
         business = session.get(BusinessModel, link.business_id)
-        validation = session.scalar(
-            select(ValidationResultModel).where(
-                ValidationResultModel.business_id == link.business_id,
-                ValidationResultModel.validation_type == "website_ownership",
+        evidence = session.scalar(
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id == link.business_id,
+                BusinessAttributeModel.row_type == "evidence",
             )
         )
 
         assert business is not None
         assert business.website_url is None
         assert business.domain is None
-        assert validation is not None
-        assert validation.status == "uncertain"
-        assert validation.confidence < 90
+        assert evidence is not None
+        assert evidence.source == "google_places"
+        assert evidence.raw_payload["websiteUri"] == "https://unrelated-garden.example"
