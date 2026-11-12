@@ -44,6 +44,8 @@ import type {
   DiscoveryRun,
   DiscoveryResult,
   LeadContactPolicyInput,
+  LeadOutcomeChannel,
+  LeadOutcomeRecord,
   LeadReviewStatus,
   LeadUpdateInput,
   LeadOutcomeValue,
@@ -723,9 +725,11 @@ export function ResultsScreen({
   const recordContactOutcome = async (
     leadId: string,
     outcome: LeadOutcomeValue,
-    channel: "email" | "phone" | "contact_form" | "other" = outcome === "contacted" ? "email" : "other",
+    channel: LeadOutcomeChannel = outcome === "contacted" ? "email" : "other",
+    note?: string | null,
+    followUpAt?: string | null,
   ) => {
-    await territoryApi.recordLeadOutcome(leadId, outcome, channel);
+    await territoryApi.recordLeadOutcome(leadId, outcome, channel, note, followUpAt);
     await refreshAll({ showLoading: false });
     if (selectedTerritory) {
       await territoryApi.getTerritoryMetrics(selectedTerritory.id).then(setTerritoryMetrics);
@@ -1312,8 +1316,15 @@ export function ResultsScreen({
             onClose={() => setDetailPanelOpen(false)}
             onDirtyChange={setOutreachDraftDirty}
             onGetPackage={() => territoryApi.getOutreachPackage(detailAudienceResultId)}
+            onGetContactHistory={() => territoryApi.listLeadOutcomes(detailContact.id)}
             onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailAudienceResultId, input)}
-            onMarkContacted={(channel) => recordContactOutcome(detailContact.id, "contacted", channel)}
+            onRecordAttempt={(outcome, channel, note, followUpAt) => recordContactOutcome(
+              detailContact.id,
+              outcome,
+              channel,
+              note,
+              followUpAt,
+            )}
             onDismiss={async () => {
               await updateLead(detailContact.id, {
                 review_status: "not_fit",
@@ -1322,11 +1333,6 @@ export function ResultsScreen({
               if (isGlobalView) {
                 await loadWorkspaceLeads("shortlisted", workspaceLeadPage?.offset || 0, leadSearch);
               }
-            }}
-            onMarkSent={async (packageId, channel) => {
-              const updated = await territoryApi.markOutreachSent(packageId, channel);
-              await refreshAll({ showLoading: false });
-              return updated;
             }}
             onSaveContext={(input) => territoryApi.saveOutreachContext(detailAudienceResultId, input)}
             onSavePackage={(packageId, content) => territoryApi.updateOutreachPackage(packageId, content)}
@@ -1581,9 +1587,9 @@ function OutreachWorkspace({
   onClose,
   onGeneratePackage,
   onGetPackage,
+  onGetContactHistory,
   onDismiss,
-  onMarkContacted,
-  onMarkSent,
+  onRecordAttempt,
   onSaveContext,
   onDirtyChange,
   onSavePackage,
@@ -1594,9 +1600,14 @@ function OutreachWorkspace({
   onClose: () => void;
   onGeneratePackage: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onGetPackage: () => Promise<OutreachPackage | null>;
+  onGetContactHistory: () => Promise<LeadOutcomeRecord[]>;
   onDismiss: () => Promise<void>;
-  onMarkContacted: (channel: "email" | "phone" | "other") => Promise<void>;
-  onMarkSent: (packageId: string, channel: OutreachDraftChannel) => Promise<OutreachPackage>;
+  onRecordAttempt: (
+    outcome: LeadOutcomeValue,
+    channel: LeadOutcomeChannel,
+    note?: string | null,
+    followUpAt?: string | null,
+  ) => Promise<void>;
   onSaveContext: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onDirtyChange: (dirty: boolean) => void;
   onSavePackage: (packageId: string, content: OutreachPackageContent) => Promise<OutreachPackage>;
@@ -1615,10 +1626,16 @@ function OutreachWorkspace({
   const [channelCopied, setChannelCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [dismissing, setDismissing] = useState(false);
-  const [markingContacted, setMarkingContacted] = useState(false);
+  const [contactHistory, setContactHistory] = useState<LeadOutcomeRecord[]>([]);
+  const [contactLogOpen, setContactLogOpen] = useState(false);
+  const [contactResult, setContactResult] = useState<LeadOutcomeValue>("no_answer");
+  const [contactChannel, setContactChannel] = useState<LeadOutcomeChannel>("phone");
+  const [contactNote, setContactNote] = useState("");
+  const [followUpAt, setFollowUpAt] = useState(() => tomorrowDateTimeLocal());
+  const [savingAttempt, setSavingAttempt] = useState(false);
   const [editingInputs, setEditingInputs] = useState(false);
   const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
-  const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json">("outreach");
+  const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json" | "history">("outreach");
   const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [], persuasion_style: "friendly_adviser" });
   const isContactedHistory = mode === "contacted";
 
@@ -1665,7 +1682,11 @@ function OutreachWorkspace({
     setLoading(true);
     setLoadError("");
     try {
-      const existing = await onGetPackage();
+      const [existing, history] = await Promise.all([
+        onGetPackage(),
+        onGetContactHistory(),
+      ]);
+      setContactHistory(history);
       setOutreachPackage(existing);
       setDraft(existing ? withTemplate(existing.content) : null);
       const savedInput = existing?.content.outreach_input;
@@ -1860,34 +1881,34 @@ function OutreachWorkspace({
     onClose();
   };
 
-  const markContacted = async () => {
-    if (markingContacted || dirty || saveState === "saving") return;
-    setMarkingContacted(true);
+  const saveContactAttempt = async () => {
+    if (savingAttempt) return;
+    setSavingAttempt(true);
     setLoadError("");
     try {
-      const hasGeneratedChannel = Boolean(
-        outreachPackage
-        && generatedOutreach?.channels[activeGeneratedChannel],
+      const normalizedFollowUp = followUpAt
+        ? new Date(followUpAt).toISOString()
+        : null;
+      await onRecordAttempt(
+        contactResult,
+        contactChannel,
+        contactNote.trim() || null,
+        normalizedFollowUp,
       );
-      if (outreachPackage && hasGeneratedChannel) {
-        const updated = await onMarkSent(outreachPackage.id, activeGeneratedChannel);
-        setOutreachPackage(updated);
-      } else {
-        const channel = activeGeneratedChannel === "email"
-          ? "email"
-          : activeGeneratedChannel === "sms" || activeGeneratedChannel === "call"
-            ? "phone"
-            : "other";
-        await onMarkContacted(channel);
-      }
-      showToast({ title: "Moved to Contacted", tone: "green" });
-      onClose();
+      setContactHistory(await onGetContactHistory());
+      setContactNote("");
+      setContactLogOpen(false);
+      showToast({
+        title: isContactedHistory ? "Contact attempt saved" : "Moved to Contacted",
+        tone: "green",
+      });
+      if (!isContactedHistory) onClose();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setLoadError(message);
-      showToast({ title: "Could not mark contacted", message, tone: "red" });
+      showToast({ title: "Could not save contact attempt", message, tone: "red" });
     } finally {
-      setMarkingContacted(false);
+      setSavingAttempt(false);
     }
   };
 
@@ -1924,6 +1945,80 @@ function OutreachWorkspace({
     </section>
   );
 
+  const contactHistoryPanel = (
+    <section className="outreach-contact-log">
+      <header>
+        <div>
+          <span>{contactHistory.length
+            ? `${contactHistory.length} recorded attempt${contactHistory.length === 1 ? "" : "s"}`
+            : "No outreach recorded yet"}</span>
+        </div>
+        {!contactLogOpen ? <button type="button" onClick={() => setContactLogOpen(true)}>
+          <Plus size={14} />Log
+        </button> : null}
+      </header>
+      {contactLogOpen ? (
+        <div className="outreach-contact-form">
+          <label>
+            <span>Result</span>
+            <select value={contactResult} onChange={(event) => setContactResult(event.target.value as LeadOutcomeValue)}>
+              <option value="no_answer">No answer</option>
+              <option value="voicemail">Left voicemail</option>
+              <option value="message_sent">Message sent</option>
+              <option value="reached">Reached</option>
+            </select>
+          </label>
+          <label>
+            <span>Channel</span>
+            <select value={contactChannel} onChange={(event) => setContactChannel(event.target.value as LeadOutcomeChannel)}>
+              <option value="phone">Call</option>
+              <option value="text">Text</option>
+              <option value="email">Email</option>
+              <option value="instagram">Instagram</option>
+              <option value="contact_form">Contact form</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label className="is-follow-up">
+            <span>Follow up</span>
+            <input type="datetime-local" value={followUpAt} onChange={(event) => setFollowUpAt(event.target.value)} />
+          </label>
+          <label className="is-note">
+            <span>Note</span>
+            <textarea
+              rows={2}
+              value={contactNote}
+              onChange={(event) => setContactNote(event.target.value)}
+              placeholder="What happened or what should you remember next time?"
+            />
+          </label>
+          <footer>
+            <button className="secondary" type="button" onClick={() => setContactLogOpen(false)}>Cancel</button>
+            <button disabled={savingAttempt} type="button" onClick={() => void saveContactAttempt()}>
+              {savingAttempt ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
+              {savingAttempt ? "Saving…" : "Save"}
+            </button>
+          </footer>
+        </div>
+      ) : null}
+      {contactHistory.length ? (
+        <ol className="outreach-contact-timeline">
+          {contactHistory.map((attempt) => (
+            <li key={attempt.id}>
+              <span className="outreach-contact-dot" />
+              <div>
+                <strong>{contactOutcomeLabel(attempt.outcome)}</strong>
+                <span>{contactChannelLabel(attempt.channel)} · {formatDate(attempt.occurred_at)}</span>
+                {attempt.note ? <p>{attempt.note}</p> : null}
+                {attempt.follow_up_at ? <em><CalendarClock size={13} />Follow up {formatContactDate(attempt.follow_up_at)}</em> : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+
   const workspaceTabs = (
     <nav className="outreach-workspace-tabs" aria-label="Outreach workspace">
       <button className={workspaceTab === "outreach" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("outreach")}>
@@ -1931,6 +2026,9 @@ function OutreachWorkspace({
       </button>
       <button className={workspaceTab === "json" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("json")}>
         Business JSON
+      </button>
+      <button className={workspaceTab === "history" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("history")}>
+        Contact history{contactHistory.length ? ` (${contactHistory.length})` : ""}
       </button>
     </nav>
   );
@@ -1966,26 +2064,29 @@ function OutreachWorkspace({
               {dismissing ? <RotateCw className="spin" size={14} /> : <X size={14} />}
               {dismissing ? "Dismissing…" : "Dismiss"}
             </button> : null}
-            {!isContactedHistory ? <button
-              className="outreach-mark-contacted"
-              disabled={markingContacted || dirty || saveState === "saving"}
-              type="button"
-              onClick={() => void markContacted()}
-            >
-              {markingContacted ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
-              {markingContacted ? "Updating…" : "Mark contacted"}
-            </button> : null}
             <button aria-label="Close outreach" title="Close" type="button" onClick={closeWorkspace}><X size={17} /></button>
           </div>
         </header>
 
         {loading ? (
           <div className="outreach-template-status"><RotateCw className="spin" size={18} /><strong>Loading outreach…</strong></div>
+        ) : workspaceTab === "history" ? (
+          <div className="outreach-tab-layout">
+            {workspaceTabs}
+            <div className="outreach-history-canvas">{contactHistoryPanel}</div>
+          </div>
         ) : isContactedHistory && !outreachPackage ? (
-          <div className="outreach-template-status">
-            <AlertTriangle size={18} />
-            <strong>No saved outreach message</strong>
-            <p>This business was marked contacted without saving a message in ScoutLead.</p>
+          <div className="outreach-tab-layout">
+            {workspaceTabs}
+            <div className="generated-outreach-canvas">
+              {workspaceTab === "json" ? businessJsonPanel : (
+                <div className="outreach-template-status">
+                  <AlertTriangle size={18} />
+                  <strong>No saved outreach message</strong>
+                  <p>This business was marked contacted without saving a message in ScoutLead.</p>
+                </div>
+              )}
+            </div>
           </div>
         ) : isContactedHistory && draft && !generatedOutreach ? (
           <div className="outreach-tab-layout">
@@ -5762,6 +5863,43 @@ function formatCompactDate(value?: string | null) {
 
 function outcomeLabel(value: string) {
   return leadOutcomeOptions.find((option) => option.value === value)?.label || value.replace(/_/g, " ");
+}
+
+function contactOutcomeLabel(value: LeadOutcomeValue) {
+  if (value === "no_answer") return "No answer";
+  if (value === "voicemail") return "Left voicemail";
+  if (value === "message_sent") return "Message sent";
+  if (value === "reached") return "Reached";
+  return outcomeLabel(value);
+}
+
+function contactChannelLabel(value: LeadOutcomeChannel) {
+  if (value === "phone") return "Call";
+  if (value === "contact_form") return "Contact form";
+  if (value === "instagram") return "Instagram";
+  if (value === "text") return "Text";
+  if (value === "email") return "Email";
+  if (value === "visit") return "Visit";
+  return "Other";
+}
+
+function tomorrowDateTimeLocal() {
+  const value = new Date();
+  value.setDate(value.getDate() + 1);
+  value.setHours(9, 0, 0, 0);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
+function formatContactDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "later";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function workflowViewLabel(view: LeadWorkflowView) {

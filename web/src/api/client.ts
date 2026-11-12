@@ -46,6 +46,8 @@ import type {
   Territory,
   TerritoryMetrics,
   TerritoryResolution,
+  LeadOutcomeChannel,
+  LeadOutcomeRecord,
   LeadOutcomeValue,
   SenderProfile,
 } from "../types/domain";
@@ -541,14 +543,32 @@ export class ApiClient {
     return this.request<TerritoryMetrics>(`/audiences/${id}/metrics?weeks=${weeks}`);
   }
 
-  async recordLeadOutcome(leadId: string, outcome: LeadOutcomeValue, channel = "other") {
+  async recordLeadOutcome(
+    leadId: string,
+    outcome: LeadOutcomeValue,
+    channel: LeadOutcomeChannel = "other",
+    note?: string | null,
+    followUpAt?: string | null,
+  ) {
     const resolvedId = leadId.startsWith("audience_result_")
       ? (await this.promoteAudienceResult(leadId)).id
       : leadId;
-    return this.request(`/leads/${resolvedId}/outcomes`, {
+    return this.request<LeadOutcomeRecord>(`/leads/${resolvedId}/outcomes`, {
       method: "POST",
-      body: { outcome, channel },
+      body: {
+        outcome,
+        channel,
+        note: note || null,
+        follow_up_at: followUpAt || null,
+      },
     });
+  }
+
+  async listLeadOutcomes(leadId: string) {
+    const resolvedId = leadId.startsWith("audience_result_")
+      ? (await this.promoteAudienceResult(leadId)).id
+      : leadId;
+    return this.request<LeadOutcomeRecord[]>(`/leads/${resolvedId}/outcomes`);
   }
 
   async generateLeadApproach(leadId: string) {

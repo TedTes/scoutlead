@@ -791,6 +791,10 @@ export type TerritoryMetrics = {
 
 export type LeadOutcomeValue =
   | "contacted"
+  | "no_answer"
+  | "voicemail"
+  | "message_sent"
+  | "reached"
   | "no_response"
   | "replied_positive"
   | "replied_negative"
@@ -801,6 +805,35 @@ export type LeadOutcomeValue =
   | "business_closed"
   | "bounced"
   | "unsubscribed";
+
+export type LeadOutcomeChannel =
+  | "email"
+  | "phone"
+  | "text"
+  | "instagram"
+  | "visit"
+  | "contact_form"
+  | "other";
+
+export type LeadOutcomeRecord = {
+  id: string;
+  workspace_id: string;
+  product_id: string;
+  lead_id: string;
+  business_id?: string | null;
+  territory_id?: string | null;
+  niche_id?: string | null;
+  market_key?: string | null;
+  outcome: LeadOutcomeValue;
+  channel: LeadOutcomeChannel;
+  source: string;
+  note?: string | null;
+  occurred_at: string;
+  follow_up_at?: string | null;
+  recorded_by?: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type DiscoveryCandidate = {
   id: string;
