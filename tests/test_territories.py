@@ -81,7 +81,7 @@ from leads.schemas import (
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
 from territories.metrics import TerritoryMetricsService
-from territories.matching import ProfileMatchService
+from territories.matching import ProfileMatchService, _profile_location_market_keys
 from territories.folders import AudienceFolderService
 from territories.schemas import AudienceFolderCreate
 from territories.coordinate_backfill import CoordinateBackfillService
@@ -906,6 +906,30 @@ def test_multi_city_profile_matches_stored_data_without_coverage_requests() -> N
         assert needs_expansion is False
         assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
+
+
+def test_multi_city_profile_matches_legacy_city_market_keys() -> None:
+    profile = SimpleNamespace(
+        locations=[
+            {
+                "city": "Toronto",
+                "label": "Toronto, Ontario, Canada",
+            },
+            {
+                "city": "Montréal",
+                "label": "Montréal, Quebec, Canada",
+            },
+        ]
+    )
+
+    assert _profile_location_market_keys(profile) == [
+        "toronto",
+        "toronto ontario canada",
+        "montr al",
+        "montreal",
+        "montr al quebec canada",
+        "montreal quebec canada",
+    ]
 
 
 def test_profile_rejects_more_than_five_cities() -> None:

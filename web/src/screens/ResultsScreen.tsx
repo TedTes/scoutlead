@@ -1248,6 +1248,29 @@ export function ResultsScreen({
                   <RotateCw size={14} className={refreshingBatch ? "sl-spin-icon" : ""} />
                   {refreshingBatch ? "Refreshing…" : "Refresh results"}
                 </button>
+              ) : !isGlobalView && visibleProfileBatch && ["setup", "empty"].includes(visibleProfileBatch.state) ? (
+                <button
+                  className="result-refresh-button"
+                  disabled={refreshingBatch}
+                  type="button"
+                  onClick={async () => {
+                    setRefreshingBatch(true);
+                    try {
+                      await refillProfile(visibleProfileBatch.audience.id);
+                    } catch (err) {
+                      showToast({
+                        title: "Search failed",
+                        message: err instanceof Error ? err.message : String(err),
+                        tone: "red",
+                      });
+                    } finally {
+                      setRefreshingBatch(false);
+                    }
+                  }}
+                >
+                  <RotateCw size={14} className={refreshingBatch ? "sl-spin-icon" : ""} />
+                  {refreshingBatch ? "Checking…" : "Check stored data again"}
+                </button>
               ) : null}
             </section>
           )}

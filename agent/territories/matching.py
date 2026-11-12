@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -771,13 +772,29 @@ class ProfileMatchService:
 
 
 def _profile_location_market_keys(profile) -> list[str]:
-    return list(
-        dict.fromkeys(
-            semantic_key(str(location.get("label") or location.get("city") or ""))
-            for location in (profile.locations or [])
-            if semantic_key(str(location.get("label") or location.get("city") or ""))
-        )
-    )
+    keys: list[str] = []
+    for location in profile.locations or []:
+        # Existing index memberships were stored with the city key (for
+        # example, ``toronto``), while canonical place selection stores the
+        # full label (``Toronto, Ontario, Canada``).  Keep both aliases so a
+        # saved search can read the shared index regardless of which version
+        # created the membership.
+        for value in (location.get("city"), location.get("label")):
+            text = str(value or "")
+            aliases = (
+                semantic_key(text),
+                semantic_key(
+                    "".join(
+                        character
+                        for character in unicodedata.normalize("NFKD", text)
+                        if not unicodedata.combining(character)
+                    )
+                ),
+            )
+            for key in aliases:
+                if key and key not in keys:
+                    keys.append(key)
+    return keys
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
