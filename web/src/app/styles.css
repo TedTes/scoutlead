@@ -10449,6 +10449,36 @@ body.is-resizing-navigation .rail {
   padding: 7px;
 }
 
+.audience-selected-cities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.audience-selected-cities button {
+  align-items: center;
+  background: var(--af-accent-weak);
+  border: 1px solid var(--green-line);
+  border-radius: 999px;
+  color: var(--af-accent-ink);
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 5px;
+  padding: 5px 8px 5px 10px;
+}
+
+.audience-selected-cities button:hover {
+  background: var(--green-soft);
+  border-color: var(--af-accent);
+}
+
+.audience-city-list > label.is-unavailable {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
 .audience-city-list > label {
   align-items: center;
   border: 1px solid transparent;

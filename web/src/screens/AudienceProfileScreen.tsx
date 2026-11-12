@@ -7,6 +7,7 @@ import type { LocationCity, LocationCountry, LocationRegion, ProfileCreateInput,
 
 const SYSTEM_EXCLUSIONS: ProfileExclusion[] = ["closed", "directories"];
 const VISIBLE_OPPORTUNITY_KEYS = new Set(["website_availability", "website_upgrade"]);
+const MAX_SELECTED_CITIES = 5;
 type FormMode = "create" | "edit" | "clone";
 
 export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderId?: string }) {
@@ -112,7 +113,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
       setCountries(countryOptions);
       setRegions(regionOptions);
       setCities(cityOptions);
-      setSelectedCityIds(cityOptions.map((city) => city.id));
+      setSelectedCityIds(cityOptions.slice(0, MAX_SELECTED_CITIES).map((city) => city.id));
     }).catch(() => {
       if (active) setOptionsError(true);
     }).finally(() => {
@@ -135,9 +136,10 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
       const available = new Set(cityOptions.map((city) => city.id));
       const desiredNames = new Set(selectedNames.map((name) => name.trim().toLowerCase()).filter(Boolean));
       const retained = selectedIds === undefined
-        ? cityOptions.map((city) => city.id)
+        ? cityOptions.slice(0, MAX_SELECTED_CITIES).map((city) => city.id)
         : cityOptions
           .filter((city) => available.has(city.id) && (selectedIds.includes(city.id) || desiredNames.has(city.name.toLowerCase())))
+          .slice(0, MAX_SELECTED_CITIES)
           .map((city) => city.id);
       setSelectedCityIds(retained);
       setCityQuery("");
@@ -164,8 +166,20 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const reviewRangeValid = !minReviewCount || !maxReviewCount || Number(minReviewCount) <= Number(maxReviewCount);
   const selectedCities = useMemo(() => { const selected = new Set(selectedCityIds); return cities.filter((city) => selected.has(city.id)); }, [cities, selectedCityIds]);
   const visibleCities = useMemo(() => { const query = cityQuery.trim().toLowerCase(); return query ? cities.filter((city) => `${city.name} ${city.region_name || ""}`.toLowerCase().includes(query)) : cities; }, [cities, cityQuery]);
-  const valid = Boolean(selectedProductId && nicheId && selectedCities.length && customerKinds.length && services.length && services.every((service) => enabledServiceKeys.has(service)) && reviewRangeValid);
+  const valid = Boolean(selectedProductId && nicheId && selectedCities.length && selectedCities.length <= MAX_SELECTED_CITIES && customerKinds.length && services.length && services.every((service) => enabledServiceKeys.has(service)) && reviewRangeValid);
   const activeBatch = useMemo(() => profileBatch?.audience.id === selectedProfile?.id ? profileBatch : null, [profileBatch, selectedProfile?.id]);
+
+  const toggleCity = (city: LocationCity) => {
+    if (selectedCityIds.includes(city.id)) {
+      setSelectedCityIds(selectedCityIds.filter((id) => id !== city.id));
+      return;
+    }
+    if (selectedCityIds.length >= MAX_SELECTED_CITIES) {
+      showToast({ title: `Choose up to ${MAX_SELECTED_CITIES} cities`, message: "Remove a selected city before adding another.", tone: "red" });
+      return;
+    }
+    setSelectedCityIds([...selectedCityIds, city.id]);
+  };
 
   useEffect(() => {
     if (defaultOpportunityAppliedRef.current || !profileOptions || mode !== "create" || editing) return;
@@ -288,16 +302,19 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
             </div>
             <div className="audience-city-toolbar">
               <label className="audience-city-search"><Search aria-hidden="true" size={14} /><input aria-label="Filter cities" placeholder="Filter cities" type="search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} /></label>
-              <strong>{selectedCities.length} of {cities.length} cities selected</strong>
-              <button type="button" onClick={() => setSelectedCityIds(cities.map((city) => city.id))}>Select all</button>
+              <strong>{selectedCities.length} of {MAX_SELECTED_CITIES} selected</strong>
+              <button type="button" onClick={() => setSelectedCityIds(cities.slice(0, MAX_SELECTED_CITIES).map((city) => city.id))}>Use top 5</button>
               <button type="button" onClick={() => setSelectedCityIds([])}>Clear</button>
             </div>
+            {selectedCities.length ? <div className="audience-selected-cities" aria-label="Selected cities">
+              {selectedCities.map((city) => <button aria-label={`Remove ${city.name}`} key={city.id} title={`Remove ${city.name}`} type="button" onClick={() => toggleCity(city)}><span>{city.name}</span><X size={12} /></button>)}
+            </div> : null}
             <div className="audience-city-list" role="group" aria-label="Cities to search">
               {citiesBusy ? <p className="audience-row-status"><LoaderCircle className="sl-spin" size={14} />Loading cities</p> : null}
-              {!citiesBusy && visibleCities.map((city) => { const selected = selectedCityIds.includes(city.id); return <label className={selected ? "is-selected" : ""} key={city.id}><input checked={selected} type="checkbox" onChange={() => setSelectedCityIds(toggleValue(selectedCityIds, city.id))} /><span><strong>{city.name}</strong>{city.region_name ? <small>{city.region_name}</small> : null}</span>{selected ? <Check size={13} /> : null}</label>; })}
+              {!citiesBusy && visibleCities.map((city) => { const selected = selectedCityIds.includes(city.id); const unavailable = !selected && selectedCityIds.length >= MAX_SELECTED_CITIES; return <label className={`${selected ? "is-selected" : ""}${unavailable ? " is-unavailable" : ""}`} key={city.id}><input checked={selected} disabled={unavailable} type="checkbox" onChange={() => toggleCity(city)} /><span><strong>{city.name}</strong>{city.region_name ? <small>{city.region_name}</small> : null}</span>{selected ? <Check size={13} /> : null}</label>; })}
               {!citiesBusy && !visibleCities.length ? <p className="audience-empty-options">No cities match “{cityQuery}”.</p> : null}
             </div>
-            <p className="audience-field-help">Each selected city is collected independently. One saved search tracks the combined progress.</p>
+            <p className="audience-field-help">Choose up to five cities. Collection runs in the background, one city at a time, and results appear as each city completes.</p>
           </div>
         </section>
 
@@ -334,7 +351,7 @@ function shortTradeLabel(label: string) {
   return shortened.replace(/\bhvac\b/gi, "HVAC");
 }
 function toggleValue<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
-function getFormHint(nicheId: string, cityCount: number, customerKindCount: number, services: string[], reviewRangeValid: boolean) { if (!nicheId) return "Choose a trade to continue."; if (!customerKindCount) return "Choose at least one customer type."; if (!cityCount) return "Select at least one city to continue."; if (!services.length) return "Choose a website opportunity to continue."; if (!reviewRangeValid) return "Minimum reviews cannot exceed maximum reviews."; return `Ready to search ${cityCount} ${cityCount === 1 ? "city" : "cities"}.`; }
+function getFormHint(nicheId: string, cityCount: number, customerKindCount: number, services: string[], reviewRangeValid: boolean) { if (!nicheId) return "Choose a trade to continue."; if (!customerKindCount) return "Choose at least one customer type."; if (!cityCount) return "Select at least one city to continue."; if (cityCount > MAX_SELECTED_CITIES) return `Choose no more than ${MAX_SELECTED_CITIES} cities.`; if (!services.length) return "Choose a website opportunity to continue."; if (!reviewRangeValid) return "Minimum reviews cannot exceed maximum reviews."; return `Ready to collect ${cityCount} ${cityCount === 1 ? "city" : "cities"} in the background.`; }
 function optionalNumber(value: string): number | null { return value.trim() === "" ? null : Number(value); }
 function optionalNumberInput(value?: number | null): string { return value == null ? "" : String(value); }
 function profileLocationSummary(profile: Territory) { const locations = profile.locations || []; if (locations.length === 1) return locations[0].label || locations[0].city; if (locations.length > 1) return `${locations.length} cities`; return `${profile.place_label || profile.city} · ${profile.radius_km} km`; }

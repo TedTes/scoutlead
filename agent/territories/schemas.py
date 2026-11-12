@@ -99,7 +99,7 @@ class TerritoryCreate(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int = Field(default=25, ge=1, le=250)
-    locations: list[dict] = Field(default_factory=list)
+    locations: list[dict] = Field(default_factory=list, max_length=5)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
@@ -148,7 +148,7 @@ class TerritoryUpdate(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int | None = Field(default=None, ge=1, le=250)
-    locations: list[dict] | None = None
+    locations: list[dict] | None = Field(default=None, max_length=5)
     customer_kind: ProfileCustomerKind | None = None
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
@@ -258,7 +258,7 @@ class ProfileCreate(BaseModel):
     min_review_count: int | None = Field(default=None, ge=0)
     max_review_count: int | None = Field(default=None, ge=0)
     market: ProfileMarket | None = None
-    markets: list[ProfileMarket] = Field(default_factory=list, max_length=5000)
+    markets: list[ProfileMarket] = Field(default_factory=list, max_length=5)
     services: list[str] = Field(default_factory=list, max_length=20)
     signals: list[str] = Field(default_factory=list, max_length=50)
     exclude: list[ProfileExclusion] = Field(

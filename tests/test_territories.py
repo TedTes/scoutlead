@@ -937,6 +937,34 @@ def test_multi_city_profile_creates_city_specific_coverage_requests() -> None:
         assert needs_expansion is False
 
 
+def test_profile_rejects_more_than_five_cities() -> None:
+    markets = [
+        {
+            "city": f"City {index}",
+            "place_label": f"City {index}, Ontario, Canada",
+            "place_provider": "geonames",
+            "place_external_id": f"geonames:{index}",
+            "country_code": "ca",
+            "region_code": "08",
+            "region_name": "Ontario",
+            "latitude": 43.0 + (index / 100),
+            "longitude": -79.0 - (index / 100),
+        }
+        for index in range(6)
+    ]
+
+    with pytest.raises(ValueError, match="at most 5 items"):
+        ProfileCreate(
+            product_id="product:test",
+            niche_id="niche:test",
+            customer_kind="both",
+            markets=markets,
+            services=["website_availability"],
+            signals=[],
+            exclude=[],
+        )
+
+
 def test_audience_worker_starts_only_one_multi_city_coverage_request(
     monkeypatch,
 ) -> None:
