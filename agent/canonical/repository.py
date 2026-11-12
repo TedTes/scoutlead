@@ -178,15 +178,20 @@ class CanonicalRepository:
         contact_email: str | None = None,
     ) -> CanonicalLeadLink:
         """Attach evidence, contact data, and explicit structured attributes."""
-        apply_business_attributes(
-            business,
-            extract_business_attributes([raw], category=business.category_key),
-        )
         website_evidence = trusted_website_evidence(
             source=source,
             payload=raw,
             business_name=business.display_name,
             business_phone=business.phone,
+        )
+        if website_evidence is not None:
+            business = self.business_for_website_evidence(
+                business=business,
+                website_url=website_evidence.url,
+            )
+        apply_business_attributes(
+            business,
+            extract_business_attributes([raw], category=business.category_key),
         )
         if business.website_url is None and website_evidence is not None:
             business.website_url = website_evidence.url
@@ -219,6 +224,34 @@ class CanonicalRepository:
             contact_id=contact.id if contact else None,
             source_observation_id=observation.id,
         )
+
+    def business_for_website_evidence(
+        self,
+        *,
+        business: BusinessModel,
+        website_url: str,
+    ) -> BusinessModel:
+        """Return the canonical owner when website evidence reveals a duplicate.
+
+        A business can be discovered without a domain and later enriched with a
+        website already owned by another row for the same normalized name. Route
+        that evidence to the existing canonical row before mutating either ORM
+        object so PostgreSQL's identity constraint is never used as control flow.
+        """
+        domain = normalize_domain(website_url)
+        if not domain or not business.normalized_name:
+            return business
+        existing = self.session.scalar(
+            select(BusinessModel)
+            .where(
+                BusinessModel.id != business.id,
+                BusinessModel.normalized_name == business.normalized_name,
+                BusinessModel.domain == domain,
+            )
+            .order_by(BusinessModel.created_at)
+            .limit(1)
+        )
+        return existing or business
 
     def list_exact_index_matches(
         self,

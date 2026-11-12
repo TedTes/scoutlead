@@ -418,6 +418,57 @@ def test_confirmed_evidence_reconciles_current_website_fact() -> None:
         assert [change.current_value for change in changes] == ["not_listed", "present"]
 
 
+def test_late_website_evidence_is_routed_to_existing_canonical_business() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        _add_painting_niche(session)
+        canonical = CanonicalRepository(session)
+        existing = canonical.upsert_from_discovery_result(
+            company_name="Maple Air Heating & Cooling",
+            website_url="https://mapleair.example",
+            geography="Toronto",
+            source="google_places",
+            raw={
+                **_source_payload(
+                    "present",
+                    external_id="places/maple-air-existing",
+                    phone="416-555-0101",
+                ),
+                "displayName": {"text": "Maple Air Heating & Cooling"},
+                "websiteUri": "https://mapleair.example",
+            },
+        )
+        duplicate = canonical.upsert_from_discovery_result(
+            company_name="Maple Air Heating & Cooling",
+            geography="Vaughan",
+            source="openstreetmap",
+            raw={
+                "external_id": "osm/maple-air-duplicate",
+                "phone": "416-555-0202",
+            },
+        )
+        assert duplicate.business_id != existing.business_id
+
+        link = canonical.record_business_evidence(
+            business=session.get(BusinessModel, duplicate.business_id),
+            source="google_places",
+            raw={
+                **_source_payload(
+                    "present",
+                    external_id="places/maple-air-confirmed",
+                    phone="416-555-0202",
+                ),
+                "displayName": {"text": "Maple Air Heating & Cooling"},
+                "websiteUri": "https://mapleair.example",
+            },
+        )
+        session.flush()
+
+        assert link.business_id == existing.business_id
+        assert session.get(BusinessModel, duplicate.business_id).domain is None
+        assert session.get(BusinessModel, existing.business_id).domain == "mapleair.example"
+
+
 def test_completed_independent_search_resolves_missing_website_fact() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

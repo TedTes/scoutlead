@@ -72,17 +72,21 @@ def run_once() -> bool:
             job.type,
             job.attempts,
         )
+        # Capture queue metadata before executing the job. A failed flush expires
+        # ORM attributes and leaves the transaction aborted, so even reading
+        # ``job.id`` in the exception handler can otherwise raise a second error
+        # and terminate the worker process.
+        job_id = job.id
+        job_type = job.type
+        job_payload = dict(job.payload or {})
         try:
             _execute_job(session, services, job)
         except Exception as exc:
-            logger.exception("job_failed job_id=%s", job.id)
+            logger.exception("job_failed job_id=%s", job_id)
             # A database error leaves PostgreSQL transactions aborted.  Reset
             # the failed unit of work before trying to persist the queue retry
             # or dead-letter state; otherwise queue.fail() raises
             # InFailedSqlTransaction and terminates the worker.
-            job_id = job.id
-            job_type = job.type
-            job_payload = dict(job.payload or {})
             session.rollback()
             failed_job = queue.fail(
                 job_id,
@@ -128,8 +132,8 @@ def run_once() -> bool:
                     reason=str(exc),
                 )
             return True
-        queue.complete(job.id)
-        logger.info("job_completed job_id=%s job_type=%s", job.id, job.type)
+        queue.complete(job_id)
+        logger.info("job_completed job_id=%s job_type=%s", job_id, job_type)
         return True
     finally:
         generator.close()

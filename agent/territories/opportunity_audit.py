@@ -14,7 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from canonical.business_entity import google_place_is_business_profile
 from canonical.normalization import normalize_business_name, normalize_domain
-from canonical.repository import CanonicalRepository
+from canonical.repository import CanonicalLeadLink, CanonicalRepository
 from canonical.website_evidence import trusted_website_evidence
 from canonical.website_enrichment import (
     SOURCE_NAME,
@@ -282,6 +282,10 @@ class BusinessOpportunityAuditor:
                 raw_sources, "source_url"
             )
             if google_website_url:
+                business = canonical.business_for_website_evidence(
+                    business=business,
+                    website_url=google_website_url,
+                )
                 business.website_url = google_website_url
                 business.domain = normalize_domain(google_website_url)
                 canonical.record_business_evidence(
@@ -326,6 +330,10 @@ class BusinessOpportunityAuditor:
                     None,
                 )
                 if trusted is not None:
+                    business = canonical.business_for_website_evidence(
+                        business=business,
+                        website_url=trusted.url,
+                    )
                     business.website_url = trusted.url
                     business.domain = normalize_domain(trusted.url)
                     continue
@@ -341,13 +349,19 @@ class BusinessOpportunityAuditor:
                 google_already_checked=google_lists_no_website,
             )
             if confirmation.google_result is not None:
-                self._record_google_confirmation(
+                google_link = self._record_google_confirmation(
                     canonical,
                     business,
                     confirmation.google_result,
                     confirmation.query,
                 )
+                if google_link.business_id and google_link.business_id != business.id:
+                    continue
             if confirmation.website_url:
+                business = canonical.business_for_website_evidence(
+                    business=business,
+                    website_url=confirmation.website_url,
+                )
                 business.website_url = confirmation.website_url
                 business.domain = normalize_domain(confirmation.website_url)
                 canonical.record_business_evidence(
@@ -458,13 +472,19 @@ class BusinessOpportunityAuditor:
                 google_already_checked=_sources_include_google(lead.raw_sources),
             )
             if confirmation.google_result is not None:
-                self._record_google_confirmation(
+                google_link = self._record_google_confirmation(
                     canonical,
                     business,
                     confirmation.google_result,
                     confirmation.query,
                 )
+                if google_link.business_id and google_link.business_id != business.id:
+                    continue
             if confirmation.website_url:
+                business = canonical.business_for_website_evidence(
+                    business=business,
+                    website_url=confirmation.website_url,
+                )
                 business.website_url = confirmation.website_url
                 business.domain = normalize_domain(confirmation.website_url)
                 lead.website_url = confirmation.website_url
@@ -722,7 +742,7 @@ class BusinessOpportunityAuditor:
         business: BusinessModel,
         result: SearchResult,
         query: str,
-    ) -> None:
+    ) -> CanonicalLeadLink:
         raw = {
             **result.raw,
             "query": query,
@@ -733,7 +753,7 @@ class BusinessOpportunityAuditor:
             "verification_scope": "entity",
             "verification_target_business_id": business.id,
         }
-        canonical.record_business_evidence(
+        return canonical.record_business_evidence(
             business=business,
             source="google_places",
             raw=raw,
