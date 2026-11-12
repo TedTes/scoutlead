@@ -4,7 +4,6 @@ from time import monotonic, sleep
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from audience_runs.scheduler import enqueue_waiting_audience_runs
 from audience_runs.service import AudienceRunService
 from app.config import get_settings
 from app.dependencies import AppServices, create_app_services
@@ -17,15 +16,11 @@ from business_facts.maintenance import enforce_fact_publication_invariants
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
-from canonical.semantics import semantic_key
 from db.session import create_database
 from db.models import (
     AudienceRunModel,
-    BusinessIndexSegmentModel,
     CampaignModel,
-    CoverageRequestModel,
     QueueJobModel,
-    TerritoryModel,
 )
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
@@ -41,13 +36,11 @@ from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
-from territories.source_expansion import enqueue_profile_source_expansion
 
 logger = get_logger(__name__)
 _last_territory_scheduler_tick = 0.0
 _last_business_index_scheduler_tick = 0.0
 _last_outcome_maintenance_date: date | None = None
-_last_audience_run_scheduler_tick = 0.0
 _last_evidence_expiry_tick = 0.0
 _last_signal_collection_tick = 0.0
 
@@ -158,108 +151,10 @@ def _execute_job(
             raise ValueError(
                 f"audience run not found: {job.payload['audience_run_id']}"
             )
-        run, needs_expansion = AudienceRunService(
+        AudienceRunService(
             session,
             workspace_id=audience_run.workspace_id,
         ).process(audience_run.id)
-        if needs_expansion:
-            profile = session.get(TerritoryModel, run.audience_id)
-            if profile is None:
-                raise ValueError(f"audience not found: {run.audience_id}")
-            # Claim exactly one queued city.  Earlier behavior passed the entire
-            # profile into source expansion and turned a country-wide search into
-            # hundreds of concurrent provider pipelines.  Remaining cities stay
-            # queued until this request completes and the audience scheduler
-            # advances the run again.
-            queued_requests = list(
-                session.scalars(
-                    select(CoverageRequestModel)
-                    .where(
-                        CoverageRequestModel.run_id == run.id,
-                        CoverageRequestModel.status == "queued",
-                    )
-                    .order_by(CoverageRequestModel.created_at, CoverageRequestModel.id)
-                )
-            )
-            request_by_market_key = {
-                request.market_key: request for request in queued_requests
-            }
-            selected_requests = [
-                request_by_market_key[market_key]
-                for market_key in dict.fromkeys(
-                    semantic_key(
-                        str(location.get("label") or location.get("city") or "")
-                    )
-                    for location in (profile.locations or [])
-                )
-                if market_key in request_by_market_key
-            ][:1]
-            if not selected_requests and queued_requests:
-                selected_requests = queued_requests[:1]
-            if not selected_requests:
-                return
-            segment_ids = enqueue_profile_source_expansion(
-                session,
-                profile,
-                google_places_configured=bool(
-                    services.settings.google_places_api_key
-                ),
-                search_configured=services.search.is_configured,
-                openstreetmap_enabled=services.settings.openstreetmap_enabled,
-                apify_sources=[
-                    source
-                    for source in services.settings.apify_source_configs
-                    if source.get("api_token")
-                    and source.get("actor_id")
-                    and (
-                        source.get("input_template")
-                        or source.get("search_url_template")
-                        or source.get("input_kind")
-                    )
-                ],
-                source_recipes=services.settings.source_template_configs,
-                market_keys={request.market_key for request in selected_requests},
-            )
-            queued_segments = (
-                {
-                    (row.niche_id, row.market_key)
-                    for row in session.execute(
-                        select(
-                            BusinessIndexSegmentModel.niche_id,
-                            BusinessIndexSegmentModel.market_key,
-                        ).where(BusinessIndexSegmentModel.id.in_(segment_ids))
-                    )
-                }
-                if segment_ids
-                else set()
-            )
-            processing_count = 0
-            failure_reason = (
-                "No configured source provider could expand this audience."
-            )
-            for request in selected_requests:
-                if (request.niche_id, request.market_key) in queued_segments:
-                    request.status = "processing"
-                    processing_count += 1
-                else:
-                    request.status = "failed"
-                    request.failure_reason = failure_reason
-                    request.completed_at = datetime.now(timezone.utc)
-            remaining_queued = session.scalar(
-                select(CoverageRequestModel.id)
-                .where(
-                    CoverageRequestModel.run_id == run.id,
-                    CoverageRequestModel.status == "queued",
-                )
-                .limit(1)
-            )
-            if processing_count == 0 and remaining_queued is None:
-                now = datetime.now(timezone.utc)
-                run.state = "partial"
-                run.failure_reason = failure_reason
-                run.completed_at = now
-                profile.last_run_at = now
-            session.commit()
     elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
         business_index_pipeline_service(
             session=session,
@@ -578,15 +473,11 @@ def _campaign_service(*, session: Session, services: AppServices) -> CampaignSer
 
 
 def _scheduler_tick(session: Session, services: AppServices) -> None:
-    global _last_audience_run_scheduler_tick
     global _last_business_index_scheduler_tick
     global _last_evidence_expiry_tick
     global _last_signal_collection_tick
     global _last_outcome_maintenance_date, _last_territory_scheduler_tick
     now = monotonic()
-    if now - _last_audience_run_scheduler_tick >= 60:
-        enqueue_waiting_audience_runs(session)
-        _last_audience_run_scheduler_tick = now
     if (
         services.settings.business_index_scheduler_enabled
         and now - _last_business_index_scheduler_tick >= 60
@@ -596,7 +487,10 @@ def _scheduler_tick(session: Session, services: AppServices) -> None:
     if now - _last_evidence_expiry_tick >= 3600:
         enforce_fact_publication_invariants(session)
         _last_evidence_expiry_tick = now
-    if now - _last_signal_collection_tick >= 3600:
+    if (
+        services.settings.signal_collection_scheduler_enabled
+        and now - _last_signal_collection_tick >= 3600
+    ):
         enqueue_due_signal_collections(session, limit=50, batch_size=10)
         _last_signal_collection_tick = now
     today = datetime.now(timezone.utc).date()

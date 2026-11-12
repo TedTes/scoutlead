@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-from sqlalchemy import and_, or_, select, true
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
-from business_index.eligibility import searchable_business_conditions
 from audience_runs.schemas import (
     AudienceLeadRead,
     AudienceResultRead,
@@ -16,26 +15,14 @@ from audience_runs.schemas import (
 from db.models import (
     AudienceResultModel,
     AudienceRunModel,
-    BusinessIndexSegmentModel,
-    BusinessFactModel,
     BusinessModel,
-    BusinessNicheMembershipModel,
-    CoverageRequestModel,
     LeadModel,
     NicheModel,
-    QueueJobModel,
-    SignalDefinitionModel,
     TerritoryModel,
 )
-from job_queue.schemas import JobStatus, JobType
-from job_queue.service import QueueService
-from seeding.batches import active_membership_condition
-from signal_collection.requirements import fact_requires_collection
-from shared.geospatial import haversine_distance_km_expression
 from shared.errors import ConflictError, NotFoundError
 from shared.utils import new_id, utcnow
 from canonical.normalization import normalize_domain, normalize_email, normalize_phone
-from canonical.semantics import semantic_key
 from leads.schemas import LeadContactPolicyUpdate, ContactPolicyStatus
 from suppressions.repository import ContactSuppressionRepository
 from territories.matching import ProfileMatchService
@@ -93,18 +80,17 @@ class AudienceRunService:
         return run
 
     def process(self, run_id: str) -> tuple[AudienceRunModel, bool]:
+        """Match a saved search against evidence already stored in the database.
+
+        Audience execution is intentionally read-only with respect to external
+        data.  It must never create coverage requests, refresh source providers,
+        or enqueue validation/signal collection.  Those operations belong to the
+        independently controlled admin collection pipeline.
+        """
         run = self._run(run_id)
         audience = self._audience(run.audience_id)
         if run.state == AudienceRunState.READY.value:
             return run, False
-        if run.state == AudienceRunState.PARTIAL.value:
-            active_segment_ids = self._active_coverage_segment_ids(run.id)
-            has_new_evidence = self._coverage_refreshed_after_snapshot(run)
-            if not active_segment_ids and not has_new_evidence:
-                return run, False
-            self._reopen_active_coverage(run.id, active_segment_ids)
-            run.state = AudienceRunState.WAITING_VALIDATION.value
-            run.completed_at = None
         if run.criteria_version != audience.criteria_version:
             run.state = AudienceRunState.FAILED.value
             run.failure_reason = "Audience criteria changed after this run was queued."
@@ -117,24 +103,6 @@ class AudienceRunService:
         run.index_snapshot_at = now
         self.session.commit()
         niches = _territory_niches(self.session, audience)
-        is_multi_city = bool(audience.locations)
-        if is_multi_city:
-            # A multi-city search promises coverage of every selected city. Create
-            # all city requests before matching so an already-populated city cannot
-            # prematurely satisfy the overall batch and skip the remaining cities.
-            self._request_coverage(run, audience, niches)
-        self._reconcile_coverage(run.id)
-        coverage_in_progress = self._coverage_in_progress(run.id)
-        coverage_market_keys = (
-            self._collectable_coverage_market_keys(run.id)
-            if is_multi_city
-            else None
-        )
-        self._enqueue_required_attribute_collection(
-            audience,
-            niches,
-            market_keys=coverage_market_keys,
-        )
         rows = ProfileMatchService(self.session).match(
             profile=audience,
             niche_ids=[niche.id for niche in niches],
@@ -170,26 +138,6 @@ class AudienceRunService:
                 select(AudienceResultModel).where(AudienceResultModel.run_id == run.id)
             )
         }
-        if is_multi_city and coverage_in_progress and len(selected) < run.requested_count:
-            # Evidence changes while provider and audit jobs are running. A
-            # transient rematch can therefore return fewer rows than the previous
-            # pass. Keep already accepted rows visible until every city finishes;
-            # the final pass below remains authoritative and removes rows that no
-            # longer qualify.
-            selected_business_ids = {_business_id(row) for row in selected}
-            retained = sorted(
-                existing_results.values(),
-                key=lambda result: result.rank_position,
-            )
-            for result in retained:
-                if result.business_id in selected_business_ids:
-                    continue
-                if result.business_id in dismissed_business_ids:
-                    continue
-                selected.append(dict(result.match_snapshot or {}))
-                selected_business_ids.add(result.business_id)
-                if len(selected) >= run.requested_count:
-                    break
         for temporary_rank, result in enumerate(existing_results.values(), start=1):
             result.rank_position = -temporary_rank
         self.session.flush()
@@ -223,182 +171,16 @@ class AudienceRunService:
                 self.session.delete(result)
         run.result_count = inserted_count
         run.new_result_count = new_result_count
-        needs_expansion = False
-        if is_multi_city and coverage_in_progress:
-            # The deadline bounds a single-city attempt. It must not turn a large
-            # asynchronous multi-city search into an empty completed batch while
-            # provider, identity, or audit jobs are still running.
-            run.state = AudienceRunState.WAITING_VALIDATION.value
-            run.completed_at = None
-            needs_expansion = self._coverage_capacity_available(run.id)
-        elif run.result_count >= run.requested_count:
+        if run.result_count >= run.requested_count:
             run.state = AudienceRunState.READY.value
-            run.failure_reason = None
-            run.completed_at = now
-            audience.last_run_at = now
-            self._complete_coverage(run.id)
-        elif _before_deadline(now, run.deadline_at):
-            self._request_coverage(run, audience, niches)
-            if self._coverage_in_progress(run.id):
-                run.state = AudienceRunState.WAITING_VALIDATION.value
-                run.completed_at = None
-                needs_expansion = self._coverage_capacity_available(run.id)
-            else:
-                run.state = AudienceRunState.PARTIAL.value
-                run.completed_at = now
-                audience.last_run_at = now
         else:
             run.state = AudienceRunState.PARTIAL.value
-            run.completed_at = now
-            audience.last_run_at = now
-            self._complete_coverage(run.id)
+        run.failure_reason = None
+        run.completed_at = now
+        audience.last_run_at = now
         self.session.commit()
         self.session.refresh(run)
-        return run, needs_expansion
-
-    def _enqueue_required_attribute_collection(
-        self,
-        audience: TerritoryModel,
-        niches: list[NicheModel],
-        *,
-        market_keys: list[str] | None = None,
-    ) -> int:
-        """Collect missing, staged, or expired attributes required by an audience."""
-        signal_keys = list(dict.fromkeys(audience.signal_keys or []))
-        if audience.min_google_rating is not None:
-            signal_keys.append("google_rating")
-        if audience.min_review_count is not None or audience.max_review_count is not None:
-            signal_keys.append("google_review_count")
-        signal_keys = list(dict.fromkeys(signal_keys))
-        if not signal_keys or not niches:
-            return 0
-        location_market_keys = (
-            list(dict.fromkeys(market_keys))
-            if market_keys is not None
-            else _audience_location_market_keys(audience)
-        )
-        if market_keys is not None and not location_market_keys:
-            return 0
-        distance_km = (
-            None
-            if location_market_keys
-            else haversine_distance_km_expression(
-                center_latitude=audience.latitude,
-                center_longitude=audience.longitude,
-                latitude=BusinessModel.latitude,
-                longitude=BusinessModel.longitude,
-            )
-            if audience.latitude is not None and audience.longitude is not None
-            else None
-        )
-        if distance_km is None and not location_market_keys:
-            return 0
-        fact = aliased(BusinessFactModel, name="required_attribute_fact")
-        statement = (
-            select(
-                SignalDefinitionModel,
-                BusinessModel.id,
-                BusinessModel.website_url,
-                BusinessNicheMembershipModel.niche_id,
-                BusinessNicheMembershipModel.market_key,
-            )
-            .select_from(SignalDefinitionModel)
-            .join(BusinessModel, true())
-            .outerjoin(
-                fact,
-                and_(
-                    fact.signal_definition_id == SignalDefinitionModel.id,
-                    fact.business_id == BusinessModel.id,
-                ),
-            )
-            .join(
-                BusinessNicheMembershipModel,
-                BusinessNicheMembershipModel.business_id == BusinessModel.id,
-            )
-            .where(
-                SignalDefinitionModel.key.in_(signal_keys),
-                SignalDefinitionModel.status == "active",
-                SignalDefinitionModel.collector_key.is_not(None),
-                SignalDefinitionModel.opportunity_direction != "none",
-                fact_requires_collection(fact),
-                BusinessNicheMembershipModel.niche_id.in_(
-                    [niche.id for niche in niches]
-                ),
-                active_membership_condition(),
-                *searchable_business_conditions(),
-            )
-        )
-        if location_market_keys:
-            statement = statement.where(
-                BusinessNicheMembershipModel.market_key.in_(location_market_keys)
-            )
-        else:
-            statement = statement.where(
-                BusinessModel.latitude.is_not(None),
-                BusinessModel.longitude.is_not(None),
-                distance_km <= float(audience.radius_km),
-            )
-        if audience.customer_kind != "both":
-            statement = statement.where(
-                BusinessModel.customer_kind == audience.customer_kind
-            )
-        segment_ids = {
-            (segment.niche_id, segment.market_key): segment.id
-            for segment in self.session.scalars(
-                select(BusinessIndexSegmentModel).where(
-                    BusinessIndexSegmentModel.niche_id.in_(
-                        [niche.id for niche in niches]
-                    )
-                )
-            )
-        }
-        by_definition: dict[str, tuple[SignalDefinitionModel, list[str]]] = {}
-        queued_website_audits: set[tuple[str, str]] = set()
-        queue = QueueService(self.session)
-        for (
-            definition,
-            business_id,
-            website_url,
-            niche_id,
-            market_key,
-        ) in self.session.execute(statement).unique():
-            if definition.key == "website_status" and not website_url:
-                segment_id = segment_ids.get((niche_id, market_key))
-                if segment_id is not None:
-                    audit_key = (segment_id, business_id)
-                    if audit_key not in queued_website_audits:
-                        queue.enqueue_business_opportunity_audit(
-                            source_item_id=None,
-                            segment_id=segment_id,
-                            business_id=business_id,
-                            commit=False,
-                        )
-                        queued_website_audits.add(audit_key)
-                    # Website absence must be discovered by the provider/search
-                    # audit. The HTTP collector cannot inspect a URL that is not
-                    # known and would only produce another unknown observation.
-                    continue
-            _, business_ids = by_definition.setdefault(
-                definition.id,
-                (definition, []),
-            )
-            if business_id not in business_ids:
-                business_ids.append(business_id)
-
-        queued = 0
-        for definition, business_ids in by_definition.values():
-            for batch_number, business_id in enumerate(business_ids, start=1):
-                queue.enqueue_signal_collection(
-                    signal_definition_id=definition.id,
-                    signal_version=definition.version,
-                    business_ids=[business_id],
-                    requested_by=None,
-                    reason="audience_staged_fact_validation",
-                    batch_number=batch_number,
-                    commit=False,
-                )
-                queued += 1
-        return queued + len(queued_website_audits)
+        return run, False
 
     def get_read(self, run_id: str) -> AudienceRunRead:
         run = self._run(run_id)
@@ -567,204 +349,6 @@ class AudienceRunService:
             result.shortlisted_at = None
             self.session.commit()
         return self._lead_read(result)
-
-    def _request_coverage(self, run, audience, niches) -> bool:
-        created = False
-        deficit = max(0, run.requested_count - run.result_count)
-        market_keys = _audience_location_market_keys(audience) or [audience.market_key]
-        for niche in niches:
-            for market_key in market_keys:
-                existing = self.session.scalar(
-                    select(CoverageRequestModel)
-                    .where(
-                        CoverageRequestModel.run_id == run.id,
-                        CoverageRequestModel.niche_id == niche.id,
-                        CoverageRequestModel.market_key == market_key,
-                    )
-                    .limit(1)
-                )
-                if existing is not None:
-                    continue
-                self.session.add(
-                    CoverageRequestModel(
-                        id=new_id("coverage"),
-                        run_id=run.id,
-                        audience_id=audience.id,
-                        niche_id=niche.id,
-                        market_key=market_key,
-                        requested_count=deficit,
-                        status="queued",
-                    )
-                )
-                created = True
-        return created
-
-    def _complete_coverage(self, run_id: str) -> None:
-        for request in self.session.scalars(
-            select(CoverageRequestModel).where(CoverageRequestModel.run_id == run_id)
-        ):
-            if request.status == "failed":
-                continue
-            request.status = "completed"
-            request.completed_at = utcnow()
-
-    def has_active_coverage_work(self, run_id: str) -> bool:
-        return bool(self._active_coverage_segment_ids(run_id))
-
-    def _reopen_active_coverage(
-        self,
-        run_id: str,
-        active_segment_ids: set[str],
-    ) -> None:
-        if not active_segment_ids:
-            return
-        segments = self._coverage_segments(run_id)
-        for request, segment in segments:
-            if segment is not None and segment.id in active_segment_ids:
-                request.status = "processing"
-                request.completed_at = None
-
-    def _reconcile_coverage(self, run_id: str) -> None:
-        active_segment_ids = self._active_coverage_segment_ids(run_id)
-        now = utcnow()
-        for request, segment in self._coverage_segments(run_id):
-            if request.status != "processing" or segment is None:
-                continue
-            if segment.id in active_segment_ids:
-                continue
-            if not segment.last_refresh_at or not _at_or_after(
-                segment.last_refresh_at,
-                request.created_at,
-            ):
-                continue
-            request.status = "completed"
-            request.completed_at = now
-
-    def _coverage_segments(
-        self,
-        run_id: str,
-    ) -> list[tuple[CoverageRequestModel, BusinessIndexSegmentModel | None]]:
-        requests = list(
-            self.session.scalars(
-                select(CoverageRequestModel).where(
-                    CoverageRequestModel.run_id == run_id
-                )
-            )
-        )
-        if not requests:
-            return []
-        niche_ids = {request.niche_id for request in requests}
-        market_keys = {request.market_key for request in requests}
-        segments = {
-            (segment.niche_id, segment.market_key): segment
-            for segment in self.session.scalars(
-                select(BusinessIndexSegmentModel).where(
-                    BusinessIndexSegmentModel.niche_id.in_(niche_ids),
-                    BusinessIndexSegmentModel.market_key.in_(market_keys),
-                )
-            )
-        }
-        return [
-            (request, segments.get((request.niche_id, request.market_key)))
-            for request in requests
-        ]
-
-    def _active_coverage_segment_ids(self, run_id: str) -> set[str]:
-        segment_ids = {
-            segment.id
-            for _, segment in self._coverage_segments(run_id)
-            if segment is not None
-        }
-        if not segment_ids:
-            return set()
-        stage_types = {
-            JobType.BUSINESS_INDEX_REFRESH.value,
-            JobType.SOURCE_FETCH.value,
-            JobType.BUSINESS_IDENTITY_RESOLVE.value,
-            JobType.BUSINESS_OPPORTUNITY_AUDIT.value,
-        }
-        active_jobs = self.session.scalars(
-            select(QueueJobModel).where(
-                QueueJobModel.status.in_(
-                    [JobStatus.QUEUED.value, JobStatus.RUNNING.value]
-                ),
-                QueueJobModel.type.in_(stage_types),
-            )
-        )
-        return {
-            str(job.payload.get("segment_id"))
-            for job in active_jobs
-            if str(job.payload.get("segment_id") or "") in segment_ids
-        }
-
-    def _coverage_refreshed_after_snapshot(self, run: AudienceRunModel) -> bool:
-        if run.index_snapshot_at is None:
-            return False
-        return any(
-            segment is not None
-            and segment.last_refresh_at is not None
-            and _at_or_after(segment.last_refresh_at, run.index_snapshot_at)
-            for _, segment in self._coverage_segments(run.id)
-        )
-
-    def _coverage_in_progress(self, run_id: str) -> bool:
-        return (
-            self.session.scalar(
-                select(CoverageRequestModel.id)
-                .where(
-                    CoverageRequestModel.run_id == run_id,
-                    CoverageRequestModel.status.in_(["queued", "processing"]),
-                )
-                .limit(1)
-            )
-            is not None
-        )
-
-    def _queued_coverage_exists(self, run_id: str) -> bool:
-        return (
-            self.session.scalar(
-                select(CoverageRequestModel.id)
-                .where(
-                    CoverageRequestModel.run_id == run_id,
-                    CoverageRequestModel.status == "queued",
-                )
-                .limit(1)
-            )
-            is not None
-        )
-
-    def _coverage_capacity_available(self, run_id: str) -> bool:
-        """Return whether the run may start its next city.
-
-        Multi-city searches intentionally keep a single city in the discovery
-        pipeline at a time.  The audience scheduler continues to rematch while
-        that city is active, so completed evidence can become visible without
-        allowing each scheduler tick to fan out another city.
-        """
-        if not self._queued_coverage_exists(run_id):
-            return False
-        active_request = self.session.scalar(
-            select(CoverageRequestModel.id)
-            .where(
-                CoverageRequestModel.run_id == run_id,
-                CoverageRequestModel.status == "processing",
-            )
-            .limit(1)
-        )
-        return active_request is None
-
-    def _collectable_coverage_market_keys(self, run_id: str) -> list[str]:
-        """Limit evidence collection to cities the sequential run has reached."""
-        return list(
-            self.session.scalars(
-                select(CoverageRequestModel.market_key)
-                .where(
-                    CoverageRequestModel.run_id == run_id,
-                    CoverageRequestModel.status.in_(["processing", "completed"]),
-                )
-                .order_by(CoverageRequestModel.created_at, CoverageRequestModel.id)
-            )
-        )
 
     def _audience(self, audience_id: str) -> TerritoryModel:
         audience = self.session.get(TerritoryModel, audience_id)
@@ -944,36 +528,8 @@ class AudienceRunService:
         return sorted(identifiers)
 
 
-def _audience_location_market_keys(audience: TerritoryModel) -> list[str]:
-    return list(
-        dict.fromkeys(
-            semantic_key(
-                str(location.get("label") or location.get("city") or "")
-            )
-            for location in (audience.locations or [])
-            if semantic_key(
-                str(location.get("label") or location.get("city") or "")
-            )
-        )
-    )
-
-
 def _business_id(row: dict) -> str:
     return str(row["raw"]["canonical_business_id"])
-
-
-def _before_deadline(now: datetime, deadline: datetime) -> bool:
-    if deadline.tzinfo is None and now.tzinfo is not None:
-        deadline = deadline.replace(tzinfo=now.tzinfo)
-    return now < deadline
-
-
-def _at_or_after(value: datetime, reference: datetime) -> bool:
-    if value.tzinfo is None and reference.tzinfo is not None:
-        value = value.replace(tzinfo=reference.tzinfo)
-    elif reference.tzinfo is None and value.tzinfo is not None:
-        reference = reference.replace(tzinfo=value.tzinfo)
-    return value >= reference
 
 
 def _territory_niches(session: Session, territory: TerritoryModel) -> list[NicheModel]:

@@ -25,8 +25,9 @@ def enqueue_profile_source_expansion(
     apify_sources: list[dict[str, Any]],
     source_recipes: list[dict[str, Any]],
     market_keys: set[str] | None = None,
+    enqueue_refresh: bool = True,
 ) -> list[str]:
-    """Ensure the audience niche has an independently refreshable source segment."""
+    """Ensure independently refreshable segments, optionally starting collection."""
 
     product = ProductRead.model_validate(
         ProductRepository(
@@ -99,12 +100,13 @@ def enqueue_profile_source_expansion(
             target_business_count=target_business_count,
             record_demand=False,
         )
-        available_count = len(segments.business_ids(segment))
-        queue.enqueue_business_index_refresh(
-            segment_id=segment.id,
-            requested_deficit=max(0, target_business_count - available_count),
-            commit=False,
-        )
+        if enqueue_refresh:
+            available_count = len(segments.business_ids(segment))
+            queue.enqueue_business_index_refresh(
+                segment_id=segment.id,
+                requested_deficit=max(0, target_business_count - available_count),
+                commit=False,
+            )
         segment_ids.append(segment.id)
 
     session.commit()

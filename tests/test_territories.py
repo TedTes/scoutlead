@@ -336,7 +336,7 @@ def test_confirmed_territory_creation_can_create_a_new_niche() -> None:
         assert territory.niche.slug == "mobile_bicycle_mechanics"
 
 
-def test_profile_creation_only_persists_configuration_and_queues_initial_batch() -> None:
+def test_profile_creation_matches_stored_data_without_queueing_collection() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -365,10 +365,14 @@ def test_profile_creation_only_persists_configuration_and_queues_initial_batch()
         assert result.audience.next_run_at is None
         assert result.audience.search_prompt is None
         assert result.audience.search_contract == {}
-        assert result.job.status.value == "queued"
-        run = session.get(AudienceRunModel, result.job.payload["audience_run_id"])
+        assert result.job is None
+        run = session.get(AudienceRunModel, result.audience_run_id)
         assert run is not None
         assert run.audience_id == result.audience.id
+        assert run.state == "partial"
+        assert run.completed_at is not None
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
         assert session.scalar(select(func.count()).select_from(CampaignModel)) == 0
 
 
@@ -397,7 +401,7 @@ def test_profile_creation_can_schedule_recurring_runs() -> None:
         assert scheduled - utcnow() <= timedelta(days=7)
 
 
-def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
+def test_recreating_active_profile_reuses_it_without_collection_jobs() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -415,21 +419,18 @@ def test_recreating_active_profile_reuses_it_and_deduplicates_refresh() -> None:
         repeated = create_profile_route(data, session, auth)
 
         assert repeated.audience.id == first.audience.id
-        assert repeated.job.id == first.job.id
+        assert repeated.job is None
+        assert first.job is None
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
-        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 1
-
-        queued = session.get(QueueJobModel, first.job.id)
-        assert queued is not None
-        queued.status = "completed"
-        session.commit()
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
         refilled = create_profile_route(data, session, auth)
 
         assert refilled.audience.id == first.audience.id
-        assert refilled.job.id != first.job.id
+        assert refilled.job is None
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 1
-        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 2
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
+        assert session.scalar(select(func.count()).select_from(AudienceRunModel)) == 3
 
 
 def test_profile_route_requires_a_service_or_explicit_signal() -> None:
@@ -505,6 +506,40 @@ def test_profile_source_expansion_queues_the_selected_niche_once() -> None:
             [task["provider_id"] for task in segment.source_plan] == ["openstreetmap"]
             for segment in segments
         )
+
+
+def test_profile_source_expansion_can_register_admin_target_without_collection() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["painters"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                limit=25,
+            )
+        )
+
+        segment_ids = enqueue_profile_source_expansion(
+            session,
+            profile,
+            google_places_configured=False,
+            search_configured=False,
+            openstreetmap_enabled=True,
+            apify_sources=[],
+            source_recipes=[],
+            enqueue_refresh=False,
+        )
+
+        assert len(segment_ids) == 1
+        assert session.get(BusinessIndexSegmentModel, segment_ids[0]) is not None
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
 
 def test_profile_source_expansion_skips_segments_without_a_provider() -> None:
@@ -610,7 +645,7 @@ def test_profile_source_expansion_can_queue_one_selected_city() -> None:
         ) == 1
 
 
-def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
+def test_profile_batch_is_read_only_and_reports_stored_match_state() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -627,49 +662,25 @@ def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
             auth,
         )
 
+        initial_run = session.get(AudienceRunModel, result.audience_run_id)
+        assert initial_run is not None
+        assert initial_run.state == "partial"
         completed = current_profile_batch(result.audience.id, session, auth)
-        assert completed.state.value == "scoring"
+        assert completed.state.value == "empty"
         assert completed.failure_class is None
 
-        job = session.get(QueueJobModel, result.job.id)
-        assert job is not None
-        assert job.status == "queued"
-
-        initial_run = session.get(
-            AudienceRunModel,
-            result.job.payload["audience_run_id"],
-        )
-        assert initial_run is not None
+        # Reading the batch must not repair the run or enqueue any background work.
         initial_run.state = "matching"
         initial_run.completed_at = None
-        job.status = "completed"
         session.commit()
 
-        repaired = current_profile_batch(result.audience.id, session, auth)
-        assert repaired.state.value == "scoring"
-        assert initial_run.state == "waiting_validation"
-        assert job.status == "queued"
-
-        run = AudienceRunService(
-            session,
-            workspace_id="workspace:first",
-        ).create(result.audience.id)
-        job = QueueService(session).enqueue_audience_run(run.id)
-        job.status = "running"
-        job.attempts = 2
-        job.locked_at = utcnow()
-        job.last_error = "HTTP 429 rate_limit_exceeded"
-        session.commit()
-        retrying = current_profile_batch(result.audience.id, session, auth)
-        assert retrying.state.value == "retrying"
-        assert retrying.failure_class == "rate_limit"
-        assert retrying.retry_at == job.run_after
-
-        job.status = "failed"
-        session.commit()
-        failed = current_profile_batch(result.audience.id, session, auth)
-        assert failed.state.value == "failed"
-        assert failed.failure_class == "rate_limit"
+        read_again = current_profile_batch(result.audience.id, session, auth)
+        session.refresh(initial_run)
+        assert read_again.state.value == "scoring"
+        assert initial_run.state == "matching"
+        assert initial_run.completed_at is None
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
 
 
 def test_profile_contract_accepts_dynamic_niches_and_bounded_custom_sizes() -> None:
@@ -833,7 +844,7 @@ def test_profile_persists_one_niche_and_supports_both_customer_kinds() -> None:
         assert profile.label == "Painting contractors near Toronto"
 
 
-def test_multi_city_profile_creates_city_specific_coverage_requests() -> None:
+def test_multi_city_profile_matches_stored_data_without_coverage_requests() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -888,53 +899,13 @@ def test_multi_city_profile_creates_city_specific_coverage_requests() -> None:
         runs = AudienceRunService(session, workspace_id="workspace:first")
         run = runs.create(profile.id)
         runs.process(run.id)
-        requests = list(
-            session.scalars(
-                select(CoverageRequestModel)
-                .where(CoverageRequestModel.run_id == run.id)
-                .order_by(CoverageRequestModel.market_key)
-            )
-        )
-        assert [request.market_key for request in requests] == [
-            "ottawa ontario canada",
-            "toronto ontario canada",
-        ]
-
-        run.deadline_at = utcnow() - timedelta(seconds=1)
-        session.commit()
-        run, needs_expansion = runs.process(run.id)
-
-        assert run.state == "waiting_validation"
-        assert run.completed_at is None
-        assert needs_expansion is True
-        assert {request.status for request in requests} == {"queued"}
-
-        requests[0].status = "processing"
-        session.commit()
-        run, needs_expansion = runs.process(run.id)
-
-        assert run.state == "waiting_validation"
-        assert needs_expansion is False
-        assert [request.status for request in requests].count("processing") == 1
-        assert [request.status for request in requests].count("queued") == 1
-
-        requests[0].status = "completed"
-        requests[0].completed_at = utcnow()
-        session.commit()
-        run, needs_expansion = runs.process(run.id)
-
-        assert run.state == "waiting_validation"
-        assert needs_expansion is True
-
-        for request in requests:
-            request.status = "completed"
-            request.completed_at = utcnow()
-        session.commit()
         run, needs_expansion = runs.process(run.id)
 
         assert run.state == "partial"
         assert run.completed_at is not None
         assert needs_expansion is False
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
 
 def test_profile_rejects_more_than_five_cities() -> None:
@@ -965,7 +936,7 @@ def test_profile_rejects_more_than_five_cities() -> None:
         )
 
 
-def test_audience_worker_starts_only_one_multi_city_coverage_request(
+def test_audience_worker_only_runs_stored_data_matching(
     monkeypatch,
 ) -> None:
     session_factory = _session_factory()
@@ -1017,61 +988,26 @@ def test_audience_worker_starts_only_one_multi_city_coverage_request(
         run = run_service.create(profile.id)
         run_service.process(run.id)
         job = QueueService(session).enqueue_audience_run(run.id)
-        selected_market_keys: list[set[str]] = []
-
-        def fake_expand(*args, market_keys, **kwargs):
-            selected_market_keys.append(market_keys)
-            market_key = next(iter(market_keys))
-            segment = BusinessIndexSegmentModel(
-                id=new_id("segment"),
-                niche_id=niche.id,
-                market_key=market_key,
-                market_label=market_key,
-                status="active",
-                target_business_count=40,
-                source_plan=[],
-                source_state={},
-            )
-            session.add(segment)
-            session.flush()
-            return [segment.id]
+        processed_run_ids: list[str] = []
 
         monkeypatch.setattr(
             AudienceRunService,
             "process",
-            lambda self, run_id: (session.get(AudienceRunModel, run_id), True),
-        )
-        monkeypatch.setattr(
-            queue_worker,
-            "enqueue_profile_source_expansion",
-            fake_expand,
-        )
-        services = SimpleNamespace(
-            settings=SimpleNamespace(
-                google_places_api_key=None,
-                openstreetmap_enabled=True,
-                apify_source_configs=[],
-                source_template_configs=[],
+            lambda self, run_id: (
+                processed_run_ids.append(run_id)
+                or session.get(AudienceRunModel, run_id),
+                False,
             ),
-            search=SimpleNamespace(is_configured=False),
         )
+        services = SimpleNamespace()
 
         queue_worker._execute_job(session, services, job)
 
-        requests = list(
-            session.scalars(
-                select(CoverageRequestModel)
-                .where(CoverageRequestModel.run_id == run.id)
-                .order_by(CoverageRequestModel.market_key)
-            )
-        )
-        assert len(selected_market_keys) == 1
-        assert selected_market_keys[0] == {"toronto ontario canada"}
-        assert [request.status for request in requests].count("processing") == 1
-        assert [request.status for request in requests].count("queued") == 1
+        assert processed_run_ids == [run.id]
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
 
 
-def test_multi_city_partial_run_reopens_while_city_pipeline_is_active() -> None:
+def test_multi_city_partial_run_does_not_start_collection() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -1119,58 +1055,16 @@ def test_multi_city_partial_run_reopens_while_city_pipeline_is_active() -> None:
         )
         runs = AudienceRunService(session, workspace_id="workspace:first")
         run = runs.create(profile.id)
-        runs.process(run.id)
-        requests = list(
-            session.scalars(
-                select(CoverageRequestModel).where(
-                    CoverageRequestModel.run_id == run.id
-                )
-            )
-        )
-        segments = []
-        for request in requests:
-            segment = BusinessIndexSegmentModel(
-                id=new_id("segment"),
-                niche_id=request.niche_id,
-                market_key=request.market_key,
-                market_label=request.market_key,
-                status="active",
-                target_business_count=40,
-                source_plan=[],
-                source_state={},
-            )
-            session.add(segment)
-            segments.append(segment)
-            request.status = "completed"
-            request.completed_at = utcnow()
-        session.flush()
-        QueueService(session).enqueue_source_fetch(
-            segment_id=segments[0].id,
-            source_index=0,
-            task={"provider_id": "google_places"},
-        )
-        run.state = "partial"
-        run.completed_at = utcnow()
-        run.deadline_at = utcnow() - timedelta(seconds=1)
-        session.commit()
-
         run, needs_expansion = runs.process(run.id)
 
-        assert run.state == "waiting_validation"
-        assert run.completed_at is None
+        assert run.state == "partial"
+        assert run.completed_at is not None
         assert needs_expansion is False
-        statuses = {
-            request.market_key: request.status
-            for request in session.scalars(
-                select(CoverageRequestModel).where(
-                    CoverageRequestModel.run_id == run.id
-                )
-            )
-        }
-        assert statuses[segments[0].market_key] == "processing"
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
 
-def test_multi_city_run_retains_visible_results_until_collection_finishes(
+def test_multi_city_run_replaces_results_from_current_stored_snapshot(
     monkeypatch,
 ) -> None:
     session_factory = _session_factory()
@@ -1236,7 +1130,7 @@ def test_multi_city_run_retains_visible_results_until_collection_finishes(
         run = runs.create(profile.id)
 
         run, _ = runs.process(run.id)
-        assert run.state == "waiting_validation"
+        assert run.state == "partial"
         assert run.result_count == 1
         assert session.scalar(
             select(func.count(AudienceResultModel.id)).where(
@@ -1246,13 +1140,14 @@ def test_multi_city_run_retains_visible_results_until_collection_finishes(
 
         run, _ = runs.process(run.id)
 
-        assert run.state == "waiting_validation"
-        assert run.result_count == 1
+        assert run.state == "partial"
+        assert run.result_count == 0
         assert session.scalar(
             select(func.count(AudienceResultModel.id)).where(
                 AudienceResultModel.run_id == run.id
             )
-        ) == 1
+        ) == 0
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
 
 
 def test_multi_city_profile_can_replace_its_selected_cities() -> None:
@@ -1804,7 +1699,7 @@ def test_dismissed_business_stays_out_of_refills_and_can_be_restored() -> None:
         ).review_status.value == "unreviewed"
 
 
-def test_audience_run_requests_coverage_and_waits_until_deadline() -> None:
+def test_audience_run_returns_partial_stored_results_without_collection() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -1829,49 +1724,13 @@ def test_audience_run_requests_coverage_and_waits_until_deadline() -> None:
         run = service.create(profile.id)
         run, needs_expansion = service.process(run.id)
 
-        assert run.state == "waiting_validation"
-        assert run.result_count == 2
-        assert run.completed_at is None
-        assert needs_expansion is True
-        assert len(service.latest_leads_for_audience(profile.id)) == 2
-        coverage = session.scalar(select(CoverageRequestModel))
-        assert coverage is not None
-        assert coverage.status == "queued"
-        assert coverage.requested_count == 23
-
-        # A background retry moves the run through matching again. Results
-        # already accepted for this run must remain visible while it does so.
-        run.state = "matching"
-        session.commit()
-        assert len(service.latest_leads_for_audience(profile.id)) == 2
-
-        run.state = "expanding"
-        session.commit()
-        assert len(service.latest_leads_for_audience(profile.id)) == 2
-
-        run.state = "waiting_validation"
-        session.commit()
-
-        run, needs_expansion = service.process(run.id)
-
-        assert run.state == "waiting_validation"
-        assert needs_expansion is True
-
-        coverage.status = "processing"
-        session.commit()
-        run, needs_expansion = service.process(run.id)
-
-        assert run.state == "waiting_validation"
-        assert needs_expansion is False
-
-        run.deadline_at = utcnow() - timedelta(seconds=1)
-        session.commit()
-        run, needs_expansion = service.process(run.id)
-
         assert run.state == "partial"
+        assert run.result_count == 2
         assert run.completed_at is not None
         assert needs_expansion is False
-        assert coverage.status == "completed"
+        assert len(service.latest_leads_for_audience(profile.id)) == 2
+        assert session.scalar(select(func.count()).select_from(CoverageRequestModel)) == 0
+        assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
 
 def test_audience_result_creates_outreach_records_only_after_user_action() -> None:
@@ -2298,15 +2157,9 @@ def test_profile_does_not_rank_staged_dynamic_signal_definition() -> None:
                 )
             )
         )
-        assert processed.state == "waiting_validation"
-        # The run collects both the staged value and the missing value for the
-        # other eligible business before attempting to match either one.
-        assert len(collection_jobs) == 2
-        assert collection_jobs[0].payload["signal_definition_id"] == definition.id
-        assert collection_jobs[0].payload["business_ids"] == [businesses[0].id]
-        assert collection_jobs[0].payload["reason"] == (
-            "audience_staged_fact_validation"
-        )
+        assert processed.state == "partial"
+        assert processed.result_count == 0
+        assert collection_jobs == []
 
 
 def test_opportunity_audit_handoff_queues_only_waiting_audience_signals() -> None:
@@ -2523,10 +2376,9 @@ def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
             )
         )
 
-        assert processed.state == "waiting_validation"
-        assert {job.payload["business_id"] for job in audit_jobs} == {
-            row.id for row in session.scalars(select(BusinessModel))
-        }
+        assert processed.state == "partial"
+        assert processed.result_count == 0
+        assert audit_jobs == []
         assert website_collection_jobs == []
 
 

@@ -394,7 +394,8 @@ class LocationCityRead(BaseModel):
 
 class ProfileQueuedRead(BaseModel):
     audience: TerritoryRead
-    job: QueueJobRead
+    audience_run_id: str
+    job: QueueJobRead | None = None
 
 
 class ProfileBatchRead(BaseModel):

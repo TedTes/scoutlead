@@ -4,7 +4,6 @@ from app.dependencies import CurrentAuth, DbSession
 from audience_runs.schemas import AudienceLeadRead, AudienceResultUpdate, AudienceRunRead
 from audience_runs.outreach import AudienceOutreachService
 from audience_runs.service import AudienceRunService
-from job_queue.service import QueueService
 from leads.schemas import LeadContactPolicyUpdate, LeadRead
 
 
@@ -14,12 +13,12 @@ router = APIRouter(prefix="/audiences", tags=["audience-runs"])
 @router.post(
     "/{audience_id}/runs",
     response_model=AudienceRunRead,
-    status_code=status.HTTP_202_ACCEPTED,
+    status_code=status.HTTP_200_OK,
 )
 def create_audience_run(audience_id: str, session: DbSession, auth: CurrentAuth):
     service = AudienceRunService(session, workspace_id=auth.workspace_id)
     run = service.create(audience_id)
-    QueueService(session).enqueue_audience_run(run.id)
+    service.process(run.id)
     return service.get_read(run.id)
 
 

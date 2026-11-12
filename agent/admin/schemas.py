@@ -62,7 +62,7 @@ class AdminBulkDeleteRequest(BaseModel):
 
 class AdminDataJobCreate(BaseModel):
     segment_id: str
-    processing_mode: Literal["automatic", "review_first"] = "review_first"
+    processing_mode: Literal["automatic", "review_first"] = "automatic"
     reason: str = Field(min_length=3, max_length=1000)
 
 
