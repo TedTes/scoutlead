@@ -2,9 +2,11 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
-import pytest
+
+import job_queue.worker as queue_worker
 
 from campaigns.repository import CampaignRepository
 from audience_runs.service import AudienceRunService, _territory_niches
@@ -539,6 +541,75 @@ def test_profile_source_expansion_skips_segments_without_a_provider() -> None:
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
 
+def test_profile_source_expansion_can_queue_one_selected_city() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(
+            session,
+            slug="home_service_electrical",
+            label="Electrical contractors",
+        )
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                customer_kind="both",
+                markets=[
+                    {
+                        "city": "Toronto",
+                        "place_label": "Toronto, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6167865",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 43.70643,
+                        "longitude": -79.39864,
+                    },
+                    {
+                        "city": "Ottawa",
+                        "place_label": "Ottawa, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6094817",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 45.41117,
+                        "longitude": -75.69812,
+                    },
+                ],
+                services=[],
+                signals=[],
+                exclude=[],
+            )
+        )
+
+        segment_ids = enqueue_profile_source_expansion(
+            session,
+            profile,
+            google_places_configured=False,
+            search_configured=False,
+            openstreetmap_enabled=True,
+            apify_sources=[],
+            source_recipes=[],
+            market_keys={"ottawa ontario canada"},
+        )
+
+        segments = list(session.scalars(select(BusinessIndexSegmentModel)))
+        assert len(segment_ids) == 1
+        assert len(segments) == 1
+        assert segments[0].market_key == "ottawa ontario canada"
+        assert session.scalar(
+            select(func.count(QueueJobModel.id)).where(
+                QueueJobModel.type == "business_index.refresh"
+            )
+        ) == 1
+
+
 def test_profile_batch_distinguishes_scoring_retrying_and_failed() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
@@ -838,6 +909,23 @@ def test_multi_city_profile_creates_city_specific_coverage_requests() -> None:
         assert needs_expansion is True
         assert {request.status for request in requests} == {"queued"}
 
+        requests[0].status = "processing"
+        session.commit()
+        run, needs_expansion = runs.process(run.id)
+
+        assert run.state == "waiting_validation"
+        assert needs_expansion is False
+        assert [request.status for request in requests].count("processing") == 1
+        assert [request.status for request in requests].count("queued") == 1
+
+        requests[0].status = "completed"
+        requests[0].completed_at = utcnow()
+        session.commit()
+        run, needs_expansion = runs.process(run.id)
+
+        assert run.state == "waiting_validation"
+        assert needs_expansion is True
+
         for request in requests:
             request.status = "completed"
             request.completed_at = utcnow()
@@ -847,6 +935,112 @@ def test_multi_city_profile_creates_city_specific_coverage_requests() -> None:
         assert run.state == "partial"
         assert run.completed_at is not None
         assert needs_expansion is False
+
+
+def test_audience_worker_starts_only_one_multi_city_coverage_request(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        niche = _niche(
+            session,
+            slug="home_service_electrical",
+            label="Electrical contractors",
+        )
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            ProfileCreate(
+                product_id=offer.id,
+                niche_id=niche.id,
+                customer_kind="both",
+                markets=[
+                    {
+                        "city": "Toronto",
+                        "place_label": "Toronto, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6167865",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 43.70643,
+                        "longitude": -79.39864,
+                    },
+                    {
+                        "city": "Ottawa",
+                        "place_label": "Ottawa, Ontario, Canada",
+                        "place_provider": "geonames",
+                        "place_external_id": "geonames:6094817",
+                        "country_code": "ca",
+                        "region_code": "08",
+                        "region_name": "Ontario",
+                        "latitude": 45.41117,
+                        "longitude": -75.69812,
+                    },
+                ],
+                services=[],
+                signals=[],
+                exclude=[],
+            )
+        )
+        run_service = AudienceRunService(session, workspace_id="workspace:first")
+        run = run_service.create(profile.id)
+        run_service.process(run.id)
+        job = QueueService(session).enqueue_audience_run(run.id)
+        selected_market_keys: list[set[str]] = []
+
+        def fake_expand(*args, market_keys, **kwargs):
+            selected_market_keys.append(market_keys)
+            market_key = next(iter(market_keys))
+            segment = BusinessIndexSegmentModel(
+                id=new_id("segment"),
+                niche_id=niche.id,
+                market_key=market_key,
+                market_label=market_key,
+                status="active",
+                target_business_count=40,
+                source_plan=[],
+                source_state={},
+            )
+            session.add(segment)
+            session.flush()
+            return [segment.id]
+
+        monkeypatch.setattr(
+            AudienceRunService,
+            "process",
+            lambda self, run_id: (session.get(AudienceRunModel, run_id), True),
+        )
+        monkeypatch.setattr(
+            queue_worker,
+            "enqueue_profile_source_expansion",
+            fake_expand,
+        )
+        services = SimpleNamespace(
+            settings=SimpleNamespace(
+                google_places_api_key=None,
+                openstreetmap_enabled=True,
+                apify_source_configs=[],
+                source_template_configs=[],
+            ),
+            search=SimpleNamespace(is_configured=False),
+        )
+
+        queue_worker._execute_job(session, services, job)
+
+        requests = list(
+            session.scalars(
+                select(CoverageRequestModel)
+                .where(CoverageRequestModel.run_id == run.id)
+                .order_by(CoverageRequestModel.market_key)
+            )
+        )
+        assert len(selected_market_keys) == 1
+        assert selected_market_keys[0] == {"toronto ontario canada"}
+        assert [request.status for request in requests].count("processing") == 1
+        assert [request.status for request in requests].count("queued") == 1
 
 
 def test_multi_city_partial_run_reopens_while_city_pipeline_is_active() -> None:

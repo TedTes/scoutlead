@@ -1215,8 +1215,20 @@ export function ResultsScreen({
             </ul>
           ) : (
             <section className="result-empty-card">
-              <strong>{isGlobalView ? "No leads in this view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).title}</strong>
-              <p>{isGlobalView ? "Create a lead search or choose another workflow view." : emptyBatchCopy(contacts.length, visibleProfileBatch?.state, visibleProfileBatch?.failure_class).detail}</p>
+              <strong>{isGlobalView ? "No leads in this view." : emptyBatchCopy(
+                contacts.length,
+                visibleProfileBatch?.state,
+                visibleProfileBatch?.failure_class,
+                visibleProfileBatch?.locations_completed,
+                visibleProfileBatch?.location_count,
+              ).title}</strong>
+              <p>{isGlobalView ? "Create a lead search or choose another workflow view." : emptyBatchCopy(
+                contacts.length,
+                visibleProfileBatch?.state,
+                visibleProfileBatch?.failure_class,
+                visibleProfileBatch?.locations_completed,
+                visibleProfileBatch?.location_count,
+              ).detail}</p>
               {!isGlobalView && visibleProfileBatch && ["scoring", "retrying"].includes(visibleProfileBatch.state) ? (
                 <button
                   className="result-refresh-button"
@@ -5680,6 +5692,8 @@ function emptyBatchCopy(
   contactCount: number,
   state?: "setup" | "scoring" | "retrying" | "ready" | "empty" | "partial" | "failed",
   failureClass?: "rate_limit" | "quota" | "other" | null,
+  locationsCompleted = 0,
+  locationCount = 1,
 ) {
   if (contactCount) {
     return {
@@ -5694,6 +5708,13 @@ function emptyBatchCopy(
     };
   }
   if (state === "scoring") {
+    if (locationCount > 1) {
+      const currentLocation = Math.min(locationsCompleted + 1, locationCount);
+      return {
+        title: `Searching city ${currentLocation} of ${locationCount}.`,
+        detail: "Leads will appear as each city finishes. The remaining cities stay queued and run one at a time.",
+      };
+    }
     return {
       title: "Building this saved search.",
       detail: "ScoutLead is collecting businesses and evaluating their signals. You can leave this page while it finishes.",

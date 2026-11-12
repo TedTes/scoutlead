@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from business_index.repository import BusinessIndexRepository
+from canonical.semantics import semantic_key
 from db.models import TerritoryModel
 from job_queue.service import QueueService
 from products.repository import ProductRepository
@@ -23,6 +24,7 @@ def enqueue_profile_source_expansion(
     openstreetmap_enabled: bool,
     apify_sources: list[dict[str, Any]],
     source_recipes: list[dict[str, Any]],
+    market_keys: set[str] | None = None,
 ) -> list[str]:
     """Ensure the audience niche has an independently refreshable source segment."""
 
@@ -57,6 +59,12 @@ def enqueue_profile_source_expansion(
             if str(location.get("label") or location.get("city") or "").strip()
         )
     ) or [profile.city]
+    if market_keys is not None:
+        market_labels = [
+            market_label
+            for market_label in market_labels
+            if semantic_key(market_label) in market_keys
+        ]
     segment_ids: list[str] = []
     for market_label in market_labels:
         search_query = query_template.format(category=business_category, city=market_label)

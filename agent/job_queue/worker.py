@@ -17,6 +17,7 @@ from business_facts.maintenance import enforce_fact_publication_invariants
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
+from canonical.semantics import semantic_key
 from db.session import create_database
 from db.models import (
     AudienceRunModel,
@@ -165,6 +166,38 @@ def _execute_job(
             profile = session.get(TerritoryModel, run.audience_id)
             if profile is None:
                 raise ValueError(f"audience not found: {run.audience_id}")
+            # Claim exactly one queued city.  Earlier behavior passed the entire
+            # profile into source expansion and turned a country-wide search into
+            # hundreds of concurrent provider pipelines.  Remaining cities stay
+            # queued until this request completes and the audience scheduler
+            # advances the run again.
+            queued_requests = list(
+                session.scalars(
+                    select(CoverageRequestModel)
+                    .where(
+                        CoverageRequestModel.run_id == run.id,
+                        CoverageRequestModel.status == "queued",
+                    )
+                    .order_by(CoverageRequestModel.created_at, CoverageRequestModel.id)
+                )
+            )
+            request_by_market_key = {
+                request.market_key: request for request in queued_requests
+            }
+            selected_requests = [
+                request_by_market_key[market_key]
+                for market_key in dict.fromkeys(
+                    semantic_key(
+                        str(location.get("label") or location.get("city") or "")
+                    )
+                    for location in (profile.locations or [])
+                )
+                if market_key in request_by_market_key
+            ][:1]
+            if not selected_requests and queued_requests:
+                selected_requests = queued_requests[:1]
+            if not selected_requests:
+                return
             segment_ids = enqueue_profile_source_expansion(
                 session,
                 profile,
@@ -185,6 +218,7 @@ def _execute_job(
                     )
                 ],
                 source_recipes=services.settings.source_template_configs,
+                market_keys={request.market_key for request in selected_requests},
             )
             queued_segments = (
                 {
@@ -203,10 +237,7 @@ def _execute_job(
             failure_reason = (
                 "No configured source provider could expand this audience."
             )
-            for request in session.query(CoverageRequestModel).filter(
-                CoverageRequestModel.run_id == run.id,
-                CoverageRequestModel.status == "queued",
-            ):
+            for request in selected_requests:
                 if (request.niche_id, request.market_key) in queued_segments:
                     request.status = "processing"
                     processing_count += 1
@@ -214,7 +245,15 @@ def _execute_job(
                     request.status = "failed"
                     request.failure_reason = failure_reason
                     request.completed_at = datetime.now(timezone.utc)
-            if processing_count == 0:
+            remaining_queued = session.scalar(
+                select(CoverageRequestModel.id)
+                .where(
+                    CoverageRequestModel.run_id == run.id,
+                    CoverageRequestModel.status == "queued",
+                )
+                .limit(1)
+            )
+            if processing_count == 0 and remaining_queued is None:
                 now = datetime.now(timezone.utc)
                 run.state = "partial"
                 run.failure_reason = failure_reason

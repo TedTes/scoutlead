@@ -125,7 +125,16 @@ class AudienceRunService:
             self._request_coverage(run, audience, niches)
         self._reconcile_coverage(run.id)
         coverage_in_progress = self._coverage_in_progress(run.id)
-        self._enqueue_required_attribute_collection(audience, niches)
+        coverage_market_keys = (
+            self._collectable_coverage_market_keys(run.id)
+            if is_multi_city
+            else None
+        )
+        self._enqueue_required_attribute_collection(
+            audience,
+            niches,
+            market_keys=coverage_market_keys,
+        )
         rows = ProfileMatchService(self.session).match(
             profile=audience,
             niche_ids=[niche.id for niche in niches],
@@ -221,7 +230,7 @@ class AudienceRunService:
             # provider, identity, or audit jobs are still running.
             run.state = AudienceRunState.WAITING_VALIDATION.value
             run.completed_at = None
-            needs_expansion = self._queued_coverage_exists(run.id)
+            needs_expansion = self._coverage_capacity_available(run.id)
         elif run.result_count >= run.requested_count:
             run.state = AudienceRunState.READY.value
             run.failure_reason = None
@@ -233,7 +242,7 @@ class AudienceRunService:
             if self._coverage_in_progress(run.id):
                 run.state = AudienceRunState.WAITING_VALIDATION.value
                 run.completed_at = None
-                needs_expansion = self._queued_coverage_exists(run.id)
+                needs_expansion = self._coverage_capacity_available(run.id)
             else:
                 run.state = AudienceRunState.PARTIAL.value
                 run.completed_at = now
@@ -251,6 +260,8 @@ class AudienceRunService:
         self,
         audience: TerritoryModel,
         niches: list[NicheModel],
+        *,
+        market_keys: list[str] | None = None,
     ) -> int:
         """Collect missing, staged, or expired attributes required by an audience."""
         signal_keys = list(dict.fromkeys(audience.signal_keys or []))
@@ -261,7 +272,13 @@ class AudienceRunService:
         signal_keys = list(dict.fromkeys(signal_keys))
         if not signal_keys or not niches:
             return 0
-        location_market_keys = _audience_location_market_keys(audience)
+        location_market_keys = (
+            list(dict.fromkeys(market_keys))
+            if market_keys is not None
+            else _audience_location_market_keys(audience)
+        )
+        if market_keys is not None and not location_market_keys:
+            return 0
         distance_km = (
             None
             if location_market_keys
@@ -714,6 +731,39 @@ class AudienceRunService:
                 .limit(1)
             )
             is not None
+        )
+
+    def _coverage_capacity_available(self, run_id: str) -> bool:
+        """Return whether the run may start its next city.
+
+        Multi-city searches intentionally keep a single city in the discovery
+        pipeline at a time.  The audience scheduler continues to rematch while
+        that city is active, so completed evidence can become visible without
+        allowing each scheduler tick to fan out another city.
+        """
+        if not self._queued_coverage_exists(run_id):
+            return False
+        active_request = self.session.scalar(
+            select(CoverageRequestModel.id)
+            .where(
+                CoverageRequestModel.run_id == run_id,
+                CoverageRequestModel.status == "processing",
+            )
+            .limit(1)
+        )
+        return active_request is None
+
+    def _collectable_coverage_market_keys(self, run_id: str) -> list[str]:
+        """Limit evidence collection to cities the sequential run has reached."""
+        return list(
+            self.session.scalars(
+                select(CoverageRequestModel.market_key)
+                .where(
+                    CoverageRequestModel.run_id == run_id,
+                    CoverageRequestModel.status.in_(["processing", "completed"]),
+                )
+                .order_by(CoverageRequestModel.created_at, CoverageRequestModel.id)
+            )
         )
 
     def _audience(self, audience_id: str) -> TerritoryModel:
