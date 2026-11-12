@@ -10438,15 +10438,14 @@ body.is-resizing-navigation .rail {
   width: 100%;
 }
 
-.audience-city-list {
+.audience-city-results {
+  background: var(--af-surface);
   border: 1px solid var(--af-border);
   border-radius: 9px;
   display: grid;
-  gap: 5px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-height: 220px;
+  max-height: 190px;
   overflow: auto;
-  padding: 7px;
+  padding: 5px;
 }
 
 .audience-selected-cities {
@@ -10474,65 +10473,71 @@ body.is-resizing-navigation .rail {
   border-color: var(--af-accent);
 }
 
-.audience-city-list > label.is-unavailable {
-  cursor: not-allowed;
-  opacity: 0.46;
-}
-
-.audience-city-list > label {
+.audience-city-results > button {
   align-items: center;
+  background: transparent;
+  border: 0;
   border: 1px solid transparent;
+  border-bottom-color: var(--af-border);
   border-radius: 7px;
+  color: var(--af-text);
   cursor: pointer;
-  display: grid;
+  display: flex;
+  font: inherit;
   gap: 7px;
-  grid-template-columns: 15px minmax(0, 1fr) 14px;
+  justify-content: space-between;
   min-height: 42px;
+  text-align: left;
+  width: 100%;
   padding: 6px 8px;
 }
 
-.audience-city-list > label:hover {
-  background: var(--af-surface-sunken);
+.audience-city-results > button:last-of-type {
+  border-bottom-color: transparent;
 }
 
-.audience-city-list > label.is-selected {
+.audience-city-results > button:hover,
+.audience-city-results > button:focus-visible {
   background: var(--af-accent-weak);
   border-color: var(--green-line);
+  outline: 0;
 }
 
-.audience-city-list input {
-  accent-color: var(--af-accent);
-}
-
-.audience-city-list label > span {
+.audience-city-results button > span {
   display: grid;
   min-width: 0;
 }
 
-.audience-city-list strong,
-.audience-city-list small {
+.audience-city-results strong,
+.audience-city-results small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.audience-city-list strong {
+.audience-city-results strong {
   color: var(--af-text);
   font-size: 11px;
 }
 
-.audience-city-list small {
+.audience-city-results small {
   color: var(--af-text-muted);
   font-size: 9.5px;
 }
 
-.audience-city-list label > svg {
+.audience-city-results button > svg {
   color: var(--af-positive);
+  flex: 0 0 auto;
+}
+
+.audience-city-limit {
+  color: var(--af-text-muted);
+  font-size: 11px;
+  margin: 0;
 }
 
 @media (max-width: 720px) {
-  .audience-location-selects,
-  .audience-city-list {
+  .audience-location-selects {
     grid-template-columns: 1fr;
   }
 

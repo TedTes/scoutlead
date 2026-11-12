@@ -5703,8 +5703,8 @@ function emptyBatchCopy(
   }
   if (state === "scoring") {
     return {
-      title: "Stored-data matching has not finished.",
-      detail: "Run the saved search again. Data collection is controlled separately from the Admin Collection screen.",
+      title: "Preparing this saved search.",
+      detail: "Refresh shortly to see the latest available leads.",
     };
   }
   if (state === "setup") {
@@ -5715,18 +5715,18 @@ function emptyBatchCopy(
   }
   if (state === "failed") {
     const cause = failureClass === "rate_limit"
-      ? "The scoring worker hit a provider rate limit."
+      ? "The search service is temporarily busy."
       : failureClass === "quota"
-        ? "The scoring worker has no remaining provider quota."
-        : "Saved-search matching stopped before completion.";
+        ? "The search service is temporarily unavailable."
+        : "The saved search stopped before completion.";
     return {
       title: "This lead batch could not be completed.",
-      detail: `${cause} Check the worker logs before trying again.`,
+      detail: `${cause} Please try again shortly.`,
     };
   }
   return {
-    title: "No stored businesses match this search.",
-    detail: "The client search only reads the database. Run data collection from Admin if this market needs more coverage.",
+    title: "No matching leads are available yet.",
+    detail: "Try adjusting the cities, filters, or website opportunity.",
   };
 }
 

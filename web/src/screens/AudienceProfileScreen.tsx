@@ -166,6 +166,11 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const reviewRangeValid = !minReviewCount || !maxReviewCount || Number(minReviewCount) <= Number(maxReviewCount);
   const selectedCities = useMemo(() => { const selected = new Set(selectedCityIds); return cities.filter((city) => selected.has(city.id)); }, [cities, selectedCityIds]);
   const visibleCities = useMemo(() => { const query = cityQuery.trim().toLowerCase(); return query ? cities.filter((city) => `${city.name} ${city.region_name || ""}`.toLowerCase().includes(query)) : cities; }, [cities, cityQuery]);
+  const citySearchResults = useMemo(() => {
+    if (!cityQuery.trim() || selectedCityIds.length >= MAX_SELECTED_CITIES) return [];
+    const selected = new Set(selectedCityIds);
+    return visibleCities.filter((city) => !selected.has(city.id));
+  }, [cityQuery, selectedCityIds, visibleCities]);
   const valid = Boolean(selectedProductId && nicheId && selectedCities.length && selectedCities.length <= MAX_SELECTED_CITIES && customerKinds.length && services.length && services.every((service) => enabledServiceKeys.has(service)) && reviewRangeValid);
   const activeBatch = useMemo(() => profileBatch?.audience.id === selectedProfile?.id ? profileBatch : null, [profileBatch, selectedProfile?.id]);
 
@@ -241,7 +246,7 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
         await createProfile(input);
         setEditing(false);
         setMode("create");
-        showToast({ title: mode === "clone" ? "Search copied" : "Search ready", message: "The initial lead batch is queued.", tone: "green" });
+        showToast({ title: mode === "clone" ? "Search copied" : "Search ready", message: "Matching leads are ready to review.", tone: "green" });
       }
     } catch (error) {
       showToast({ title: "Search could not be saved", message: error instanceof Error ? error.message : String(error), tone: "red" });
@@ -301,20 +306,20 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
               </select></label>
             </div>
             <div className="audience-city-toolbar">
-              <label className="audience-city-search"><Search aria-hidden="true" size={14} /><input aria-label="Filter cities" placeholder="Filter cities" type="search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} /></label>
-              <strong>{selectedCities.length} of {MAX_SELECTED_CITIES} selected</strong>
-              <button type="button" onClick={() => setSelectedCityIds(cities.slice(0, MAX_SELECTED_CITIES).map((city) => city.id))}>Use top 5</button>
-              <button type="button" onClick={() => setSelectedCityIds([])}>Clear</button>
+              <label className="audience-city-search"><Search aria-hidden="true" size={14} /><input aria-label="Search cities to add" placeholder="Search cities to add" type="search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} /></label>
+              <strong>{selectedCities.length} selected</strong>
+              {selectedCities.length ? <button type="button" onClick={() => setSelectedCityIds([])}>Clear</button> : null}
             </div>
             {selectedCities.length ? <div className="audience-selected-cities" aria-label="Selected cities">
               {selectedCities.map((city) => <button aria-label={`Remove ${city.name}`} key={city.id} title={`Remove ${city.name}`} type="button" onClick={() => toggleCity(city)}><span>{city.name}</span><X size={12} /></button>)}
             </div> : null}
-            <div className="audience-city-list" role="group" aria-label="Cities to search">
-              {citiesBusy ? <p className="audience-row-status"><LoaderCircle className="sl-spin" size={14} />Loading cities</p> : null}
-              {!citiesBusy && visibleCities.map((city) => { const selected = selectedCityIds.includes(city.id); const unavailable = !selected && selectedCityIds.length >= MAX_SELECTED_CITIES; return <label className={`${selected ? "is-selected" : ""}${unavailable ? " is-unavailable" : ""}`} key={city.id}><input checked={selected} disabled={unavailable} type="checkbox" onChange={() => toggleCity(city)} /><span><strong>{city.name}</strong>{city.region_name ? <small>{city.region_name}</small> : null}</span>{selected ? <Check size={13} /> : null}</label>; })}
-              {!citiesBusy && !visibleCities.length ? <p className="audience-empty-options">No cities match “{cityQuery}”.</p> : null}
-            </div>
-            <p className="audience-field-help">Choose up to five cities. Collection runs in the background, one city at a time, and results appear as each city completes.</p>
+            {citiesBusy ? <p className="audience-row-status"><LoaderCircle className="sl-spin" size={14} />Loading cities</p> : null}
+            {!citiesBusy && cityQuery.trim() && selectedCityIds.length < MAX_SELECTED_CITIES ? <div className="audience-city-results" aria-label="City search results">
+              {citySearchResults.map((city) => <button key={city.id} type="button" onClick={() => { toggleCity(city); setCityQuery(""); }}><span><strong>{city.name}</strong>{city.region_name ? <small>{city.region_name}</small> : null}</span><Plus aria-hidden="true" size={14} /></button>)}
+              {!citySearchResults.length ? <p className="audience-empty-options">No additional cities match “{cityQuery}”.</p> : null}
+            </div> : null}
+            {!citiesBusy && cityQuery.trim() && selectedCityIds.length >= MAX_SELECTED_CITIES ? <p className="audience-city-limit">Remove a selected city before adding another.</p> : null}
+            <p className="audience-field-help">Choose up to five cities. Search only when you need to replace or add a city.</p>
           </div>
         </section>
 
