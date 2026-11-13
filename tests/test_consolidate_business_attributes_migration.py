@@ -16,6 +16,74 @@ RETIRED_TABLES = {
 }
 
 
+def test_bulk_insert_updates_an_existing_canonical_attribute() -> None:
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    attributes = sa.Table(
+        "business_attributes",
+        metadata,
+        sa.Column("id", sa.String(64), primary_key=True),
+        sa.Column("business_id", sa.String(64), nullable=False),
+        sa.Column("row_type", sa.String(32), nullable=False),
+        sa.Column("attribute_key", sa.String(255), nullable=False),
+        sa.Column("value_text", sa.Text()),
+        sa.Column("confidence", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint(
+            "business_id",
+            "row_type",
+            "attribute_key",
+            name="uq_business_attributes_business_type_key",
+        ),
+    )
+    metadata.create_all(engine)
+    migration = importlib.import_module(
+        "db.migrations.versions.20261112_0088_consolidate_business_attributes"
+    )
+    created_at = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    migrated_at = datetime(2026, 11, 12, tzinfo=timezone.utc)
+
+    with engine.begin() as connection:
+        connection.execute(
+            attributes.insert(),
+            {
+                "id": "existing_attribute",
+                "business_id": "business_1",
+                "row_type": "attribute",
+                "attribute_key": "website_status",
+                "value_text": "present",
+                "confidence": 50,
+                "created_at": created_at,
+                "updated_at": created_at,
+            },
+        )
+        migration._bulk_insert(
+            connection,
+            attributes,
+            [
+                {
+                    "id": "legacy_fact",
+                    "business_id": "business_1",
+                    "row_type": "attribute",
+                    "attribute_key": "website_status",
+                    "value_text": "missing",
+                    "confidence": 95,
+                    "created_at": migrated_at,
+                    "updated_at": migrated_at,
+                }
+            ],
+        )
+
+        rows = list(connection.execute(sa.select(attributes)).mappings())
+        assert len(rows) == 1
+        assert rows[0]["id"] == "existing_attribute"
+        assert rows[0]["value_text"] == "missing"
+        assert rows[0]["confidence"] == 95
+        assert rows[0]["created_at"] == created_at.replace(tzinfo=None)
+        assert rows[0]["updated_at"] == migrated_at.replace(tzinfo=None)
+
+
 def test_consolidation_preserves_attributes_and_evidence_before_dropping_old_tables() -> None:
     engine = sa.create_engine("sqlite://")
     metadata = sa.MetaData()

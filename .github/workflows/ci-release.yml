@@ -210,10 +210,10 @@ jobs:
 
       - name: Run database migrations
         if: steps.changes.outputs.migrations == 'true'
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           DATABASE_URL: ${{ env.RAILWAY_MIGRATION_DATABASE_URL }}
-          PGOPTIONS: -c lock_timeout=10000 -c statement_timeout=240000
+          PGOPTIONS: -c lock_timeout=120000 -c statement_timeout=480000
         run: python -m alembic upgrade head
 
       - name: Deploy API service

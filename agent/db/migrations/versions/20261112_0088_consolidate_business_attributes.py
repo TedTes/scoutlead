@@ -7,6 +7,8 @@ Create Date: 2026-11-12
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 
 revision = "20261112_0088"
@@ -27,6 +29,12 @@ RETIRED_TABLES = (
 
 def upgrade() -> None:
     bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        # Retiring the legacy evidence tables requires an ACCESS EXCLUSIVE
+        # lock. Normal API reads can briefly hold weaker locks, so wait for
+        # those transactions instead of failing the entire transactional
+        # migration after the release workflow's short default timeout.
+        bind.execute(sa.text("SET LOCAL lock_timeout = '120s'"))
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
 
@@ -245,4 +253,58 @@ def _bulk_insert(
     chunk_size: int = 1000,
 ) -> None:
     for start in range(0, len(rows), chunk_size):
-        bind.execute(table.insert(), rows[start : start + chunk_size])
+        chunk = rows[start : start + chunk_size]
+        if not chunk:
+            continue
+        if bind.dialect.name == "postgresql":
+            statement = postgresql_insert(table).values(chunk)
+            excluded = statement.excluded
+            bind.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["business_id", "row_type", "attribute_key"],
+                    set_={
+                        column.name: excluded[column.name]
+                        for column in table.columns
+                        if column.name not in {"id", "created_at"}
+                    },
+                )
+            )
+            continue
+        if bind.dialect.name == "sqlite":
+            statement = sqlite_insert(table).values(chunk)
+            excluded = statement.excluded
+            bind.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["business_id", "row_type", "attribute_key"],
+                    set_={
+                        column.name: excluded[column.name]
+                        for column in table.columns
+                        if column.name not in {"id", "created_at"}
+                    },
+                )
+            )
+            continue
+
+        # The deployed databases are PostgreSQL and tests use SQLite. Keep a
+        # portable fallback so the migration remains deterministic elsewhere.
+        for row in chunk:
+            identity = sa.and_(
+                table.c.business_id == row["business_id"],
+                table.c.row_type == row["row_type"],
+                table.c.attribute_key == row["attribute_key"],
+            )
+            existing_id = bind.scalar(sa.select(table.c.id).where(identity))
+            if existing_id is None:
+                bind.execute(table.insert().values(**row))
+                continue
+            bind.execute(
+                table.update()
+                .where(table.c.id == existing_id)
+                .values(
+                    **{
+                        key: value
+                        for key, value in row.items()
+                        if key not in {"id", "created_at"}
+                    }
+                )
+            )
