@@ -1226,6 +1226,35 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
         assert profile.min_review_count == 10
         assert profile.max_review_count == 40
 
+        broad_profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="both",
+                market={"city": "Toronto", "radius_km": 25},
+                min_google_rating=4.5,
+                min_review_count=10,
+                max_review_count=40,
+                signals=[],
+                exclude=[],
+            )
+        )
+
+        broad_rows = ProfileMatchService(session).match(
+            profile=broad_profile,
+            niche_ids=[broad_profile.niche_id],
+            limit=25,
+        )
+
+        # HVAC 2 is outside the review range but passes the rating criterion.
+        assert {row["title"] for row in broad_rows} == {
+            business.display_name for business in businesses
+        }
+
 
 def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
     session_factory = _session_factory()
@@ -2043,6 +2072,82 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
             niche_ids=[profile.niche_id],
             limit=25,
         )) == 1
+
+
+def test_profile_matches_google_operational_business_with_no_listed_website() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        attributes = BusinessAttributeRepository(session)
+        for business in businesses:
+            source_evidence_id = _latest_evidence_id(session, business.id)
+            attributes.upsert(
+                business.id,
+                BusinessAttributeValue(
+                    key=BusinessAttributeKey.WEBSITE_STATUS,
+                    value="present",
+                    observed_at=utcnow(),
+                    source_evidence_id=source_evidence_id,
+                ),
+            )
+        target = businesses[0]
+        source_evidence_id = _latest_evidence_id(session, target.id)
+        for key, value in (
+            (BusinessAttributeKey.WEBSITE_STATUS, "not_listed"),
+            (BusinessAttributeKey.BUSINESS_OPERATIONAL, True),
+            ("google_business_profile_present", True),
+            ("city", "toronto"),
+        ):
+            attributes.upsert(
+                target.id,
+                BusinessAttributeValue(
+                    key=key,
+                    value=value,
+                    observed_at=utcnow(),
+                    source_evidence_id=source_evidence_id,
+                ),
+            )
+        membership = session.scalar(
+            select(BusinessNicheMembershipModel).where(
+                BusinessNicheMembershipModel.business_id == target.id
+            )
+        )
+        membership.market_key = "toronto gta"
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="both",
+                market={"city": "Toronto", "radius_km": 25},
+                signals=["website_unavailable"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [target.display_name]
+        evidence = rows[0]["raw"]["profile_match"]["signals"][
+            "website_unavailable"
+        ]
+        assert evidence["value"] == "not_listed"
+        assert evidence["opportunity_score"] == 100
+        assert evidence["matched"] is True
 
 
 def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:

@@ -131,38 +131,59 @@ class ProfileMatchService:
         location_market_keys = _profile_location_market_keys(profile)
         if location_market_keys:
             statement = statement.where(
-                BusinessNicheMembershipModel.market_key.in_(location_market_keys)
+                or_(
+                    BusinessNicheMembershipModel.market_key.in_(location_market_keys),
+                    BusinessModel.market_key.in_(location_market_keys),
+                    _text_fact_exists(
+                        business_id=BusinessModel.id,
+                        attribute_key="city",
+                        cutoff=cutoff,
+                        values=location_market_keys,
+                    ),
+                )
             )
         if profile.customer_kind != "both":
             statement = statement.where(BusinessModel.customer_kind == profile.customer_kind)
 
-        if profile.min_google_rating is not None:
-            statement = statement.where(
-                _numeric_fact_exists(
-                    business_id=BusinessModel.id,
-                    attribute_key="google_rating",
-                    cutoff=cutoff,
-                    minimum=float(profile.min_google_rating),
-                )
+        rating_condition = (
+            _numeric_fact_exists(
+                business_id=BusinessModel.id,
+                attribute_key="google_rating",
+                cutoff=cutoff,
+                minimum=float(profile.min_google_rating),
             )
-        if profile.min_review_count is not None or profile.max_review_count is not None:
-            statement = statement.where(
-                _numeric_fact_exists(
-                    business_id=BusinessModel.id,
-                    attribute_key="google_review_count",
-                    cutoff=cutoff,
-                    minimum=(
-                        float(profile.min_review_count)
-                        if profile.min_review_count is not None
-                        else None
-                    ),
-                    maximum=(
-                        float(profile.max_review_count)
-                        if profile.max_review_count is not None
-                        else None
-                    ),
-                )
+            if profile.min_google_rating is not None
+            else None
+        )
+        review_condition = (
+            _numeric_fact_exists(
+                business_id=BusinessModel.id,
+                attribute_key="google_review_count",
+                cutoff=cutoff,
+                minimum=(
+                    float(profile.min_review_count)
+                    if profile.min_review_count is not None
+                    else None
+                ),
+                maximum=(
+                    float(profile.max_review_count)
+                    if profile.max_review_count is not None
+                    else None
+                ),
             )
+            if profile.min_review_count is not None
+            or profile.max_review_count is not None
+            else None
+        )
+        # Rating and review range are alternative Google-profile qualification
+        # routes. Requiring both excluded sound businesses whose profile only
+        # satisfied one of the two user-selected criteria.
+        if rating_condition is not None and review_condition is not None:
+            statement = statement.where(or_(rating_condition, review_condition))
+        elif rating_condition is not None:
+            statement = statement.where(rating_condition)
+        elif review_condition is not None:
+            statement = statement.where(review_condition)
 
         exclusions = set(profile.exclusion_keys or [])
         if "closed" in exclusions:
@@ -202,10 +223,7 @@ class ProfileMatchService:
                 (condition, signal_weights.get(spec.key, 1.0)),
                 else_=0.0,
             )
-            confirmed_signal_count += case(
-                (_confirmed_signal_condition(spec, fact), 1),
-                else_=0,
-            )
+            confirmed_signal_count += case((condition, 1), else_=0)
 
         if selected_signals:
             statement = statement.where(
@@ -456,16 +474,36 @@ class ProfileMatchService:
                 minimum_confidence=minimum_confidence,
                 require_provenance=True,
             )
-            match_confidence = _signal_match_confidence(spec, fact)
+            supported_listing_gap = (
+                spec.attribute_key == "website_status"
+                and attribute_value(fact) == "not_listed"
+                and _eligible_true_attribute(facts.get("business_operational"))
+                and _eligible_true_attribute(
+                    facts.get("google_business_profile_present")
+                )
+            )
+            match_confidence = _signal_match_confidence(
+                spec,
+                fact,
+                supported_listing_gap=supported_listing_gap,
+            )
+            effective_score = (
+                100.0
+                if supported_listing_gap
+                else fact.attribute_score
+                if fact is not None
+                else None
+            )
             fact_observation = fact
             evidence = {
                 "attribute_key": spec.attribute_key,
                 "value": attribute_value(fact),
-                "evaluated": eligible and fact.attribute_score is not None,
+                "evaluated": eligible
+                and (fact.attribute_score is not None or supported_listing_gap),
                 "matched": match_confidence is not None,
                 "confidence": match_confidence,
                 "evidence_confidence": fact.confidence if fact is not None else None,
-                "opportunity_score": fact.attribute_score if fact is not None else None,
+                "opportunity_score": effective_score,
             }
             if fact_observation is not None:
                 pitch_eligible, pitch_reason = pitch_scope_decision(
@@ -609,9 +647,7 @@ class ProfileMatchService:
                     "severity": _signal_severity(
                         spec,
                         service_specs,
-                        facts[spec.attribute_key].attribute_score
-                        if spec.attribute_key in facts
-                        else None,
+                        signal_evidence[spec.key]["opportunity_score"],
                     ),
                 }
                 for spec in signal_specs
@@ -752,15 +788,31 @@ def _selected_profile_signals(profile) -> list[str]:
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
     evidence = _usable_evidence_condition(spec, fact)
     minimum_score = float(spec.config.get("audience_min_score", 50.001))
-    return and_(
-        evidence,
+    scored_opportunity = and_(
         fact.attribute_score.is_not(None),
         fact.attribute_score >= minimum_score,
     )
-
-
-def _confirmed_signal_condition(spec: SignalMatchSpec, fact) -> Any:
-    return _signal_condition(spec, fact)
+    if spec.attribute_key == "website_status":
+        # A current Google listing for an operational business is sufficient
+        # to treat its explicit lack of a website URL as a no-website lead.
+        # Other providers' weak `not_listed` observations remain unmatched.
+        supported_listing_gap = and_(
+            fact.value_type == "text",
+            func.lower(func.trim(fact.value_text)) == "not_listed",
+            _boolean_fact_exists(
+                business_id=fact.business_id,
+                attribute_key="business_operational",
+            ),
+            _boolean_fact_exists(
+                business_id=fact.business_id,
+                attribute_key="google_business_profile_present",
+            ),
+        )
+        return and_(evidence, or_(scored_opportunity, supported_listing_gap))
+    return and_(
+        evidence,
+        scored_opportunity,
+    )
 
 
 def _usable_evidence_condition(
@@ -809,9 +861,66 @@ def _numeric_fact_exists(
     return exists(select(fact.id).where(*conditions))
 
 
+def _text_fact_exists(
+    *,
+    business_id,
+    attribute_key: str,
+    cutoff: datetime,
+    values: list[str],
+) -> Any:
+    fact = aliased(BusinessAttributeModel, name=f"filter_fact_{attribute_key}")
+    normalized = func.lower(func.trim(fact.value_text))
+    return exists(
+        select(fact.id).where(
+            fact.business_id == business_id,
+            fact.attribute_key == attribute_key,
+            fact.value_type == "text",
+            normalized.in_(values),
+            fact.observed_at >= cutoff,
+            eligible_fact_condition(
+                fact,
+                minimum_confidence=DEFAULT_MINIMUM_FACT_CONFIDENCE,
+                require_provenance=True,
+                require_validation=False,
+            ),
+        )
+    )
+
+
+def _boolean_fact_exists(*, business_id, attribute_key: str) -> Any:
+    fact = aliased(BusinessAttributeModel, name=f"support_fact_{attribute_key}")
+    return exists(
+        select(fact.id).where(
+            fact.business_id == business_id,
+            fact.attribute_key == attribute_key,
+            fact.value_type == "boolean",
+            fact.value_boolean.is_(True),
+            eligible_fact_condition(
+                fact,
+                minimum_confidence=DEFAULT_MINIMUM_FACT_CONFIDENCE,
+                require_provenance=True,
+                require_validation=False,
+            ),
+        )
+    )
+
+
+def _eligible_true_attribute(fact: BusinessAttributeModel | None) -> bool:
+    return bool(
+        fact_is_eligible(
+            fact,
+            minimum_confidence=DEFAULT_MINIMUM_FACT_CONFIDENCE,
+            require_provenance=True,
+        )
+        and attribute_value(fact) is True
+    )
+
+
 def _signal_match_confidence(
     spec: SignalMatchSpec,
     fact: BusinessAttributeModel | None,
+    *,
+    supported_listing_gap: bool = False,
 ) -> str | None:
     if not fact_is_eligible(
         fact,
@@ -822,6 +931,8 @@ def _signal_match_confidence(
     ):
         return None
     evidence_confidence = "confirmed"
+    if supported_listing_gap:
+        return evidence_confidence
     minimum_score = float(spec.config.get("audience_min_score", 50.001))
     return (
         evidence_confidence
@@ -861,7 +972,7 @@ def _evidence_result_sort_key(item: tuple[dict[str, Any], Any]) -> tuple:
     matched_signals = profile_match.get("matched_signals") or []
     verified_missing_website = any(
         signal.get("attribute_key") == "website_status"
-        and signal.get("value") == "missing"
+        and signal.get("value") in {"missing", "not_listed", "unavailable"}
         for signal in matched_signals
     )
     return (
