@@ -1293,11 +1293,9 @@ export type AdminBusinessSignal = {
   expires_at?: string | null;
 };
 
-export type AdminAttributeLineageService = {
-  id: string;
+export type AdminAttributeLineageOpportunity = {
   key: string;
   label: string;
-  status: string;
   weight: number;
 };
 
@@ -1310,7 +1308,7 @@ export type AdminAttributeLineageSignal = {
   opportunity_direction: string;
   matches_opportunity_value: boolean;
   eligible_for_matching: boolean;
-  services: AdminAttributeLineageService[];
+  opportunity?: AdminAttributeLineageOpportunity | null;
 };
 
 export type AdminAttributeLineageValue = {
@@ -1459,33 +1457,5 @@ export type AdminSignalDefinitionInput = {
   freshness_days: number;
   opportunity_direction: string;
   config: Record<string, unknown>;
-  reason: string;
-};
-
-export type AdminServiceDefinition = {
-  id: string;
-  key: string;
-  label: string;
-  description?: string | null;
-  status: "draft" | "active" | "inactive";
-  sort_order: number;
-  version: number;
-  signals: Array<{
-    definition_id: string;
-    key: string;
-    label: string;
-    status: string;
-    weight: number;
-  }>;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AdminServiceDefinitionInput = {
-  key: string;
-  label: string;
-  description?: string;
-  sort_order: number;
-  mappings: Array<{ signal_definition_id: string; weight: number }>;
   reason: string;
 };
