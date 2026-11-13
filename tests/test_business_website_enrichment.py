@@ -12,6 +12,7 @@ from canonical.website_enrichment import (
     cleanup_placeholder_emails,
     enrich_business_pool,
 )
+from business_attributes.source_payloads import source_payload_attribute_key
 from seeding.service import BusinessSeedService
 from tests.test_business_seeding import painting_seed
 
@@ -19,7 +20,11 @@ from tests.test_business_seeding import painting_seed
 def _website_evidence_query():
     return (
         select(BusinessAttributeModel)
-        .where(BusinessAttributeModel.source == SOURCE_NAME)
+        .where(
+            BusinessAttributeModel.source == SOURCE_NAME,
+            BusinessAttributeModel.attribute_key
+            == source_payload_attribute_key(SOURCE_NAME),
+        )
         .order_by(BusinessAttributeModel.observed_at.desc())
         .limit(1)
     )

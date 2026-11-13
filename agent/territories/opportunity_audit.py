@@ -23,6 +23,7 @@ from canonical.website_enrichment import (
     WebsiteEnrichmentClient,
     enrich_business_pool,
 )
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import (
     BusinessModel,
     CampaignModel,
@@ -224,7 +225,10 @@ class BusinessOpportunityAuditor:
         observations: dict[str, list[dict]] = defaultdict(list)
         for observation in self.session.scalars(
             select(BusinessAttributeModel)
-            .where(BusinessAttributeModel.business_id.in_(unique_ids))
+            .where(
+                BusinessAttributeModel.business_id.in_(unique_ids),
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
+            )
             .order_by(BusinessAttributeModel.observed_at.desc())
         ):
             observations[observation.business_id].append(
@@ -809,6 +813,7 @@ class BusinessOpportunityAuditor:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id.in_(business_ids),
+                    BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                     BusinessAttributeModel.source.in_(
                         [SOURCE_NAME, WEBSITE_PRESENCE_SOURCE]
                     ),

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from business_attributes.repository import BusinessAttributeRepository, attribute_value
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_attributes.service import reconcile_business_attributes
 from business_index.schemas import (
     BusinessIndexSearch,
@@ -100,6 +101,7 @@ class BusinessIndexSearchService:
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                 BusinessAttributeModel.observed_at >= request.evidence_fresh_after,
             )
             .order_by(BusinessAttributeModel.observed_at.desc())
@@ -112,6 +114,7 @@ class BusinessIndexSearchService:
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                 BusinessAttributeModel.source.notin_(
                     ["website_presence_check", "company_website_seed"]
                 ),

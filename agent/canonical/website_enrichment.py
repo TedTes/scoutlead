@@ -28,6 +28,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from canonical.normalization import normalize_domain, stable_content_hash
 from canonical.repository import CanonicalRepository
 from db.models import (
@@ -1745,6 +1746,9 @@ def cleanup_placeholder_emails(session: Session, *, dry_run: bool = False) -> di
         select(BusinessAttributeModel, BusinessModel)
         .join(BusinessModel, BusinessModel.id == BusinessAttributeModel.business_id)
         .where(
+            BusinessAttributeModel.attribute_key.startswith(
+                SOURCE_PAYLOAD_PREFIX
+            ),
             BusinessAttributeModel.source == SOURCE_NAME,
         )
     )
@@ -1927,6 +1931,9 @@ def _business_ids_with_website_observation(session: Session, business_ids: list[
         session.scalars(
             select(BusinessAttributeModel.business_id).where(
                 BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.attribute_key.startswith(
+                    SOURCE_PAYLOAD_PREFIX
+                ),
                 BusinessAttributeModel.source == SOURCE_NAME,
             )
         )
@@ -2004,6 +2011,7 @@ def _google_places_reputation(
         select(BusinessAttributeModel)
         .where(
             BusinessAttributeModel.business_id == business_id,
+            BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
             BusinessAttributeModel.source == "google_places_seed",
         )
         .order_by(BusinessAttributeModel.observed_at.desc())

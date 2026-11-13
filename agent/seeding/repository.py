@@ -10,6 +10,7 @@ from agents.embeddings import EmbeddingClient
 from canonical.normalization import normalize_business_name, normalize_domain, normalize_phone
 from canonical.repository import CanonicalLeadLink, CanonicalRepository
 from canonical.semantics import semantic_key
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
@@ -53,6 +54,11 @@ class BusinessSeedRepository:
             self.session.scalar(
                 select(func.count())
                 .select_from(BusinessAttributeModel)
+                .where(
+                    BusinessAttributeModel.attribute_key.startswith(
+                        SOURCE_PAYLOAD_PREFIX
+                    )
+                )
             )
             or 0
         )

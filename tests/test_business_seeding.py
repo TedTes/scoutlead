@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from canonical.repository import CanonicalRepository
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import (
     BusinessAttributeModel,
     BusinessModel,
@@ -45,10 +46,10 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert summary.businesses_created == 1
         assert summary.businesses_updated == 0
         assert summary.contacts_created == 1
-        assert summary.evidence_records_created == 2
+        assert summary.evidence_records_created == 1
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
-        assert _evidence_count(session) == 2
+        assert _evidence_count(session) == 1
         assert _count(session, NicheModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
         assert _count(session, LeadModel) == 0
@@ -69,7 +70,7 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
 
         observation = session.scalar(
             select(BusinessAttributeModel).where(
-                BusinessAttributeModel.attribute_key == "business_name"
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX)
             )
         )
         assert observation is not None
@@ -111,7 +112,7 @@ def test_business_seed_import_is_idempotent() -> None:
         assert second.evidence_records_created == 0
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
-        assert _evidence_count(session) == 2
+        assert _evidence_count(session) == 1
         assert _count(session, NicheModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
 
@@ -133,7 +134,7 @@ def test_seed_import_keeps_source_evidence_without_a_parallel_validation_log() -
 
         evidence = session.scalar(
             select(BusinessAttributeModel).where(
-                BusinessAttributeModel.attribute_key == "business_name"
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX)
             )
         )
         assert evidence is not None
@@ -556,7 +557,13 @@ def _count(session, model) -> int:
 def _evidence_count(session) -> int:
     return int(
         session.scalar(
-            select(func.count()).select_from(BusinessAttributeModel)
+            select(func.count())
+            .select_from(BusinessAttributeModel)
+            .where(
+                BusinessAttributeModel.attribute_key.startswith(
+                    SOURCE_PAYLOAD_PREFIX
+                )
+            )
         )
         or 0
     )

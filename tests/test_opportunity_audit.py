@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate
 from canonical.repository import CanonicalRepository
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from canonical.website_enrichment import (
     BusinessWebsiteEnrichment,
     EnrichmentSummary,
@@ -279,10 +280,10 @@ def test_business_audit_restores_nested_google_website(monkeypatch) -> None:
         )
 
         session.refresh(business)
-        latest = session.query(BusinessAttributeModel).filter_by(
-            business_id=business.id,
-            source="website_presence_check",
-            attribute_key="website_status",
+        latest = session.query(BusinessAttributeModel).filter(
+            BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.source == "website_presence_check",
+            BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
         ).one()
         assert business.website_url == "https://www.prestigepaintinggta.ca/"
         assert business.domain == "prestigepaintinggta.ca"
@@ -368,10 +369,10 @@ def test_failed_confirmation_keeps_website_status_unknown(monkeypatch) -> None:
             opportunity_policy="weak_or_missing",
         )
 
-        latest = session.query(BusinessAttributeModel).filter_by(
-            business_id=business.id,
-            source="website_presence_check",
-            attribute_key="website_status",
+        latest = session.query(BusinessAttributeModel).filter(
+            BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.source == "website_presence_check",
+            BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
         ).one()
         presence = latest.raw_payload["website_presence"]
         assert presence["status"] == "verification_incomplete"
@@ -456,10 +457,10 @@ def test_osm_candidate_is_cross_checked_with_google_places(monkeypatch) -> None:
         session.refresh(business)
         assert business.website_url == "https://salivanlandscape.com/"
         assert "Salivan Landscape Ltd" in google.queries[0]
-        presence = session.query(BusinessAttributeModel).filter_by(
-            business_id=business.id,
-            source="website_presence_check",
-            attribute_key="website_status",
+        presence = session.query(BusinessAttributeModel).filter(
+            BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.source == "website_presence_check",
+            BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
         ).one()
         assert presence.raw_payload["website_presence"]["status"] == (
             "website_found_during_confirmation"
@@ -511,10 +512,10 @@ def test_google_no_website_observation_repairs_polluted_canonical_url(monkeypatc
         )
 
         session.refresh(business)
-        latest = session.query(BusinessAttributeModel).filter_by(
-            business_id=business.id,
-            source="website_presence_check",
-            attribute_key="website_status",
+        latest = session.query(BusinessAttributeModel).filter(
+            BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.source == "website_presence_check",
+            BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
         ).one()
         assert business.website_url is None
         assert latest.raw_payload["digital_opportunity"]["signals"][0]["key"] == (

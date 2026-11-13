@@ -14,6 +14,7 @@ from db.models import (
 )
 from business_attributes.attribute_scoring import score_attribute
 from business_attributes.freshness import attribute_expires_at
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from shared.utils import new_id
 
 
@@ -115,9 +116,10 @@ class BusinessAttributeRepository:
         source_url = fact.source_url or (
             source_evidence.source_url if source_evidence else None
         )
-        evidence = fact.evidence if fact.evidence is not None else (
-            source_evidence.evidence if source_evidence else {}
-        )
+        # A resolved attribute keeps its typed value and compact provenance in
+        # dedicated columns. Do not copy the source row's full provider payload
+        # into every derived attribute.
+        evidence = fact.evidence or {}
         if existing is None:
             existing = BusinessAttributeModel(
                 id=new_id("business_attribute"),
@@ -165,8 +167,9 @@ class BusinessAttributeRepository:
                 existing.evidence_hash = evidence_hash
             if source_url is not None:
                 existing.source_url = source_url
-            if evidence:
-                existing.evidence = evidence
+            # Clear payloads copied by the former evidence-inheritance path as
+            # soon as an attribute is refreshed.
+            existing.evidence = evidence
         if commit:
             self.session.commit()
             self.session.refresh(existing)
@@ -192,6 +195,9 @@ class BusinessAttributeRepository:
         rows = self.session.scalars(
             select(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id.in_(business_ids),
+                ~BusinessAttributeModel.attribute_key.startswith(
+                    SOURCE_PAYLOAD_PREFIX
+                ),
             )
         )
         result: dict[str, dict[str, BusinessAttributeModel]] = {}

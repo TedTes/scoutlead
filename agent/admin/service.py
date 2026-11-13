@@ -21,6 +21,7 @@ from business_attributes.catalog import (
     TRACKED_ATTRIBUTE_KEYS,
 )
 from business_attributes.attribute_scoring import audience_match_config, score_attribute
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_attributes.eligibility import (
     DEFAULT_MINIMUM_FACT_CONFIDENCE,
     eligible_fact_condition,
@@ -947,6 +948,9 @@ class AdminDataService:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id == business_id,
+                    ~BusinessAttributeModel.attribute_key.startswith(
+                        SOURCE_PAYLOAD_PREFIX
+                    ),
                 )
                 .order_by(BusinessAttributeModel.attribute_key)
             )
@@ -1100,6 +1104,9 @@ class AdminDataService:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id == business_id,
+                    ~BusinessAttributeModel.attribute_key.startswith(
+                        SOURCE_PAYLOAD_PREFIX
+                    ),
                 )
                 .order_by(BusinessAttributeModel.attribute_key)
             )
@@ -1823,6 +1830,9 @@ class AdminDataService:
                     select(BusinessAttributeModel.business_id)
                     .where(
                         BusinessAttributeModel.business_id.in_(business_ids),
+                        ~BusinessAttributeModel.attribute_key.startswith(
+                            SOURCE_PAYLOAD_PREFIX
+                        ),
                     )
                     .distinct()
                 )
@@ -1848,6 +1858,9 @@ class AdminDataService:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id.in_(business_ids),
+                    ~BusinessAttributeModel.attribute_key.startswith(
+                        SOURCE_PAYLOAD_PREFIX
+                    ),
                 )
                 .order_by(
                     BusinessAttributeModel.business_id,

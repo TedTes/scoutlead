@@ -6,6 +6,7 @@ from canonical.website_evidence import (
     trusted_website_evidence,
 )
 from canonical.repository import CanonicalRepository
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import BusinessAttributeModel, BusinessModel
 from db.session import create_database
 
@@ -125,7 +126,7 @@ def test_canonical_ingest_keeps_evidence_and_does_not_promote_uncertain_url() ->
         evidence = session.scalar(
             select(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id == link.business_id,
-                BusinessAttributeModel.attribute_key == "business_name",
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
             )
         )
 

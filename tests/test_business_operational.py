@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from business_attributes.operational import assess_business_operational
+from business_attributes.source_payloads import source_payload_attribute_key
 from db.models import BusinessAttributeModel, BusinessModel
 from db.session import create_database
 from shared.utils import new_id, utcnow
@@ -25,7 +26,7 @@ def _assessment(status: str):
         observation = BusinessAttributeModel(
             id=new_id("observation"),
             business_id=business.id,
-            attribute_key="business_name",
+            attribute_key=source_payload_attribute_key("google_places"),
             value_type="json",
             value_json={"businessStatus": status},
             confidence=100,

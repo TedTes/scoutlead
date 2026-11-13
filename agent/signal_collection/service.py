@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from business_attributes.repository import BusinessAttributeRepository, BusinessAttributeValue
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_attributes.core_attributes import sync_observed_business_attributes
 from canonical.repository import CanonicalRepository
 from canonical.website_enrichment import BusinessWebsiteEnrichment, WebsiteEnrichmentClient
@@ -170,6 +171,7 @@ class SignalCollectionService:
             return self._domain_observation(definition, business)
         statement = select(BusinessAttributeModel).where(
             BusinessAttributeModel.business_id == business.id,
+            BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
         )
         if definition.collector_key == "google_places":
             statement = statement.where(BusinessAttributeModel.source.in_(GOOGLE_SOURCES))
@@ -188,6 +190,7 @@ class SignalCollectionService:
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id == business_id,
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                 BusinessAttributeModel.source.in_(sources),
                 BusinessAttributeModel.observed_at
                 >= utcnow() - timedelta(days=freshness_days),

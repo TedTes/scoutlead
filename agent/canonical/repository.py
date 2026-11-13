@@ -35,6 +35,10 @@ from canonical.semantics import (
 )
 from canonical.website_evidence import trusted_website_evidence
 from business_attributes.repository import BusinessAttributeRepository, BusinessAttributeValue
+from business_attributes.source_payloads import (
+    SOURCE_PAYLOAD_PREFIX,
+    source_payload_attribute_key,
+)
 from business_attributes.service import reconcile_business_attributes
 from business_attributes.core_attributes import sync_observed_business_attributes
 from business_validation.policy import business_is_publishable
@@ -272,6 +276,9 @@ class CanonicalRepository:
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
             .where(
+                BusinessAttributeModel.attribute_key.startswith(
+                    SOURCE_PAYLOAD_PREFIX
+                ),
                 BusinessAttributeModel.source == source,
                 BusinessAttributeModel.query_signature == signature,
                 BusinessNicheMembershipModel.niche_id == resolution.niche_id,
@@ -554,6 +561,7 @@ class CanonicalRepository:
             observations = self.session.scalars(
                 select(BusinessAttributeModel)
                 .where(
+                    BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                     BusinessAttributeModel.source == source,
                     BusinessAttributeModel.external_id == external_id,
                 )
@@ -769,8 +777,9 @@ class CanonicalRepository:
         append: bool = False,
     ) -> BusinessAttributeModel:
         now = utcnow()
-        # Each current attribute carries the provider payload that supports it.
-        # Keep the snapshot independent from caller-owned dictionaries.
+        # Keep one latest provider snapshot per business/source inside the
+        # existing attributes table. Derived attributes store only their typed
+        # values and compact provenance columns.
         snapshot = deepcopy(raw)
         external_id = external_id_from_raw(snapshot)
         signature = query_signature(source=source, query=query)
@@ -781,7 +790,8 @@ class CanonicalRepository:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id == business.id,
-                    BusinessAttributeModel.attribute_key == "business_name",
+                    BusinessAttributeModel.attribute_key
+                    == source_payload_attribute_key(source),
                     BusinessAttributeModel.source == source,
                     BusinessAttributeModel.evidence_hash == content_hash,
                 )
@@ -796,7 +806,7 @@ class CanonicalRepository:
         observation = BusinessAttributeRepository(self.session).upsert(
             business.id,
             BusinessAttributeValue(
-                key="business_name",
+                key=source_payload_attribute_key(source),
                 value=business.display_name,
                 observed_at=now,
                 source_provider=source,
@@ -898,6 +908,9 @@ class CanonicalRepository:
                     select(BusinessAttributeModel)
                     .where(
                         BusinessAttributeModel.business_id == business_id,
+                        BusinessAttributeModel.attribute_key.startswith(
+                            SOURCE_PAYLOAD_PREFIX
+                        ),
                     )
                     .order_by(BusinessAttributeModel.observed_at.desc())
                 )

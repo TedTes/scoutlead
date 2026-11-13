@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from canonical.normalization import normalize_domain, normalize_phone
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import (
     BusinessAttributeModel,
     BusinessModel,
@@ -95,6 +96,9 @@ def export_city_category(
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(business_ids),
+                ~BusinessAttributeModel.attribute_key.startswith(
+                    SOURCE_PAYLOAD_PREFIX
+                ),
             )
             .order_by(BusinessAttributeModel.attribute_key)
         )

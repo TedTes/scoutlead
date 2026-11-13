@@ -252,7 +252,7 @@ BusinessAttributeDefinitionModel = SignalDefinitionModel
 
 
 class BusinessAttributeModel(TimestampMixin, Base):
-    """One current business attribute with its source evidence attached."""
+    """One current business attribute with compact source provenance."""
 
     __tablename__ = "business_attributes"
     __table_args__ = (

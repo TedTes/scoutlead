@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_index.repository import BusinessIndexRepository
 from business_index.schemas import BusinessIndexSearch, OpportunityType, SearchContract
 from business_index.search import BusinessIndexSearchService
@@ -428,6 +429,7 @@ class BusinessIndexRefreshService:
             self.session.scalars(
                 select(BusinessAttributeModel).where(
                     BusinessAttributeModel.business_id.in_(business_ids),
+                    BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                     BusinessAttributeModel.source.in_(
                         [
                             WEBSITE_AUDIT_SOURCE,

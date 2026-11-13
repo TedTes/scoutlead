@@ -12,6 +12,7 @@ from business_attributes.repository import (
     BusinessAttributeRepository,
     BusinessAttributeValue,
 )
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_attributes.freshness import attribute_expires_at
 from canonical.normalization import normalize_domain
 from canonical.website_evidence import (
@@ -41,6 +42,7 @@ def reconcile_business_attributes(session: Session, business_id: str) -> dict[st
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id == business_id,
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
             )
             .order_by(BusinessAttributeModel.observed_at.desc())
         )

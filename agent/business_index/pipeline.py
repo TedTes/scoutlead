@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agents.embeddings import EmbeddingClient
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_index.refresh import (
     BusinessIndexRefreshService,
     _campaign_source,
@@ -411,7 +412,10 @@ class BusinessIndexPipelineService:
         opportunity_evidence = None
         observations = self.session.scalars(
             select(BusinessAttributeModel)
-            .where(BusinessAttributeModel.business_id == business_id)
+            .where(
+                BusinessAttributeModel.business_id == business_id,
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
+            )
             .order_by(BusinessAttributeModel.observed_at.desc())
         )
         for observation in observations:

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from canonical.business_entity import assess_provider_business_entity
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from canonical.normalization import first_raw_text, nested_raw
 from canonical.website_evidence import assess_website_ownership
 from db.models import BusinessModel, ContactModel, BusinessAttributeModel
@@ -81,6 +82,7 @@ def assess_business_operational(
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id == business.id,
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
                 BusinessAttributeModel.observed_at >= cutoff,
             )
             .order_by(BusinessAttributeModel.observed_at.desc())

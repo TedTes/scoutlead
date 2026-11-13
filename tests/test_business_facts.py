@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from business_attributes.repository import BusinessAttributeKey, BusinessAttributeRepository, attribute_value
 from business_attributes.repository import BusinessAttributeValue
+from business_attributes.source_payloads import source_payload_attribute_key
 from business_attributes.service import _replace_website_fact
 from business_index.contracts import compile_search_contract
 from business_index.schemas import BusinessIndexSearch, OpportunityType
@@ -89,7 +90,8 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
         assert session.scalar(
             select(func.count()).select_from(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id == first.business_id,
-                BusinessAttributeModel.attribute_key == "business_name",
+                BusinessAttributeModel.attribute_key
+                == source_payload_attribute_key("google_places"),
             )
         ) == 1
 
@@ -109,7 +111,8 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
         assert session.scalar(
             select(func.count()).select_from(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id == first.business_id,
-                BusinessAttributeModel.attribute_key == "business_name",
+                BusinessAttributeModel.attribute_key
+                == source_payload_attribute_key("google_places"),
             )
         ) == 1
 
@@ -526,7 +529,7 @@ def test_verified_website_replaces_stale_canonical_url() -> None:
         assert business.domain == "northstarpainting.example"
         assert website_fact.source == "company_website_seed"
         assert website_fact.source_url == "https://northstarpainting.example"
-        assert website_fact.evidence["website_url"] == "https://northstarpainting.example"
+        assert website_fact.evidence == {}
         assert website_fact.confidence == 95
 
 

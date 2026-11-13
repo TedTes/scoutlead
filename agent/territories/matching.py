@@ -15,6 +15,7 @@ from business_attributes.eligibility import (
 )
 from business_attributes.attribute_scoring import audience_match_config
 from business_attributes.repository import attribute_value
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from business_index.eligibility import searchable_business_conditions
 from canonical.normalization import (
     email_from_raw,
@@ -418,7 +419,10 @@ class ProfileMatchService:
             candidate
             for candidate in self.session.scalars(
                 select(BusinessAttributeModel)
-                .where(BusinessAttributeModel.business_id == business_id)
+                .where(
+                    BusinessAttributeModel.business_id == business_id,
+                    BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
+                )
                 .order_by(BusinessAttributeModel.observed_at.desc())
             )
             if not observation_is_quarantined(self.session, candidate)

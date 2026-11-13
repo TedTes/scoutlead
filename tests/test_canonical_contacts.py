@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import CampaignCreate, LeadSeedInput
 from canonical.repository import CanonicalRepository
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import BusinessAttributeModel, BusinessModel, ContactModel
 from db.session import create_database
 from leads.repository import LeadRepository
@@ -78,7 +79,11 @@ def test_leads_from_repeat_runs_share_canonical_business_and_contact() -> None:
             session.scalar(
                 select(func.count())
                 .select_from(BusinessAttributeModel)
-                .where(BusinessAttributeModel.attribute_key == "business_name")
+                .where(
+                    BusinessAttributeModel.attribute_key.startswith(
+                        SOURCE_PAYLOAD_PREFIX
+                    )
+                )
             )
             == 1
         )

@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from business_attributes.repository import BusinessAttributeKey, BusinessAttributeRepository, BusinessAttributeValue
+from business_attributes.source_payloads import source_payload_attribute_key
 from db.models import BusinessAttributeModel, BusinessModel, SignalDefinitionModel
 from db.session import create_database
 from shared.utils import new_id, utcnow
@@ -68,7 +69,7 @@ def _evidence(business_id: str, payload: dict, *, source: str = "test") -> Busin
     return BusinessAttributeModel(
         id=new_id("business_evidence"),
         business_id=business_id,
-        attribute_key="business_name",
+        attribute_key=source_payload_attribute_key(source),
         value_type="text",
         value_text="Test Business",
         confidence=100,
@@ -110,7 +111,7 @@ def test_resolved_attribute_links_to_definition_and_evidence() -> None:
         assert fact.signal_definition_id == definition.id
         assert fact.source_provider == observation.source_provider
         assert fact.evidence_hash == observation.evidence_hash
-        assert fact.evidence == observation.evidence
+        assert fact.evidence == {}
 
 
 def test_dynamic_signal_collects_from_existing_observation() -> None:

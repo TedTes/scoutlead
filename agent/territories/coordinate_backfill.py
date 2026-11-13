@@ -6,6 +6,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from canonical.attributes import extract_business_attributes
+from business_attributes.source_payloads import SOURCE_PAYLOAD_PREFIX
 from db.models import BusinessModel, BusinessAttributeModel, TerritoryModel
 from shared.geospatial import coordinates_are_valid, haversine_distance_km
 from territories.geocoding import MarketGeocoder
@@ -108,7 +109,12 @@ class CoordinateBackfillService:
             observations = list(
                 self.session.scalars(
                     select(BusinessAttributeModel)
-                    .where(BusinessAttributeModel.business_id == business.id)
+                    .where(
+                        BusinessAttributeModel.business_id == business.id,
+                        BusinessAttributeModel.attribute_key.startswith(
+                            SOURCE_PAYLOAD_PREFIX
+                        ),
+                    )
                     .order_by(BusinessAttributeModel.observed_at.desc())
                 )
             )
