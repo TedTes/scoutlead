@@ -19,14 +19,6 @@ SUPPORTED_FACTS: dict[str, dict[str, Any]] = {
         "values": ["present", "missing", "not_listed", "unavailable", "parked", "unknown"],
         "operators": ["equals", "in"],
     },
-    BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value: {
-        "type": "boolean",
-        "operators": ["equals"],
-    },
-    BusinessAttributeKey.CONTACT_FORM_PRESENT.value: {
-        "type": "boolean",
-        "operators": ["equals"],
-    },
     BusinessAttributeKey.GOOGLE_RATING.value: {
         "type": "number",
         "operators": ["less_than", "less_than_or_equal", "greater_than", "greater_than_or_equal"],

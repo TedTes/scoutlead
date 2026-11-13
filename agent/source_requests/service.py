@@ -612,18 +612,10 @@ def _unresolved_criteria(
 
 def _opportunity_type(contract: SearchContract) -> OpportunityType:
     website_values: set[str] = set()
-    conversion_gap = False
     for predicate in (*contract.all_of, *contract.any_of):
         if predicate.key == BusinessAttributeKey.WEBSITE_STATUS.value:
             values = predicate.value if isinstance(predicate.value, tuple) else (predicate.value,)
             website_values.update(str(value) for value in values)
-        if predicate.key in {
-            BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
-            BusinessAttributeKey.CONTACT_FORM_PRESENT.value,
-        } and predicate.value is False:
-            conversion_gap = True
-    if conversion_gap:
-        return OpportunityType.WEAK_OR_MISSING_WEBSITE
     if website_values == {"missing"}:
         return OpportunityType.MISSING_WEBSITE
     if website_values and website_values <= {"missing", "not_listed", "unavailable", "parked"}:

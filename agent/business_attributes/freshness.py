@@ -5,8 +5,6 @@ from datetime import datetime, timedelta
 
 FACT_TTL_DAYS = {
     "website_status": 30,
-    "quote_or_booking_form_present": 30,
-    "contact_form_present": 30,
     "google_rating": 14,
     "google_review_count": 14,
     "business_operational": 90,

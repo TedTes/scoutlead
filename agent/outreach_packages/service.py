@@ -896,8 +896,6 @@ def _evidence(item: dict[str, Any]) -> OutreachEvidence:
             else "The website has not been verified."
         ),
         "website_unavailable": "The business website was unavailable during the latest check.",
-        "no_quote_flow": "No quote or booking flow was found in the latest website check.",
-        "no_contact_form": "No contact form was found in the latest website check.",
         "mobile_viewport_missing": "The latest website check did not find a mobile viewport declaration.",
         "shortlisted_interest": "This business was shortlisted for personalized outreach.",
     }
@@ -910,18 +908,14 @@ def _evidence(item: dict[str, Any]) -> OutreachEvidence:
 
 def _evidence_label(key: str, value: object) -> str:
     boolean_labels = {
-        "contact_form_present": ("Contact form present", "Contact form missing"),
         "primary_cta_present": ("Primary CTA present", "Primary CTA missing"),
         "click_to_call_present": ("Click to call present", "Click to call missing"),
-        "quote_or_booking_form_present": ("Quote or booking present", "Quote or booking missing"),
         "complete_contact_details": ("Contact details complete", "Contact details incomplete"),
     }
     if key in boolean_labels and isinstance(value, bool):
         return boolean_labels[key][0 if value else 1]
     labels = {
         "website_unavailable": "Website unavailable",
-        "no_quote_flow": "Quote or booking missing",
-        "no_contact_form": "Contact form missing",
         "mobile_viewport_missing": "Mobile setup missing",
         "reviews_under_15": "Low review count",
         "shortlisted_interest": "Personalized website idea",
@@ -1090,10 +1084,6 @@ def _proposal_angle(
     value = evidence.value
     if key == "website_status" and value in {"missing", "not_listed"}:
         return f"New website concept for {business_name}: services, project proof, and a clear quote-request path"
-    if key in {"no_quote_flow", "quote_or_booking_form_present"}:
-        return f"Website update for {business_name}: a guided quote or booking flow"
-    if key in {"no_contact_form", "contact_form_present"}:
-        return f"Website update for {business_name}: a clearer contact and quote-request path"
     if key in {"website_unavailable", "mobile_viewport_missing"}:
         return f"Website refresh for {business_name}: a clearer, mobile-friendly customer path"
     return fallback

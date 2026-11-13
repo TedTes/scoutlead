@@ -25,8 +25,7 @@ TRACKED_ATTRIBUTE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "lead_capture",
         "Lead capture",
         (
-            "contact_form_present", "contact_page_url", "quote_or_booking_form_present",
-            "booking_url", "primary_cta_present", "click_to_call_present",
+            "contact_page_url", "booking_url", "primary_cta_present", "click_to_call_present",
             "public_email_present", "public_phone_present",
         ),
     ),

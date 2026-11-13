@@ -1449,10 +1449,8 @@ function textMessageSegmentCount(value: string) {
 function outreachEvidenceLabel(evidence: OutreachPackageContent["evidence"][number]) {
   if (evidence.signal_key === "website_status" && evidence.value === "not_listed") return "No website listed";
   const booleanLabels: Record<string, [string, string]> = {
-    contact_form_present: ["Contact form present", "Contact form missing"],
     primary_cta_present: ["Primary CTA present", "Primary CTA missing"],
     click_to_call_present: ["Click to call present", "Click to call missing"],
-    quote_or_booking_form_present: ["Quote or booking present", "Quote or booking missing"],
     complete_contact_details: ["Contact details complete", "Contact details incomplete"],
   };
   if (typeof evidence.value === "boolean" && booleanLabels[evidence.signal_key]) {
@@ -1460,8 +1458,6 @@ function outreachEvidenceLabel(evidence: OutreachPackageContent["evidence"][numb
   }
   const labels: Record<string, string> = {
     website_unavailable: "Website unavailable",
-    no_quote_flow: "No quote flow",
-    no_contact_form: "No contact form",
     mobile_viewport_missing: "Mobile setup missing",
     reviews_under_15: "Low review count",
   };
@@ -1498,12 +1494,6 @@ function proposalAngleFromReason(businessName: string, reason: string, fallback:
   const normalized = reason.toLowerCase();
   if (normalized.includes("no website") || normalized.includes("does not include a website")) {
     return `New website concept for ${businessName}: services, project proof, and a clear quote-request path`;
-  }
-  if (normalized.includes("quote") || normalized.includes("booking")) {
-    return `Website update for ${businessName}: a guided quote or booking flow`;
-  }
-  if (normalized.includes("contact form")) {
-    return `Website update for ${businessName}: a clearer contact and quote-request path`;
   }
   if (normalized.includes("unavailable") || normalized.includes("mobile")) {
     return `Website refresh for ${businessName}: a clearer, mobile-friendly customer path`;
@@ -2994,7 +2984,7 @@ function audienceMatchedSignals(contact: DiscoveryResult): AudienceMatchedSignal
 function isOutreachEligibleEvidence(evidence: AudienceMatchedSignal): boolean {
   if (evidence.pitchEligible === false) return false;
   if (
-    ["primary_cta_present", "click_to_call_present", "contact_form_present", "quote_or_booking_form_present"].includes(evidence.signalKey)
+    ["primary_cta_present", "click_to_call_present"].includes(evidence.signalKey)
     && evidence.value !== false
   ) return false;
   return evidence.confidence === "confirmed" || (
@@ -3043,12 +3033,6 @@ function audienceSignalStatement(
 ): string | null {
   if (signalKey === "reviews_under_15" || signalKey === "google_review_count") {
     return `${Number(value || 0)} public reviews in the latest business record.`;
-  }
-  if (signalKey === "no_quote_flow" || (signalKey === "quote_or_booking_form_present" && value === false)) {
-    return "No quote or booking flow was found in the latest website check.";
-  }
-  if (signalKey === "no_contact_form" || (signalKey === "contact_form_present" && value === false)) {
-    return "No contact form was found in the latest website check.";
   }
   if (signalKey === "primary_cta_present" && value === false) {
     return "No primary call to action was found in the latest website check.";
@@ -5936,8 +5920,6 @@ function profileServiceLabel(value: string) {
 function profileSignalLabel(value: string) {
   const labels: Record<string, string> = {
     website_unavailable: "Missing or unavailable website",
-    no_quote_flow: "No quote or booking flow",
-    no_contact_form: "No contact form",
     reviews_under_15: "Reviews under 15",
   };
   return labels[value] || profileValueLabel(value);
@@ -6157,11 +6139,6 @@ function profileSignalMessage(signalKey: string, evidence: Record<string, unknow
   }
   if (typeof value === "boolean") {
     const statements: Record<string, [string, string]> = {
-      contact_form_present: ["Contact form found.", "No contact form was found."],
-      quote_or_booking_form_present: [
-        "Quote or booking form found.",
-        "No quote or booking form was found.",
-      ],
       primary_cta_present: [
         "Primary call to action found.",
         "No primary call to action was found.",

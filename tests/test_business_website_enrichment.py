@@ -56,7 +56,6 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert summary.selected == 1
         assert summary.reachable == 1
         assert summary.with_email == 1
-        assert summary.with_quote_signal == 1
         assert summary.written == 1
 
         business = session.scalar(select(BusinessModel))
@@ -74,8 +73,9 @@ def test_website_enrichment_creates_contact_and_source_observation(monkeypatch) 
         assert observation is not None
         assert observation.business_id == business.id
         assert observation.raw_payload["website_enrichment"]["best_email"] == "owner@paint.testsite.ca"
-        assert observation.raw_payload["website_enrichment"]["has_quote_form"] is True
         enrichment = observation.raw_payload["website_enrichment"]
+        assert "has_quote_form" not in enrichment
+        assert "has_contact_form" not in enrichment
         assert enrichment["has_primary_cta"] is True
         assert enrichment["has_click_to_call"] is False
         assert enrichment["has_online_payment_or_financing"] is False
@@ -208,7 +208,7 @@ def test_website_enrichment_records_review_and_conversion_opportunity(monkeypatc
         )
         assert observation is not None
         opportunity = observation.raw_payload["digital_opportunity"]
-        assert opportunity["score"] == 80
+        assert opportunity["score"] == 50
         assert opportunity["level"] == "high"
         assert opportunity["google_rating"] == 4.1
         assert opportunity["google_review_count"] == 8
@@ -397,7 +397,7 @@ def test_active_website_is_excluded_from_availability_lane(monkeypatch) -> None:
         assert observation.raw_payload["digital_opportunity"]["level"] == "none"
 
 
-def test_weak_or_missing_lane_keeps_active_site_with_no_conversion_form(monkeypatch) -> None:
+def test_weak_or_missing_lane_does_not_measure_conversion_forms(monkeypatch) -> None:
     session_factory = _session_factory()
 
     with session_factory() as session:
@@ -430,8 +430,8 @@ def test_weak_or_missing_lane_keeps_active_site_with_no_conversion_form(monkeypa
         )
         assert observation is not None
         opportunity = observation.raw_payload["digital_opportunity"]
-        assert opportunity["score"] >= 30
-        assert "missing_quote_or_booking_form" in {
+        assert opportunity["score"] == 15
+        assert "missing_quote_or_booking_form" not in {
             signal["key"] for signal in opportunity["signals"]
         }
 
@@ -704,7 +704,7 @@ def test_cleanup_placeholder_emails_removes_existing_bad_values() -> None:
         assert observation.content_hash == stable_content_hash(observation.raw_payload)
 
 
-def test_javascript_shell_uses_configured_renderer_for_booking_evidence(monkeypatch) -> None:
+def test_javascript_shell_renderer_does_not_measure_booking_forms(monkeypatch) -> None:
     monkeypatch.setattr(
         "canonical.website_enrichment.httpx.get",
         lambda url, **kwargs: FakeResponse(
@@ -744,7 +744,7 @@ def test_javascript_shell_uses_configured_renderer_for_booking_evidence(monkeypa
         )
     )
 
-    assert result.has_booking_form is True
+    assert result.has_booking_form is None
     assert result.inspected_urls == ["https://dynamic.example/"]
 
 
@@ -767,8 +767,8 @@ def test_newsletter_form_and_marketing_copy_are_not_conversion_signals(monkeypat
         _target("https://newsletter.example")
     )
 
-    assert result.has_contact_form is False
-    assert result.has_quote_form is False
+    assert result.has_contact_form is None
+    assert result.has_quote_form is None
     assert result.page_signals["has_primary_cta"] is False
     assert result.page_signals["has_online_payment_or_financing"] is False
 
@@ -795,12 +795,12 @@ def test_semantic_actions_record_exact_signal_evidence(monkeypatch) -> None:
         _target("https://actions.example")
     )
 
-    assert result.has_quote_form is True
+    assert result.has_quote_form is None
     assert result.page_signals["has_primary_cta"] is True
     assert result.page_signals["has_click_to_call"] is True
     assert result.page_signals["has_service_area_pages"] is True
     evidence = result.page_signals["signal_evidence"]
-    assert evidence["quote_or_booking_form_present"]
+    assert "quote_or_booking_form_present" not in evidence
     assert evidence["click_to_call_present"][0]["match"].startswith("tel:")
 
 
@@ -828,7 +828,7 @@ def test_inspection_extracts_matchable_digital_footprint_attributes(monkeypatch)
     assert result.page_signals["public_email_present"] is True
     assert result.page_signals["public_phone_present"] is True
     assert result.page_signals["contact_page_url"] == "https://example.test/contact"
-    assert result.page_signals["contact_form_url"] == "https://example.test/contact"
+    assert result.page_signals["contact_form_url"] is None
     assert result.page_signals["local_business_schema_present"] is True
     assert result.page_signals["title_and_meta_present"] is True
     assert result.page_signals["http_status"] == 200

@@ -672,11 +672,13 @@ def test_dynamic_contract_reports_unsupported_criteria() -> None:
 
     assert {predicate.key for predicate in contract.any_of} == {
         BusinessAttributeKey.GOOGLE_REVIEW_COUNT.value,
-        BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
     }
+    assert contract.semantic_any_of == ("No quote form",)
     assert contract.semantic_all_of == ("Independent business",)
     assert contract.semantic_exclusions == ("National chains and franchises",)
-    assert contract.unsupported == ()
+    assert contract.unsupported == (
+        "No quote form (quote_or_booking_form_present)",
+    )
 
 
 def test_explicit_present_website_contract_does_not_use_opportunity_fallback() -> None:

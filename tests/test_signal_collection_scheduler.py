@@ -83,8 +83,6 @@ def test_standing_website_collection_covers_composite_upgrade_components() -> No
         "website_status",
         "website_quality_score",
         "mobile_viewport_present",
-        "contact_form_present",
-        "quote_or_booking_form_present",
         "primary_cta_present",
         "click_to_call_present",
     }

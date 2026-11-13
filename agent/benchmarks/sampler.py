@@ -132,8 +132,6 @@ def _record(
             customer_kind=business.customer_kind,
             operational=value("business_operational"),
             website_status=value("website_status"),
-            quote_or_booking_form_present=value("quote_or_booking_form_present"),
-            contact_form_present=value("contact_form_present"),
             mobile_viewport_present=value("mobile_viewport_present"),
             primary_cta_present=value("primary_cta_present"),
             click_to_call_present=value("click_to_call_present"),

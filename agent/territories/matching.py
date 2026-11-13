@@ -42,8 +42,6 @@ from seeding.batches import active_membership_condition, observation_is_quaranti
 
 SIGNAL_FACTS = {
     "website_unavailable": "website_status",
-    "no_quote_flow": "quote_or_booking_form_present",
-    "no_contact_form": "contact_form_present",
     "reviews_under_15": "google_review_count",
 }
 

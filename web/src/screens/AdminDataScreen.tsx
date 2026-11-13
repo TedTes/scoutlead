@@ -721,7 +721,7 @@ function humanizeKey(value: string) {
 const FALLBACK_ATTRIBUTE_GROUPS: Array<[string, string, string[]]> = [
   ["identity", "Core identity and targeting", ["business_name", "business_operational", "trade_category", "provider_business_id", "address", "city", "region", "postal_code", "latitude", "longitude", "phone", "website_url", "domain", "is_directory", "is_chain", "is_franchise"]],
   ["website", "Website", ["website_status", "website_ownership", "http_status", "mobile_viewport_present", "website_quality_score", "performance_score", "accessibility_score", "best_practices_score"]],
-  ["lead_capture", "Lead capture", ["contact_form_present", "contact_page_url", "quote_or_booking_form_present", "booking_url", "primary_cta_present", "click_to_call_present", "public_email_present", "public_phone_present"]],
+  ["lead_capture", "Lead capture", ["contact_page_url", "booking_url", "primary_cta_present", "click_to_call_present", "public_email_present", "public_phone_present"]],
   ["reputation", "Reputation", ["google_rating", "google_review_count", "review_recency_days"]],
   ["local_visibility", "Local visibility attributes", ["google_business_profile_present", "local_business_schema_present", "service_area_content_present", "title_and_meta_present"]],
   ["outreach", "Outreach readiness", ["verified_email", "verified_phone", "contact_form_url", "preferred_contact_channel"]],

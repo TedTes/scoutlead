@@ -24,11 +24,6 @@ def cached_signals(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
     signals: list[str] = []
     signals.extend(signal for signal in raw.get("signals", []) if isinstance(signal, str))
     signals.extend(signal for signal in enrichment.get("service_signals", []) if isinstance(signal, str))
-    signals.extend(signal for signal in enrichment.get("quote_signals", []) if isinstance(signal, str))
-    if enrichment.get("has_quote_form"):
-        signals.append("quote or estimate form")
-    if enrichment.get("has_contact_form"):
-        signals.append("contact form")
     if lead.contact_email:
         signals.append("public email")
     if cached_phone(row):
@@ -36,15 +31,6 @@ def cached_signals(*, row: dict[str, Any], lead: LeadRead) -> list[str]:
     if not signals and lead.description:
         signals.append(truncate(lead.description, 120))
     return list(dict.fromkeys(signals))[:8]
-
-
-def has_quote_signal(row: dict[str, Any]) -> bool:
-    enrichment = website_enrichment(row)
-    return bool(enrichment.get("has_quote_form") or enrichment.get("quote_signals"))
-
-
-def has_contact_form(row: dict[str, Any]) -> bool:
-    return bool(website_enrichment(row).get("has_contact_form"))
 
 
 def cached_phone(row: dict[str, Any]) -> str | None:
@@ -92,7 +78,7 @@ def evidence_text(*, row: dict[str, Any], lead: LeadRead, extra: list[str]) -> s
 def enrichment_signals(row: dict[str, Any]) -> list[str]:
     enrichment = website_enrichment(row)
     signals: list[str] = []
-    for key in ("service_signals", "quote_signals", "contact_signals"):
+    for key in ("service_signals", "contact_signals"):
         signals.extend(signal for signal in enrichment.get(key, []) if isinstance(signal, str))
     return signals
 

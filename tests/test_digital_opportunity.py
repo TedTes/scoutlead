@@ -15,18 +15,16 @@ def test_assessment_scores_only_observed_opportunities() -> None:
     assessment = assess_digital_opportunity(
         website_reachable=True,
         has_mobile_viewport=False,
-        has_quote_or_booking_form=False,
         rating=4.1,
         review_count=8,
         website_source_url="http://painter.example",
         reviews_source_url="https://maps.example/painter",
     )
 
-    assert assessment.score == 80
+    assert assessment.score == 50
     assert assessment.level == "high"
     assert {signal.key for signal in assessment.signals} == {
         "missing_mobile_viewport",
-        "missing_quote_or_booking_form",
         "low_google_rating",
         "low_google_review_count",
     }
@@ -36,7 +34,6 @@ def test_assessment_does_not_penalize_unknown_review_data() -> None:
     assessment = assess_digital_opportunity(
         website_reachable=True,
         has_mobile_viewport=True,
-        has_quote_or_booking_form=True,
         rating=None,
         review_count=None,
         website_source_url="https://painter.example",

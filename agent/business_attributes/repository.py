@@ -19,6 +19,8 @@ from shared.utils import new_id
 
 class BusinessAttributeKey(StrEnum):
     WEBSITE_STATUS = "website_status"
+    # Legacy identifiers retained only to read old snapshots and migrations.
+    # Current collectors and resolvers never create these attributes.
     QUOTE_OR_BOOKING_FORM_PRESENT = "quote_or_booking_form_present"
     CONTACT_FORM_PRESENT = "contact_form_present"
     GOOGLE_RATING = "google_rating"

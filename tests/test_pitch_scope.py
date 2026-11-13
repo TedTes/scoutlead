@@ -21,26 +21,24 @@ def test_page_absence_requires_the_relevant_page_scope() -> None:
     )
 
     assert pitch_scope_decision("primary_cta_present", False, payload)[0] is True
-    assert pitch_scope_decision("contact_form_present", False, payload)[0] is False
-    assert pitch_scope_decision("quote_or_booking_form_present", False, payload)[0] is False
     assert pitch_scope_decision("click_to_call_present", False, payload)[0] is False
 
 
 def test_positive_page_finding_requires_element_evidence() -> None:
-    without_evidence = _website_payload(scope={"contact_intent_page_complete": True})
+    without_evidence = _website_payload(scope={"homepage_complete": True})
     with_evidence = _website_payload(
-        scope={"contact_intent_page_complete": True},
+        scope={"homepage_complete": True},
         evidence={
-            "contact_form_present": [
-                {"url": "https://example.test/contact", "match": "contact form"}
+            "primary_cta_present": [
+                {"url": "https://example.test", "match": "request an estimate"}
             ]
         },
     )
 
     assert pitch_scope_decision(
-        "contact_form_present", True, without_evidence
+        "primary_cta_present", True, without_evidence
     )[0] is False
-    assert pitch_scope_decision("contact_form_present", True, with_evidence)[0] is True
+    assert pitch_scope_decision("primary_cta_present", True, with_evidence)[0] is True
 
 
 def test_website_grade_requires_a_successful_pagespeed_result() -> None:

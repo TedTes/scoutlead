@@ -79,24 +79,6 @@ def evaluate_records(
                 predicted=lambda row: _website_opportunity(row.observed.website_status),
             )
         ),
-        "no_quote_flow": _binary_metric(
-            _signal_cases(
-                rows,
-                expected=lambda row: _negative_truth(
-                    row.labels.quote_or_booking_form_present
-                ),
-                predicted=lambda row: _negative_boolean(
-                    row.observed.quote_or_booking_form_present
-                ),
-            )
-        ),
-        "no_contact_form": _binary_metric(
-            _signal_cases(
-                rows,
-                expected=lambda row: _negative_truth(row.labels.contact_form_present),
-                predicted=lambda row: _negative_boolean(row.observed.contact_form_present),
-            )
-        ),
     }
     metrics.update(
         {

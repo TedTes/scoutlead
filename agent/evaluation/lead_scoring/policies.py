@@ -8,8 +8,6 @@ from evaluation.lead_scoring.signals import (
     cached_phone,
     enrichment_signals,
     evidence_text,
-    has_contact_form,
-    has_quote_signal,
     raw_payload,
     target_terms,
     website_enrichment,
@@ -81,8 +79,6 @@ def score_breakdown(
         notes.append("Reachability includes a public email signal.")
     if cached_phone(row):
         notes.append("Reachability includes a public phone signal.")
-    if has_quote_signal(row) and not product_requires_digital_opportunity(product):
-        notes.append("Problem evidence includes a public quote or estimate signal.")
     return QualificationScoreBreakdown(
         fit_score=fit_score,
         reachability_score=reachability_score,
@@ -145,8 +141,6 @@ def problem_fit_score(*, product: ProductRead, row: dict[str, Any], lead: LeadRe
     score = 30
     score += min(matched_target_terms * 7, 30)
     score += min(len(service_signals) * 6, 18)
-    if has_quote_signal(row) and not product_requires_digital_opportunity(product):
-        score += 15
     if product_requires_digital_opportunity(product):
         opportunity = opportunity_evidence_from_sources([row, *lead.raw_sources])
         opportunity_level = str((opportunity or {}).get("level") or "none").lower()
@@ -171,8 +165,6 @@ def reachability_score_for(*, row: dict[str, Any], lead: LeadRead) -> int:
         score += 60 if looks_like_person_email(lead.contact_email) else 40
     if cached_phone(row):
         score += 25
-    if has_contact_form(row):
-        score += 15
     if lead.verification_status == ContactVerificationStatus.VALID:
         score += 15
     elif lead.verification_status == ContactVerificationStatus.RISKY:

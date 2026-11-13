@@ -111,14 +111,6 @@ def _resolve_facts(
     )
     if website is not None:
         facts[website.key.value] = website
-    for resolver in (_quote_form_fact, _contact_form_fact):
-        fact = resolver(
-            business,
-            observations,
-            ownership_confidence_by_observation=ownership_confidence_by_observation,
-        )
-        if fact is not None:
-            facts[fact.key.value] = fact
     for resolver in (_google_rating_fact, _google_review_count_fact, _operational_fact):
         fact = resolver(observations)
         if fact is not None:
@@ -291,75 +283,6 @@ def _verified_missing_website(presence: dict[str, Any]) -> bool:
         and str(check.get("status") or "").strip().lower() == "completed"
         for check in checks
     )
-
-
-def _quote_form_fact(
-    business: BusinessModel,
-    observations: list[BusinessAttributeModel],
-    *,
-    ownership_confidence_by_observation: dict[str, int],
-) -> BusinessAttributeValue | None:
-    for observation in observations:
-        enrichment = (observation.raw_payload or {}).get("website_enrichment")
-        if (
-            not isinstance(enrichment, dict)
-            or not enrichment.get("inspected_urls")
-            or observation.id not in ownership_confidence_by_observation
-        ):
-            continue
-        quote = enrichment.get("has_quote_form")
-        booking = enrichment.get("has_booking_form")
-        if quote is True or booking is True:
-            value = True
-        elif quote is False and booking is False:
-            value = False
-        else:
-            continue
-        return BusinessAttributeValue(
-            key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-            value=value,
-            observed_at=observation.observed_at,
-            source_evidence_id=observation.id,
-            confidence=ownership_confidence_by_observation[observation.id],
-            expires_at=attribute_expires_at(
-                BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT.value,
-                observation.observed_at,
-            ),
-            resolver_version=RESOLVER_VERSION,
-        )
-    return None
-
-
-def _contact_form_fact(
-    business: BusinessModel,
-    observations: list[BusinessAttributeModel],
-    *,
-    ownership_confidence_by_observation: dict[str, int],
-) -> BusinessAttributeValue | None:
-    for observation in observations:
-        enrichment = (observation.raw_payload or {}).get("website_enrichment")
-        if (
-            not isinstance(enrichment, dict)
-            or not enrichment.get("inspected_urls")
-            or observation.id not in ownership_confidence_by_observation
-        ):
-            continue
-        value = enrichment.get("has_contact_form")
-        if not isinstance(value, bool):
-            continue
-        return BusinessAttributeValue(
-            key=BusinessAttributeKey.CONTACT_FORM_PRESENT,
-            value=value,
-            observed_at=observation.observed_at,
-            source_evidence_id=observation.id,
-            confidence=ownership_confidence_by_observation[observation.id],
-            expires_at=attribute_expires_at(
-                BusinessAttributeKey.CONTACT_FORM_PRESENT.value,
-                observation.observed_at,
-            ),
-            resolver_version=RESOLVER_VERSION,
-        )
-    return None
 
 
 def _google_rating_fact(

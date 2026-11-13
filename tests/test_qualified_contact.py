@@ -20,7 +20,7 @@ def test_controlled_signal_tags_drop_unknown_values_and_preserve_vocabulary_labe
     assert controlled_signal_tags(["anything"], None) == []
 
 
-def test_best_channel_uses_verified_email_then_phone_form_visit_and_none() -> None:
+def test_best_channel_uses_verified_email_then_phone_visit_and_none() -> None:
     lead = _lead(
         contact_email="owner@example.test",
         verification_status=ContactVerificationStatus.VALID,
@@ -30,8 +30,8 @@ def test_best_channel_uses_verified_email_then_phone_form_visit_and_none() -> No
     phone = _lead(raw_sources=[{"phone": "416-555-0100"}])
     assert best_contact_channel(phone)[0] == BestChannel.PHONE
 
-    form = _lead(raw_sources=[{"website_enrichment": {"has_contact_form": True}}])
-    assert best_contact_channel(form)[0] == BestChannel.CONTACT_FORM
+    legacy_form = _lead(raw_sources=[{"website_enrichment": {"has_contact_form": True}}])
+    assert best_contact_channel(legacy_form)[0] == BestChannel.NONE
 
     visit = _lead(raw_sources=[{"formatted_address": "100 King St, Toronto"}])
     assert best_contact_channel(visit)[0] == BestChannel.VISIT

@@ -27,8 +27,6 @@ BOOLEAN_POSITIVE_ATTRIBUTES = frozenset(
     {
         "business_operational",
         "mobile_viewport_present",
-        "contact_form_present",
-        "quote_or_booking_form_present",
         "primary_cta_present",
         "click_to_call_present",
         "public_email_present",

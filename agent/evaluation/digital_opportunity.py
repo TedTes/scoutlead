@@ -90,7 +90,6 @@ def assess_digital_opportunity(
     *,
     website_reachable: bool,
     has_mobile_viewport: bool | None,
-    has_quote_or_booking_form: bool | None,
     rating: float | None,
     review_count: int | None,
     website_source_url: str | None,
@@ -117,16 +116,6 @@ def assess_digital_opportunity(
                     source_url=website_source_url,
                 )
             )
-        if has_quote_or_booking_form is False:
-            signals.append(
-                OpportunitySignal(
-                    key="missing_quote_or_booking_form",
-                    message="No quote, estimate, or booking form was found on inspected pages.",
-                    points=30,
-                    source_url=website_source_url,
-                )
-            )
-
     if rating is not None and rating < 4.3:
         signals.append(
             OpportunitySignal(

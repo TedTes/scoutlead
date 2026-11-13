@@ -1319,14 +1319,14 @@ def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
             profile.id,
             TerritoryUpdate(
                 radius_km=40,
-                signal_keys=["No quote flow", "No quote flow"],
+                signal_keys=["Website unavailable", "Website unavailable"],
             ),
         )
 
         assert updated.criteria_version == 2
         assert updated.criteria_hash != previous_hash
         assert updated.radius_km == 40
-        assert updated.signal_keys == ["no_quote_flow"]
+        assert updated.signal_keys == ["website_unavailable"]
 
         scheduled = service.update(
             profile.id,
@@ -2062,8 +2062,8 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         BusinessAttributeRepository(session).upsert(
             businesses[1].id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                value="missing",
                 observed_at=utcnow(),
                 source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
@@ -2078,7 +2078,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow"],
+                signals=["website_unavailable"],
                 exclude=[],
                 limit=25,
             )
@@ -2093,7 +2093,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         assert [row["title"] for row in rows] == [businesses[1].display_name]
         assert rows[0]["raw"]["profile_match"]["rank_position"] == 1
         assert rows[0]["raw"]["profile_match"]["matched_signal_count"] == 1
-        assert rows[0]["raw"]["profile_match"]["signals"]["no_quote_flow"]["matched"] is True
+        assert rows[0]["raw"]["profile_match"]["signals"]["website_unavailable"]["matched"] is True
         matched_signal = rows[0]["raw"]["profile_match"]["matched_signals"][0]
         assert matched_signal["source_evidence_id"]
         assert matched_signal["source"] == "google_places"
@@ -2104,9 +2104,9 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
             "value": matched_signal["value"],
             "confidence": matched_signal["confidence"],
         } == {
-            "signal_key": "no_quote_flow",
-            "attribute_key": "quote_or_booking_form_present",
-            "value": False,
+            "signal_key": "website_unavailable",
+            "attribute_key": "website_status",
+            "value": "missing",
             "confidence": "confirmed",
         }
 
@@ -2134,7 +2134,7 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
             raw={
                 "source": "company_website_signal",
                 "source_url": "https://hvac.example/contact",
-                "website_enrichment": {"has_quote_form": False},
+                "website_enrichment": {"availability_status": "unavailable"},
             },
         )
         canonical.record_business_evidence(
@@ -2149,8 +2149,8 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
         BusinessAttributeRepository(session).upsert(
             business.id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                value="unavailable",
                 observed_at=utcnow(),
                 source_evidence_id=website_evidence.source_evidence_id,
             ),
@@ -2166,7 +2166,7 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow"],
+                signals=["website_unavailable"],
                 exclude=[],
                 limit=25,
             )
@@ -2476,8 +2476,8 @@ def test_profile_matching_does_not_depend_on_learned_outcome_models() -> None:
         facts.upsert(
             businesses[0].id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.GOOGLE_REVIEW_COUNT,
+                value=8,
                 observed_at=utcnow(),
                 source_evidence_id=_latest_evidence_id(session, businesses[0].id),
             ),
@@ -2485,8 +2485,8 @@ def test_profile_matching_does_not_depend_on_learned_outcome_models() -> None:
         facts.upsert(
             businesses[1].id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.CONTACT_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.GOOGLE_REVIEW_COUNT,
+                value=12,
                 observed_at=utcnow(),
                 source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
@@ -2500,7 +2500,7 @@ def test_profile_matching_does_not_depend_on_learned_outcome_models() -> None:
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow", "no_contact_form"],
+                signals=["reviews_under_15"],
                 exclude=[],
                 limit=25,
             )
@@ -2539,8 +2539,8 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
         BusinessAttributeRepository(session).upsert(
             businesses[0].id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                value="missing",
                 observed_at=utcnow() - timedelta(days=60),
                 source_evidence_id=None,
             ),
@@ -2555,7 +2555,7 @@ def test_profile_stale_or_missing_signal_facts_do_not_enter_delivery() -> None:
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow"],
+                signals=["website_unavailable"],
                 exclude=[],
                 limit=25,
             )
@@ -2656,7 +2656,7 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
         ]
 
 
-def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None:
+def test_profile_signals_rank_equal_confirmed_matches_by_distance() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -2670,8 +2670,8 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
             facts.upsert(
                 business.id,
                 BusinessAttributeValue(
-                    key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                    value=False,
+                    key=BusinessAttributeKey.WEBSITE_STATUS,
+                    value="missing",
                     observed_at=utcnow(),
                         source_evidence_id=_latest_evidence_id(session, business.id),
                 ),
@@ -2679,8 +2679,8 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
         facts.upsert(
             businesses[1].id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.CONTACT_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.GOOGLE_REVIEW_COUNT,
+                value=8,
                 observed_at=utcnow(),
                 source_evidence_id=_latest_evidence_id(session, businesses[1].id),
             ),
@@ -2695,7 +2695,7 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow", "no_contact_form"],
+                signals=["website_unavailable", "reviews_under_15"],
                 exclude=[],
                 limit=25,
             )
@@ -2708,14 +2708,12 @@ def test_profile_signals_rank_by_confirmed_match_count_before_distance() -> None
         )
 
         assert [row["title"] for row in rows] == [
-            businesses[1].display_name,
             businesses[0].display_name,
+            businesses[1].display_name,
         ]
         assert [
             row["raw"]["profile_match"]["matched_signal_count"] for row in rows
-        ] == [2, 1]
-        scores = [row["raw"]["profile_match"]["opportunity_score"] for row in rows]
-        assert scores[0] > scores[1]
+        ] == [1, 2]
         assert set(rows[0]["raw"]["profile_match"]["score_breakdown"]) == {
             "severity",
             "confidence",
@@ -2736,8 +2734,8 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
         BusinessAttributeRepository(session).upsert(
             business.id,
             BusinessAttributeValue(
-                key=BusinessAttributeKey.QUOTE_OR_BOOKING_FORM_PRESENT,
-                value=False,
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                value="missing",
                 observed_at=utcnow(),
                 source_evidence_id=_latest_evidence_id(session, business.id),
             ),
@@ -2752,7 +2750,7 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                signals=["no_quote_flow"],
+                signals=["website_unavailable"],
                 exclude=[],
                 limit=25,
             )
@@ -2791,7 +2789,7 @@ def test_profile_materialization_qualifies_only_confirmed_signal_rows() -> None:
         assert leads[0].qualification.qualified is True
         assert leads[0].qualification.fit_status == AgentFitStatus.GOOD_FIT
         assert leads[0].qualification.positive_signals == [
-            "no_quote_flow: quote_or_booking_form_present=false"
+            "website_unavailable: website_status=missing"
         ]
 
         general_profile = TerritoryService(

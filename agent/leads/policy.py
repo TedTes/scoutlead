@@ -111,12 +111,6 @@ def best_contact_channel(lead: LeadRead) -> tuple[BestChannel, str]:
         return BestChannel.EMAIL, "A verified email is available."
     if _raw_value(lead.raw_sources, {"phone", "contact_phone", "telephone"}):
         return BestChannel.PHONE, "A public phone number is available."
-    signals = [*(lead.research.signals if lead.research else [])]
-    if any("contact form" in signal.casefold() for signal in signals) or _raw_truthy(
-        lead.raw_sources,
-        {"has_contact_form", "contact_form"},
-    ):
-        return BestChannel.CONTACT_FORM, "The business website has a contact form."
     if _raw_value(lead.raw_sources, {"address", "street_address", "formatted_address"}):
         return BestChannel.VISIT, "A public business address is available."
     return BestChannel.NONE, "No verified outreach channel is available."

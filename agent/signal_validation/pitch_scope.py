@@ -5,8 +5,6 @@ from typing import Any
 
 PAGE_SCOPED_NEGATIVE_SIGNALS = frozenset(
     {
-        "contact_form_present",
-        "quote_or_booking_form_present",
         "primary_cta_present",
         "click_to_call_present",
     }
@@ -22,8 +20,6 @@ PAGESPEED_GRADE_SIGNALS = frozenset(
 )
 
 _REQUIRED_SCOPE = {
-    "contact_form_present": "contact_intent_page_complete",
-    "quote_or_booking_form_present": "quote_intent_page_complete",
     "primary_cta_present": "homepage_complete",
     "click_to_call_present": "mobile_render_complete",
 }

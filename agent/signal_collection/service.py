@@ -410,13 +410,9 @@ def _website_payload(
             "inspected_urls": enrichment.inspected_urls,
             "availability_status": enrichment.availability_status,
             "availability_reason": enrichment.availability_reason,
-            "has_contact_form": enrichment.has_contact_form,
-            "has_quote_form": enrichment.has_quote_form,
-            "has_booking_form": enrichment.has_booking_form,
             "uses_https": enrichment.uses_https,
             "has_mobile_viewport": enrichment.has_mobile_viewport,
             **enrichment.page_signals,
-            "quote_signals": enrichment.quote_signals,
             "service_signals": enrichment.service_signals,
             "errors": enrichment.errors[:5],
         },
@@ -432,10 +428,6 @@ def _extract_value(definition: SignalDefinitionModel, payload: dict[str, Any]) -
         enrichment = {}
     extractors = {
         "website_status": lambda: _website_status(enrichment),
-        "contact_form": lambda: enrichment.get("has_contact_form"),
-        "quote_or_booking_form": lambda: _combined_boolean(
-            enrichment.get("has_quote_form"), enrichment.get("has_booking_form")
-        ),
         "google_rating": lambda: _first_value(payload, {"google_rating", "rating"}),
         "google_review_count": lambda: _first_value(
             payload, {"google_review_count", "userRatingCount", "review_count"}

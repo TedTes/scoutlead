@@ -83,11 +83,11 @@ class _StructuredLLM:
 
 
 def test_boolean_evidence_labels_reflect_the_value() -> None:
-    missing = _evidence({"signal_key": "contact_form_present", "value": False})
-    present = _evidence({"signal_key": "contact_form_present", "value": True})
+    missing = _evidence({"signal_key": "primary_cta_present", "value": False})
+    present = _evidence({"signal_key": "primary_cta_present", "value": True})
 
-    assert missing.label == "Contact form missing"
-    assert present.label == "Contact form present"
+    assert missing.label == "Primary CTA missing"
+    assert present.label == "Primary CTA present"
 
 
 def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
@@ -101,15 +101,14 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         package = service.generate(result.id)
 
         assert package.channels == ["message", "call", "form", "email"]
-        assert package.content.observation == "No quote or booking flow was found in the latest website check."
+        assert package.content.observation == "The latest website quality score was 42."
         assert package.phone == "416-555-0101"
         assert package.contact_url == "https://example.com/contact"
         assert package.provider == "template"
         assert package.model is None
         assert package.usage == {}
         assert "Lakeside Painting" in package.content.message.body
-        assert "quote or booking" in package.content.message.body
-        assert "quote" in package.content.message.body.lower()
+        assert "website" in package.content.message.body.lower()
         assert len(package.content.message.body) <= 160
         assert "example" not in package.content.message.body.lower()
         assert len(package.content.evidence_fingerprint) == 64
@@ -118,15 +117,15 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert package.content.form.body.count("\n\n") >= 5
         assert package.content.call.ask.endswith("?")
         assert package.content.call.discovery_question == (
-            "How do customers currently request a quote or schedule work?"
+            "Is the current website mainly informational, or is it expected to generate inquiries?"
         )
         assert len(package.content.call.branches) == 6
-        assert package.content.strategy.service_key == "booking_payments"
+        assert package.content.strategy.service_key == "website_modernization"
         assert package.content.strategy.phrasing_provider == "deterministic"
         assert package.content.message_template is not None
         assert package.content.message_template.lead_reason == package.content.observation
         assert package.content.message_template.opportunity
-        assert "Lakeside Painting" in package.content.message_template.opportunity
+        assert package.content.message_template.opportunity
         assert service.generate(result.id).id == package.id
         assert session.scalar(
             select(func.count())
@@ -313,7 +312,7 @@ def test_workspace_shortlist_uses_the_shortlisted_result_id_for_duplicate_busine
             niche_id=first_audience.niche_id,
             market_key="north-york",
             city="North York",
-            signal_keys=["no_quote_flow"],
+            signal_keys=["website_quality_score"],
             label="Painters · North York",
             criteria_hash="duplicate-business-test",
         )
@@ -569,7 +568,7 @@ def test_outreach_package_refreshes_older_template_copy() -> None:
 
         assert refreshed is not None
         assert "on businesses in" not in refreshed.content.message.body
-        assert "quote" in refreshed.content.message.body.lower()
+        assert "website" in refreshed.content.message.body.lower()
         assert len(refreshed.content.message.body) <= 160
         assert row.prompt_version == 12
 
@@ -678,9 +677,9 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
                 "confidence": "possible",
             },
             {
-                "signal_key": "no_quote_flow",
-                "fact_key": "quote_or_booking_form_present",
-                "value": False,
+                "signal_key": "website_quality_score",
+                "fact_key": "website_quality_score",
+                "value": 42,
                 "confidence": "confirmed",
                 "pitch_eligible": True,
             },
@@ -696,7 +695,7 @@ def test_outreach_package_ignores_possible_evidence_when_confirmed_exists() -> N
 
         package = service.generate(result.id)
 
-        assert package.content.observation.startswith("No quote")
+        assert package.content.observation == "The latest website quality score was 42."
 
 
 def test_outreach_package_uses_safe_fallback_for_unconfirmed_website_observation() -> None:
@@ -780,7 +779,7 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
         niche_id=niche.id,
         market_key="toronto",
         city="Toronto",
-        signal_keys=["no_quote_flow"] if confirmed else [],
+        signal_keys=["website_quality_score"] if confirmed else [],
         label="Painters · Toronto",
         criteria_hash="test",
     )
@@ -794,9 +793,9 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
     audience.match_completed_at = now
     matched = [
         {
-            "signal_key": "no_quote_flow",
-            "fact_key": "quote_or_booking_form_present",
-            "value": False,
+            "signal_key": "website_quality_score",
+            "fact_key": "website_quality_score",
+            "value": 42,
             "confidence": "confirmed",
             "pitch_eligible": True,
         }

@@ -80,8 +80,6 @@ MATCH_ATTRIBUTE_LABELS = {
     "performance_score": "Low PageSpeed performance",
     "accessibility_score": "Low accessibility score",
     "best_practices_score": "Low best-practices score",
-    "contact_form_present": "No contact form",
-    "quote_or_booking_form_present": "No quote or booking flow",
     "primary_cta_present": "No primary call to action",
     "click_to_call_present": "No click-to-call",
     "public_email_present": "No public email",
