@@ -25,21 +25,17 @@ def _assessment(status: str):
         observation = BusinessAttributeModel(
             id=new_id("observation"),
             business_id=business.id,
-            row_type="evidence",
-            attribute_key="source:google_places:mobile-painter",
+            attribute_key="business_name",
             value_type="json",
             value_json={"businessStatus": status},
             confidence=100,
-            resolution_state="observed",
-            supporting_evidence_ids=[],
             source="google_places",
             source_external_id="places/mobile-painter",
             source_query_signature=None,
-            source_content_hash="b" * 64,
+            evidence_hash="b" * 64,
             source_url="https://maps.example/mobile-painter",
             evidence={"businessStatus": status},
             observed_at=now,
-            resolver_version=1,
         )
         session.add_all([business, observation])
         session.commit()

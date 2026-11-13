@@ -45,10 +45,10 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert summary.businesses_created == 1
         assert summary.businesses_updated == 0
         assert summary.contacts_created == 1
-        assert summary.evidence_records_created == 1
+        assert summary.evidence_records_created == 2
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
-        assert _evidence_count(session) == 1
+        assert _evidence_count(session) == 2
         assert _count(session, NicheModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
         assert _count(session, LeadModel) == 0
@@ -69,7 +69,7 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
 
         observation = session.scalar(
             select(BusinessAttributeModel).where(
-                BusinessAttributeModel.row_type == "evidence"
+                BusinessAttributeModel.attribute_key == "business_name"
             )
         )
         assert observation is not None
@@ -111,7 +111,7 @@ def test_business_seed_import_is_idempotent() -> None:
         assert second.evidence_records_created == 0
         assert _count(session, BusinessModel) == 1
         assert _count(session, ContactModel) == 1
-        assert _evidence_count(session) == 1
+        assert _evidence_count(session) == 2
         assert _count(session, NicheModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
 
@@ -133,7 +133,7 @@ def test_seed_import_keeps_source_evidence_without_a_parallel_validation_log() -
 
         evidence = session.scalar(
             select(BusinessAttributeModel).where(
-                BusinessAttributeModel.row_type == "evidence"
+                BusinessAttributeModel.attribute_key == "business_name"
             )
         )
         assert evidence is not None
@@ -277,9 +277,7 @@ def test_business_seed_import_persists_match_columns_without_inventing_form_fact
 
         fact_keys = set(
             session.scalars(
-                select(BusinessAttributeModel.attribute_key).where(
-                    BusinessAttributeModel.row_type == "attribute"
-                )
+                select(BusinessAttributeModel.attribute_key)
             )
         )
         assert "website_status" in fact_keys
@@ -558,9 +556,7 @@ def _count(session, model) -> int:
 def _evidence_count(session) -> int:
     return int(
         session.scalar(
-            select(func.count())
-            .select_from(BusinessAttributeModel)
-            .where(BusinessAttributeModel.row_type == "evidence")
+            select(func.count()).select_from(BusinessAttributeModel)
         )
         or 0
     )

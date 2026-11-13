@@ -252,34 +252,29 @@ BusinessAttributeDefinitionModel = SignalDefinitionModel
 
 
 class BusinessAttributeModel(TimestampMixin, Base):
-    """Current business attributes and the evidence that produced them.
-
-    ``row_type='attribute'`` rows are the canonical values used by matching.
-    ``row_type='evidence'`` rows retain immutable provider payloads so every
-    canonical value remains inspectable without a parallel observation table.
-    """
+    """One current business attribute with its source evidence attached."""
 
     __tablename__ = "business_attributes"
     __table_args__ = (
         UniqueConstraint(
             "business_id",
-            "row_type",
             "attribute_key",
-            name="uq_business_attributes_business_type_key",
+            name="uq_business_attributes_business_key",
         ),
         Index("ix_business_attributes_key_text", "attribute_key", "value_text"),
         Index("ix_business_attributes_key_number", "attribute_key", "value_number"),
         Index("ix_business_attributes_key_boolean", "attribute_key", "value_boolean"),
         Index("ix_business_attributes_business_observed", "business_id", "observed_at"),
-        Index("ix_business_attributes_source_hash", "source", "source_content_hash"),
+        Index(
+            "ix_business_attributes_source_hash",
+            "source_provider",
+            "evidence_hash",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     business_id: Mapped[str] = mapped_column(
         ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    row_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="attribute", index=True
     )
     attribute_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     signal_definition_id: Mapped[str | None] = mapped_column(
@@ -291,32 +286,25 @@ class BusinessAttributeModel(TimestampMixin, Base):
     value_boolean: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     value_json: Mapped[Any | None] = mapped_column(JSON, nullable=True)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    # Legacy column name: this stores opportunity severity (0=no opportunity,
-    # 100=strong opportunity). Confidence separately describes the evidence.
-    attribute_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    opportunity_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
     score_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     score_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    resolution_state: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="unknown", index=True
-    )
-    supporting_evidence_ids: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list
-    )
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    source_provider: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     source_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_query_signature: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    source_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    evidence_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    resolver_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    # Evidence rows expose the familiar provider-field names while storing all
-    # provenance in this one table.
+    # Compatibility names keep existing API payloads stable while the database
+    # uses explicit attribute terminology.
+    source = synonym("source_provider")
     external_id = synonym("source_external_id")
     query_signature = synonym("source_query_signature")
-    content_hash = synonym("source_content_hash")
+    content_hash = synonym("evidence_hash")
+    attribute_score = synonym("opportunity_score")
 
     business: Mapped[BusinessModel] = relationship(back_populates="attributes")
     signal_definition: Mapped["SignalDefinitionModel | None"] = relationship()
@@ -328,19 +316,15 @@ class BusinessAttributeModel(TimestampMixin, Base):
     @raw_payload.setter
     def raw_payload(self, value: dict[str, Any]) -> None:
         self.evidence = value
-        if self.row_type == "evidence":
-            self.value_json = value
 
     @property
     def source_evidence_id(self) -> str | None:
-        if self.row_type == "evidence":
-            return self.id
-        return next(iter(self.supporting_evidence_ids or []), None)
+        return self.id
 
     @source_evidence_id.setter
     def source_evidence_id(self, value: str | None) -> None:
-        self.supporting_evidence_ids = [value] if value else []
-
+        # Provenance now lives directly on the attribute row.
+        pass
 
 class AudienceResultModel(TimestampMixin, Base):
     __tablename__ = "audience_results"

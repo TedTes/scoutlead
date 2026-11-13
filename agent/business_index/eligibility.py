@@ -26,12 +26,10 @@ def searchable_business_conditions(*, now: datetime | None = None) -> list:
             select(operational.id).where(
                 operational.business_id == BusinessModel.id,
                 operational.attribute_key == "business_operational",
-                operational.row_type == "attribute",
                 operational.value_type == "boolean",
                 operational.value_boolean.is_(False),
-                operational.resolution_state == "confirmed",
                 operational.confidence >= 85,
-                operational.source_content_hash.is_not(None),
+                operational.evidence_hash.is_not(None),
                 operational.expires_at.is_not(None),
                 operational.expires_at > current_time,
             )

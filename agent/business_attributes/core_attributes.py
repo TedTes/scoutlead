@@ -97,7 +97,6 @@ def sync_observed_business_attributes(
     contact_form = session.scalar(
         select(BusinessAttributeModel).where(
             BusinessAttributeModel.business_id == business.id,
-            BusinessAttributeModel.row_type == "attribute",
             BusinessAttributeModel.attribute_key == "contact_form_url",
         )
     )
@@ -139,7 +138,6 @@ def sync_observed_business_attributes(
                 observed_at=observation.observed_at,
                 source_evidence_id=source_evidence_id,
                 confidence=fact_confidence,
-                resolution_state="confirmed",
             ),
             track_change=track_changes,
         )

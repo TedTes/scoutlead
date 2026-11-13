@@ -472,19 +472,6 @@ class BusinessIndexPipelineService:
                 )
             )
         )
-        fact_observation_ids = {
-            fact.source_evidence_id
-            for fact in current.values()
-            if fact.source_evidence_id
-        }
-        fact_observations = {
-            observation.id: observation
-            for observation in self.session.scalars(
-                select(BusinessAttributeModel).where(
-                    BusinessAttributeModel.id.in_(fact_observation_ids)
-                )
-            )
-        }
         candidates = [
             business_id
             for business_id in business_ids
@@ -497,7 +484,7 @@ class BusinessIndexPipelineService:
             or current[business_id].value_text in {"unknown", "not_listed"}
             or _unverified_missing_fact(
                 current[business_id],
-                fact_observations.get(current[business_id].source_evidence_id),
+                current[business_id],
             )
         ]
         limit = min(max(int(segment.target_business_count or 25), 1), 100)

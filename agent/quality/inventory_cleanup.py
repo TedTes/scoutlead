@@ -74,7 +74,6 @@ def cleanup_search_origin_inventory(
         session.scalars(
             select(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id.in_(business_ids),
-                BusinessAttributeModel.row_type == "evidence",
             )
         )
     )
@@ -148,7 +147,6 @@ def cleanup_search_origin_inventory(
                 BusinessAttributeModel.business_id == business.id
             )
         ):
-            fact.resolution_state = "invalid_source"
             fact.confidence = 0
 
     if apply:

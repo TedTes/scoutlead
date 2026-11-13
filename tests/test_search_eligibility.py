@@ -66,42 +66,21 @@ def _searchable_ids(session) -> list[str]:
 
 def _add_operational_attribute(session, business, observed_at, value: bool) -> None:
     payload = {"businessStatus": "OPERATIONAL" if value else "CLOSED_PERMANENTLY"}
-    evidence = BusinessAttributeModel(
-        id=new_id("business_evidence"),
-        business_id=business.id,
-        row_type="evidence",
-        attribute_key=f"evidence:google_places:{business.id}",
-        value_type="json",
-        value_json=payload,
-        confidence=100,
-        resolution_state="confirmed",
-        observed_at=observed_at,
-        expires_at=observed_at + timedelta(days=90),
-        source="google_places",
-        source_external_id=f"place-{business.id}",
-        source_content_hash="a" * 64,
-        source_url=f"https://maps.example/{business.id}",
-        evidence=payload,
-    )
-    session.add(evidence)
-    session.flush()
     session.add(
         BusinessAttributeModel(
             id=new_id("business_attribute"),
             business_id=business.id,
-            row_type="attribute",
             attribute_key="business_operational",
             value_type="boolean",
             value_boolean=value,
             confidence=100,
             attribute_score=100,
-            resolution_state="confirmed",
-            supporting_evidence_ids=[evidence.id],
             observed_at=observed_at,
             expires_at=observed_at + timedelta(days=90),
             source="google_places",
-            source_content_hash=evidence.source_content_hash,
-            source_url=evidence.source_url,
+            evidence_hash="a" * 64,
+            source_external_id=f"place-{business.id}",
+            source_url=f"https://maps.example/{business.id}",
             evidence=payload,
         )
     )

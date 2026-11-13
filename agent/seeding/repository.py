@@ -53,7 +53,6 @@ class BusinessSeedRepository:
             self.session.scalar(
                 select(func.count())
                 .select_from(BusinessAttributeModel)
-                .where(BusinessAttributeModel.row_type == "evidence")
             )
             or 0
         )

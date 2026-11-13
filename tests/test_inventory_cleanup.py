@@ -46,7 +46,7 @@ def test_search_origin_cleanup_is_dry_run_first_and_preserves_structured_entitie
         dry_run = cleanup_search_origin_inventory(session)
         assert dry_run.archived == 1
         assert dry_run.quarantined == 1
-        assert dry_run.retained == 1
+        assert dry_run.retained == 0
         assert session.get(BusinessModel, result_page.business_id).status == "active"
 
         applied = cleanup_search_origin_inventory(session, apply=True)
@@ -59,7 +59,7 @@ def test_search_origin_cleanup_is_dry_run_first_and_preserves_structured_entitie
             session.scalars(
                 select(BusinessAttributeModel).where(
                     BusinessAttributeModel.business_id == result_page.business_id,
-                    BusinessAttributeModel.resolution_state == "invalid_source",
+                    BusinessAttributeModel.confidence == 0,
                 )
             )
         )

@@ -253,7 +253,6 @@ class ProfileMatchService:
                     fact.confidence,
                     fact.attribute_score,
                     fact.score_version,
-                    fact.resolution_state,
                     fact.expires_at,
                     fact.source,
                     fact.source_url,
@@ -424,7 +423,6 @@ class ProfileMatchService:
             )
             if not observation_is_quarantined(self.session, candidate)
         ]
-        observations_by_id = {candidate.id: candidate for candidate in observations}
         contact = next(
             (
                 candidate
@@ -455,11 +453,7 @@ class ProfileMatchService:
                 require_provenance=True,
             )
             match_confidence = _signal_match_confidence(spec, fact)
-            fact_observation = (
-                observations_by_id.get(fact.source_evidence_id)
-                if fact is not None and fact.source_evidence_id
-                else None
-            )
+            fact_observation = fact
             evidence = {
                 "attribute_key": spec.attribute_key,
                 "value": attribute_value(fact),
@@ -477,7 +471,7 @@ class ProfileMatchService:
                 )
                 evidence.update(
                     {
-                        "source_evidence_id": fact_observation.id,
+                        "attribute_id": fact_observation.id,
                         "source": fact_observation.source,
                         "source_url": fact_observation.source_url,
                         "observed_at": fact_observation.observed_at.isoformat(),
@@ -505,12 +499,12 @@ class ProfileMatchService:
                 "pitch_reason": evidence["pitch_reason"],
                 **(
                     {
-                        "source_evidence_id": evidence["source_evidence_id"],
+                        "attribute_id": evidence["attribute_id"],
                         "source": evidence["source"],
                         "source_url": evidence["source_url"],
                         "observed_at": evidence["observed_at"],
                     }
-                    if evidence.get("source_evidence_id")
+                    if evidence.get("attribute_id")
                     else {}
                 ),
             }
@@ -518,9 +512,9 @@ class ProfileMatchService:
             if evidence["matched"] is True
         ]
         matched_observations = [
-            observations_by_id[item["source_evidence_id"]]
+            facts[item["attribute_key"]]
             for item in matched_signals
-            if item.get("source_evidence_id") in observations_by_id
+            if item.get("attribute_key") in facts
         ]
         observation = (
             matched_observations[0]
@@ -668,7 +662,7 @@ class ProfileMatchService:
             **(observation.raw_payload if observation else {}),
             "match_origin": "profile_sql",
             "canonical_business_id": business.id,
-            "source_evidence_id": observation.id if observation else None,
+            "source_attribute_id": observation.id if observation else None,
             "business_attributes": {
                 key: attribute_value(value) for key, value in facts.items()
             },

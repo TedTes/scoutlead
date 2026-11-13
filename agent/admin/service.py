@@ -340,13 +340,12 @@ class AdminDataService:
             raise ValidationError("Selected scope requires at least one business")
         statement = select(BusinessAttributeModel).where(
             BusinessAttributeModel.signal_definition_id == definition.id,
-            BusinessAttributeModel.row_type == "attribute",
         )
         if scope == "selected":
             statement = statement.where(BusinessAttributeModel.business_id.in_(selected_ids))
         facts = list(self.session.scalars(statement))
         for fact in facts:
-            fact.resolution_state = "confirmed" if decision == "approve" else "rejected"
+            fact.confidence = max(fact.confidence, 90) if decision == "approve" else 0
         affected_ids = [fact.business_id for fact in facts]
         self._audit(
             f"signal:validate:{decision}",
@@ -948,7 +947,6 @@ class AdminDataService:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id == business_id,
-                    BusinessAttributeModel.row_type == "attribute",
                 )
                 .order_by(BusinessAttributeModel.attribute_key)
             )
@@ -1034,8 +1032,10 @@ class AdminDataService:
                     "key": attribute.attribute_key,
                     "value": _attribute_value(attribute),
                     "confidence": attribute.confidence,
-                    "resolution_state": attribute.resolution_state,
-                    "evidence_state": attribute.resolution_state,
+                    "evidence_state": "usable" if attribute.confidence > 0 else "rejected",
+                    "source_provider": attribute.source_provider,
+                    "source_url": attribute.source_url,
+                    "evidence_hash": attribute.evidence_hash,
                     "observed_at": attribute.observed_at,
                     "expires_at": attribute.expires_at,
                 }
@@ -1100,7 +1100,6 @@ class AdminDataService:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id == business_id,
-                    BusinessAttributeModel.row_type == "attribute",
                 )
                 .order_by(BusinessAttributeModel.attribute_key)
             )
@@ -1125,24 +1124,6 @@ class AdminDataService:
         )
         definitions_by_id = {definition.id: definition for definition in definitions}
         definitions_by_key = {definition.key: definition for definition in definitions}
-
-        evidence_ids = {
-            evidence_id
-            for attribute in attributes
-            for evidence_id in (attribute.supporting_evidence_ids or [])
-            if evidence_id is not None
-        }
-        evidence_records = list(
-            self.session.scalars(
-                select(BusinessAttributeModel)
-                .where(
-                    BusinessAttributeModel.business_id == business_id,
-                    BusinessAttributeModel.id.in_(evidence_ids),
-                    BusinessAttributeModel.row_type == "evidence",
-                )
-                .order_by(BusinessAttributeModel.observed_at.desc())
-            )
-        ) if evidence_ids else []
 
         return {
             "business_id": business_id,
@@ -1181,16 +1162,17 @@ class AdminDataService:
             ],
             "evidence_records": [
                 {
-                    "id": evidence.id,
-                    "source": evidence.source,
-                    "external_id": evidence.external_id,
-                    "query_signature": evidence.query_signature,
-                    "content_hash": evidence.content_hash,
-                    "source_url": evidence.source_url,
-                    "payload": evidence.raw_payload,
-                    "observed_at": evidence.observed_at,
+                    "id": attribute.id,
+                    "attribute_key": attribute.attribute_key,
+                    "source": attribute.source_provider,
+                    "external_id": attribute.source_external_id,
+                    "query_signature": attribute.source_query_signature,
+                    "content_hash": attribute.evidence_hash,
+                    "source_url": attribute.source_url,
+                    "payload": attribute.evidence,
+                    "observed_at": attribute.observed_at,
                 }
-                for evidence in evidence_records
+                for attribute in attributes
             ],
         }
 
@@ -1199,9 +1181,6 @@ class AdminDataService:
         lineage = self.attribute_lineage(business_id)
         attributes_by_key = {
             attribute["key"]: attribute for attribute in lineage["attributes"]
-        }
-        evidence_by_id = {
-            evidence["id"]: evidence for evidence in lineage["evidence_records"]
         }
         fallback_values = {
             "business_name": detail["display_name"],
@@ -1220,11 +1199,6 @@ class AdminDataService:
         for definition in lineage["attribute_definitions"]:
             key = definition["key"]
             attribute = attributes_by_key.get(key)
-            evidence = (
-                evidence_by_id.get(attribute.get("source_evidence_id"))
-                if attribute and attribute.get("source_evidence_id")
-                else None
-            )
             value = (
                 attribute.get("value")
                 if attribute is not None
@@ -1238,19 +1212,10 @@ class AdminDataService:
                 "opportunity_score": attribute.get("opportunity_score") if attribute else None,
                 "score_reason": attribute.get("score_reason") if attribute else None,
                 "evidence_confidence": attribute.get("evidence_confidence") if attribute else None,
-                "resolution_state": attribute.get("resolution_state") if attribute else None,
                 "evidence_state": attribute.get("evidence_state") if attribute else None,
                 "observed_at": attribute.get("observed_at") if attribute else None,
                 "expires_at": attribute.get("expires_at") if attribute else None,
-                "source": (
-                    {
-                        "evidence_id": evidence["id"],
-                        "provider": evidence["source"],
-                        "url": evidence.get("source_url"),
-                    }
-                    if evidence is not None
-                    else None
-                ),
+                "source": attribute.get("source") if attribute else None,
             }
         return {
             "business": {
@@ -1858,7 +1823,6 @@ class AdminDataService:
                     select(BusinessAttributeModel.business_id)
                     .where(
                         BusinessAttributeModel.business_id.in_(business_ids),
-                        BusinessAttributeModel.row_type == "attribute",
                     )
                     .distinct()
                 )
@@ -1884,7 +1848,6 @@ class AdminDataService:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id.in_(business_ids),
-                    BusinessAttributeModel.row_type == "attribute",
                 )
                 .order_by(
                     BusinessAttributeModel.business_id,
@@ -2611,7 +2574,7 @@ def _fact_attribute_component(
     *,
     now,
 ) -> dict[str, Any]:
-    has_source = bool(fact.source_content_hash or fact.source or fact.source_url)
+    has_source = bool(fact.evidence_hash or fact.source_provider or fact.source_url)
     expires_at = fact.expires_at
     comparable_expiry = (
         expires_at
@@ -2619,7 +2582,7 @@ def _fact_attribute_component(
         else expires_at.replace(tzinfo=timezone.utc)
     )
     is_fresh = comparable_expiry is None or comparable_expiry >= now
-    is_confirmed = fact.resolution_state == "confirmed"
+    is_confirmed = fact.confidence > 0
     confidence = min(max(int(fact.confidence), 0), 100)
     score = fact.attribute_score
     if score is None:
@@ -2628,7 +2591,7 @@ def _fact_attribute_component(
         "usable"
         if has_source and is_fresh and is_confirmed
         else "rejected"
-        if fact.resolution_state == "rejected"
+        if fact.confidence <= 0
         else "source missing"
         if not has_source
         else "expired"
@@ -2643,7 +2606,7 @@ def _fact_attribute_component(
             f"{confidence}% evidence confidence",
             "source linked" if has_source else "source missing",
             "fresh" if is_fresh else "expired",
-            fact.resolution_state,
+            "current attribute" if is_confirmed else "rejected attribute",
         ]
     )
     component = _attribute_component(
@@ -2658,9 +2621,11 @@ def _fact_attribute_component(
             "value": _attribute_value(fact),
             "evidence_confidence": confidence,
             "evidence_state": evidence_state,
-            "resolution_state": fact.resolution_state,
             "quality_state": "usable" if evidence_state == "usable" else evidence_state,
-            "source_evidence_id": (fact.supporting_evidence_ids or [None])[0],
+            "source_evidence_id": fact.id,
+            "source_provider": fact.source_provider,
+            "source_url": fact.source_url,
+            "evidence_hash": fact.evidence_hash,
             "observed_at": fact.observed_at,
             "expires_at": fact.expires_at,
         }
@@ -2763,10 +2728,10 @@ def _attribute_lineage_dict(
         matches_opportunity
         and definition is not None
         and definition.status == "active"
-        and attribute.resolution_state == "confirmed"
+        and attribute.confidence > 0
         and bool(
-            attribute.source_content_hash
-            or attribute.source
+            attribute.evidence_hash
+            or attribute.source_provider
             or attribute.source_url
         )
         and attribute.confidence >= minimum_confidence
@@ -2782,12 +2747,18 @@ def _attribute_lineage_dict(
         "score_reason": attribute.score_reason,
         "evidence_confidence": attribute.confidence,
         "confidence": attribute.confidence,
-        "resolution_state": attribute.resolution_state,
-        "evidence_state": "usable" if eligible else attribute.resolution_state,
+        "evidence_state": "usable" if eligible else "insufficient",
         "observed_at": attribute.observed_at,
         "expires_at": attribute.expires_at,
-        "source_evidence_id": (attribute.supporting_evidence_ids or [None])[0],
-        "supporting_evidence_ids": list(attribute.supporting_evidence_ids or []),
+        "source_evidence_id": attribute.id,
+        "source": {
+            "provider": attribute.source_provider,
+            "external_id": attribute.source_external_id,
+            "query_signature": attribute.source_query_signature,
+            "url": attribute.source_url,
+            "evidence_hash": attribute.evidence_hash,
+            "payload": attribute.evidence,
+        },
         "signal": (
             {
                 "definition_id": definition.id,
@@ -2873,7 +2844,9 @@ def _business_signal_dict(
         "status": status,
         "value": _attribute_value(fact) if fact is not None else None,
         "confidence": fact.confidence if fact is not None else None,
-        "evidence_state": fact.resolution_state if fact is not None else None,
+        "evidence_state": (
+            "usable" if fact is not None and fact.confidence > 0 else "missing"
+        ),
         "observed_at": fact.observed_at if fact is not None else None,
         "expires_at": fact.expires_at if fact is not None else None,
     }

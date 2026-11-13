@@ -23,12 +23,11 @@ STANDING_WEBSITE_ATTRIBUTE_KEYS = frozenset(
 
 
 def fact_requires_collection(fact, *, now: datetime | None = None):
-    """One shared SQL predicate for missing, unresolved, or stale evidence."""
+    """One shared SQL predicate for missing or stale evidence."""
 
     current_time = now or utcnow()
     return or_(
         fact.id.is_(None),
-        fact.resolution_state != "confirmed",
         fact.expires_at.is_(None),
         fact.expires_at <= current_time,
     )

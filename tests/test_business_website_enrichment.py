@@ -17,9 +17,11 @@ from tests.test_business_seeding import painting_seed
 
 
 def _website_evidence_query():
-    return select(BusinessAttributeModel).where(
-        BusinessAttributeModel.row_type == "evidence",
-        BusinessAttributeModel.source == SOURCE_NAME,
+    return (
+        select(BusinessAttributeModel)
+        .where(BusinessAttributeModel.source == SOURCE_NAME)
+        .order_by(BusinessAttributeModel.observed_at.desc())
+        .limit(1)
     )
 
 

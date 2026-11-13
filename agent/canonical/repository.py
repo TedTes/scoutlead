@@ -34,6 +34,7 @@ from canonical.semantics import (
     semantic_key,
 )
 from canonical.website_evidence import trusted_website_evidence
+from business_attributes.repository import BusinessAttributeRepository, BusinessAttributeValue
 from business_attributes.service import reconcile_business_attributes
 from business_attributes.core_attributes import sync_observed_business_attributes
 from business_validation.policy import business_is_publishable
@@ -271,7 +272,6 @@ class CanonicalRepository:
                 BusinessNicheMembershipModel.business_id == BusinessModel.id,
             )
             .where(
-                BusinessAttributeModel.row_type == "evidence",
                 BusinessAttributeModel.source == source,
                 BusinessAttributeModel.query_signature == signature,
                 BusinessNicheMembershipModel.niche_id == resolution.niche_id,
@@ -554,7 +554,6 @@ class CanonicalRepository:
             observations = self.session.scalars(
                 select(BusinessAttributeModel)
                 .where(
-                    BusinessAttributeModel.row_type == "evidence",
                     BusinessAttributeModel.source == source,
                     BusinessAttributeModel.external_id == external_id,
                 )
@@ -770,8 +769,8 @@ class CanonicalRepository:
         append: bool = False,
     ) -> BusinessAttributeModel:
         now = utcnow()
-        # An observation is an immutable evidence snapshot. Keep it independent
-        # from caller-owned dictionaries that may be enriched after this method.
+        # Each current attribute carries the provider payload that supports it.
+        # Keep the snapshot independent from caller-owned dictionaries.
         snapshot = deepcopy(raw)
         external_id = external_id_from_raw(snapshot)
         signature = query_signature(source=source, query=query)
@@ -782,12 +781,9 @@ class CanonicalRepository:
                 select(BusinessAttributeModel)
                 .where(
                     BusinessAttributeModel.business_id == business.id,
-                    BusinessAttributeModel.row_type == "evidence",
+                    BusinessAttributeModel.attribute_key == "business_name",
                     BusinessAttributeModel.source == source,
-                    or_(
-                        BusinessAttributeModel.external_id == external_id,
-                        BusinessAttributeModel.query_signature == signature,
-                    ),
+                    BusinessAttributeModel.evidence_hash == content_hash,
                 )
                 .order_by(BusinessAttributeModel.observed_at.desc())
                 .limit(25)
@@ -797,31 +793,21 @@ class CanonicalRepository:
                 if meaningful_observation_hash(existing.raw_payload or {}) == fingerprint:
                     return existing
 
-        observation = BusinessAttributeModel(
-            id=new_id("sourceobs"),
-            business_id=business.id,
-            row_type="evidence",
-            attribute_key=f"source:{source}:{content_hash}",
-            value_type="json",
-            value_json=snapshot,
-            confidence=100,
-            attribute_score=None,
-            score_version=None,
-            score_reason=None,
-            resolution_state="observed",
-            supporting_evidence_ids=[],
-            source=source,
-            source_external_id=external_id,
-            source_query_signature=signature,
-            source_content_hash=content_hash,
-            source_url=source_url_from_raw(snapshot),
-            evidence=snapshot,
-            observed_at=now,
-            expires_at=None,
-            resolver_version=1,
+        observation = BusinessAttributeRepository(self.session).upsert(
+            business.id,
+            BusinessAttributeValue(
+                key="business_name",
+                value=business.display_name,
+                observed_at=now,
+                source_provider=source,
+                source_external_id=external_id,
+                source_query_signature=signature,
+                evidence_hash=content_hash,
+                source_url=source_url_from_raw(snapshot),
+                evidence=snapshot,
+                confidence=100,
+            ),
         )
-        self.session.add(observation)
-        self.session.flush()
         return observation
 
     def _niche_embedding_matches(
@@ -912,7 +898,6 @@ class CanonicalRepository:
                     select(BusinessAttributeModel)
                     .where(
                         BusinessAttributeModel.business_id == business_id,
-                        BusinessAttributeModel.row_type == "evidence",
                     )
                     .order_by(BusinessAttributeModel.observed_at.desc())
                 )
@@ -976,7 +961,7 @@ class CanonicalRepository:
             evidence_id = evidence.get("source_evidence_id")
             if evidence_id:
                 observation = self.session.get(BusinessAttributeModel, evidence_id)
-                if observation is not None and observation.row_type == "evidence":
+                if observation is not None:
                     return observation
         return self._latest_observation_for_business(membership.business_id)
 

@@ -88,7 +88,8 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
         assert first.source_evidence_id == second.source_evidence_id
         assert session.scalar(
             select(func.count()).select_from(BusinessAttributeModel).where(
-                BusinessAttributeModel.row_type == "evidence"
+                BusinessAttributeModel.business_id == first.business_id,
+                BusinessAttributeModel.attribute_key == "business_name",
             )
         ) == 1
 
@@ -99,12 +100,18 @@ def test_repeated_provider_fetches_reuse_unchanged_observation_and_preserve_iden
             raw={**_source_payload("no_website_listed"), "rating": 4.8},
         )
 
-        assert changed.source_evidence_id != first.source_evidence_id
+        assert changed.source_evidence_id == first.source_evidence_id
+        changed_attribute = session.get(
+            BusinessAttributeModel, changed.source_evidence_id
+        )
+        assert changed_attribute is not None
+        assert changed_attribute.evidence["rating"] == 4.8
         assert session.scalar(
             select(func.count()).select_from(BusinessAttributeModel).where(
-                BusinessAttributeModel.row_type == "evidence"
+                BusinessAttributeModel.business_id == first.business_id,
+                BusinessAttributeModel.attribute_key == "business_name",
             )
-        ) == 2
+        ) == 1
 
 
 def test_canonical_business_attributes_are_materialized_and_scored() -> None:
@@ -517,9 +524,10 @@ def test_verified_website_replaces_stale_canonical_url() -> None:
         website_fact = facts[business.id][BusinessAttributeKey.WEBSITE_STATUS.value]
         assert business.website_url == "https://northstarpainting.example"
         assert business.domain == "northstarpainting.example"
-        assert website_fact.source_evidence_id == evidence.source_evidence_id
+        assert website_fact.source == "company_website_seed"
+        assert website_fact.source_url == "https://northstarpainting.example"
+        assert website_fact.evidence["website_url"] == "https://northstarpainting.example"
         assert website_fact.confidence == 95
-        assert website_fact.resolution_state == "confirmed"
 
 
 def test_mismatched_website_enrichment_does_not_create_present_fact() -> None:

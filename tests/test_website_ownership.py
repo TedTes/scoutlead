@@ -125,7 +125,7 @@ def test_canonical_ingest_keeps_evidence_and_does_not_promote_uncertain_url() ->
         evidence = session.scalar(
             select(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id == link.business_id,
-                BusinessAttributeModel.row_type == "evidence",
+                BusinessAttributeModel.attribute_key == "business_name",
             )
         )
 

@@ -116,41 +116,24 @@ def _add_attribute(
     expires_at=None,
 ):
     now = utcnow()
-    evidence = BusinessAttributeModel(
-        id=new_id("business_evidence"),
-        business_id=business.id,
-        row_type="evidence",
-        attribute_key=f"evidence:{source}:{new_id('record')}",
-        value_type="json",
-        value_json={key: value},
-        confidence=confidence,
-        resolution_state="confirmed",
-        supporting_evidence_ids=[],
-        observed_at=now,
-        expires_at=None,
-        source=source,
-        source_external_id=f"external-{business.id}",
-        source_content_hash=new_id("hash")[:64].ljust(64, "0"),
-        source_url=f"https://source.example/{business.id}",
-        evidence={key: value},
-    )
-    session.add(evidence)
-    session.flush()
     attribute = BusinessAttributeRepository(session).upsert(
         business.id,
         BusinessAttributeValue(
             key=key,
             value=value,
             observed_at=now,
-            source_evidence_id=evidence.id,
             confidence=confidence,
-            resolution_state="confirmed",
+            source_provider=source,
+            source_external_id=f"external-{business.id}",
+            evidence_hash=new_id("hash")[:64].ljust(64, "0"),
+            source_url=f"https://source.example/{business.id}",
+            evidence={key: value},
             expires_at=expires_at or now + timedelta(days=30),
         ),
     )
     if definition is not None:
         attribute.signal_definition_id = definition.id
-    return evidence, attribute
+    return attribute, attribute
 
 
 def test_admin_match_state_uses_eligibility_and_attribute_evidence() -> None:
@@ -413,7 +396,7 @@ def test_delete_business_purges_attributes_and_retains_audit() -> None:
 
         service = _service(session)
         dependencies = service.delete_dependencies(business.id)
-        assert dependencies["business_attributes"] == 2
+        assert dependencies["business_attributes"] == 1
 
         service.delete(
             business.id,
@@ -433,7 +416,7 @@ def test_delete_business_purges_attributes_and_retains_audit() -> None:
                 AdminAuditEventModel.action == "delete",
             )
         )
-        assert audit.after["deleted_dependencies"]["business_attributes"] == 2
+        assert audit.after["deleted_dependencies"]["business_attributes"] == 1
 
 
 def test_edit_quarantines_business_and_audits() -> None:

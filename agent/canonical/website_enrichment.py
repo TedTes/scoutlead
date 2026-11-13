@@ -1745,7 +1745,6 @@ def cleanup_placeholder_emails(session: Session, *, dry_run: bool = False) -> di
         select(BusinessAttributeModel, BusinessModel)
         .join(BusinessModel, BusinessModel.id == BusinessAttributeModel.business_id)
         .where(
-            BusinessAttributeModel.row_type == "evidence",
             BusinessAttributeModel.source == SOURCE_NAME,
         )
     )

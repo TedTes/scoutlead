@@ -90,24 +90,11 @@ def export_city_category(
     scoped = scoped[: max(1, candidate_limit)]
 
     business_ids = [business.id for business, _, _ in scoped]
-    observations = _group_by_business(
+    attributes = _group_by_business(
         session.scalars(
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(business_ids),
-                BusinessAttributeModel.row_type == "evidence",
-            )
-            .order_by(BusinessAttributeModel.observed_at.desc())
-        )
-        if business_ids
-        else []
-    )
-    facts = _group_by_business(
-        session.scalars(
-            select(BusinessAttributeModel)
-            .where(
-                BusinessAttributeModel.business_id.in_(business_ids),
-                BusinessAttributeModel.row_type == "attribute",
             )
             .order_by(BusinessAttributeModel.attribute_key)
         )
@@ -133,9 +120,11 @@ def export_city_category(
     issue_counts: Counter[str] = Counter()
     for business, membership, distance_km in scoped:
         state, reasons = _quality_state(business)
-        business_observations = observations.get(business.id, [])
-        source_counts.update(row.source for row in business_observations)
-        integrity = _observation_summary(business_observations, now=checked_at)
+        business_attributes = attributes.get(business.id, [])
+        source_counts.update(
+            row.source for row in business_attributes if row.source is not None
+        )
+        integrity = _observation_summary(business_attributes, now=checked_at)
         issue_counts.update(integrity["issue_counts"])
         buckets[state].append(
             _business_record(
@@ -144,9 +133,9 @@ def export_city_category(
                 distance_km=distance_km,
                 quality_state=state,
                 quality_reasons=reasons,
-                observations=business_observations,
+                observations=business_attributes,
                 observation_summary=integrity,
-                facts=facts.get(business.id, []),
+                facts=business_attributes,
                 contacts=contacts.get(business.id, []),
                 now=checked_at,
             )
@@ -257,20 +246,24 @@ def _business_record(
     eligible_facts = []
     for fact in facts:
         eligible = bool(
-            fact.resolution_state == "confirmed"
-            and fact.confidence >= 90
+            fact.confidence >= 90
             and (fact.expires_at is None or _aware(fact.expires_at) > _aware(now))
-            and bool(fact.source or fact.source_url or fact.supporting_evidence_ids)
+            and bool(fact.evidence_hash or fact.source or fact.source_url)
         )
         eligible_facts.append(
             {
                 "key": fact.attribute_key,
                 "value": _attribute_value(fact),
                 "confidence": fact.confidence,
-                "resolution_state": fact.resolution_state,
                 "observed_at": fact.observed_at.isoformat(),
                 "expires_at": fact.expires_at.isoformat() if fact.expires_at else None,
-                "supporting_evidence_ids": fact.supporting_evidence_ids,
+                "source": {
+                    "provider": fact.source_provider,
+                    "external_id": fact.source_external_id,
+                    "url": fact.source_url,
+                    "evidence_hash": fact.evidence_hash,
+                },
+                "evidence": fact.evidence,
                 "eligible": eligible,
             }
         )
@@ -339,8 +332,10 @@ def _observation_summary(
         )
     return {
         "count": len(observations),
-        "source_count": len({row.source for row in observations}),
-        "sources": dict(sorted(Counter(row.source for row in observations).items())),
+        "source_count": len({row.source for row in observations if row.source}),
+        "sources": dict(
+            sorted(Counter(row.source for row in observations if row.source).items())
+        ),
         "status_counts": dict(sorted(status_counts.items())),
         "issue_counts": dict(sorted(issue_counts.items())),
         "latest_observed_at": (

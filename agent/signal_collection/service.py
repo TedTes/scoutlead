@@ -170,7 +170,6 @@ class SignalCollectionService:
             return self._domain_observation(definition, business)
         statement = select(BusinessAttributeModel).where(
             BusinessAttributeModel.business_id == business.id,
-            BusinessAttributeModel.row_type == "evidence",
         )
         if definition.collector_key == "google_places":
             statement = statement.where(BusinessAttributeModel.source.in_(GOOGLE_SOURCES))
@@ -189,7 +188,6 @@ class SignalCollectionService:
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id == business_id,
-                BusinessAttributeModel.row_type == "evidence",
                 BusinessAttributeModel.source.in_(sources),
                 BusinessAttributeModel.observed_at
                 >= utcnow() - timedelta(days=freshness_days),
@@ -371,11 +369,8 @@ class SignalCollectionService:
                 observed_at=observation.observed_at,
                 source_evidence_id=observation.id,
                 confidence=confidence,
-                resolution_state="confirmed",
-                supporting_evidence_ids=(observation.id,),
                 expires_at=observation.observed_at
                 + timedelta(days=definition.freshness_days),
-                resolver_version=RESOLVER_VERSION,
             ),
         )
         business = self.session.get(BusinessModel, business_id)

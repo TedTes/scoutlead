@@ -84,7 +84,6 @@ def sample_businesses(
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(ids),
-                BusinessAttributeModel.row_type == "evidence",
             )
             .order_by(BusinessAttributeModel.observed_at.desc())
         ):

@@ -33,12 +33,15 @@ class BusinessAttributeValue:
     key: BusinessAttributeKey | str
     value: str | float | bool
     observed_at: datetime
-    source_evidence_id: str | None
+    source_evidence_id: str | None = None
     confidence: int = 100
-    resolution_state: str = "confirmed"
-    supporting_evidence_ids: tuple[str, ...] = ()
+    source_provider: str | None = None
+    source_external_id: str | None = None
+    source_query_signature: str | None = None
+    evidence_hash: str | None = None
+    source_url: str | None = None
+    evidence: dict[str, Any] | None = None
     expires_at: datetime | None = None
-    resolver_version: int = 1
 
 
 class BusinessAttributeRepository:
@@ -74,14 +77,12 @@ class BusinessAttributeRepository:
         existing = self.session.scalar(
             select(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id == business_id,
-                BusinessAttributeModel.row_type == "attribute",
                 BusinessAttributeModel.attribute_key == attribute_key,
             )
         )
         if (
             existing is not None
             and _aware(existing.observed_at) > _aware(fact.observed_at)
-            and existing.resolver_version >= fact.resolver_version
         ):
             return existing, False
         previous_value = attribute_value(existing)
@@ -99,13 +100,28 @@ class BusinessAttributeRepository:
             if fact.source_evidence_id
             else None
         )
-        if source_evidence is not None and source_evidence.row_type != "evidence":
-            source_evidence = None
+        source_provider = fact.source_provider or (
+            source_evidence.source_provider if source_evidence else None
+        )
+        source_external_id = fact.source_external_id or (
+            source_evidence.source_external_id if source_evidence else None
+        )
+        source_query_signature = fact.source_query_signature or (
+            source_evidence.source_query_signature if source_evidence else None
+        )
+        evidence_hash = fact.evidence_hash or (
+            source_evidence.evidence_hash if source_evidence else None
+        )
+        source_url = fact.source_url or (
+            source_evidence.source_url if source_evidence else None
+        )
+        evidence = fact.evidence if fact.evidence is not None else (
+            source_evidence.evidence if source_evidence else {}
+        )
         if existing is None:
             existing = BusinessAttributeModel(
                 id=new_id("business_attribute"),
                 business_id=business_id,
-                row_type="attribute",
                 attribute_key=attribute_key,
                 signal_definition_id=definition.id if definition else None,
                 value_type=value_type,
@@ -113,29 +129,17 @@ class BusinessAttributeRepository:
                 value_number=value_number,
                 value_boolean=value_boolean,
                 confidence=fact.confidence,
-                attribute_score=scored.score,
+                opportunity_score=scored.score,
                 score_version=scored.version,
                 score_reason=scored.reason,
-                resolution_state=fact.resolution_state,
-                supporting_evidence_ids=list(
-                    fact.supporting_evidence_ids
-                    or ((fact.source_evidence_id,) if fact.source_evidence_id else ())
-                ),
                 observed_at=fact.observed_at,
                 expires_at=expires_at,
-                source=source_evidence.source if source_evidence else None,
-                source_external_id=(
-                    source_evidence.source_external_id if source_evidence else None
-                ),
-                source_query_signature=(
-                    source_evidence.source_query_signature if source_evidence else None
-                ),
-                source_content_hash=(
-                    source_evidence.source_content_hash if source_evidence else None
-                ),
-                source_url=source_evidence.source_url if source_evidence else None,
-                evidence=source_evidence.evidence if source_evidence else {},
-                resolver_version=fact.resolver_version,
+                source_provider=source_provider,
+                source_external_id=source_external_id,
+                source_query_signature=source_query_signature,
+                evidence_hash=evidence_hash,
+                source_url=source_url,
+                evidence=evidence,
             )
             self.session.add(existing)
         else:
@@ -146,24 +150,23 @@ class BusinessAttributeRepository:
             existing.value_number = value_number
             existing.value_boolean = value_boolean
             existing.confidence = fact.confidence
-            existing.attribute_score = scored.score
+            existing.opportunity_score = scored.score
             existing.score_version = scored.version
             existing.score_reason = scored.reason
-            existing.resolution_state = fact.resolution_state
-            existing.supporting_evidence_ids = list(
-                fact.supporting_evidence_ids
-                or ((fact.source_evidence_id,) if fact.source_evidence_id else ())
-            )
             existing.observed_at = fact.observed_at
             existing.expires_at = expires_at
-            if source_evidence is not None:
-                existing.source = source_evidence.source
-                existing.source_external_id = source_evidence.source_external_id
-                existing.source_query_signature = source_evidence.source_query_signature
-                existing.source_content_hash = source_evidence.source_content_hash
-                existing.source_url = source_evidence.source_url
-                existing.evidence = source_evidence.evidence
-            existing.resolver_version = fact.resolver_version
+            if source_provider is not None:
+                existing.source_provider = source_provider
+            if source_external_id is not None:
+                existing.source_external_id = source_external_id
+            if source_query_signature is not None:
+                existing.source_query_signature = source_query_signature
+            if evidence_hash is not None:
+                existing.evidence_hash = evidence_hash
+            if source_url is not None:
+                existing.source_url = source_url
+            if evidence:
+                existing.evidence = evidence
         if commit:
             self.session.commit()
             self.session.refresh(existing)
@@ -189,7 +192,6 @@ class BusinessAttributeRepository:
         rows = self.session.scalars(
             select(BusinessAttributeModel).where(
                 BusinessAttributeModel.business_id.in_(business_ids),
-                BusinessAttributeModel.row_type == "attribute",
             )
         )
         result: dict[str, dict[str, BusinessAttributeModel]] = {}

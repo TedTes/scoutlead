@@ -25,15 +25,13 @@ def eligible_fact_condition(
 
     checked_at = now or utcnow()
     conditions = [
-        fact.row_type == "attribute",
-        fact.resolution_state == "confirmed",
         fact.confidence >= minimum_confidence,
         fact.expires_at.is_not(None),
         fact.expires_at > checked_at,
         _known_value_condition(fact),
     ]
     if require_provenance:
-        conditions.append(fact.source_content_hash.is_not(None))
+        conditions.append(fact.evidence_hash.is_not(None))
     return and_(*conditions)
 
 
@@ -49,11 +47,9 @@ def fact_is_eligible(
     if fact is None:
         return False
     checked_at = now or utcnow()
-    if fact.row_type != "attribute" or fact.resolution_state != "confirmed":
-        return False
     if fact.confidence < minimum_confidence:
         return False
-    if require_provenance and not fact.source_content_hash:
+    if require_provenance and not fact.evidence_hash:
         return False
     expires_at = fact.expires_at
     if expires_at is None:

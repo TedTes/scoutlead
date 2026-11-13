@@ -2022,7 +2022,7 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         assert rows[0]["raw"]["profile_match"]["matched_signal_count"] == 1
         assert rows[0]["raw"]["profile_match"]["signals"]["website_unavailable"]["matched"] is True
         matched_signal = rows[0]["raw"]["profile_match"]["matched_signals"][0]
-        assert matched_signal["source_evidence_id"]
+        assert matched_signal["attribute_id"]
         assert matched_signal["source"] == "google_places"
         assert matched_signal["pitch_eligible"] is False
         assert {
@@ -2079,7 +2079,14 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
                 key=BusinessAttributeKey.WEBSITE_STATUS,
                 value="unavailable",
                 observed_at=utcnow(),
-                source_evidence_id=website_evidence.source_evidence_id,
+                    source_provider="company_website_signal",
+                    source_url="https://hvac.example/contact",
+                    evidence_hash="website-signal",
+                    evidence={
+                        "source": "company_website_signal",
+                        "source_url": "https://hvac.example/contact",
+                        "website_enrichment": {"availability_status": "unavailable"},
+                    },
             ),
         )
         session.commit()
@@ -2108,7 +2115,7 @@ def test_profile_match_uses_the_signal_fact_observation_as_its_source() -> None:
         assert rows[0]["source"] == "company_website_signal"
         matched = rows[0]["raw"]["profile_match"]["matched_signals"][0]
         assert matched["source"] == "company_website_signal"
-        assert matched["source_evidence_id"] == website_evidence.source_evidence_id
+        assert matched["attribute_id"]
         assert matched["source_url"] == "https://hvac.example/contact"
 
 
@@ -2229,7 +2236,6 @@ def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
                 observed_at=utcnow(),
                 source_evidence_id=None,
                 confidence=65,
-                resolution_state="probable",
             ),
         )
         session.commit()
@@ -2540,7 +2546,7 @@ def test_profile_website_signal_requires_confirmed_missing_evidence() -> None:
             "matched": True,
             "confidence": "confirmed",
         }
-        assert website_evidence["source_evidence_id"]
+        assert website_evidence["attribute_id"]
         campaign = CampaignRepository(
             session,
             workspace_id="workspace:first",
@@ -3331,7 +3337,6 @@ def _latest_evidence_id(session, business_id: str) -> str:
         select(BusinessAttributeModel.id)
         .where(
             BusinessAttributeModel.business_id == business_id,
-            BusinessAttributeModel.row_type == "evidence",
         )
         .order_by(BusinessAttributeModel.observed_at.desc())
         .limit(1)

@@ -100,7 +100,6 @@ class BusinessIndexSearchService:
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(business_ids),
-                BusinessAttributeModel.row_type == "evidence",
                 BusinessAttributeModel.observed_at >= request.evidence_fresh_after,
             )
             .order_by(BusinessAttributeModel.observed_at.desc())
@@ -113,7 +112,6 @@ class BusinessIndexSearchService:
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id.in_(business_ids),
-                BusinessAttributeModel.row_type == "evidence",
                 BusinessAttributeModel.source.notin_(
                     ["website_presence_check", "company_website_seed"]
                 ),
@@ -414,8 +412,9 @@ def _serialize_facts(facts: dict) -> dict:
             "value": attribute_value(fact),
             "observed_at": fact.observed_at.isoformat(),
             "confidence": fact.confidence,
-            "source_evidence_id": fact.source_evidence_id,
-            "resolver_version": fact.resolver_version,
+            "source": fact.source_provider,
+            "source_url": fact.source_url,
+            "evidence_hash": fact.evidence_hash,
         }
         for key, fact in facts.items()
     }

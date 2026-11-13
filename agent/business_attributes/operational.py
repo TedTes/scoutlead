@@ -81,7 +81,6 @@ def assess_business_operational(
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id == business.id,
-                BusinessAttributeModel.row_type == "evidence",
                 BusinessAttributeModel.observed_at >= cutoff,
             )
             .order_by(BusinessAttributeModel.observed_at.desc())

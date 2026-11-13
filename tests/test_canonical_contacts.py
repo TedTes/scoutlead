@@ -78,7 +78,7 @@ def test_leads_from_repeat_runs_share_canonical_business_and_contact() -> None:
             session.scalar(
                 select(func.count())
                 .select_from(BusinessAttributeModel)
-                .where(BusinessAttributeModel.row_type == "evidence")
+                .where(BusinessAttributeModel.attribute_key == "business_name")
             )
             == 1
         )

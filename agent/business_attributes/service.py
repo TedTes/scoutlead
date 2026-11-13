@@ -28,7 +28,6 @@ from seeding.batches import observation_is_quarantined
 from shared.utils import normalize_url, utcnow
 
 
-RESOLVER_VERSION = 4
 GOOGLE_REPUTATION_SOURCES = frozenset({"google_places", "google_places_seed"})
 
 
@@ -42,7 +41,6 @@ def reconcile_business_attributes(session: Session, business_id: str) -> dict[st
             select(BusinessAttributeModel)
             .where(
                 BusinessAttributeModel.business_id == business_id,
-                BusinessAttributeModel.row_type == "evidence",
             )
             .order_by(BusinessAttributeModel.observed_at.desc())
         )
@@ -145,7 +143,6 @@ def _website_status_fact(
                         BusinessAttributeKey.WEBSITE_STATUS.value,
                         observation.observed_at,
                     ),
-                    resolver_version=RESOLVER_VERSION,
                 )
             )
     if business.website_url:
@@ -172,7 +169,6 @@ def _website_status_fact(
                     BusinessAttributeKey.WEBSITE_STATUS.value,
                     evidence.observed_at,
                 ),
-                resolver_version=RESOLVER_VERSION,
             )
             # A provider omitting websiteUri does not invalidate a URL already attached to
             # the canonical business. Only a direct availability check can supersede it.
@@ -331,7 +327,6 @@ def _number_fact(
             source_evidence_id=observation.id,
             confidence=95,
             expires_at=attribute_expires_at(key.value, observation.observed_at),
-            resolver_version=RESOLVER_VERSION,
         )
     return None
 
@@ -356,7 +351,6 @@ def _operational_fact(
                 BusinessAttributeKey.BUSINESS_OPERATIONAL.value,
                 observation.observed_at,
             ),
-            resolver_version=RESOLVER_VERSION,
         )
     return None
 

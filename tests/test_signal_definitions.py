@@ -68,15 +68,13 @@ def _evidence(business_id: str, payload: dict, *, source: str = "test") -> Busin
     return BusinessAttributeModel(
         id=new_id("business_evidence"),
         business_id=business_id,
-        row_type="evidence",
-        attribute_key=f"evidence:{source}:{new_id('record')}",
-        value_type="json",
-        value_json=payload,
+        attribute_key="business_name",
+        value_type="text",
+        value_text="Test Business",
         confidence=100,
-        resolution_state="confirmed",
         observed_at=now,
-        source=source,
-        source_content_hash=new_id("hash")[:64],
+        source_provider=source,
+        evidence_hash=new_id("hash")[:64],
         evidence=payload,
     )
 
@@ -85,7 +83,7 @@ def _attribute(business: BusinessModel, key: str) -> BusinessAttributeModel:
     return next(
         item
         for item in business.attributes
-        if item.row_type == "attribute" and item.attribute_key == key
+        if item.attribute_key == key
     )
 
 
@@ -110,7 +108,9 @@ def test_resolved_attribute_links_to_definition_and_evidence() -> None:
         )
 
         assert fact.signal_definition_id == definition.id
-        assert fact.supporting_evidence_ids == [observation.id]
+        assert fact.source_provider == observation.source_provider
+        assert fact.evidence_hash == observation.evidence_hash
+        assert fact.evidence == observation.evidence
 
 
 def test_dynamic_signal_collects_from_existing_observation() -> None:
@@ -199,7 +199,6 @@ def test_incomplete_javascript_crawl_does_not_claim_signal_absence(monkeypatch) 
         assert all(
             fact.attribute_key != definition.key
             for fact in business.attributes
-            if fact.row_type == "attribute"
         )
 
 
@@ -350,7 +349,6 @@ def test_pagespeed_signals_share_one_mobile_audit(monkeypatch) -> None:
         facts = {
             fact.attribute_key: fact
             for fact in business.attributes
-            if fact.row_type == "attribute"
         }
         assert facts["mobile_performance_score"].value_number == 64
         assert facts["accessibility_score"].value_number == 91
