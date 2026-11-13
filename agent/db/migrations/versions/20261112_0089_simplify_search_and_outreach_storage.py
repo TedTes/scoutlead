@@ -246,9 +246,12 @@ def _fold_result_workflow_into_leads(
                     values[lead_name] = value
         if "status" in lead_columns:
             if row.get("contacted_at") is not None:
-                values["status"] = "contacted"
+                # Contact workflow state is stored in last_contacted_at. Keep
+                # the lead lifecycle status within the LeadStatus enum.
+                values["status"] = "sent"
             elif row.get("shortlisted_at") is not None:
-                values["status"] = "shortlisted"
+                # Shortlist workflow state is stored in shortlisted_at.
+                values["status"] = "qualified"
         if values:
             bind.execute(
                 leads.update().where(leads.c.id == lead_id).values(**values)

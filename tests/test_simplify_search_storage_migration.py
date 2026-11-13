@@ -281,7 +281,7 @@ def test_simplification_preserves_current_state_and_drops_redundant_tables() -> 
         lead = connection.execute(sa.select(current_leads)).mappings().one()
         assert lead["review_status"] == "not_fit"
         assert lead["last_contacted_at"] is not None
-        assert lead["status"] == "contacted"
+        assert lead["status"] == "sent"
 
         current_items = sa.Table(
             "source_items", sa.MetaData(), autoload_with=connection
