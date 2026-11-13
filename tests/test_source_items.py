@@ -51,7 +51,7 @@ def test_repeated_fetches_create_distinct_immutable_source_items() -> None:
         assert prior.decision == SourceItemDecisionValue.REJECTED.value
 
 
-def test_source_item_decisions_are_append_only_and_update_current_state() -> None:
+def test_source_item_keeps_only_the_current_decision() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         _add_segment(session)
@@ -95,9 +95,10 @@ def test_source_item_decisions_are_append_only_and_update_current_state() -> Non
         refreshed = repository.get(item.id)
         assert refreshed.state == SourceItemState.RELEVANT.value
         assert [decision.decision for decision in refreshed.decisions] == [
-            SourceItemDecisionValue.NEEDS_REVIEW.value,
             SourceItemDecisionValue.ACCEPTED.value,
         ]
+        assert refreshed.decision_reason == "Confirmed by reviewer."
+        assert refreshed.decision_actor_id == "user_test"
 
 
 def test_human_review_is_versioned_and_overrides_current_state() -> None:

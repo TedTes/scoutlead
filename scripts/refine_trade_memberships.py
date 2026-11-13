@@ -58,8 +58,6 @@ def find_invalid_memberships(session: Session) -> list[InvalidMembership]:
     ).all()
     invalid: list[InvalidMembership] = []
     for membership, business, niche in rows:
-        if membership.seed_batch_id is not None:
-            continue
         evidence = membership.evidence if isinstance(membership.evidence, list) else []
         if not evidence or any(_is_explicit(item) for item in evidence):
             continue

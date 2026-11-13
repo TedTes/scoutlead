@@ -17,12 +17,12 @@ class MessageRepository:
 
     def create_draft(
         self,
-        campaign_id: str,
+        campaign_id: str | None,
         product_id: str,
         lead_id: str,
         draft: OutreachDraft,
         *,
-        outreach_package_id: str | None = None,
+        audience_result_id: str | None = None,
     ) -> MessageModel:
         self._assert_product_in_scope(product_id)
         data = draft.model_dump(mode="json")
@@ -31,7 +31,7 @@ class MessageRepository:
             campaign_id=campaign_id,
             product_id=product_id,
             lead_id=lead_id,
-            outreach_package_id=outreach_package_id,
+            audience_result_id=audience_result_id,
             status=MessageStatus.PENDING_APPROVAL.value,
             **data,
         )
@@ -39,15 +39,6 @@ class MessageRepository:
         self.session.commit()
         self.session.refresh(model)
         return model
-
-    def find_for_outreach_package(self, package_id: str) -> MessageModel | None:
-        return self.session.scalar(
-            self._scope(
-                select(MessageModel).where(
-                    MessageModel.outreach_package_id == package_id
-                )
-            )
-        )
 
     def get(self, message_id: str) -> MessageModel:
         model = self.session.scalar(self._scope(select(MessageModel).where(MessageModel.id == message_id)))

@@ -5,8 +5,6 @@ from fastapi import APIRouter, Depends, Query
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
 from campaigns.repository import CampaignRepository
 from campaigns.schemas import LeadSeedInput
-from discovery.repository import DiscoveryCandidateRepository
-from discovery.schemas import DiscoveryCandidateRead
 from leads.repository import LeadRepository
 from leads.approach_service import LeadApproachService
 from leads.schemas import LeadContactPolicyUpdate, LeadRead, LeadUpdate
@@ -23,12 +21,6 @@ router = APIRouter(tags=["leads"])
 def list_campaign_leads(campaign_id: str, session: DbSession, auth: CurrentAuth):
     CampaignRepository(session, workspace_id=auth.workspace_id).get(campaign_id)
     return LeadRepository(session, workspace_id=auth.workspace_id).list_by_campaign(campaign_id)
-
-
-@router.get("/campaigns/{campaign_id}/discovery-candidates", response_model=list[DiscoveryCandidateRead])
-def list_campaign_discovery_candidates(campaign_id: str, session: DbSession, auth: CurrentAuth):
-    CampaignRepository(session, workspace_id=auth.workspace_id).get(campaign_id)
-    return DiscoveryCandidateRepository(session).list_by_campaign(campaign_id)
 
 
 @router.post("/campaigns/{campaign_id}/leads/seeds", response_model=list[LeadRead])

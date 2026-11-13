@@ -43,7 +43,11 @@ class OutcomeService:
     def record(self, lead_id: str, data: LeadOutcomeCreate) -> LeadOutcomeModel:
         lead = self._lead(lead_id)
         occurred_at = data.occurred_at or utcnow()
-        campaign = self.session.get(CampaignModel, lead.campaign_id)
+        campaign = (
+            self.session.get(CampaignModel, lead.campaign_id)
+            if lead.campaign_id
+            else None
+        )
         territory_id = lead.territory_id or (campaign.territory_id if campaign else None)
         territory = (
             self.session.get(TerritoryModel, territory_id)
@@ -73,18 +77,10 @@ class OutcomeService:
             lead.latest_outcome_at = occurred_at
         if data.outcome in CONTACT_ATTEMPT_OUTCOMES:
             lead.last_contacted_at = occurred_at
-            audience_result = self.session.scalar(
-                select(AudienceResultModel)
-                .where(AudienceResultModel.outreach_lead_id == lead.id)
-                .limit(1)
-            )
-            if audience_result is not None:
-                audience_result.contacted_at = occurred_at
         self._apply_objective_quality_update(lead, data.outcome, occurred_at)
         self.session.commit()
         self.session.refresh(model)
         enqueue_refill_if_depleted(self.session, territory_id)
-        self._recompute_learning_model_if_due(model)
         return model
 
     def list_for_lead(self, lead_id: str) -> list[LeadOutcomeModel]:
@@ -153,28 +149,6 @@ class OutcomeService:
             business = self.session.get(BusinessModel, lead.business_id)
             if business:
                 business.status = "closed"
-
-    def _recompute_learning_model_if_due(self, outcome: LeadOutcomeModel) -> None:
-        if not outcome.niche_id:
-            return
-        outcome_count = len(
-            self.session.scalars(
-                select(LeadOutcomeModel.id).where(
-                    LeadOutcomeModel.workspace_id == self.workspace_id,
-                    LeadOutcomeModel.product_id == outcome.product_id,
-                    LeadOutcomeModel.niche_id == outcome.niche_id,
-                )
-            ).all()
-        )
-        if outcome_count % 10:
-            return
-        from evaluation.outcome_learning_service import OutcomeLearningService
-
-        OutcomeLearningService(self.session, workspace_id=self.workspace_id).recompute(
-            product_id=outcome.product_id,
-            niche_id=outcome.niche_id,
-        )
-
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)

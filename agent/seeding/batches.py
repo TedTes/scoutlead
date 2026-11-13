@@ -1,45 +1,20 @@
-from __future__ import annotations
-
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import true
 from sqlalchemy.orm import Session
 
-from db.models import BusinessNicheMembershipModel, SeedBatchModel, BusinessAttributeModel
-
-
-QUARANTINED_BATCH_STATUSES = frozenset({"quarantined", "retired"})
+from db.models import BusinessAttributeModel
 
 
 def active_membership_condition():
-    quarantined_batch = (
-        select(SeedBatchModel.id)
-        .where(
-            SeedBatchModel.id == BusinessNicheMembershipModel.seed_batch_id,
-            SeedBatchModel.status.in_(QUARANTINED_BATCH_STATUSES),
-        )
-        .exists()
-    )
-    return or_(
-        BusinessNicheMembershipModel.seed_batch_id.is_(None),
-        ~quarantined_batch,
-    )
+    """All memberships are active; batch lifecycle is no longer persisted."""
+    return true()
 
 
 def observation_is_quarantined(
     session: Session,
     observation: BusinessAttributeModel,
 ) -> bool:
-    batch_id = observation_batch_id(observation.raw_payload)
-    if not batch_id:
-        return False
-    quarantined = session.info.setdefault("quarantined_seed_batch_ids", set())
-    if batch_id in quarantined:
-        return True
-    batch = session.get(SeedBatchModel, batch_id)
-    if batch and batch.status in QUARANTINED_BATCH_STATUSES:
-        quarantined.add(batch_id)
-        return True
     return False
 
 

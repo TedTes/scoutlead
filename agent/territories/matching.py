@@ -28,13 +28,11 @@ from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
-    OutcomeModel,
     ServiceDefinitionModel,
     ServiceSignalMappingModel,
     SignalDefinitionModel,
-    BusinessAttributeModel,
 )
-from evaluation.outcome_learning import MIN_CONTACTED, MIN_POSITIVE, outcome_adjustment
+from evaluation.outcome_learning import outcome_adjustment
 from shared.errors import ConflictError
 from shared.geospatial import haversine_distance_km_expression
 from shared.utils import utcnow
@@ -95,11 +93,7 @@ class ProfileMatchService:
         if not niche_ids or limit <= 0:
             return []
         cutoff = utcnow() - timedelta(days=profile.evidence_max_age_days)
-        outcome_weights = self._active_outcome_weights(
-            workspace_id=profile.workspace_id,
-            product_id=profile.product_id,
-            niche_ids=niche_ids,
-        )
+        outcome_weights: dict[str, float] = {}
         matched_signal_count = literal(0)
         confirmed_signal_count = literal(0)
         signal_conditions: list[Any] = []
@@ -412,38 +406,6 @@ class ProfileMatchService:
             )
             for definition in definitions
         ]
-    def _active_outcome_weights(
-        self,
-        *,
-        workspace_id: str,
-        product_id: str,
-        niche_ids: list[str],
-    ) -> dict[str, float]:
-        models = list(
-            self.session.scalars(
-                select(OutcomeModel).where(
-                    OutcomeModel.workspace_id == workspace_id,
-                    OutcomeModel.product_id == product_id,
-                    OutcomeModel.niche_id.in_(niche_ids),
-                    OutcomeModel.n_contacted >= MIN_CONTACTED,
-                    OutcomeModel.n_positive >= MIN_POSITIVE,
-                )
-            )
-        )
-        if not models:
-            return {}
-        totals: dict[str, float] = {}
-        sample_counts: dict[str, int] = {}
-        for model in models:
-            for signal, weight in (model.weights or {}).items():
-                totals[signal] = totals.get(signal, 0.0) + float(weight) * model.n_contacted
-                sample_counts[signal] = sample_counts.get(signal, 0) + model.n_contacted
-        return {
-            signal: total / sample_counts[signal]
-            for signal, total in totals.items()
-            if sample_counts[signal]
-        }
-
     def _result_row(
         self,
         *,

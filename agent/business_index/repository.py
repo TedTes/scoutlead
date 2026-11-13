@@ -164,7 +164,6 @@ class BusinessIndexRepository:
                 market_key=segment.market_key,
                 confidence=1.0,
                 evidence=[evidence],
-                seed_batch_id=None,
                 first_seen_at=now,
                 last_seen_at=now,
             )

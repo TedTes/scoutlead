@@ -10,11 +10,9 @@ from campaigns.schemas import LeadSeedInput
 from canonical.repository import CanonicalRepository
 from canonical.normalization import normalize_email
 from db.models import (
-    AudienceResultModel,
     BusinessModel,
     CampaignModel,
     ContactModel,
-    DiscoveryCandidateModel,
     LeadModel,
     NicheModel,
     ProductModel,
@@ -252,61 +250,6 @@ class LeadRepository:
         self.session.refresh(model)
         return model
 
-    def create_from_candidate(self, candidate: DiscoveryCandidateModel) -> LeadModel:
-        self._assert_product_in_scope(candidate.product_id)
-        existing = self.find_existing(candidate.campaign_id, candidate.title, candidate.url)
-        if existing:
-            return ContactSuppressionRepository(self.session).apply_to_lead_model(existing)
-
-        raw_source = {
-            "candidate_id": candidate.id,
-            "query": candidate.query,
-            "title": candidate.title,
-            "url": candidate.url,
-            "snippet": candidate.snippet,
-            "geography": candidate.geography,
-            "contact_email": candidate.contact_email,
-            "source": candidate.source,
-            "candidate_type": candidate.candidate_type,
-            "confidence": candidate.confidence,
-            "raw": candidate.raw,
-        }
-        canonical = CanonicalRepository(
-            self.session,
-            embedding=self.embedding,
-        ).upsert_from_discovery_result(
-            company_name=candidate.title,
-            website_url=candidate.url,
-            contact_email=candidate.contact_email,
-            geography=candidate.geography,
-            description=candidate.snippet,
-            source=candidate.raw.get("provider_id") or candidate.source,
-            raw=raw_source,
-        )
-        model = LeadModel(
-            id=new_id("lead"),
-            campaign_id=candidate.campaign_id,
-            territory_id=self._territory_id_for_campaign(candidate.campaign_id),
-            product_id=candidate.product_id,
-            business_id=canonical.business_id,
-            contact_id=canonical.contact_id,
-            company_name=candidate.title,
-            website_url=normalize_url(candidate.url),
-            contact_email=candidate.contact_email,
-            geography=candidate.geography,
-            description=candidate.snippet,
-            source=candidate.source,
-            status=LeadStatus.DISCOVERED.value,
-            review_status=LeadReviewStatus.UNREVIEWED.value,
-            verification_status=ContactVerificationStatus.UNVERIFIED.value,
-            raw_sources=[raw_source],
-        )
-        self.session.add(model)
-        ContactSuppressionRepository(self.session).apply_to_lead_model(model, commit=False)
-        self.session.commit()
-        self.session.refresh(model)
-        return model
-
     def list_by_campaign(self, campaign_id: str) -> list[LeadModel]:
         statement = (
             select(LeadModel).where(LeadModel.campaign_id == campaign_id).order_by(LeadModel.created_at)
@@ -420,13 +363,6 @@ class LeadRepository:
         model = self.get(lead_id)
         occurred_at = contacted_at or utcnow()
         model.last_contacted_at = occurred_at
-        audience_result = self.session.scalar(
-            select(AudienceResultModel)
-            .where(AudienceResultModel.outreach_lead_id == model.id)
-            .limit(1)
-        )
-        if audience_result is not None:
-            audience_result.contacted_at = occurred_at
         self.session.commit()
         self.session.refresh(model)
         return model

@@ -305,7 +305,7 @@ class CanonicalRepository:
                 "market_key": membership.market_key,
                 "confidence": membership.confidence,
                 "evidence": membership.evidence,
-                "seed_batch_id": membership.seed_batch_id,
+                "seed_batch_id": _membership_batch_id(membership.evidence),
                 "resolution_type": resolution.match_type,
                 "resolution_score": resolution.score,
             }
@@ -399,7 +399,7 @@ class CanonicalRepository:
                 "market_key": membership.market_key,
                 "confidence": membership.confidence,
                 "evidence": membership.evidence,
-                "seed_batch_id": membership.seed_batch_id,
+                "seed_batch_id": _membership_batch_id(membership.evidence),
                 "resolution_type": resolution.match_type,
                 "resolution_score": resolution.score,
             }
@@ -561,7 +561,10 @@ class CanonicalRepository:
                 .order_by(BusinessAttributeModel.observed_at.desc())
             )
             for observation in observations:
-                if not observation_is_quarantined(self.session, observation):
+                if (
+                    observation.business.status == "active"
+                    and not observation_is_quarantined(self.session, observation)
+                ):
                     return IdentityResolution(observation.business, "provider_external_id")
 
         strong_candidates: dict[str, tuple[BusinessModel, set[str]]] = {}
@@ -1030,7 +1033,6 @@ class CanonicalRepository:
                     market_key=market_key,
                     confidence=resolution.score,
                     evidence=[evidence],
-                    seed_batch_id=None,
                     first_seen_at=now,
                     last_seen_at=now,
                 )
@@ -1235,3 +1237,12 @@ def _append_unique_membership_evidence(
         if row_key == evidence_key:
             return rows
     return [*rows, evidence]
+
+
+def _membership_batch_id(evidence: list[dict[str, Any]] | None) -> str | None:
+    """Read legacy batch provenance from evidence without a batch table/column."""
+    for row in reversed(list(evidence or [])):
+        value = row.get("batch_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None

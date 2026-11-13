@@ -6,15 +6,12 @@ from sqlalchemy.orm import sessionmaker
 
 from db.models import (
     AudienceResultModel,
-    AudienceRunModel,
     BusinessModel,
     LeadModel,
     LeadOutcomeModel,
     MessageModel,
     NicheModel,
-    OutreachPackageModel,
     OutreachTemplateModel,
-    OutreachEventModel,
     ProductModel,
     TerritoryModel,
 )
@@ -131,7 +128,11 @@ def test_outreach_package_uses_verified_signal_and_persists_edits() -> None:
         assert package.content.message_template.opportunity
         assert "Lakeside Painting" in package.content.message_template.opportunity
         assert service.generate(result.id).id == package.id
-        assert session.scalar(select(func.count()).select_from(OutreachPackageModel)) == 1
+        assert session.scalar(
+            select(func.count())
+            .select_from(MessageModel)
+            .where(MessageModel.channel == "outreach_package")
+        ) == 1
 
         content = package.content.model_copy(deep=True)
         content.message.body = "Updated message grounded in the same verified opportunity evidence?"
@@ -301,7 +302,8 @@ def test_saving_context_does_not_generate_or_replace_existing_drafts() -> None:
 def test_workspace_shortlist_uses_the_shortlisted_result_id_for_duplicate_business() -> None:
     with _session_factory()() as session:
         unshortlisted = _seed_result(session, confirmed=True)
-        unshortlisted.shortlisted_at = None
+        unshortlisted_lead = session.get(LeadModel, unshortlisted.outreach_lead_id)
+        unshortlisted_lead.shortlisted_at = None
         first_audience = session.get(TerritoryModel, unshortlisted.audience_id)
         now = utcnow()
         shortlisted_audience = TerritoryModel(
@@ -317,28 +319,27 @@ def test_workspace_shortlist_uses_the_shortlisted_result_id_for_duplicate_busine
         )
         session.add(shortlisted_audience)
         session.flush()
-        shortlisted_run = AudienceRunModel(
-            id=new_id("audience_run"),
-            workspace_id="workspace:first",
-            audience_id=shortlisted_audience.id,
-            criteria_version=1,
-            state="ready",
-            requested_count=25,
-            result_count=1,
-            new_result_count=1,
-            deadline_at=now + timedelta(minutes=5),
-            completed_at=now,
+        shortlisted_audience.match_state = "ready"
+        shortlisted_audience.match_result_count = 1
+        shortlisted_audience.match_new_result_count = 1
+        shortlisted_audience.match_deadline_at = now + timedelta(minutes=5)
+        shortlisted_audience.match_completed_at = now
+        shortlisted_lead = _lead_for_result(
+            session,
+            product_id=first_audience.product_id,
+            territory_id=shortlisted_audience.id,
+            business_id=unshortlisted.business_id,
+            company_name="Lakeside Painting",
+            shortlisted_at=now,
         )
-        session.add(shortlisted_run)
         session.flush()
         shortlisted = AudienceResultModel(
             id=new_id("audience_result"),
-            run_id=shortlisted_run.id,
             audience_id=shortlisted_audience.id,
             business_id=unshortlisted.business_id,
             rank_position=1,
             is_new=False,
-            shortlisted_at=now,
+            outreach_lead_id=shortlisted_lead.id,
             match_snapshot=unshortlisted.match_snapshot,
         )
         session.add(shortlisted)
@@ -443,14 +444,13 @@ def test_mark_sent_moves_shortlisted_result_to_contacted_once() -> None:
             OutreachMarkSentRequest(channel="instagram"),
         )
 
-        session.refresh(result)
         lead = session.get(LeadModel, result.outreach_lead_id)
-        assert result.contacted_at is not None
         assert lead is not None
         assert lead.last_contacted_at is not None
         assert contacted.sent_channels["instagram"] == repeated.sent_channels["instagram"]
         assert session.scalar(select(func.count()).select_from(LeadOutcomeModel)) == 1
-        assert session.scalar(select(func.count()).select_from(OutreachEventModel)) == 1
+        package_row = session.get(MessageModel, package.id)
+        assert len((package_row.generation_context or {}).get("events") or []) == 1
         contacted_page = WorkspaceLeadService(
             session,
             workspace_id="workspace:first",
@@ -509,11 +509,20 @@ def test_outreach_package_handoff_snapshots_one_message() -> None:
         repeated = service.prepare_message(package.id)
 
         assert repeated.id == message.id
-        assert message.outreach_package_id == package.id
+        assert message.audience_result_id == result.id
         assert message.subject == package.content.email.subject
         assert message.body == package.content.email.body
         assert message.status.value == "pending_approval"
-        assert session.scalar(select(func.count()).select_from(MessageModel)) == 1
+        assert session.scalar(
+            select(func.count()).select_from(MessageModel).where(
+                MessageModel.channel == "outreach_package"
+            )
+        ) == 1
+        assert session.scalar(
+            select(func.count()).select_from(MessageModel).where(
+                MessageModel.channel == "email"
+            )
+        ) == 1
 
 
 def test_outreach_package_refreshes_when_evidence_snapshot_changes() -> None:
@@ -544,7 +553,7 @@ def test_outreach_package_refreshes_older_template_copy() -> None:
         result = _seed_result(session, confirmed=True)
         service = OutreachPackageService(session, workspace_id="workspace:first")
         package = service.generate(result.id)
-        row = session.get(OutreachPackageModel, package.id)
+        row = session.get(MessageModel, package.id)
         stale_content = dict(row.content)
         stale_content["message"] = {
             "body": (
@@ -570,7 +579,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         result = _seed_result(session, confirmed=True)
         service = OutreachPackageService(session, workspace_id="workspace:first")
         package = service.generate(result.id)
-        row = session.get(OutreachPackageModel, package.id)
+        row = session.get(MessageModel, package.id)
         custom_body = "Hi Lakeside Painting, I wrote this custom message and want to keep it."
         custom_content = dict(row.content)
         custom_content["message"] = {"body": custom_body}
@@ -585,7 +594,7 @@ def test_outreach_package_preserves_edited_older_template_copy() -> None:
         assert preserved.content.message.body == custom_body
         assert preserved.content.strategy is not None
         assert preserved.content.call.branches
-        assert session.get(OutreachPackageModel, package.id).prompt_version == 12
+        assert session.get(MessageModel, package.id).prompt_version == 12
 
 
 def test_outreach_package_uses_safe_fallback_for_shortlisted_business_without_verified_opportunity() -> None:
@@ -777,20 +786,12 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
     )
     session.add(audience)
     session.flush()
-    run = AudienceRunModel(
-        id=new_id("audience_run"),
-        workspace_id="workspace:first",
-        audience_id=audience.id,
-        criteria_version=1,
-        state="ready",
-        requested_count=25,
-        result_count=1,
-        new_result_count=1,
-        deadline_at=now + timedelta(minutes=5),
-        completed_at=now,
-    )
-    session.add(run)
-    session.flush()
+    audience.match_state = "ready"
+    audience.match_requested_count = 25
+    audience.match_result_count = 1
+    audience.match_new_result_count = 1
+    audience.match_deadline_at = now + timedelta(minutes=5)
+    audience.match_completed_at = now
     matched = [
         {
             "signal_key": "no_quote_flow",
@@ -802,12 +803,10 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
     ] if confirmed else []
     result = AudienceResultModel(
         id=new_id("audience_result"),
-        run_id=run.id,
         audience_id=audience.id,
         business_id=business.id,
         rank_position=1,
         is_new=True,
-        shortlisted_at=now,
         match_snapshot={
             "title": business.display_name,
             "url": business.website_url,
@@ -821,6 +820,46 @@ def _seed_result(session, *, confirmed: bool) -> AudienceResultModel:
             },
         },
     )
+    lead = _lead_for_result(
+        session,
+        product_id=product.id,
+        territory_id=audience.id,
+        business_id=business.id,
+        company_name=business.display_name,
+        shortlisted_at=now,
+    )
+    result.outreach_lead_id = lead.id
     session.add(result)
     session.commit()
     return result
+
+
+def _lead_for_result(
+    session,
+    *,
+    product_id: str,
+    territory_id: str,
+    business_id: str,
+    company_name: str,
+    shortlisted_at,
+) -> LeadModel:
+    lead = LeadModel(
+        id=new_id("lead"),
+        campaign_id=None,
+        territory_id=territory_id,
+        product_id=product_id,
+        business_id=business_id,
+        contact_id=None,
+        company_name=company_name,
+        website_url="https://example.com",
+        contact_email="owner@example.com",
+        geography="Toronto",
+        description=None,
+        source="audience_result",
+        status="qualified",
+        review_status="unreviewed",
+        shortlisted_at=shortlisted_at,
+        raw_sources=[],
+    )
+    session.add(lead)
+    return lead

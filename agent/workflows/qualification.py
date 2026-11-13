@@ -4,8 +4,6 @@ from campaigns.schemas import CampaignRead, CampaignStage, CampaignStatus
 from leads.repository import LeadRepository
 from leads.policy import normalize_qualification_result
 from leads.schemas import AgentFitStatus, LeadRead, LeadStatus, QualificationResult
-from memory.repository import MemoryRepository
-from memory.schemas import CampaignMemoryCreate, ObservationType
 from products.schemas import ProductRead
 from prompts.qualification import (
     DISQUALIFYING_LEAD_TYPES,
@@ -24,12 +22,10 @@ class QualificationWorkflow:
         *,
         campaigns: CampaignRepository,
         leads: LeadRepository,
-        memory: MemoryRepository,
         llm: LLMClient,
     ) -> None:
         self.campaigns = campaigns
         self.leads = leads
-        self.memory = memory
         self.llm = llm
 
     def run(self, product: ProductRead, campaign: CampaignRead) -> list[LeadRead]:
@@ -58,16 +54,6 @@ class QualificationWorkflow:
             result = enforce_qualification_boundary(product, lead, result)
             updated = LeadRead.model_validate(self.leads.attach_qualification(lead.id, result))
             qualified.append(updated)
-            self.memory.create_observation(
-                CampaignMemoryCreate(
-                    product_id=product.id,
-                    campaign_id=campaign.id,
-                    type=ObservationType.LEAD_QUALITY,
-                    content=f"{updated.company_name} scored {result.score}: {result.rationale}",
-                    tags=["qualification", "qualified" if result.qualified else "disqualified"],
-                    score_impact=result.score,
-                )
-            )
         return qualified
 
 

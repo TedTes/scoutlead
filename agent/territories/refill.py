@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from db.models import AudienceResultModel, AudienceRunModel, TerritoryModel
+from db.models import AudienceResultModel, LeadModel, TerritoryModel
 from job_queue.service import QueueService
 
 
@@ -20,27 +20,19 @@ def enqueue_refill_if_depleted(
         or territory.refill_policy != "when_depleted"
     ):
         return False
-    latest_run = session.scalar(
-        select(AudienceRunModel)
-        .where(
-            AudienceRunModel.audience_id == territory.id,
-            AudienceRunModel.state.in_(("ready", "partial")),
-        )
-        .order_by(AudienceRunModel.created_at.desc())
-        .limit(1)
-    )
-    if latest_run is None:
+    if territory.match_state not in {"ready", "partial"}:
         return False
     remaining = session.scalar(
         select(func.count())
         .select_from(AudienceResultModel)
+        .outerjoin(LeadModel, LeadModel.id == AudienceResultModel.outreach_lead_id)
         .where(
-            AudienceResultModel.run_id == latest_run.id,
-            AudienceResultModel.shortlisted_at.is_(None),
-            AudienceResultModel.contacted_at.is_(None),
+            AudienceResultModel.audience_id == territory.id,
+            LeadModel.shortlisted_at.is_(None),
+            LeadModel.last_contacted_at.is_(None),
             or_(
-                AudienceResultModel.review_status.is_(None),
-                AudienceResultModel.review_status != "not_fit",
+                LeadModel.review_status.is_(None),
+                LeadModel.review_status != "not_fit",
             ),
         )
     ) or 0

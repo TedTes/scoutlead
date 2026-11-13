@@ -907,7 +907,11 @@ def select_businesses(
             BusinessNicheMembershipModel.business_id == BusinessModel.id,
         )
         .join(NicheModel, NicheModel.id == BusinessNicheMembershipModel.niche_id)
-        .where(BusinessModel.website_url.is_not(None), NicheModel.active.is_(True))
+        .where(
+            BusinessModel.website_url.is_not(None),
+            BusinessModel.status == "active",
+            NicheModel.active.is_(True),
+        )
         .where(active_membership_condition())
         .distinct()
     )

@@ -69,10 +69,10 @@ class MessageRead(OutreachDraft):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    campaign_id: str
+    campaign_id: str | None
     product_id: str
     lead_id: str
-    outreach_package_id: str | None = None
+    audience_result_id: str | None = None
     status: MessageStatus
     approval: dict | None = None
     sent_at: datetime | None = None

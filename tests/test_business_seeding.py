@@ -11,7 +11,6 @@ from db.models import (
     ContactModel,
     LeadModel,
     NicheModel,
-    SeedBatchModel,
 )
 from db.session import create_database
 from seeding.schemas import BusinessSeedInput
@@ -51,7 +50,6 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert _count(session, ContactModel) == 1
         assert _evidence_count(session) == 1
         assert _count(session, NicheModel) == 1
-        assert _count(session, SeedBatchModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
         assert _count(session, LeadModel) == 0
         assert _count(session, CampaignModel) == 0
@@ -88,22 +86,10 @@ def test_business_seed_import_populates_canonical_and_niche_tables() -> None:
         assert niche.label == "Home Service Painting"
         assert niche.default_query == "solo residential painters in Toronto with estimate forms"
 
-        seed_batch = session.scalar(select(SeedBatchModel))
-        assert seed_batch is not None
-        assert seed_batch.id == "painting-toronto-v1"
-        assert seed_batch.niche_id == niche.id
-        assert seed_batch.market_key == "toronto gta"
-        assert seed_batch.status == "completed"
-        assert seed_batch.found_count == 1
-        assert seed_batch.inserted_count == 1
-        assert seed_batch.updated_count == 0
-        assert seed_batch.evidence_record_count == 1
-
         membership = session.scalar(select(BusinessNicheMembershipModel))
         assert membership is not None
         assert membership.business_id == business.id
         assert membership.niche_id == niche.id
-        assert membership.seed_batch_id == seed_batch.id
         assert membership.market_key == "toronto gta"
         assert membership.confidence == 1.0
         assert membership.evidence[0]["type"] == "seed_import"
@@ -127,7 +113,6 @@ def test_business_seed_import_is_idempotent() -> None:
         assert _count(session, ContactModel) == 1
         assert _evidence_count(session) == 1
         assert _count(session, NicheModel) == 1
-        assert _count(session, SeedBatchModel) == 1
         assert _count(session, BusinessNicheMembershipModel) == 1
 
 
@@ -165,7 +150,7 @@ def test_quarantined_external_identity_is_not_reused() -> None:
             [painting_seed(external_id="shared-place-id")],
             batch_id="contaminated-v1",
         )
-        session.get(SeedBatchModel, "contaminated-v1").status = "quarantined"
+        session.scalar(select(BusinessModel)).status = "quarantined"
         session.commit()
 
         summary = service.import_seeds(
@@ -245,7 +230,7 @@ def test_semantic_matches_ignore_quarantined_seed_memberships() -> None:
             [painting_seed()],
             batch_id="contaminated-v1",
         )
-        session.get(SeedBatchModel, "contaminated-v1").status = "quarantined"
+        session.scalar(select(BusinessModel)).status = "quarantined"
         session.commit()
 
         rows = CanonicalRepository(
@@ -420,7 +405,7 @@ def test_business_seed_import_rejects_a_mixed_niche_batch_before_writing() -> No
             )
 
         assert _count(session, BusinessModel) == 0
-        assert _count(session, SeedBatchModel) == 0
+        assert _count(session, BusinessNicheMembershipModel) == 0
 
 
 def test_business_seed_import_supports_semantic_cache_reuse() -> None:

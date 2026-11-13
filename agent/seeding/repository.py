@@ -15,7 +15,6 @@ from db.models import (
     BusinessNicheMembershipModel,
     ContactModel,
     NicheModel,
-    SeedBatchModel,
     BusinessAttributeModel,
 )
 from niches.catalog import search_config_for_slug
@@ -63,7 +62,7 @@ class BusinessSeedRepository:
         return int(self.session.scalar(select(func.count()).select_from(NicheModel)) or 0)
 
     def seed_batch_count(self) -> int:
-        return int(self.session.scalar(select(func.count()).select_from(SeedBatchModel)) or 0)
+        return 0
 
     def membership_count(self) -> int:
         return int(
@@ -79,16 +78,7 @@ class BusinessSeedRepository:
         updated_count: int,
         evidence_record_count: int,
     ) -> None:
-        seed_batch = self.session.get(SeedBatchModel, batch_id)
-        if seed_batch is None:
-            return
-        seed_batch.status = "completed"
-        seed_batch.completed_at = utcnow()
-        seed_batch.found_count = found_count
-        seed_batch.inserted_count = inserted_count
-        seed_batch.updated_count = updated_count
-        seed_batch.evidence_record_count = evidence_record_count
-        self.session.flush()
+        return None
 
     def _record_seed_membership(
         self,
@@ -98,12 +88,11 @@ class BusinessSeedRepository:
         link: CanonicalLeadLink,
     ) -> None:
         niche = self._upsert_niche(seed)
-        seed_batch = self._upsert_seed_batch(seed, batch_id=batch_id, niche_id=niche.id)
         self._upsert_business_niche_membership(
             seed,
             business_id=link.business_id,
             niche_id=niche.id,
-            seed_batch_id=seed_batch.id,
+            seed_batch_id=batch_id,
             source_evidence_id=link.source_evidence_id,
         )
 
@@ -131,46 +120,6 @@ class BusinessSeedRepository:
             niche.search_config = search_config_for_slug(slug)
         self.session.flush()
         return niche
-
-    def _upsert_seed_batch(
-        self,
-        seed: BusinessSeedInput,
-        *,
-        batch_id: str,
-        niche_id: str,
-    ) -> SeedBatchModel:
-        now = utcnow()
-        seed_batch = self.session.get(SeedBatchModel, batch_id)
-        if seed_batch is None:
-            seed_batch = SeedBatchModel(
-                id=batch_id,
-                niche_id=niche_id,
-                market_key=_seed_market_key(seed),
-                source=seed.source,
-                query=seed.query,
-                status="running",
-                started_at=now,
-                found_count=0,
-                inserted_count=0,
-                updated_count=0,
-                evidence_record_count=0,
-            )
-            self.session.add(seed_batch)
-            self.session.flush()
-            return seed_batch
-        market_key = _seed_market_key(seed)
-        if seed_batch.niche_id and seed_batch.niche_id != niche_id:
-            raise ValueError(f"seed batch {batch_id} cannot contain more than one niche")
-        if seed_batch.market_key and seed_batch.market_key != market_key:
-            raise ValueError(f"seed batch {batch_id} cannot contain more than one market")
-        seed_batch.niche_id = niche_id
-        seed_batch.market_key = market_key
-        seed_batch.source = seed_batch.source or seed.source
-        seed_batch.query = seed_batch.query or seed.query
-        if seed_batch.status != "completed":
-            seed_batch.status = "running"
-        self.session.flush()
-        return seed_batch
 
     def _upsert_business_niche_membership(
         self,
@@ -205,7 +154,6 @@ class BusinessSeedRepository:
                 market_key=market_key,
                 confidence=1.0,
                 evidence=[evidence],
-                seed_batch_id=seed_batch_id,
                 first_seen_at=now,
                 last_seen_at=now,
             )
@@ -215,7 +163,6 @@ class BusinessSeedRepository:
 
         membership.confidence = max(membership.confidence, 1.0)
         membership.evidence = _append_unique_evidence(membership.evidence or [], evidence)
-        membership.seed_batch_id = seed_batch_id or membership.seed_batch_id
         membership.last_seen_at = now
         self.session.flush()
         return membership

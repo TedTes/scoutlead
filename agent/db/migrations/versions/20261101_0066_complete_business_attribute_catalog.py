@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from alembic import op
 import sqlalchemy as sa
 
-from business_facts.attribute_scoring import score_attribute
+from business_attributes.attribute_scoring import score_attribute
 from canonical.normalization import external_id_from_raw, first_raw_text, nested_raw
 from shared.utils import new_id
 

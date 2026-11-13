@@ -12,7 +12,6 @@ from audience_runs.schemas import AudienceLeadRead
 from audience_runs.service import AudienceRunService
 from db.models import (
     AudienceResultModel,
-    AudienceRunModel,
     LeadModel,
     ProductModel,
     TerritoryModel,
@@ -21,6 +20,10 @@ from leads.schemas import LeadRead, WorkspaceLeadCounts
 
 
 WorkspaceLeadView = Literal["inbox", "shortlisted", "contacted", "dismissed", "this_week", "all"]
+
+
+def _datetime_key(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 class WorkspaceLeadPage(BaseModel):
@@ -136,8 +139,16 @@ class WorkspaceLeadService:
                     if current.contact_policy_status != "allowed"
                     else candidate.contact_policy_status
                 ),
-                created_at=min(current.created_at, candidate.created_at),
-                updated_at=max(current.updated_at, candidate.updated_at),
+                created_at=min(
+                    current.created_at,
+                    candidate.created_at,
+                    key=_datetime_key,
+                ),
+                updated_at=max(
+                    current.updated_at,
+                    candidate.updated_at,
+                    key=_datetime_key,
+                ),
                 searchable=f"{current.searchable} {candidate.searchable}",
             )
         return list(canonical.values())
@@ -153,53 +164,13 @@ class WorkspaceLeadService:
         )
         if not audience_ids:
             return []
-        runs = list(
+        selected = list(
             self.session.scalars(
-                select(AudienceRunModel)
-                .where(
-                    AudienceRunModel.workspace_id == self.workspace_id,
-                    AudienceRunModel.audience_id.in_(audience_ids),
-                    select(AudienceResultModel.id)
-                    .where(AudienceResultModel.run_id == AudienceRunModel.id)
-                    .exists(),
+                select(AudienceResultModel).where(
+                    AudienceResultModel.audience_id.in_(audience_ids)
                 )
-                .order_by(AudienceRunModel.created_at.desc())
             )
         )
-        latest_run_by_audience: dict[str, str] = {}
-        for run in runs:
-            latest_run_by_audience.setdefault(run.audience_id, run.id)
-        latest_run_ids = set(latest_run_by_audience.values())
-        current_results = list(
-            self.session.scalars(
-                select(AudienceResultModel).where(AudienceResultModel.run_id.in_(latest_run_ids))
-            )
-        ) if latest_run_ids else []
-        current_keys = {(item.audience_id, item.business_id) for item in current_results}
-        managed_history = list(
-            self.session.scalars(
-                select(AudienceResultModel)
-                .where(
-                    AudienceResultModel.audience_id.in_(audience_ids),
-                    AudienceResultModel.run_id.not_in(latest_run_ids),
-                    or_(
-                        AudienceResultModel.reviewed_at.is_not(None),
-                        AudienceResultModel.shortlisted_at.is_not(None),
-                        AudienceResultModel.contacted_at.is_not(None),
-                        AudienceResultModel.outreach_lead_id.is_not(None),
-                    ),
-                )
-                .order_by(AudienceResultModel.updated_at.desc())
-            )
-        ) if latest_run_ids else []
-        included_history: set[tuple[str, str]] = set()
-        selected = list(current_results)
-        for item in managed_history:
-            key = (item.audience_id, item.business_id)
-            if key in current_keys or key in included_history:
-                continue
-            included_history.add(key)
-            selected.append(item)
         outreach_lead_ids = [item.outreach_lead_id for item in selected if item.outreach_lead_id]
         outreach_leads = {
             lead.id: lead
@@ -212,7 +183,7 @@ class WorkspaceLeadService:
             snapshot = item.match_snapshot or {}
             outreach_lead = outreach_leads.get(item.outreach_lead_id or "")
             policy = outreach_lead.contact_policy_status if outreach_lead else "allowed"
-            contacted_at = outreach_lead.last_contacted_at if outreach_lead else item.contacted_at
+            contacted_at = outreach_lead.last_contacted_at if outreach_lead else None
             searchable = " ".join(
                 str(value or "")
                 for value in (
@@ -227,8 +198,8 @@ class WorkspaceLeadService:
                     model=item,
                     key=f"business:{item.business_id}",
                     audience_result_id=item.id,
-                    review_status=item.review_status,
-                    shortlisted_at=item.shortlisted_at,
+                    review_status=(outreach_lead.review_status if outreach_lead else "unreviewed"),
+                    shortlisted_at=(outreach_lead.shortlisted_at if outreach_lead else None),
                     contacted_at=contacted_at,
                     contact_policy_status=policy,
                     created_at=item.created_at,
@@ -251,9 +222,9 @@ class WorkspaceLeadService:
         if lead_ids:
             rows = self.session.scalars(
                 select(AudienceResultModel)
-                .join(AudienceRunModel, AudienceRunModel.id == AudienceResultModel.run_id)
+                .join(TerritoryModel, TerritoryModel.id == AudienceResultModel.audience_id)
                 .where(
-                    AudienceRunModel.workspace_id == self.workspace_id,
+                    TerritoryModel.workspace_id == self.workspace_id,
                     AudienceResultModel.outreach_lead_id.in_(lead_ids),
                 )
                 .order_by(AudienceResultModel.updated_at.desc())

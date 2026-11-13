@@ -17,9 +17,9 @@ from campaigns.schemas import CampaignStatus
 from campaigns.service import CampaignService
 from db.session import create_database
 from db.models import (
-    AudienceRunModel,
     CampaignModel,
     QueueJobModel,
+    TerritoryModel,
 )
 from job_queue.repository import QueueRepository
 from job_queue.schemas import JobStatus, JobType
@@ -129,18 +129,18 @@ def _execute_job(
             str(job.payload["message_id"])
         )
     elif job.type == JobType.AUDIENCE_RUN.value:
-        audience_run = session.get(
-            AudienceRunModel,
+        audience = session.get(
+            TerritoryModel,
             str(job.payload["audience_run_id"]),
         )
-        if audience_run is None:
+        if audience is None:
             raise ValueError(
-                f"audience run not found: {job.payload['audience_run_id']}"
+                f"saved search not found: {job.payload['audience_run_id']}"
             )
         AudienceRunService(
             session,
-            workspace_id=audience_run.workspace_id,
-        ).process(audience_run.id)
+            workspace_id=audience.workspace_id,
+        ).process(audience.id)
     elif job.type == JobType.BUSINESS_INDEX_REFRESH.value:
         business_index_pipeline_service(
             session=session,
@@ -291,12 +291,12 @@ def _fail_expanding_campaigns(session: Session, *, segment_id: str, reason: str)
 
 
 def _fail_audience_run(session: Session, *, run_id: str, reason: str) -> None:
-    run = session.get(AudienceRunModel, run_id)
-    if run is None:
+    audience = session.get(TerritoryModel, run_id)
+    if audience is None:
         return
-    run.state = "failed"
-    run.failure_reason = reason[:2000]
-    run.completed_at = datetime.now(timezone.utc)
+    audience.match_state = "failed"
+    audience.match_failure_reason = reason[:2000]
+    audience.match_completed_at = datetime.now(timezone.utc)
     session.commit()
 
 

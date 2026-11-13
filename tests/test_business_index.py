@@ -21,7 +21,6 @@ from db.models import (
     BusinessNicheMembershipModel,
     NicheModel,
     QueueJobModel,
-    SourceItemDecisionModel,
     SourceItemModel,
 )
 from db.session import create_database
@@ -342,7 +341,7 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
             final_results=[],
         )
         source_items = session.query(SourceItemModel).all()
-        source_item_decisions = session.query(SourceItemDecisionModel).all()
+        decided_source_items = [item for item in source_items if item.decision is not None]
 
     assert [call.provider_id for call in registry.calls] == [
         "google_places",
@@ -368,7 +367,7 @@ def test_scheduled_refresh_runs_every_provider_and_populates_the_shared_index() 
     assert diagnostics.summary["final"] == 0
     assert len(source_items) == 2
     assert all(item.state == "audit_pending" for item in source_items)
-    assert len(source_item_decisions) == 2
+    assert len(decided_source_items) == 2
 
 
 def test_staged_refresh_processes_fetch_identity_and_audit_jobs() -> None:

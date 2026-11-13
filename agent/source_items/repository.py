@@ -6,9 +6,9 @@ import json
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from db.models import SourceItemDecisionModel, SourceItemModel
+from db.models import SourceItemModel
 from shared.errors import NotFoundError
-from shared.utils import new_id
+from shared.utils import new_id, utcnow
 from source_items.schemas import (
     SourceItemCreate,
     SourceItemDecisionCreate,
@@ -41,20 +41,22 @@ class SourceItemRepository:
         business_id: str | None = None,
         error: str | None = None,
         commit: bool = True,
-    ) -> SourceItemDecisionModel:
+    ):
         item = self.get(source_item_id)
-        decision = SourceItemDecisionModel(
-            id=new_id("source_decision"),
-            source_item_id=item.id,
-            **value.model_dump(mode="json"),
-        )
         item.state = next_state.value
         if business_id is not None:
             item.business_id = business_id
         item.last_error = error
-        self.session.add(decision)
-        self._finish(decision, commit=commit)
-        return decision
+        item.decision_stage = value.stage.value
+        item.decision = value.decision.value
+        item.decision_reason = value.reason
+        item.decision_confidence = value.confidence
+        item.decision_details = value.details
+        item.decision_actor_type = value.actor_type
+        item.decision_actor_id = value.actor_id
+        item.decided_at = utcnow()
+        self._finish(item, commit=commit)
+        return item.decisions[-1]
 
     def get(self, source_item_id: str) -> SourceItemModel:
         item = self.session.get(SourceItemModel, source_item_id)
@@ -62,21 +64,20 @@ class SourceItemRepository:
             raise NotFoundError("source item not found", {"source_item_id": source_item_id})
         return item
 
-    def latest_user_decision_for(self, item: SourceItemModel) -> SourceItemDecisionModel | None:
+    def latest_user_decision_for(self, item: SourceItemModel):
         identity_filters = [SourceItemModel.content_hash == item.content_hash]
         if item.external_id:
             identity_filters.append(SourceItemModel.external_id == item.external_id)
         if item.source_url:
             identity_filters.append(SourceItemModel.source_url == item.source_url)
-        return self.session.scalar(
-            select(SourceItemDecisionModel)
-            .join(SourceItemModel, SourceItemModel.id == SourceItemDecisionModel.source_item_id)
+        previous = self.session.scalar(
+            select(SourceItemModel)
             .where(
                 SourceItemModel.id != item.id,
                 SourceItemModel.segment_id == item.segment_id,
                 SourceItemModel.provider_id == item.provider_id,
-                SourceItemDecisionModel.actor_type == "user",
-                SourceItemDecisionModel.decision.in_(
+                SourceItemModel.decision_actor_type == "user",
+                SourceItemModel.decision.in_(
                     [
                         "accepted",
                         "rejected",
@@ -85,9 +86,10 @@ class SourceItemRepository:
                 ),
                 or_(*identity_filters),
             )
-            .order_by(SourceItemDecisionModel.created_at.desc())
+            .order_by(SourceItemModel.decided_at.desc())
             .limit(1)
         )
+        return previous.decisions[-1] if previous and previous.decisions else None
 
     def list_for_segment(
         self,

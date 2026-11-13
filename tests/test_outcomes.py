@@ -12,7 +12,6 @@ from db.models import (
     ContactModel,
     LeadOutcomeModel,
     NicheModel,
-    OutcomeModel,
 )
 from db.session import create_database
 from leads.repository import LeadRepository
@@ -203,7 +202,7 @@ def test_due_no_response_is_added_only_after_window() -> None:
         assert service.record_due_no_responses(days=14, now=now) == 0
 
 
-def test_learning_model_recomputes_after_ten_new_outcomes() -> None:
+def test_outcomes_remain_the_source_data_without_a_derived_model_table() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         lead, territory = _territory_lead(session, workspace_id="workspace:first")
@@ -222,16 +221,15 @@ def test_learning_model_recomputes_after_ten_new_outcomes() -> None:
                 ),
             )
 
-        model = session.query(OutcomeModel).one()
-        assert model.n_contacted == 1
-        assert model.n_positive == 0
-        assert model.niche_id == territory.niche_id
+        rows = session.query(LeadOutcomeModel).all()
+        assert len(rows) == 10
+        assert {row.niche_id for row in rows} == {territory.niche_id}
 
 
 def test_daily_maintenance_records_due_no_response() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
-        lead, territory = _territory_lead(session, workspace_id="workspace:first")
+        lead, _ = _territory_lead(session, workspace_id="workspace:first")
         OutcomeService(session, workspace_id="workspace:first").record(
             lead.id,
             LeadOutcomeCreate(
@@ -244,7 +242,7 @@ def test_daily_maintenance_records_due_no_response() -> None:
 
         session.refresh(lead)
         assert lead.latest_outcome == LeadOutcome.NO_RESPONSE.value
-        assert session.query(OutcomeModel).one().niche_id == territory.niche_id
+        assert len(session.query(LeadOutcomeModel).all()) == 2
 
 
 def _session_factory():

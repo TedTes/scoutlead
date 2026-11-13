@@ -2,7 +2,7 @@ import httpx
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from db.models import BusinessAttributeModel, BusinessModel, ContactModel, SeedBatchModel
+from db.models import BusinessAttributeModel, BusinessModel, ContactModel
 from db.session import create_database
 from canonical.normalization import stable_content_hash
 from canonical.website_enrichment import (
@@ -623,7 +623,7 @@ def test_website_enrichment_ignores_quarantined_seed_memberships(monkeypatch) ->
             ],
             batch_id="contaminated-v1",
         )
-        session.get(SeedBatchModel, "contaminated-v1").status = "quarantined"
+        session.scalar(select(BusinessModel)).status = "quarantined"
         session.commit()
 
         def unexpected_request(*args, **kwargs):

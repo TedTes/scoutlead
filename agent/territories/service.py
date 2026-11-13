@@ -12,7 +12,6 @@ from canonical.semantics import semantic_key
 from business_index.schemas import OpportunityType, SearchContract
 from db.models import (
     AudienceResultModel,
-    AudienceRunModel,
     LeadOutcomeModel,
     NicheModel,
     SignalDefinitionModel,
@@ -782,25 +781,12 @@ class TerritoryService:
         self.territories.delete(territory_id)
 
     def _read(self, model) -> TerritoryRead:
-        latest_run = self.session.scalar(
-            select(AudienceRunModel)
-            .where(
-                AudienceRunModel.audience_id == model.id,
-                AudienceRunModel.state.in_(("ready", "partial")),
-            )
-            .order_by(AudienceRunModel.created_at.desc())
-            .limit(1)
-        )
-        batch_results = (
-            list(
-                self.session.scalars(
-                    select(AudienceResultModel).where(
-                        AudienceResultModel.run_id == latest_run.id
-                    )
+        batch_results = list(
+            self.session.scalars(
+                select(AudienceResultModel).where(
+                    AudienceResultModel.audience_id == model.id
                 )
             )
-            if latest_run is not None
-            else []
         )
         outcomes = list(
             self.session.scalars(
@@ -825,8 +811,7 @@ class TerritoryService:
                 "niche_label": model.niche.label if model.niche else None,
                 "last_batch_count": len(batch_results),
                 "unreviewed_batch_count": sum(
-                    result.review_status == "unreviewed"
-                    for result in batch_results
+                    result.outreach_lead_id is None for result in batch_results
                 ),
                 "positive_outcome_rate": (
                     round(len(contacted & positive) / len(contacted), 4)

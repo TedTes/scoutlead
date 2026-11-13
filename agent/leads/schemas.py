@@ -180,7 +180,7 @@ def _first_qualification_detail(value: dict[str, Any]) -> str:
 
 
 class LeadCreate(BaseModel):
-    campaign_id: str
+    campaign_id: str | None = None
     product_id: str
     company_name: str = Field(min_length=1)
     website_url: str | None = None

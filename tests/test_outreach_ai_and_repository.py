@@ -1,3 +1,4 @@
+import pytest
 from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -94,7 +95,7 @@ def test_invalid_ai_classification_falls_back_to_keyword_rules() -> None:
     assert result.source == "deterministic"
 
 
-def test_database_playbook_override_replaces_only_matching_service() -> None:
+def test_database_playbook_overrides_are_retired() -> None:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     create_database(engine)
     with sessionmaker(bind=engine, expire_on_commit=False)() as session:
@@ -107,19 +108,18 @@ def test_database_playbook_override_replaces_only_matching_service() -> None:
         definition = original.model_copy(
             update={"goal": "Managed override goal."}
         ).model_dump()
-        row = repository.save(
-            service_key="website_modernization",
-            definition=definition,
-        )
-        row.status = "active"
-        session.commit()
+        with pytest.raises(ValueError, match="playbook overrides were retired"):
+            repository.save(
+                service_key="website_modernization",
+                definition=definition,
+            )
 
         catalog = repository.catalog()
-        overridden = next(
+        unchanged = next(
             service
             for service in catalog.services
             if service.service_key == "website_modernization"
         )
-        assert isinstance(overridden, ServicePlaybook)
-        assert overridden.goal == "Managed override goal."
+        assert isinstance(unchanged, ServicePlaybook)
+        assert unchanged.goal == original.goal
         assert len(catalog.services) == len(load_playbook_catalog().services)

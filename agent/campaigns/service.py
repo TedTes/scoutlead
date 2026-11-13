@@ -18,8 +18,6 @@ from campaigns.schemas import (
 from conversations.repository import ConversationRepository
 from conversations.schemas import ConversationRead
 from db.models import CampaignModel
-from discovery.repository import DiscoveryCandidateRepository
-from discovery.schemas import DiscoveryCandidateCreate, DiscoveryCandidateType
 from evaluation.campaign_metrics import calculate_campaign_metrics
 from evaluation.lead_scoring import build_cached_lead_research, score_cached_lead
 from evaluation.schemas import CampaignMetrics
@@ -31,8 +29,6 @@ from leads.schemas import (
     LeadRead,
     QualificationResult,
 )
-from memory.repository import MemoryRepository
-from memory.schemas import CampaignMemoryCreate, ObservationType
 from messages.repository import MessageRepository
 from messages.schemas import MessageRead
 from products.discovery_policy import validate_google_places_query
@@ -110,11 +106,9 @@ class CampaignService:
         self.campaign_sources = CampaignSourceRepository(session)
         self.icp_presets = ICPPresetService()
         self.source_presets = SourcePresetService()
-        self.discovery_candidates = DiscoveryCandidateRepository(session)
         self.leads = LeadRepository(session, embedding=self.embedding, workspace_id=workspace_id)
         self.messages = MessageRepository(session, workspace_id=workspace_id)
         self.conversations = ConversationRepository(session, workspace_id=workspace_id)
-        self.memory = MemoryRepository(session)
 
     def create(self, campaign: CampaignCreate) -> CampaignModel:
         product = ProductRead.model_validate(self.products.get(campaign.product_id))
@@ -333,23 +327,6 @@ class CampaignService:
     ) -> list[LeadRead]:
         discovered: list[LeadRead] = []
         for row, search_result in indexed_rows:
-            candidate = self.discovery_candidates.create(
-                DiscoveryCandidateCreate(
-                    campaign_id=campaign.id,
-                    product_id=product.id,
-                    query=str(row.get("discovery_query") or search_result.raw.get("query") or ""),
-                    title=search_result.title,
-                    url=search_result.url,
-                    snippet=search_result.snippet,
-                    geography=search_result.geography,
-                    contact_email=search_result.contact_email,
-                    source=search_result.source,
-                    raw=row,
-                    candidate_type=DiscoveryCandidateType.TARGET_BUSINESS,
-                    confidence=100,
-                    rejection_reason=None,
-                )
-            )
             if len(discovered) >= campaign.max_leads:
                 continue
             lead = self.leads.create_from_existing_match(
@@ -357,7 +334,6 @@ class CampaignService:
                 product_id=product.id,
                 result=row,
             )
-            self.discovery_candidates.mark_promoted(candidate.id, lead.id)
             lead = self.leads.attach_research(
                 lead.id,
                 build_cached_lead_research(
@@ -379,15 +355,6 @@ class CampaignService:
             )
             discovered.append(LeadRead.model_validate(lead))
 
-        self.memory.create_observation(
-            CampaignMemoryCreate(
-                product_id=product.id,
-                campaign_id=campaign.id,
-                type=ObservationType.LEAD_QUALITY,
-                content=f"Business index produced {len(discovered)} existing matches.",
-                tags=["discovery", "business_index", product.target_customer],
-            )
-        )
         return discovered
 
     def metrics(self, campaign_id: str) -> CampaignMetrics:

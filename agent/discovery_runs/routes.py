@@ -14,8 +14,6 @@ from campaigns.schemas import (
     LeadSeedInput,
 )
 from campaigns.service import CampaignService
-from discovery.repository import DiscoveryCandidateRepository
-from discovery.schemas import DiscoveryCandidateRead
 from evaluation.schemas import CampaignMetrics
 from leads.repository import LeadRepository
 from leads.export import leads_csv
@@ -304,17 +302,6 @@ def add_discovery_seed_results(
     run = _service(session, services, auth).get(run_id)
     leads = LeadRepository(session, workspace_id=auth.workspace_id)
     return [leads.create_from_seed(run_id, run.product_id, seed) for seed in seeds]
-
-
-@router.get("/{run_id}/discovery-candidates", response_model=list[DiscoveryCandidateRead])
-def list_discovery_candidates(
-    run_id: str,
-    session: DbSession,
-    services: Annotated[AppServices, Depends(get_services)],
-    auth: CurrentAuth,
-):
-    _service(session, services, auth).get(run_id)
-    return DiscoveryCandidateRepository(session).list_by_campaign(run_id)
 
 
 @router.get("/{run_id}/messages", response_model=list[MessageRead])

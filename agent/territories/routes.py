@@ -3,12 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import select
 
-from audience_runs.schemas import AudienceRunState
 from audience_runs.service import AudienceRunService
 from app.dependencies import AppServices, CurrentAuth, DbSession, get_services
-from db.models import (
-    AudienceRunModel,
-)
 from shared.errors import ValidationError
 from territories.metrics import (
     AudiencePerformanceRead,
@@ -381,21 +377,7 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
     service = _service(session, auth)
     profile = service.get(audience_id)
     run_service = AudienceRunService(session, workspace_id=auth.workspace_id)
-    latest_run = session.scalar(
-        select(AudienceRunModel)
-        .where(AudienceRunModel.audience_id == profile.id)
-        .order_by(AudienceRunModel.created_at.desc())
-        .limit(1)
-    )
-    outreach_run = session.scalar(
-        select(AudienceRunModel)
-        .where(
-            AudienceRunModel.audience_id == profile.id,
-            AudienceRunModel.outreach_campaign_id.is_not(None),
-        )
-        .order_by(AudienceRunModel.created_at.desc())
-        .limit(1)
-    )
+    has_match = profile.match_started_at is not None
     leads = run_service.latest_leads_for_audience(profile.id)
     remaining = sum(
         not lead.shortlisted_at
@@ -404,32 +386,30 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
         for lead in leads
     )
     location_count = max(1, len(profile.locations or []))
-    if latest_run is None:
+    if not has_match:
         state = ProfileBatchState.SETUP
-    elif latest_run.state == AudienceRunState.FAILED.value:
+    elif profile.match_state == "failed":
         state = ProfileBatchState.FAILED
-    elif latest_run.state == AudienceRunState.READY.value:
+    elif profile.match_state == "ready":
         state = ProfileBatchState.READY if leads else ProfileBatchState.EMPTY
-    elif latest_run.state == AudienceRunState.PARTIAL.value:
+    elif profile.match_state == "partial":
         state = ProfileBatchState.PARTIAL if leads else ProfileBatchState.EMPTY
     else:
         state = ProfileBatchState.SCORING
     return ProfileBatchRead(
         audience=service.get_read(profile.id),
-        audience_run_id=latest_run.id if latest_run is not None else None,
-        outreach_campaign_id=(
-            outreach_run.outreach_campaign_id if outreach_run is not None else None
-        ),
+        audience_run_id=profile.id if has_match else None,
+        outreach_campaign_id=profile.outreach_campaign_id,
         leads=leads,
         state=state,
         requested_count=profile.batch_size,
         result_count=len(leads),
         remaining_count=remaining,
         location_count=location_count,
-        locations_completed=(location_count if latest_run is not None else 0),
+        locations_completed=(location_count if has_match else 0),
         failure_class=(
-            _failure_class(latest_run.failure_reason)
-            if state == ProfileBatchState.FAILED and latest_run is not None
+            _failure_class(profile.match_failure_reason)
+            if state == ProfileBatchState.FAILED
             else None
         ),
         retry_at=None,

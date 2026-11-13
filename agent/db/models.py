@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+from types import SimpleNamespace
 
 from sqlalchemy import (
     Boolean,
@@ -141,7 +142,10 @@ class CampaignModel(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     product: Mapped[ProductModel] = relationship()
-    territory: Mapped["TerritoryModel | None"] = relationship(back_populates="campaigns")
+    territory: Mapped["TerritoryModel | None"] = relationship(
+        back_populates="campaigns",
+        foreign_keys=[territory_id],
+    )
 
 
 class CampaignSourceModel(TimestampMixin, Base):
@@ -385,48 +389,14 @@ class BusinessAttributeModel(TimestampMixin, Base):
         self.supporting_evidence_ids = [value] if value else []
 
 
-class AudienceRunModel(TimestampMixin, Base):
-    __tablename__ = "audience_runs"
-    __table_args__ = (
-        Index("ix_audience_runs_audience_created", "audience_id", "created_at"),
-        Index("ix_audience_runs_state_deadline", "state", "deadline_at"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    workspace_id: Mapped[str | None] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=True, index=True
-    )
-    audience_id: Mapped[str] = mapped_column(
-        ForeignKey("territories.id"), nullable=False, index=True
-    )
-    criteria_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    new_result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    index_snapshot_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    outreach_campaign_id: Mapped[str | None] = mapped_column(
-        ForeignKey("campaigns.id"), nullable=True, index=True
-    )
-
-
 class AudienceResultModel(TimestampMixin, Base):
     __tablename__ = "audience_results"
     __table_args__ = (
-        UniqueConstraint("run_id", "business_id", name="uq_audience_results_run_business"),
-        UniqueConstraint("run_id", "rank_position", name="uq_audience_results_run_rank"),
+        UniqueConstraint("audience_id", "business_id", name="uq_audience_results_audience_business"),
+        UniqueConstraint("audience_id", "rank_position", name="uq_audience_results_audience_rank"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("audience_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
     audience_id: Mapped[str] = mapped_column(
         ForeignKey("territories.id"), nullable=False, index=True
     )
@@ -436,76 +406,9 @@ class AudienceResultModel(TimestampMixin, Base):
     rank_position: Mapped[int] = mapped_column(Integer, nullable=False)
     is_new: Mapped[bool] = mapped_column(Boolean, nullable=False)
     match_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    review_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="unreviewed", index=True
-    )
-    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    shortlisted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    contacted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     outreach_lead_id: Mapped[str | None] = mapped_column(
         ForeignKey("leads.id"), nullable=True, index=True
     )
-
-
-class CoverageRequestModel(TimestampMixin, Base):
-    __tablename__ = "coverage_requests"
-    __table_args__ = (
-        UniqueConstraint(
-            "run_id",
-            "niche_id",
-            "market_key",
-            name="uq_coverage_requests_run_niche_market",
-        ),
-        Index("ix_coverage_requests_status_created", "status", "created_at"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("audience_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    audience_id: Mapped[str] = mapped_column(
-        ForeignKey("territories.id"), nullable=False, index=True
-    )
-    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
-    market_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class OutreachPackageModel(TimestampMixin, Base):
-    __tablename__ = "outreach_packages"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "audience_result_id",
-            name="uq_outreach_packages_workspace_result",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    workspace_id: Mapped[str | None] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=True, index=True
-    )
-    audience_result_id: Mapped[str] = mapped_column(
-        ForeignKey("audience_results.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    business_id: Mapped[str] = mapped_column(
-        ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    provider: Mapped[str] = mapped_column(String(64), nullable=False)
-    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class OutreachTemplateModel(TimestampMixin, Base):
@@ -525,40 +428,6 @@ class OutreachTemplateModel(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     structure: Mapped[str] = mapped_column(Text, nullable=False)
     example: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class OutreachPlaybookModel(TimestampMixin, Base):
-    __tablename__ = "outreach_playbooks"
-    __table_args__ = (
-        UniqueConstraint("service_key", name="uq_outreach_playbooks_service_key"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    service_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
-    definition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-
-
-class OutreachEventModel(Base):
-    __tablename__ = "outreach_events"
-    __table_args__ = (
-        Index("ix_outreach_events_package_created", "package_id", "created_at"),
-        Index("ix_outreach_events_workspace_event", "workspace_id", "event_type"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    workspace_id: Mapped[str | None] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=True, index=True
-    )
-    package_id: Mapped[str] = mapped_column(
-        ForeignKey("outreach_packages.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    channel: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    variant_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
-    event_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class NicheModel(TimestampMixin, Base):
@@ -583,7 +452,6 @@ class NicheModel(TimestampMixin, Base):
     memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
         back_populates="niche"
     )
-    seed_batches: Mapped[list["SeedBatchModel"]] = relationship(back_populates="niche")
     territories: Mapped[list["TerritoryModel"]] = relationship(back_populates="niche")
 
 
@@ -683,40 +551,33 @@ class TerritoryModel(TimestampMixin, Base):
     criteria_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    match_state: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    match_requested_count: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    match_result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    match_new_result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    match_index_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    match_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    match_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    match_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    match_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outreach_campaign_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "campaigns.id",
+            name="fk_territories_outreach_campaign_id_campaigns",
+            use_alter=True,
+        ),
+        nullable=True,
+        index=True,
+    )
 
     workspace: Mapped[WorkspaceModel] = relationship(back_populates="territories")
     product: Mapped[ProductModel] = relationship(back_populates="territories")
     folder: Mapped[AudienceFolderModel | None] = relationship(back_populates="audiences")
     niche: Mapped[NicheModel] = relationship(back_populates="territories")
-    campaigns: Mapped[list[CampaignModel]] = relationship(back_populates="territory")
-class SeedBatchModel(TimestampMixin, Base):
-    __tablename__ = "seed_batches"
-
-    id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    niche_id: Mapped[str | None] = mapped_column(ForeignKey("niches.id"), nullable=True, index=True)
-    market_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    source: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-        default="manual_seed",
-        index=True,
+    campaigns: Mapped[list[CampaignModel]] = relationship(
+        back_populates="territory",
+        foreign_keys=[CampaignModel.territory_id],
     )
-    query: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(64), nullable=False, default="running", index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    found_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    inserted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    updated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    evidence_record_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-    niche: Mapped[NicheModel | None] = relationship(back_populates="seed_batches")
-    memberships: Mapped[list["BusinessNicheMembershipModel"]] = relationship(
-        back_populates="seed_batch"
-    )
-
-
 class BusinessNicheMembershipModel(TimestampMixin, Base):
     __tablename__ = "business_niche_memberships"
     __table_args__ = (
@@ -748,17 +609,11 @@ class BusinessNicheMembershipModel(TimestampMixin, Base):
     )
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
-    seed_batch_id: Mapped[str | None] = mapped_column(
-        ForeignKey("seed_batches.id"),
-        nullable=True,
-        index=True,
-    )
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     business: Mapped[BusinessModel] = relationship(back_populates="niche_memberships")
     niche: Mapped[NicheModel] = relationship(back_populates="memberships")
-    seed_batch: Mapped[SeedBatchModel | None] = relationship(back_populates="memberships")
 
 
 class BusinessIndexSegmentModel(TimestampMixin, Base):
@@ -845,45 +700,44 @@ class SourceItemModel(TimestampMixin, Base):
         ForeignKey("businesses.id"), nullable=True, index=True
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_stage: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    decision: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decision_details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    decision_actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_actor_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     business: Mapped[BusinessModel | None] = relationship()
-    decisions: Mapped[list["SourceItemDecisionModel"]] = relationship(
-        back_populates="source_item",
-        order_by="SourceItemDecisionModel.created_at",
-    )
 
-
-class SourceItemDecisionModel(TimestampMixin, Base):
-    __tablename__ = "source_item_decisions"
-    __table_args__ = (
-        Index(
-            "ix_source_item_decisions_item_stage_created",
-            "source_item_id",
-            "stage",
-            "created_at",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    source_item_id: Mapped[str] = mapped_column(
-        ForeignKey("source_items.id"), nullable=False, index=True
-    )
-    stage: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    decision: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    actor_type: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
-    actor_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
-    source_item: Mapped[SourceItemModel] = relationship(back_populates="decisions")
+    @property
+    def decisions(self) -> list[SimpleNamespace]:
+        """Compatibility view of the single current decision stored on the item."""
+        if self.decision is None:
+            return []
+        return [
+            SimpleNamespace(
+                id=f"{self.id}:decision",
+                source_item_id=self.id,
+                stage=self.decision_stage,
+                decision=self.decision,
+                reason=self.decision_reason,
+                confidence=self.decision_confidence,
+                details=self.decision_details or {},
+                actor_type=self.decision_actor_type or "system",
+                actor_id=self.decision_actor_id,
+                created_at=self.decided_at or self.updated_at,
+                updated_at=self.decided_at or self.updated_at,
+            )
+        ]
 
 
 class LeadModel(TimestampMixin, Base):
     __tablename__ = "leads"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id"), nullable=True, index=True)
     territory_id: Mapped[str | None] = mapped_column(
         ForeignKey("territories.id"), nullable=True, index=True
     )
@@ -951,29 +805,6 @@ class LeadOutcomeModel(TimestampMixin, Base):
     recorded_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
-class OutcomeModel(TimestampMixin, Base):
-    __tablename__ = "outcome_models"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "product_id",
-            "niche_id",
-            name="uq_outcome_models_workspace_product_niche",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=False, index=True
-    )
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    niche_id: Mapped[str] = mapped_column(ForeignKey("niches.id"), nullable=False, index=True)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    n_contacted: Mapped[int] = mapped_column(Integer, nullable=False)
-    n_positive: Mapped[int] = mapped_column(Integer, nullable=False)
-    weights: Mapped[dict[str, float]] = mapped_column(JSON, nullable=False)
-
-
 class ContactSuppressionModel(TimestampMixin, Base):
     __tablename__ = "contact_suppressions"
     __table_args__ = (
@@ -1005,57 +836,15 @@ class ContactSuppressionModel(TimestampMixin, Base):
     workspace: Mapped[WorkspaceModel | None] = relationship()
 
 
-class WebhookDeliveryModel(TimestampMixin, Base):
-    __tablename__ = "webhook_deliveries"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
-    event: Mapped[str] = mapped_column(String(255), nullable=False)
-    url: Mapped[str] = mapped_column(String(1000), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    request_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    product: Mapped[ProductModel] = relationship()
-    campaign: Mapped[CampaignModel] = relationship()
-
-
-class DiscoveryCandidateModel(TimestampMixin, Base):
-    __tablename__ = "discovery_candidates"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    lead_id: Mapped[str | None] = mapped_column(ForeignKey("leads.id"), nullable=True, index=True)
-    query: Mapped[str] = mapped_column(Text, nullable=False)
-    title: Mapped[str] = mapped_column(String(1000), nullable=False)
-    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
-    geography: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    source: Mapped[str] = mapped_column(String(255), nullable=False)
-    raw: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    candidate_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
-    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class MessageModel(TimestampMixin, Base):
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id"), nullable=True, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id"), nullable=False, index=True)
-    outreach_package_id: Mapped[str | None] = mapped_column(
-        ForeignKey("outreach_packages.id", ondelete="SET NULL"),
-        nullable=True,
-        unique=True,
-        index=True,
+    audience_result_id: Mapped[str | None] = mapped_column(
+        ForeignKey("audience_results.id", ondelete="SET NULL"), nullable=True, index=True
     )
     channel: Mapped[str] = mapped_column(String(64), nullable=False)
     subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -1067,6 +856,44 @@ class MessageModel(TimestampMixin, Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generation_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    generation_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    generation_usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    generation_context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+    @property
+    def content(self) -> dict[str, Any]:
+        value = (self.generation_context or {}).get("content")
+        return value if isinstance(value, dict) else {}
+
+    @content.setter
+    def content(self, value: dict[str, Any]) -> None:
+        self.generation_context = {**(self.generation_context or {}), "content": value}
+
+    @property
+    def provider(self) -> str:
+        return self.generation_provider or "template"
+
+    @provider.setter
+    def provider(self, value: str) -> None:
+        self.generation_provider = value
+
+    @property
+    def model(self) -> str | None:
+        return self.generation_model
+
+    @model.setter
+    def model(self, value: str | None) -> None:
+        self.generation_model = value
+
+    @property
+    def usage(self) -> dict[str, Any]:
+        return self.generation_usage or {}
+
+    @usage.setter
+    def usage(self, value: dict[str, Any]) -> None:
+        self.generation_usage = value
 
 
 class EmailConnectionModel(TimestampMixin, Base):
@@ -1120,19 +947,6 @@ class ConversationEventModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     conversation: Mapped[ConversationModel] = relationship(back_populates="events")
-
-
-class CampaignMemoryModel(Base):
-    __tablename__ = "campaign_memory"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
-    type: Mapped[str] = mapped_column(String(64), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    score_impact: Mapped[float | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class QueueJobModel(TimestampMixin, Base):

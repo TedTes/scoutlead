@@ -13,9 +13,9 @@ from campaigns.schemas import OutreachChannel
 
 from db.models import (
     AudienceResultModel,
-    AudienceRunModel,
     BusinessModel,
-    OutreachPackageModel,
+    LeadModel,
+    MessageModel,
     OutreachTemplateModel,
     ProductModel,
     TerritoryModel,
@@ -169,12 +169,7 @@ class OutreachPackageService:
 
     def find_for_result(self, result_id: str) -> OutreachPackageRead | None:
         result, audience, product, business, workspace = self._context(result_id)
-        row = self.session.scalar(
-            select(OutreachPackageModel).where(
-                OutreachPackageModel.workspace_id == self.workspace_id,
-                OutreachPackageModel.audience_result_id == result.id,
-            )
-        )
+        row = self._package_for_result(result.id)
         if row is not None and (
             _should_refresh_template(row)
             or _needs_strategy_upgrade(row)
@@ -195,17 +190,12 @@ class OutreachPackageService:
         data: OutreachGenerateRequest | None = None,
     ) -> OutreachPackageRead:
         result, audience, product, business, workspace = self._context(result_id)
-        if result.shortlisted_at is None:
+        if self._shortlisted_lead(result) is None:
             raise WorkflowBoundaryError(
                 "Shortlist this business before preparing outreach.",
                 {"result_id": result_id},
             )
-        existing = self.session.scalar(
-            select(OutreachPackageModel).where(
-                OutreachPackageModel.workspace_id == self.workspace_id,
-                OutreachPackageModel.audience_result_id == result.id,
-            )
-        )
+        existing = self._package_for_result(result.id)
         if existing is not None:
             if data is not None:
                 generated = self._render_content(
@@ -252,16 +242,13 @@ class OutreachPackageService:
             outreach_input=data.outreach_input if data else OutreachGenerationInput(),
             generate_channels=data is not None,
         )
-        row = OutreachPackageModel(
-            id=new_id("outreach_package"),
-            workspace_id=self.workspace_id,
-            audience_result_id=result.id,
-            business_id=result.business_id,
-            content=content.model_dump(),
+        row = self._new_package(
+            result=result,
+            audience=audience,
+            content=content,
             provider=_llm_provider(self.llm) if data is not None else "template",
             model=_llm_model(self.llm) if data is not None else None,
             usage=_llm_usage(self.llm) if data is not None else {},
-            prompt_version=TEMPLATE_VERSION,
         )
         self.session.add(row)
         self.session.commit()
@@ -274,17 +261,12 @@ class OutreachPackageService:
         data: OutreachGenerateRequest,
     ) -> OutreachPackageRead:
         result, audience, product, business, workspace = self._context(result_id)
-        if result.shortlisted_at is None:
+        if self._shortlisted_lead(result) is None:
             raise WorkflowBoundaryError(
                 "Shortlist this business before saving outreach context.",
                 {"result_id": result_id},
             )
-        existing = self.session.scalar(
-            select(OutreachPackageModel).where(
-                OutreachPackageModel.workspace_id == self.workspace_id,
-                OutreachPackageModel.audience_result_id == result.id,
-            )
-        )
+        existing = self._package_for_result(result.id)
         if existing is not None:
             content = OutreachPackageContent.model_validate(existing.content)
             content.outreach_input = data.outreach_input
@@ -302,16 +284,13 @@ class OutreachPackageService:
             outreach_input=data.outreach_input,
             generate_channels=False,
         )
-        row = OutreachPackageModel(
-            id=new_id("outreach_package"),
-            workspace_id=self.workspace_id,
-            audience_result_id=result.id,
-            business_id=result.business_id,
-            content=content.model_dump(),
+        row = self._new_package(
+            result=result,
+            audience=audience,
+            content=content,
             provider="template",
             model=None,
             usage={},
-            prompt_version=TEMPLATE_VERSION,
         )
         self.session.add(row)
         self.session.commit()
@@ -632,7 +611,7 @@ class OutreachPackageService:
             self.session,
             workspace_id=self.workspace_id,
         ).promote(result.id)
-        if result.contacted_at is None:
+        if lead.last_contacted_at is None:
             OutcomeService(
                 self.session,
                 workspace_id=self.workspace_id,
@@ -645,7 +624,6 @@ class OutreachPackageService:
                     note=f"Marked {data.channel} outreach sent.",
                 ),
             )
-            self.session.refresh(result)
 
         events.record(
             package_id,
@@ -668,7 +646,15 @@ class OutreachPackageService:
         """Snapshot the package email into the approval and sending workflow."""
         package = self._owned(package_id)
         messages = MessageRepository(self.session, workspace_id=self.workspace_id)
-        existing = messages.find_for_outreach_package(package.id)
+        existing = self.session.scalar(
+            select(MessageModel)
+            .where(
+                MessageModel.audience_result_id == package.audience_result_id,
+                MessageModel.channel == OutreachChannel.EMAIL.value,
+                MessageModel.id != package.id,
+            )
+            .order_by(MessageModel.created_at.desc())
+        )
         if existing is not None:
             return MessageRead.model_validate(existing)
 
@@ -677,12 +663,7 @@ class OutreachPackageService:
             self.session,
             workspace_id=self.workspace_id,
         ).promote(result.id)
-        run = self.session.get(AudienceRunModel, result.run_id)
-        if run is None or run.outreach_campaign_id is None:
-            raise WorkflowBoundaryError(
-                "The audience result could not be attached to an outreach campaign.",
-                {"package_id": package_id},
-            )
+        self.session.refresh(audience)
 
         content = OutreachPackageContent.model_validate(package.content)
         if content.email is None:
@@ -691,7 +672,7 @@ class OutreachPackageService:
                 {"package_id": package_id},
             )
         message = messages.create_draft(
-            run.outreach_campaign_id,
+            audience.outreach_campaign_id,
             audience.product_id,
             lead.id,
             OutreachDraft(
@@ -701,21 +682,91 @@ class OutreachPackageService:
                 personalization_notes=[item.statement for item in content.evidence],
                 approach_tag="outreach_package",
             ),
-            outreach_package_id=package.id,
+            audience_result_id=result.id,
         )
         return MessageRead.model_validate(message)
 
-    def _owned(self, package_id: str) -> OutreachPackageModel:
-        row = self.session.get(OutreachPackageModel, package_id)
-        if row is None or row.workspace_id != self.workspace_id:
+    def _package_for_result(self, result_id: str) -> MessageModel | None:
+        statement = (
+            select(MessageModel)
+            .join(ProductModel, ProductModel.id == MessageModel.product_id)
+            .where(
+                MessageModel.audience_result_id == result_id,
+                MessageModel.channel == "outreach_package",
+            )
+            .order_by(MessageModel.updated_at.desc())
+        )
+        if self.workspace_id is not None:
+            statement = statement.where(ProductModel.workspace_id == self.workspace_id)
+        return self.session.scalars(statement).first()
+
+    def _shortlisted_lead(self, result: AudienceResultModel) -> LeadModel | None:
+        if result.outreach_lead_id is None:
+            return None
+        lead = self.session.get(LeadModel, result.outreach_lead_id)
+        return lead if lead is not None and lead.shortlisted_at is not None else None
+
+    def _new_package(
+        self,
+        *,
+        result: AudienceResultModel,
+        audience: TerritoryModel,
+        content: OutreachPackageContent,
+        provider: str,
+        model: str | None,
+        usage: dict[str, Any],
+    ) -> MessageModel:
+        lead = AudienceOutreachService(
+            self.session,
+            workspace_id=self.workspace_id,
+        ).promote(result.id)
+        self.session.refresh(audience)
+        return MessageModel(
+            id=new_id("outreach_package"),
+            campaign_id=audience.outreach_campaign_id,
+            product_id=audience.product_id,
+            lead_id=lead.id,
+            audience_result_id=result.id,
+            channel="outreach_package",
+            subject=None,
+            body=content.message.body,
+            personalization_notes=[item.statement for item in content.evidence],
+            approach_tag="outreach_package",
+            status="draft",
+            generation_provider=provider,
+            generation_model=model,
+            generation_usage=usage,
+            prompt_version=TEMPLATE_VERSION,
+            generation_context={
+                "kind": "outreach_package",
+                "content": content.model_dump(mode="json"),
+                "events": [],
+            },
+        )
+
+    def _owned(self, package_id: str) -> MessageModel:
+        row = self.session.get(MessageModel, package_id)
+        if row is None or row.channel != "outreach_package":
             raise NotFoundError("outreach package not found", {"package_id": package_id})
+        if self.workspace_id is not None:
+            workspace_id = self.session.scalar(
+                select(ProductModel.workspace_id).where(ProductModel.id == row.product_id)
+            )
+            if workspace_id != self.workspace_id:
+                raise NotFoundError("outreach package not found", {"package_id": package_id})
         return row
 
     def _context(self, result_id: str):
         result = self.session.get(AudienceResultModel, result_id)
-        run = self.session.get(AudienceRunModel, result.run_id) if result else None
         audience = self.session.get(TerritoryModel, result.audience_id) if result else None
-        if result is None or run is None or audience is None or run.workspace_id != self.workspace_id:
+        if (
+            result is None
+            or audience is None
+            or (
+                self.workspace_id is not None
+                and audience.workspace_id != self.workspace_id
+            )
+        ):
             raise NotFoundError("audience result not found", {"result_id": result_id})
         product = self.session.get(ProductModel, audience.product_id)
         business = self.session.get(BusinessModel, result.business_id)
@@ -726,7 +777,7 @@ class OutreachPackageService:
 
     def _read(
         self,
-        row: OutreachPackageModel,
+        row: MessageModel,
         business: BusinessModel,
         result: AudienceResultModel,
     ) -> OutreachPackageRead:
@@ -744,8 +795,8 @@ class OutreachPackageService:
             channels.append("email")
         return OutreachPackageRead(
             id=row.id,
-            audience_result_id=row.audience_result_id,
-            business_id=row.business_id,
+            audience_result_id=result.id,
+            business_id=result.business_id,
             business_name=business.display_name,
             website_url=business.website_url,
             phone=business.phone,
@@ -897,7 +948,7 @@ def _evidence_fingerprint(result: AudienceResultModel) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _evidence_is_current(row: OutreachPackageModel, result: AudienceResultModel) -> bool:
+def _evidence_is_current(row: MessageModel, result: AudienceResultModel) -> bool:
     content = row.content if isinstance(row.content, dict) else {}
     return content.get("evidence_fingerprint") == _evidence_fingerprint(result)
 
@@ -1048,7 +1099,7 @@ def _proposal_angle(
     return fallback
 
 
-def _should_refresh_template(row: OutreachPackageModel) -> bool:
+def _should_refresh_template(row: MessageModel) -> bool:
     if row.provider != "template" or row.prompt_version >= TEMPLATE_VERSION:
         return False
     content = row.content if isinstance(row.content, dict) else {}
@@ -1063,7 +1114,7 @@ def _should_refresh_template(row: OutreachPackageModel) -> bool:
     )
 
 
-def _needs_strategy_upgrade(row: OutreachPackageModel) -> bool:
+def _needs_strategy_upgrade(row: MessageModel) -> bool:
     if row.provider != "template":
         return False
     content = row.content if isinstance(row.content, dict) else {}
@@ -1077,7 +1128,7 @@ def _needs_strategy_upgrade(row: OutreachPackageModel) -> bool:
 
 
 def _upgrade_content(
-    row: OutreachPackageModel,
+    row: MessageModel,
     fresh: OutreachPackageContent,
 ) -> OutreachPackageContent:
     if _should_refresh_template(row) or _looks_like_generated_copy(row.content):
