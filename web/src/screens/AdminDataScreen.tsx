@@ -527,11 +527,6 @@ function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {
 }
 
 function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminAttributeLineage) {
-  const attributesByKey = new Map(lineage.attributes.map((attribute) => [attribute.key, attribute]));
-  const evidenceById = new Map(lineage.evidence_records.map((evidence) => [evidence.id, evidence]));
-  const definitions = lineage.attribute_definitions.length
-    ? lineage.attribute_definitions
-    : FALLBACK_ATTRIBUTE_DEFINITIONS;
   const fallbackValues: Record<string, unknown> = {
     business_name: detail.display_name,
     trade_category: detail.niche_label || detail.niche_slug,
@@ -545,31 +540,13 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminAtt
     is_chain: detail.is_chain,
     is_franchise: detail.is_franchise,
   };
-  const attributes = Object.fromEntries(definitions.map((definition) => {
-    const attribute = attributesByKey.get(definition.key);
-    const value = attribute?.value ?? fallbackValues[definition.key] ?? null;
-    const evidence = attribute?.source_evidence_id
-      ? evidenceById.get(attribute.source_evidence_id)
-      : undefined;
-    return [definition.key, {
-      label: definition.label,
-      category: definition.category,
-      observed: value !== null && value !== "",
-      value,
-      opportunity_score: attribute?.opportunity_score ?? null,
-      score_reason: attribute?.score_reason ?? null,
-      evidence_confidence: attribute?.evidence_confidence ?? null,
-      resolution_state: attribute?.resolution_state ?? null,
-      evidence_state: attribute?.evidence_state ?? null,
-      observed_at: attribute?.observed_at ?? null,
-      expires_at: attribute?.expires_at ?? null,
-      source: evidence ? {
-        evidence_id: evidence.id,
-        provider: evidence.source,
-        url: evidence.source_url,
-      } : null,
-    }];
-  }));
+  const attributes: Record<string, unknown> = {};
+  lineage.attributes.forEach((attribute) => {
+    if (hasJsonValue(attribute.value)) attributes[attribute.key] = attribute.value;
+  });
+  Object.entries(fallbackValues).forEach(([key, value]) => {
+    if (!(key in attributes) && hasJsonValue(value)) attributes[key] = value;
+  });
   return {
     business: {
       id: detail.id,
@@ -577,19 +554,40 @@ function buildBusinessJsonPayload(detail: AdminBusinessDetail, lineage: AdminAtt
       state: detail.status,
       trade: detail.niche_label,
       market: detail.market_key,
-      address: detail.address,
-      coordinates: { latitude: detail.latitude, longitude: detail.longitude },
-      website_url: detail.website_url,
-      domain: detail.domain,
-      phone: detail.phone,
       first_seen_at: detail.first_seen_at,
       last_seen_at: detail.last_seen_at,
     },
     lead_assessment: detail.lead_assessment,
     attributes,
-    contacts: detail.contacts,
-    evidence: { records: lineage.evidence_records },
+    contacts: compactBusinessContacts(detail.contacts, detail.phone),
   };
+}
+
+function hasJsonValue(value: unknown) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function compactBusinessContacts(
+  contacts: AdminBusinessDetail["contacts"],
+  primaryPhone?: string | null,
+) {
+  const normalizedPrimaryPhone = (primaryPhone || "").replace(/\D/g, "");
+  const seen = new Set<string>();
+  return contacts.flatMap((contact) => {
+    const compact: Record<string, string> = {};
+    if (contact.name?.trim()) compact.name = contact.name.trim();
+    if (contact.role?.trim()) compact.role = contact.role.trim();
+    if (contact.email?.trim()) compact.email = contact.email.trim();
+    const phone = contact.phone?.trim();
+    if (phone && (!normalizedPrimaryPhone || phone.replace(/\D/g, "") !== normalizedPrimaryPhone)) {
+      compact.phone = phone;
+    }
+    if (!Object.keys(compact).length) return [];
+    const signature = JSON.stringify(compact);
+    if (seen.has(signature)) return [];
+    seen.add(signature);
+    return [compact];
+  });
 }
 
 function BusinessAttributeRecord({

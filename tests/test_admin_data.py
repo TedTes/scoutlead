@@ -208,15 +208,39 @@ def test_admin_business_detail_includes_contacts() -> None:
         assert detail["contacts"][0]["verification_status"] == "verified"
 
 
-def test_admin_business_json_includes_attribute_and_embedded_evidence() -> None:
+def test_admin_business_json_is_compact_and_keeps_lineage_separate() -> None:
     factory = _session_factory()
     with factory() as session:
         business, _ = _business(session)
-        evidence, _ = _add_attribute(
+        _add_attribute(
             session,
             business,
             key="business_operational",
             value=True,
+        )
+        business.phone = "4165550100"
+        now = utcnow()
+        session.add_all(
+            [
+                ContactModel(
+                    id=new_id("contact"),
+                    business_id=business.id,
+                    phone="4165550100",
+                    verification_status="unverified",
+                    first_seen_at=now,
+                    last_seen_at=now,
+                ),
+                ContactModel(
+                    id=new_id("contact"),
+                    business_id=business.id,
+                    name="Alex Owner",
+                    email="alex@example.test",
+                    phone="4165550100",
+                    verification_status="verified",
+                    first_seen_at=now,
+                    last_seen_at=now,
+                ),
+            ]
         )
         session.commit()
 
@@ -224,13 +248,12 @@ def test_admin_business_json_includes_attribute_and_embedded_evidence() -> None:
         exported = _service(session).export_businesses_json([business.id, business.id])
 
         assert payload["business"]["id"] == business.id
-        attribute = payload["attributes"]["business_operational"]
-        assert attribute["value"] is True
-        assert attribute["source"]["provider"] == "google_places"
-        assert payload["evidence"]["records"][0]["id"] == evidence.id
-        assert payload["evidence"]["records"][0]["payload"] == {
-            "business_operational": True
-        }
+        assert payload["attributes"]["business_operational"] is True
+        assert payload["attributes"]["phone"] == "4165550100"
+        assert "evidence" not in payload
+        assert payload["contacts"] == [
+            {"name": "Alex Owner", "email": "alex@example.test"}
+        ]
         assert exported["business_count"] == 1
 
 

@@ -1186,9 +1186,6 @@ class AdminDataService:
     def business_json(self, business_id: str) -> dict[str, Any]:
         detail = self.detail(business_id)
         lineage = self.attribute_lineage(business_id)
-        attributes_by_key = {
-            attribute["key"]: attribute for attribute in lineage["attributes"]
-        }
         fallback_values = {
             "business_name": detail["display_name"],
             "trade_category": detail.get("niche_label") or detail.get("niche_slug"),
@@ -1202,28 +1199,14 @@ class AdminDataService:
             "is_chain": detail.get("is_chain"),
             "is_franchise": detail.get("is_franchise"),
         }
-        attributes: dict[str, dict[str, Any]] = {}
-        for definition in lineage["attribute_definitions"]:
-            key = definition["key"]
-            attribute = attributes_by_key.get(key)
-            value = (
-                attribute.get("value")
-                if attribute is not None
-                else fallback_values.get(key)
-            )
-            attributes[key] = {
-                "label": definition["label"],
-                "category": definition["category"],
-                "observed": value is not None and value != "",
-                "value": value,
-                "opportunity_score": attribute.get("opportunity_score") if attribute else None,
-                "score_reason": attribute.get("score_reason") if attribute else None,
-                "evidence_confidence": attribute.get("evidence_confidence") if attribute else None,
-                "evidence_state": attribute.get("evidence_state") if attribute else None,
-                "observed_at": attribute.get("observed_at") if attribute else None,
-                "expires_at": attribute.get("expires_at") if attribute else None,
-                "source": attribute.get("source") if attribute else None,
-            }
+        attributes = {
+            attribute["key"]: attribute["value"]
+            for attribute in lineage["attributes"]
+            if _payload_value_present(attribute.get("value"))
+        }
+        for key, value in fallback_values.items():
+            if key not in attributes and _payload_value_present(value):
+                attributes[key] = value
         return {
             "business": {
                 "id": detail["id"],
@@ -1231,21 +1214,15 @@ class AdminDataService:
                 "state": detail["status"],
                 "trade": detail.get("niche_label"),
                 "market": detail.get("market_key"),
-                "address": detail.get("address"),
-                "coordinates": {
-                    "latitude": detail.get("latitude"),
-                    "longitude": detail.get("longitude"),
-                },
-                "website_url": detail.get("website_url"),
-                "domain": detail.get("domain"),
-                "phone": detail.get("phone"),
                 "first_seen_at": detail.get("first_seen_at"),
                 "last_seen_at": detail.get("last_seen_at"),
             },
             "lead_assessment": detail["lead_assessment"],
             "attributes": attributes,
-            "contacts": detail.get("contacts", []),
-            "evidence": {"records": lineage["evidence_records"]},
+            "contacts": _compact_business_contacts(
+                detail.get("contacts", []),
+                primary_phone=detail.get("phone"),
+            ),
         }
 
     def export_businesses_json(self, business_ids: list[str]) -> dict[str, Any]:
@@ -2710,6 +2687,37 @@ def _payload_has(payload: Any, keys: set[str]) -> bool:
 
 def _payload_value_present(value: Any) -> bool:
     return value is not None and value != "" and value != [] and value != {}
+
+
+def _compact_business_contacts(
+    contacts: list[dict[str, Any]],
+    *,
+    primary_phone: str | None,
+) -> list[dict[str, str]]:
+    compact: list[dict[str, str]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    normalized_primary_phone = "".join(
+        character for character in (primary_phone or "") if character.isdigit()
+    )
+    for contact in contacts:
+        item: dict[str, str] = {}
+        for key in ("name", "role", "email"):
+            value = contact.get(key)
+            if isinstance(value, str) and value.strip():
+                item[key] = value.strip()
+        phone = contact.get("phone")
+        if isinstance(phone, str) and phone.strip():
+            normalized_phone = "".join(character for character in phone if character.isdigit())
+            if not normalized_primary_phone or normalized_phone != normalized_primary_phone:
+                item["phone"] = phone.strip()
+        if not item:
+            continue
+        signature = tuple(sorted(item.items()))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        compact.append(item)
+    return compact
 
 
 def _attribute_value(fact: BusinessAttributeModel) -> Any:
