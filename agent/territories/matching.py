@@ -47,6 +47,23 @@ SIGNAL_FACTS = {
     "reviews_under_15": "google_review_count",
 }
 
+# Page-element detectors remain useful diagnostic attributes, but a shallow
+# crawl must not turn their absence into a customer-facing website-upgrade
+# lead.  Website upgrade matching is intentionally based on the composite
+# website grade only.
+WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset({"website_quality_score"})
+RETIRED_WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset(
+    {
+        "mobile_viewport_present",
+        "quote_or_booking_form_present",
+        "contact_form_present",
+        "primary_cta_present",
+        "click_to_call_present",
+        "no_quote_flow",
+        "no_contact_form",
+    }
+)
+
 LEGACY_SIGNAL_CONFIG = {
     "reviews_under_15": {
         "opportunity_threshold": 15,
@@ -157,7 +174,7 @@ class ProfileMatchService:
                 continue
             statement = statement.where(or_(field.is_(False), field.is_(None)))
 
-        selected_signals = list(dict.fromkeys(profile.signal_keys or []))
+        selected_signals = _selected_profile_signals(profile)
         signal_specs = self._signal_specs(selected_signals)
         service_specs = self._service_specs(profile.service_keys or [])
         signal_weights: dict[str, float] = {}
@@ -757,6 +774,19 @@ def _profile_location_market_keys(profile) -> list[str]:
                 if key and key not in keys:
                     keys.append(key)
     return keys
+
+
+def _selected_profile_signals(profile) -> list[str]:
+    selected = list(dict.fromkeys(profile.signal_keys or []))
+    if "website_upgrade" not in set(profile.service_keys or []):
+        return selected
+    retained = [
+        signal
+        for signal in selected
+        if signal
+        not in RETIRED_WEBSITE_UPGRADE_SIGNAL_KEYS | WEBSITE_UPGRADE_SIGNAL_KEYS
+    ]
+    return [*retained, *WEBSITE_UPGRADE_SIGNAL_KEYS]
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:

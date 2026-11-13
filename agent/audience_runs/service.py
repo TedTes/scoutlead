@@ -315,7 +315,12 @@ class AudienceRunService:
         raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
         profile_match = raw.get("profile_match") if isinstance(raw.get("profile_match"), dict) else {}
         matched_signals = profile_match.get("matched_signals") or []
-        reasons = [_signal_reason(item) for item in matched_signals if isinstance(item, dict)]
+        reasons = [
+            reason
+            for item in matched_signals
+            if isinstance(item, dict)
+            if (reason := _signal_reason(item)) is not None
+        ]
         score = min(100, 80 + max(0, int(profile_match.get("confirmed_signal_count") or 0) - 1) * 5)
         contact_email = _optional_string(snapshot.get("contact_email"))
         business = self.session.get(BusinessModel, result.business_id)
@@ -426,15 +431,22 @@ def _optional_int(value) -> int | None:
     return int(number) if number is not None else None
 
 
-def _signal_reason(signal: dict) -> str:
+def _signal_reason(signal: dict) -> str | None:
     key = str(signal.get("signal_key") or "")
     value = signal.get("value")
     if key == "website_unavailable":
         return "No owned website was found."
     if key == "reviews_under_15":
         return f"The business has {int(value or 0)} public reviews."
-    if key == "no_quote_flow":
-        return "No quote or booking flow was found in the stored inspection."
-    if key == "no_contact_form":
-        return "No contact form was found in the stored inspection."
+    if key in {
+        "no_quote_flow",
+        "no_contact_form",
+        "quote_or_booking_form_present",
+        "contact_form_present",
+        "primary_cta_present",
+        "click_to_call_present",
+    }:
+        return None
+    if key == "website_quality_score":
+        return f"The measured website quality score is {value}."
     return f"Matched {key.replace('_', ' ')}."

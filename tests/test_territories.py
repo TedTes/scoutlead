@@ -73,7 +73,11 @@ from leads.schemas import (
 from outcomes.schemas import LeadOutcome, LeadOutcomeCreate, OutcomeChannel
 from outcomes.service import OutcomeService
 from territories.metrics import TerritoryMetricsService
-from territories.matching import ProfileMatchService, _profile_location_market_keys
+from territories.matching import (
+    ProfileMatchService,
+    _profile_location_market_keys,
+    _selected_profile_signals,
+)
 from territories.folders import AudienceFolderService
 from territories.schemas import AudienceFolderCreate
 from territories.coordinate_backfill import CoordinateBackfillService
@@ -98,6 +102,21 @@ def test_resolve_existing_niche_is_read_only() -> None:
         assert resolution.niche_id == niche.id
         assert resolution.market_key == "toronto"
         assert session.scalar(select(func.count()).select_from(TerritoryModel)) == 0
+
+
+def test_website_upgrade_ignores_shallow_page_element_signals() -> None:
+    profile = SimpleNamespace(
+        service_keys=["website_upgrade"],
+        signal_keys=[
+            "contact_form_present",
+            "quote_or_booking_form_present",
+            "primary_cta_present",
+            "click_to_call_present",
+            "website_quality_score",
+        ],
+    )
+
+    assert _selected_profile_signals(profile) == ["website_quality_score"]
 
 
 def test_audience_folders_are_optional_and_deletion_preserves_audiences() -> None:

@@ -396,10 +396,9 @@ def _opportunity_score(facts: dict) -> int:
         score += 65
     elif website_status in {"unavailable", "parked"}:
         score += 55
-    if attribute_value(facts.get("quote_or_booking_form_present")) is False:
-        score += 30
-    if attribute_value(facts.get("contact_form_present")) is False:
-        score += 15
+    website_quality = attribute_value(facts.get("website_quality_score"))
+    if isinstance(website_quality, (int, float)) and website_quality < 75:
+        score += round(75 - float(website_quality))
     rating = attribute_value(facts.get("google_rating"))
     if isinstance(rating, (int, float)) and rating < 4.3:
         score += 20

@@ -3005,7 +3005,17 @@ function isOutreachEligibleEvidence(evidence: AudienceMatchedSignal): boolean {
 }
 
 function visibleAudienceEvidence(contact: DiscoveryResult): AudienceMatchedSignal[] {
-  const eligible = audienceMatchedSignals(contact).filter(isOutreachEligibleEvidence);
+  const retiredWebsitePageSignals = new Set([
+    "no_quote_flow",
+    "quote_or_booking_form_present",
+    "no_contact_form",
+    "contact_form_present",
+    "primary_cta_present",
+    "click_to_call_present",
+  ]);
+  const eligible = audienceMatchedSignals(contact)
+    .filter(isOutreachEligibleEvidence)
+    .filter((item) => !retiredWebsitePageSignals.has(item.signalKey));
   const websiteMissing = eligible.filter((item) => (
     item.signalKey === "website_status"
     && (item.value === "missing" || item.value === "not_listed")
@@ -6085,7 +6095,17 @@ function contactProfileMatchOpportunity(contact: DiscoveryResult): ContactOpport
     if (!selectedSignals.length) {
       return { level: "unknown", score: 0, signals: [], services };
     }
-    const matchedSignals = selectedSignals.filter(([, value]) => value.matched === true);
+    const retiredWebsitePageSignals = new Set([
+      "no_quote_flow",
+      "quote_or_booking_form_present",
+      "no_contact_form",
+      "contact_form_present",
+      "primary_cta_present",
+      "click_to_call_present",
+    ]);
+    const matchedSignals = selectedSignals.filter(
+      ([key, value]) => value.matched === true && !retiredWebsitePageSignals.has(key),
+    );
     if (!matchedSignals.length) {
       return { level: "none", score: 0, signals: [], services };
     }
@@ -6130,12 +6150,6 @@ function profileSignalMessage(signalKey: string, evidence: Record<string, unknow
       return "No website is listed in the source profile; website presence is not yet independently verified.";
     }
     return `Website status is confirmed as ${rawValueToString(value) || "unavailable"}.`;
-  }
-  if (signalKey === "no_quote_flow") {
-    return "No quote or booking flow was found in the stored inspection.";
-  }
-  if (signalKey === "no_contact_form") {
-    return "No contact form was found in the stored inspection.";
   }
   if (signalKey === "reviews_under_15") {
     const count = typeof value === "number" && Number.isFinite(value) ? value : 0;
