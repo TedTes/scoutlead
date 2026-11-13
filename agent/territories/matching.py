@@ -28,8 +28,6 @@ from db.models import (
     BusinessModel,
     BusinessNicheMembershipModel,
     ContactModel,
-    ServiceDefinitionModel,
-    ServiceSignalMappingModel,
     SignalDefinitionModel,
 )
 from evaluation.outcome_learning import outcome_adjustment
@@ -38,6 +36,7 @@ from shared.geospatial import haversine_distance_km_expression
 from shared.utils import utcnow
 from signal_validation.pitch_scope import pitch_scope_decision
 from seeding.batches import active_membership_condition, observation_is_quarantined
+from territories.opportunities import OPPORTUNITY_BY_KEY
 
 
 SIGNAL_FACTS = {
@@ -377,49 +376,14 @@ class ProfileMatchService:
         return specs
 
     def _service_specs(self, selected_services: list[str]) -> list[ServiceMatchSpec]:
-        if not selected_services:
-            return []
-        definitions = list(
-            self.session.scalars(
-                select(ServiceDefinitionModel)
-                .where(
-                    ServiceDefinitionModel.key.in_(selected_services),
-                    ServiceDefinitionModel.status == "active",
-                )
-                .order_by(ServiceDefinitionModel.sort_order)
-            )
-        )
-        mappings = list(
-            self.session.execute(
-                select(
-                    ServiceSignalMappingModel.service_definition_id,
-                    SignalDefinitionModel.key,
-                    ServiceSignalMappingModel.weight,
-                )
-                .join(
-                    SignalDefinitionModel,
-                    SignalDefinitionModel.id
-                    == ServiceSignalMappingModel.signal_definition_id,
-                )
-                .where(
-                    ServiceSignalMappingModel.service_definition_id.in_(
-                        [definition.id for definition in definitions]
-                    ),
-                    SignalDefinitionModel.status.in_(("active", "derived")),
-                )
-                .order_by(ServiceSignalMappingModel.sort_order)
-            )
-        ) if definitions else []
-        by_service: dict[str, list[tuple[str, float]]] = {}
-        for service_id, signal_key, weight in mappings:
-            by_service.setdefault(service_id, []).append((signal_key, float(weight)))
         return [
             ServiceMatchSpec(
-                key=definition.key,
-                label=definition.label,
-                signals=tuple(by_service.get(definition.id, [])),
+                key=criterion.key,
+                label=criterion.label,
+                signals=((criterion.attribute_key, criterion.weight),),
             )
-            for definition in definitions
+            for key in selected_services
+            if (criterion := OPPORTUNITY_BY_KEY.get(key)) is not None
         ]
     def _result_row(
         self,

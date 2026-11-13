@@ -22,8 +22,6 @@ from db.models import (
     ContactModel,
     NicheModel,
     QueueJobModel,
-    ServiceDefinitionModel,
-    ServiceSignalMappingModel,
     SignalDefinitionModel,
     SourceItemModel,
 )
@@ -279,10 +277,10 @@ def test_admin_lists_business_with_attributes_as_evaluated_and_searchable() -> N
         assert rows[0]["evaluation_state"] == "evaluated"
 
 
-def test_admin_attribute_match_does_not_require_validation_log() -> None:
+def test_admin_attribute_match_reads_canonical_attribute_directly() -> None:
     factory = _session_factory()
     with factory() as session:
-        missing_form, niche = _business(session)
+        missing_website, niche = _business(session)
         now = utcnow()
         has_form = BusinessModel(
             id=new_id("business"),
@@ -297,44 +295,31 @@ def test_admin_attribute_match_does_not_require_validation_log() -> None:
         )
         definition = SignalDefinitionModel(
             id=new_id("signal"),
-            key="contact_form_present",
-            label="Contact form present",
-            value_type="boolean",
-            category="conversion",
+            key="website_status",
+            label="Website status",
+            value_type="text",
+            category="website",
             status="active",
-            collector_key="website_dom",
-            extractor_key="contact_form",
+            collector_key="website_presence",
+            extractor_key="website_status",
             freshness_days=30,
-            opportunity_direction="false_is_opportunity",
-            config={"minimum_confidence": 90},
+            opportunity_direction="missing_is_opportunity",
+            config={
+                "minimum_confidence": 90,
+                "opportunity_values": ["missing"],
+                "audience_min_score": 50,
+            },
             version=1,
         )
         session.add_all([has_form, definition])
         session.flush()
-        service = ServiceDefinitionModel(
-            id=new_id("service"),
-            key="lead_capture",
-            label="Lead capture",
-            status="active",
-            sort_order=1,
-        )
-        session.add(service)
-        session.flush()
-        session.add(
-            ServiceSignalMappingModel(
-                id=new_id("service_signal"),
-                service_definition_id=service.id,
-                signal_definition_id=definition.id,
-                sort_order=1,
-            )
-        )
-        for business, present in ((missing_form, False), (has_form, True)):
+        for business, status in ((missing_website, "missing"), (has_form, "present")):
             _membership(session, business, niche)
             _add_attribute(
                 session,
                 business,
                 key=definition.key,
-                value=present,
+                value=status,
                 definition=definition,
             )
         session.commit()
@@ -349,7 +334,7 @@ def test_admin_attribute_match_does_not_require_validation_log() -> None:
             market_key=None,
             page=1,
             page_size=50,
-            match_attribute="contact_form_present",
+            match_attribute="website_status",
         )
         all_states = _service(session).list_businesses(
             query=None,
@@ -361,13 +346,13 @@ def test_admin_attribute_match_does_not_require_validation_log() -> None:
             market_key=None,
             page=1,
             page_size=50,
-            match_attribute="contact_form_present",
+            match_attribute="website_status",
             match_state="all",
         )
 
-        assert [row["id"] for row in result["items"]] == [missing_form.id]
+        assert [row["id"] for row in result["items"]] == [missing_website.id]
         assert {row["id"]: row["match_state"] for row in all_states["items"]} == {
-            missing_form.id: "matched",
+            missing_website.id: "matched",
             has_form.id: "does_not_match",
         }
 
@@ -378,16 +363,19 @@ def test_attribute_lineage_connects_canonical_value_to_evidence() -> None:
         business, _ = _business(session)
         definition = SignalDefinitionModel(
             id=new_id("signal"),
-            key="contact_form_present",
-            label="Contact form present",
-            value_type="boolean",
-            category="conversion",
+            key="website_status",
+            label="Website status",
+            value_type="text",
+            category="website",
             status="active",
-            collector_key="website_dom",
-            extractor_key="contact_form",
+            collector_key="website_presence",
+            extractor_key="website_status",
             freshness_days=30,
-            opportunity_direction="false_is_opportunity",
-            config={"minimum_confidence": 90},
+            opportunity_direction="missing_is_opportunity",
+            config={
+                "minimum_confidence": 90,
+                "opportunity_values": ["missing"],
+            },
             version=1,
         )
         session.add(definition)
@@ -396,7 +384,7 @@ def test_attribute_lineage_connects_canonical_value_to_evidence() -> None:
             session,
             business,
             key=definition.key,
-            value=False,
+            value="missing",
             source="company_website_signal",
             definition=definition,
         )
@@ -411,7 +399,7 @@ def test_attribute_lineage_connects_canonical_value_to_evidence() -> None:
         assert lineage_attribute["source_evidence_id"] == evidence.id
         assert lineage_attribute["signal"]["eligible_for_matching"] is True
         assert result["evidence_records"][0]["payload"] == {
-            "contact_form_present": False
+            "website_status": "missing"
         }
 
 

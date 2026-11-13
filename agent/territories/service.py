@@ -21,11 +21,15 @@ from outcomes.policy import CONTACT_ATTEMPT_OUTCOMES, POSITIVE_OUTCOMES
 from outcomes.schemas import LeadOutcome
 from niches.resolver import resolve_niche
 from products.repository import DEFAULT_WORKSPACE_ID, ProductRepository
-from service_definitions.repository import ServiceDefinitionRepository
 from shared.errors import NotFoundError, ValidationError
 from shared.utils import new_id, normalize_text, utcnow
 from territories.geocoding import GeocodedMarket, MarketGeocoder
 from territories.repository import TerritoryRepository
+from territories.opportunities import (
+    normalize_opportunity_keys,
+    opportunity_options,
+    signal_keys_for_opportunities,
+)
 from territories.schemas import (
     ProfileCreate,
     TerritoryCreate,
@@ -48,7 +52,6 @@ class TerritoryService:
         self.workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
         self.products = ProductRepository(session, workspace_id=self.workspace_id)
         self.territories = TerritoryRepository(session, workspace_id=self.workspace_id)
-        self.services = ServiceDefinitionRepository(session)
         self.market_geocoder = market_geocoder or MarketGeocoder(
             openstreetmap_enabled=False
         )
@@ -238,17 +241,14 @@ class TerritoryService:
                 "selected place is outside the supported market",
                 {"country_code": country_code, "supported": ["ca", "us", "mx"]},
             )
-        service_keys = list(dict.fromkeys(data.services))
-        active_service_keys = {
-            service.key for service in self.services.list(status="active")
-        }
-        unknown_services = sorted(set(service_keys) - active_service_keys)
+        service_keys = normalize_opportunity_keys(data.services)
+        unknown_services = sorted(set(data.services) - set(service_keys))
         if unknown_services:
             raise ValidationError(
-                "profile contains inactive or unknown services",
+                "profile contains unknown website opportunities",
                 {"service_keys": unknown_services},
             )
-        mapped_signals = self.services.signal_keys(service_keys)
+        mapped_signals = signal_keys_for_opportunities(service_keys)
         signals = list(dict.fromkeys([*mapped_signals, *data.signals]))
         allowed_signals = {option["key"] for option in self.profile_signal_options()}
         unknown_signals = sorted(set(signals) - allowed_signals)
@@ -542,35 +542,7 @@ class TerritoryService:
         ]
 
     def profile_service_options(self) -> list[dict]:
-        options = []
-        for service in self.services.list():
-            # Inactive services are retired catalog entries. Draft services are
-            # still returned as honest "upcoming" options, while retired broad
-            # groupings must not leak back into audience creation.
-            if service.status == "inactive":
-                continue
-            signals = [
-                {
-                    "key": mapping.signal_definition.key,
-                    "label": mapping.signal_definition.label,
-                    "weight": mapping.weight,
-                }
-                for mapping in sorted(
-                    service.signal_mappings,
-                    key=lambda item: item.sort_order,
-                )
-                if mapping.signal_definition.status == "active"
-                and mapping.signal_definition.opportunity_direction != "none"
-            ]
-            options.append({
-                "key": service.key,
-                "label": service.label,
-                "description": service.description,
-                "status": service.status,
-                "enabled": service.status == "active" and bool(signals),
-                "signals": signals,
-            })
-        return options
+        return opportunity_options()
 
     def list(self):
         return [self._read(model) for model in self.territories.list()]
@@ -683,18 +655,16 @@ class TerritoryService:
         if "customer_kind" in values and hasattr(values["customer_kind"], "value"):
             values["customer_kind"] = values["customer_kind"].value
         if "service_keys" in values:
-            service_keys = _clean_profile_keys(values["service_keys"])
-            active_service_keys = {
-                service.key for service in self.services.list(status="active")
-            }
-            unknown_services = sorted(set(service_keys) - active_service_keys)
+            requested_keys = _clean_profile_keys(values["service_keys"])
+            service_keys = normalize_opportunity_keys(requested_keys)
+            unknown_services = sorted(set(requested_keys) - set(service_keys))
             if unknown_services:
                 raise ValidationError(
-                    "Unknown or inactive services",
+                    "Unknown website opportunities",
                     {"service_keys": unknown_services},
                 )
             values["service_keys"] = service_keys
-            values["signal_keys"] = self.services.signal_keys(service_keys)
+            values["signal_keys"] = signal_keys_for_opportunities(service_keys)
         prospective_latitude = values.get("latitude", model.latitude)
         prospective_longitude = values.get("longitude", model.longitude)
         location_changed = bool({"city", "place_label", "radius_km", "locations"} & values.keys())

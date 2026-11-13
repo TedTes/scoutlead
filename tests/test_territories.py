@@ -34,8 +34,6 @@ from db.models import (
     NicheModel,
     QueueJobModel,
     SignalDefinitionModel,
-    ServiceDefinitionModel,
-    ServiceSignalMappingModel,
     TerritoryModel,
     WorkspaceNichePreferenceModel,
 )
@@ -742,90 +740,19 @@ def test_profile_options_come_from_backend_capabilities_and_hide_disabled_niches
         }]
 
 
-def test_profile_service_options_include_disabled_draft_services() -> None:
+def test_profile_opportunity_options_map_directly_to_attributes() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
-        signal = SignalDefinitionModel(
-            id=new_id("signal"),
-            key="language_selector_present",
-            label="Language selector present",
-            value_type="boolean",
-            category="localization",
-            status="active",
-            collector_key="website_dom",
-            extractor_key="language_selector_present",
-            freshness_days=30,
-            opportunity_direction="false_is_opportunity",
-            config={},
-            version=1,
-        )
-        active = ServiceDefinitionModel(
-            id=new_id("service"),
-            key="website_modernization",
-            label="Website modernization",
-            status="active",
-            sort_order=10,
-            version=1,
-        )
-        active.signal_mappings.append(
-            ServiceSignalMappingModel(
-                id=new_id("service_signal"),
-                signal_definition=signal,
-                weight=1,
-                sort_order=0,
-            )
-        )
-        preparing = ServiceDefinitionModel(
-            id=new_id("service"),
-            key="multilingual_localization",
-            label="Multilingual localization",
-            status="draft",
-            sort_order=20,
-            version=1,
-        )
-        preparing.signal_mappings.append(
-            ServiceSignalMappingModel(
-                id=new_id("service_signal"),
-                signal_definition=signal,
-                weight=1,
-                sort_order=0,
-            )
-        )
-        planned = ServiceDefinitionModel(
-            id=new_id("service"),
-            key="social_media_management",
-            label="Social media management",
-            status="draft",
-            sort_order=30,
-            version=1,
-        )
-        retired = ServiceDefinitionModel(
-            id=new_id("service"),
-            key="local_visibility",
-            label="Legacy local visibility",
-            status="inactive",
-            sort_order=40,
-            version=1,
-        )
-        retired.signal_mappings.append(
-            ServiceSignalMappingModel(
-                id=new_id("service_signal"),
-                signal_definition=signal,
-                weight=1,
-                sort_order=0,
-            )
-        )
-        session.add_all([active, preparing, planned, retired])
-        session.commit()
-
         options = TerritoryService(
             session, workspace_id="workspace:first"
         ).profile_service_options()
 
-        assert [(option["key"], option["enabled"], len(option["signals"])) for option in options] == [
-            ("website_modernization", True, 1),
-            ("multilingual_localization", False, 1),
-            ("social_media_management", False, 0),
+        assert [
+            (option["key"], option["enabled"], option["signals"][0]["key"])
+            for option in options
+        ] == [
+            ("website_availability", True, "website_status"),
+            ("website_upgrade", True, "website_quality_score"),
         ]
 
 
@@ -2375,7 +2302,7 @@ def test_profile_does_not_rank_staged_probable_website_evidence() -> None:
         assert website_collection_jobs == []
 
 
-def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
+def test_profile_opportunity_matches_business_attribute_directly() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -2384,41 +2311,28 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
         business = session.scalar(select(BusinessModel).order_by(BusinessModel.display_name))
         signal = SignalDefinitionModel(
             id=new_id("signal"),
-            key="html_language_present",
-            label="HTML language declared",
-            value_type="boolean",
-            category="localization",
+            key="website_status",
+            label="Website status",
+            value_type="text",
+            category="website",
             status="active",
-            collector_key="website_dom",
-            extractor_key="html_language_present",
+            collector_key="website_presence",
+            extractor_key="website_status",
             freshness_days=30,
-            opportunity_direction="false_is_opportunity",
-            config={},
+            opportunity_direction="categorical",
+            config={
+                "opportunity_values": ["missing"],
+                "audience_min_score": 50,
+            },
             version=1,
         )
-        service_definition = ServiceDefinitionModel(
-            id=new_id("service"),
-            key="multilingual_localization",
-            label="Multilingual localization",
-            status="active",
-            sort_order=10,
-            version=1,
-        )
-        service_definition.signal_mappings.append(
-            ServiceSignalMappingModel(
-                id=new_id("service_signal"),
-                signal_definition=signal,
-                weight=1.5,
-                sort_order=0,
-            )
-        )
-        session.add(service_definition)
+        session.add(signal)
         session.flush()
         BusinessAttributeRepository(session).upsert(
             business.id,
             BusinessAttributeValue(
                 key=signal.key,
-                value=False,
+                value="missing",
                 observed_at=utcnow(),
                 source_evidence_id=_latest_evidence_id(session, business.id),
             ),
@@ -2431,7 +2345,7 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
                 trades=["hvac"],
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
-                services=[service_definition.key],
+                services=["website_availability"],
                 limit=25,
             )
         )
@@ -2439,24 +2353,24 @@ def test_profile_service_expands_signals_and_reports_service_evidence() -> None:
             profile=profile, niche_ids=[profile.niche_id], limit=25
         )
 
-        assert profile.service_keys == [service_definition.key]
+        assert profile.service_keys == ["website_availability"]
         assert profile.signal_keys == [signal.key]
         assert rows[0]["raw"]["profile_match"]["matched_services"] == [
             {
-                "service_key": service_definition.key,
-                "label": service_definition.label,
-                "score": 1.5,
+                "service_key": "website_availability",
+                "label": "No website",
+                "score": 1.0,
                     "composite_score": 100.0,
                     "measured_score": 100.0,
                     "coverage": 1.0,
-                    "matched_weight": 1.5,
+                    "matched_weight": 1.0,
                 "supporting_evidence": [
                     {
                         "signal_key": signal.key,
                         "attribute_key": signal.key,
-                        "value": False,
+                        "value": "missing",
                         "confidence": "confirmed",
-                        "weight": 1.5,
+                        "weight": 1.0,
                     }
                 ],
             }
