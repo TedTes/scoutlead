@@ -50,6 +50,7 @@ SIGNAL_FACTS = {
 # lead.  Website upgrade matching is intentionally based on the composite
 # website grade only.
 WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset({"website_quality_score"})
+FALLBACK_MINIMUM_OPPORTUNITY_SCORE = 0.001
 RETIRED_WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset(
     {
         "mobile_viewport_present",
@@ -110,7 +111,9 @@ class ProfileMatchService:
         cutoff = utcnow() - timedelta(days=profile.evidence_max_age_days)
         outcome_weights: dict[str, float] = {}
         matched_signal_count = literal(0)
+        preferred_signal_count = literal(0)
         confirmed_signal_count = literal(0)
+        candidate_opportunity_score = literal(0.0)
         signal_conditions: list[Any] = []
         signal_aliases: dict[str, Any] = {}
         statement = (
@@ -217,8 +220,17 @@ class ProfileMatchService:
                 ),
             )
             condition = _signal_condition(spec, fact)
+            preferred_condition = _preferred_signal_condition(spec, fact)
             signal_conditions.append(condition)
             matched_signal_count += case((condition, 1), else_=0)
+            preferred_signal_count += case((preferred_condition, 1), else_=0)
+            candidate_opportunity_score += case(
+                (
+                    condition,
+                    func.coalesce(fact.attribute_score, 100.0),
+                ),
+                else_=0.0,
+            )
             weighted_match_score += case(
                 (condition, signal_weights.get(spec.key, 1.0)),
                 else_=0.0,
@@ -290,8 +302,10 @@ class ProfileMatchService:
             group_columns.extend([BusinessModel.latitude, BusinessModel.longitude])
         statement = statement.add_columns(
             matched_signal_count.label("matched_signal_count"),
+            preferred_signal_count.label("preferred_signal_count"),
             confirmed_signal_count.label("confirmed_signal_count"),
             weighted_match_score.label("weighted_match_score"),
+            candidate_opportunity_score.label("candidate_opportunity_score"),
         )
         if distance_km_expression is not None:
             statement = statement.add_columns(distance_km_expression.label("distance_km"))
@@ -302,6 +316,8 @@ class ProfileMatchService:
         # timestamps, rather than approximated in database-specific SQL.
         candidate_limit = min(max(limit * 4, 100), 400)
         statement = statement.group_by(*group_columns).order_by(
+            preferred_signal_count.desc(),
+            candidate_opportunity_score.desc(),
             confirmed_signal_count.desc(),
             weighted_match_score.desc(),
             matched_signal_count.desc(),
@@ -316,6 +332,7 @@ class ProfileMatchService:
                 self._result_row(
                     business_id=str(item["id"]),
                     matched_signal_count=int(item["matched_signal_count"] or 0),
+                    preferred_signal_count=int(item["preferred_signal_count"] or 0),
                     confirmed_signal_count=int(item["confirmed_signal_count"] or 0),
                     weighted_match_score=float(item["weighted_match_score"] or 0),
                     distance_km=(
@@ -408,6 +425,7 @@ class ProfileMatchService:
         *,
         business_id: str,
         matched_signal_count: int,
+        preferred_signal_count: int,
         confirmed_signal_count: int,
         weighted_match_score: float,
         distance_km: float | None,
@@ -494,6 +512,14 @@ class ProfileMatchService:
                 if fact is not None
                 else None
             )
+            preferred_threshold = float(
+                spec.config.get("audience_min_score", 50.001)
+            )
+            meets_preferred_threshold = bool(
+                match_confidence is not None
+                and effective_score is not None
+                and effective_score >= preferred_threshold
+            )
             fact_observation = fact
             evidence = {
                 "attribute_key": spec.attribute_key,
@@ -504,6 +530,15 @@ class ProfileMatchService:
                 "confidence": match_confidence,
                 "evidence_confidence": fact.confidence if fact is not None else None,
                 "opportunity_score": effective_score,
+                "preferred_threshold": preferred_threshold,
+                "meets_preferred_threshold": meets_preferred_threshold,
+                "match_tier": (
+                    "preferred"
+                    if meets_preferred_threshold
+                    else "fallback"
+                    if match_confidence is not None
+                    else None
+                ),
             }
             if fact_observation is not None:
                 pitch_eligible, pitch_reason = pitch_scope_decision(
@@ -537,6 +572,7 @@ class ProfileMatchService:
                 "confidence": evidence["confidence"],
                 "evidence_confidence": evidence["evidence_confidence"],
                 "opportunity_score": evidence["opportunity_score"],
+                "match_tier": evidence["match_tier"],
                 "pitch_eligible": evidence["pitch_eligible"],
                 "pitch_reason": evidence["pitch_reason"],
                 **(
@@ -716,6 +752,7 @@ class ProfileMatchService:
                 "lead_assessment": lead_assessment,
                 "selected_signal_count": len(signal_evidence),
                 "matched_signal_count": matched_signal_count,
+                "preferred_signal_count": preferred_signal_count,
                 "confirmed_signal_count": confirmed_signal_count,
                 "possible_signal_count": matched_signal_count - confirmed_signal_count,
                 "matched_signals": matched_signals,
@@ -786,11 +823,16 @@ def _selected_profile_signals(profile) -> list[str]:
 
 
 def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
+    """Match any positive, usable opportunity score.
+
+    The configured audience threshold defines the preferred tier, not a hard
+    delivery cutoff. This lets a saved search fill the remainder of its batch
+    with lower-scoring evidence when stronger candidates are unavailable.
+    """
     evidence = _usable_evidence_condition(spec, fact)
-    minimum_score = float(spec.config.get("audience_min_score", 50.001))
     scored_opportunity = and_(
         fact.attribute_score.is_not(None),
-        fact.attribute_score >= minimum_score,
+        fact.attribute_score >= FALLBACK_MINIMUM_OPPORTUNITY_SCORE,
     )
     if spec.attribute_key == "website_status":
         # A current Google listing for an operational business is sufficient
@@ -813,6 +855,32 @@ def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
         evidence,
         scored_opportunity,
     )
+
+
+def _preferred_signal_condition(spec: SignalMatchSpec, fact) -> Any:
+    """Identify candidates that meet the configured preferred score."""
+
+    evidence = _usable_evidence_condition(spec, fact)
+    minimum_score = float(spec.config.get("audience_min_score", 50.001))
+    scored_opportunity = and_(
+        fact.attribute_score.is_not(None),
+        fact.attribute_score >= minimum_score,
+    )
+    if spec.attribute_key == "website_status":
+        supported_listing_gap = and_(
+            fact.value_type == "text",
+            func.lower(func.trim(fact.value_text)) == "not_listed",
+            _boolean_fact_exists(
+                business_id=fact.business_id,
+                attribute_key="business_operational",
+            ),
+            _boolean_fact_exists(
+                business_id=fact.business_id,
+                attribute_key="google_business_profile_present",
+            ),
+        )
+        return and_(evidence, or_(scored_opportunity, supported_listing_gap))
+    return and_(evidence, scored_opportunity)
 
 
 def _usable_evidence_condition(
@@ -933,10 +1001,10 @@ def _signal_match_confidence(
     evidence_confidence = "confirmed"
     if supported_listing_gap:
         return evidence_confidence
-    minimum_score = float(spec.config.get("audience_min_score", 50.001))
     return (
         evidence_confidence
-        if fact.attribute_score is not None and fact.attribute_score >= minimum_score
+        if fact.attribute_score is not None
+        and fact.attribute_score >= FALLBACK_MINIMUM_OPPORTUNITY_SCORE
         else None
     )
 

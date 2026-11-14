@@ -2488,6 +2488,76 @@ def test_profile_opportunity_matches_business_attribute_directly() -> None:
         ]
 
 
+def test_profile_fills_batch_with_lower_positive_opportunity_scores() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        definition = SignalDefinitionModel(
+            id=new_id("signal"),
+            key=BusinessAttributeKey.WEBSITE_STATUS,
+            label="Website status",
+            value_type="text",
+            category="website",
+            status="active",
+            collector_key="website_presence",
+            extractor_key="website_status",
+            freshness_days=30,
+            opportunity_direction="categorical",
+            config={"audience_min_score": 70},
+            version=1,
+        )
+        session.add(definition)
+        session.flush()
+        attributes = BusinessAttributeRepository(session)
+        attributes.upsert(
+            businesses[0].id,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                value="thin",
+                observed_at=utcnow(),
+                source_evidence_id=_latest_evidence_id(session, businesses[0].id),
+            ),
+        )
+        attributes.upsert(
+            businesses[1].id,
+            BusinessAttributeValue(
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                value="present",
+                observed_at=utcnow(),
+                source_evidence_id=_latest_evidence_id(session, businesses[1].id),
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(session, workspace_id="workspace:first").create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                services=["website_availability"],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [businesses[0].display_name]
+        match = rows[0]["raw"]["profile_match"]
+        assert match["preferred_signal_count"] == 0
+        assert match["matched_signals"][0]["opportunity_score"] == 55
+        assert match["matched_signals"][0]["match_tier"] == "fallback"
+
+
 def test_profile_matching_does_not_depend_on_learned_outcome_models() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
