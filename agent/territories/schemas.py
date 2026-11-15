@@ -10,6 +10,9 @@ from audience_runs.schemas import AudienceLeadRead
 from job_queue.schemas import QueueJobRead
 
 
+UNBOUNDED_REVIEW_COUNT_SENTINEL = 500
+
+
 class TerritoryStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
@@ -120,10 +123,25 @@ class TerritoryCreate(BaseModel):
     criteria_hash: str = "default"
     criteria_version: int = Field(default=1, ge=1)
 
+    @field_validator("min_google_rating", "min_review_count", mode="after")
+    @classmethod
+    def normalize_zero_minimum_filters(cls, value):
+        """A zero lower bound is equivalent to not enabling the filter."""
+        return None if value == 0 else value
+
     @model_validator(mode="after")
     def require_complete_coordinate_pair(self):
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("latitude and longitude must be provided together")
+        if (
+            self.min_review_count is None
+            and self.max_review_count is not None
+            and self.max_review_count >= UNBOUNDED_REVIEW_COUNT_SENTINEL
+        ):
+            # Older clients submitted 0..500 to mean "Any". Persist the
+            # neutral representation so missing Google metrics do not become
+            # an accidental eligibility requirement.
+            self.max_review_count = None
         if (
             self.min_review_count is not None
             and self.max_review_count is not None
@@ -158,9 +176,23 @@ class TerritoryUpdate(BaseModel):
     exclusion_keys: list[str] | None = None
     refill_policy: TerritoryRefillPolicy | None = None
 
+    @field_validator("min_google_rating", "min_review_count", mode="after")
+    @classmethod
+    def normalize_zero_minimum_filters(cls, value):
+        """A zero lower bound is equivalent to clearing the filter."""
+        return None if value == 0 else value
+
     @model_validator(mode="after")
     def require_complete_coordinate_pair(self):
         provided = self.model_fields_set
+        if (
+            "min_review_count" in provided
+            and "max_review_count" in provided
+            and self.min_review_count is None
+            and self.max_review_count is not None
+            and self.max_review_count >= UNBOUNDED_REVIEW_COUNT_SENTINEL
+        ):
+            self.max_review_count = None
         if "latitude" in provided or "longitude" in provided:
             if "latitude" not in provided or "longitude" not in provided:
                 raise ValueError("latitude and longitude must be updated together")

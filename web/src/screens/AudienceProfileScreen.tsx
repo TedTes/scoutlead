@@ -29,9 +29,9 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
   const [cityQuery, setCityQuery] = useState("");
   const [citiesBusy, setCitiesBusy] = useState(false);
   const [customerKinds, setCustomerKinds] = useState<Array<Exclude<ProfileCustomerKind, "both">>>(["residential", "commercial"]);
-  const [minGoogleRating, setMinGoogleRating] = useState("4.3");
-  const [minReviewCount, setMinReviewCount] = useState("20");
-  const [maxReviewCount, setMaxReviewCount] = useState("150");
+  const [minGoogleRating, setMinGoogleRating] = useState("");
+  const [minReviewCount, setMinReviewCount] = useState("");
+  const [maxReviewCount, setMaxReviewCount] = useState("");
   const [batchSize, setBatchSize] = useState(25);
   const [refillPolicy, setRefillPolicy] = useState<Territory["refill_policy"]>("when_depleted");
   const [folderId, setFolderId] = useState(defaultFolderId);
@@ -231,8 +231,8 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
     setSaving(true);
     const fitFilters = {
       customer_kind: customerKinds.length === 2 ? "both" as const : customerKinds[0] || "both",
-      min_google_rating: optionalNumber(minGoogleRating),
-      min_review_count: optionalNumber(minReviewCount),
+      min_google_rating: optionalPositiveNumber(minGoogleRating),
+      min_review_count: optionalPositiveNumber(minReviewCount),
       max_review_count: optionalNumber(maxReviewCount),
     };
     const markets = selectedCities.map((city) => ({ city: city.name, place_label: city.label, place_provider: "geonames", place_external_id: city.id, country_code: city.country_code, region_code: city.region_code, region_name: city.region_name, latitude: city.latitude, longitude: city.longitude }));
@@ -287,8 +287,8 @@ export function AudienceProfileScreen({ defaultFolderId = "" }: { defaultFolderI
               </div>
             </fieldset>
             <fieldset className="audience-google-filters">
-              <label><span><i aria-hidden="true">G</i> Rating</span><input aria-label="Minimum Google rating" inputMode="decimal" max="5" min="0" step="0.1" type="number" value={minGoogleRating} onChange={(event) => setMinGoogleRating(event.target.value)} /></label>
-              <label><span><i aria-hidden="true">G</i> Reviews</span><div className="audience-number-range"><input aria-label="Minimum Google review count" inputMode="numeric" min="0" step="1" type="number" value={minReviewCount} onChange={(event) => setMinReviewCount(event.target.value)} /><span>to</span><input aria-label="Maximum Google review count" inputMode="numeric" min="0" step="1" type="number" value={maxReviewCount} onChange={(event) => setMaxReviewCount(event.target.value)} /></div></label>
+              <label><span><i aria-hidden="true">G</i> Rating</span><input aria-label="Minimum Google rating" inputMode="decimal" max="5" min="0" placeholder="Any" step="0.1" type="number" value={minGoogleRating} onChange={(event) => setMinGoogleRating(event.target.value)} /></label>
+              <label><span><i aria-hidden="true">G</i> Reviews</span><div className="audience-number-range"><input aria-label="Minimum Google review count" inputMode="numeric" min="0" placeholder="Any" step="1" type="number" value={minReviewCount} onChange={(event) => setMinReviewCount(event.target.value)} /><span>to</span><input aria-label="Maximum Google review count" inputMode="numeric" min="0" placeholder="Any" step="1" type="number" value={maxReviewCount} onChange={(event) => setMaxReviewCount(event.target.value)} /></div></label>
             </fieldset>
           </div>
         </section>
@@ -358,6 +358,7 @@ function shortTradeLabel(label: string) {
 function toggleValue<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
 function getFormHint(nicheId: string, cityCount: number, customerKindCount: number, services: string[], reviewRangeValid: boolean) { if (!nicheId) return "Choose a trade to continue."; if (!customerKindCount) return "Choose at least one customer type."; if (!cityCount) return "Select at least one city to continue."; if (cityCount > MAX_SELECTED_CITIES) return `Choose no more than ${MAX_SELECTED_CITIES} cities.`; if (!services.length) return "Choose a website opportunity to continue."; if (!reviewRangeValid) return "Minimum reviews cannot exceed maximum reviews."; return `Ready to collect ${cityCount} ${cityCount === 1 ? "city" : "cities"} in the background.`; }
 function optionalNumber(value: string): number | null { return value.trim() === "" ? null : Number(value); }
+function optionalPositiveNumber(value: string): number | null { const parsed = optionalNumber(value); return parsed != null && parsed > 0 ? parsed : null; }
 function optionalNumberInput(value?: number | null): string { return value == null ? "" : String(value); }
 function profileLocationSummary(profile: Territory) { const locations = profile.locations || []; if (locations.length === 1) return locations[0].label || locations[0].city; if (locations.length > 1) return `${locations.length} cities`; return `${profile.place_label || profile.city} · ${profile.radius_km} km`; }
 function batchStateLabel(state?: string) { if (state === "scoring") return "Building"; if (state === "retrying") return "Retrying"; if (state === "ready") return "Ready"; if (state === "partial") return "Partial"; if (state === "empty") return "No matches"; if (state === "failed") return "Needs attention"; return "Set up"; }

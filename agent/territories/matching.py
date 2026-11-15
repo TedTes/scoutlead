@@ -51,6 +51,7 @@ SIGNAL_FACTS = {
 # website grade only.
 WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset({"website_quality_score"})
 FALLBACK_MINIMUM_OPPORTUNITY_SCORE = 0.001
+LEGACY_UNBOUNDED_REVIEW_COUNT = 500
 RETIRED_WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset(
     {
         "mobile_viewport_present",
@@ -148,14 +149,38 @@ class ProfileMatchService:
         if profile.customer_kind != "both":
             statement = statement.where(BusinessModel.customer_kind == profile.customer_kind)
 
+        minimum_rating = (
+            float(profile.min_google_rating)
+            if profile.min_google_rating is not None
+            and float(profile.min_google_rating) > 0
+            else None
+        )
+        minimum_reviews = (
+            float(profile.min_review_count)
+            if profile.min_review_count is not None
+            and float(profile.min_review_count) > 0
+            else None
+        )
+        maximum_reviews = (
+            float(profile.max_review_count)
+            if profile.max_review_count is not None
+            else None
+        )
+        if (
+            minimum_reviews is None
+            and maximum_reviews is not None
+            and maximum_reviews >= LEGACY_UNBOUNDED_REVIEW_COUNT
+        ):
+            # Existing searches stored 0..500 as the UI's "Any" range.
+            maximum_reviews = None
         rating_condition = (
             _numeric_fact_exists(
                 business_id=BusinessModel.id,
                 attribute_key="google_rating",
                 cutoff=cutoff,
-                minimum=float(profile.min_google_rating),
+                minimum=minimum_rating,
             )
-            if profile.min_google_rating is not None
+            if minimum_rating is not None
             else None
         )
         review_condition = (
@@ -163,19 +188,11 @@ class ProfileMatchService:
                 business_id=BusinessModel.id,
                 attribute_key="google_review_count",
                 cutoff=cutoff,
-                minimum=(
-                    float(profile.min_review_count)
-                    if profile.min_review_count is not None
-                    else None
-                ),
-                maximum=(
-                    float(profile.max_review_count)
-                    if profile.max_review_count is not None
-                    else None
-                ),
+                minimum=minimum_reviews,
+                maximum=maximum_reviews,
             )
-            if profile.min_review_count is not None
-            or profile.max_review_count is not None
+            if minimum_reviews is not None
+            or maximum_reviews is not None
             else None
         )
         # Rating and review range are alternative Google-profile qualification

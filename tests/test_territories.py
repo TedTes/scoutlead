@@ -1256,6 +1256,77 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
         }
 
 
+def test_zero_google_minimums_do_not_require_google_attributes() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        session.add(
+            SignalDefinitionModel(
+                id=new_id("signal"),
+                key=BusinessAttributeKey.WEBSITE_STATUS,
+                label="Website status",
+                value_type="text",
+                category="website",
+                status="active",
+                collector_key="website_presence",
+                extractor_key="website_status",
+                freshness_days=30,
+                opportunity_direction="categorical",
+                config={"audience_min_score": 50},
+                version=1,
+            )
+        )
+        session.flush()
+        attributes = BusinessAttributeRepository(session)
+        for business in businesses:
+            attributes.upsert(
+                business.id,
+                BusinessAttributeValue(
+                    key=BusinessAttributeKey.WEBSITE_STATUS,
+                    value="missing",
+                    observed_at=utcnow(),
+                    source_evidence_id=_latest_evidence_id(session, business.id),
+                ),
+            )
+        session.commit()
+
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="both",
+                market={"city": "Toronto", "radius_km": 25},
+                min_google_rating=0,
+                min_review_count=0,
+                max_review_count=500,
+                services=["website_availability"],
+                exclude=[],
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert profile.min_google_rating is None
+        assert profile.min_review_count is None
+        assert profile.max_review_count is None
+        assert {row["title"] for row in rows} == {
+            business.display_name for business in businesses
+        }
+
+
 def test_profile_criteria_edit_increments_version_and_rehashes() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
