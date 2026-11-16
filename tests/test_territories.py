@@ -2145,6 +2145,115 @@ def test_profile_signals_deliver_only_confirmed_matches() -> None:
         )) == 1
 
 
+def test_website_upgrade_keeps_unmeasured_sites_and_ranks_stored_quality() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        _niche(session, slug="home_service_hvac", label="HVAC contractors")
+        _seed_hvac_businesses(session)
+        businesses = list(
+            session.scalars(select(BusinessModel).order_by(BusinessModel.display_name))
+        )
+        for business in businesses:
+            business.website_url = (
+                f"https://{business.display_name.lower().replace(' ', '-')}.example"
+            )
+        session.add(
+            SignalDefinitionModel(
+                id=new_id("signal"),
+                key="website_quality_score",
+                label="Website quality score",
+                value_type="number",
+                category="website",
+                status="active",
+                collector_key="pagespeed_mobile",
+                extractor_key="pagespeed_quality_score",
+                freshness_days=30,
+                opportunity_direction="lower_is_opportunity",
+                config={"audience_min_score": 50},
+            )
+        )
+        attributes = BusinessAttributeRepository(session)
+        attributes.upsert(
+            businesses[0].id,
+            BusinessAttributeValue(
+                key="website_quality_score",
+                value=20,
+                observed_at=utcnow(),
+                source_evidence_id=_latest_evidence_id(session, businesses[0].id),
+            ),
+        )
+        session.commit()
+        profile = TerritoryService(
+            session,
+            workspace_id="workspace:first",
+        ).create_profile(
+            _profile_create(
+                session,
+                product_id=offer.id,
+                trades=["hvac"],
+                customer_kind="residential",
+                market={"city": "Toronto", "radius_km": 25},
+                services=["website_upgrade"],
+                exclude=[],
+                limit=25,
+            )
+        )
+
+        rows = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in rows] == [
+            businesses[0].display_name,
+            businesses[1].display_name,
+        ]
+        initial_scores = [
+            row["raw"]["profile_match"]["website_improvement_score"]
+            for row in rows
+        ]
+        assert initial_scores[0] > initial_scores[1] == 50.0
+        assert rows[1]["raw"]["profile_match"]["website_improvement_assessment"] == {
+            "candidate": True,
+            "score": 50.0,
+            "coverage": 0.0,
+            "measured_count": 0,
+            "components": [],
+        }
+
+        # Strong measured quality ranks below an unmeasured website, but the
+        # site remains available for human review.
+        attributes.upsert(
+            businesses[0].id,
+            BusinessAttributeValue(
+                key="website_quality_score",
+                value=90,
+                observed_at=utcnow() + timedelta(seconds=1),
+                source_evidence_id=_latest_evidence_id(session, businesses[0].id),
+            ),
+        )
+        session.commit()
+
+        reranked = ProfileMatchService(session).match(
+            profile=profile,
+            niche_ids=[profile.niche_id],
+            limit=25,
+        )
+
+        assert [row["title"] for row in reranked] == [
+            businesses[1].display_name,
+            businesses[0].display_name,
+        ]
+        reranked_scores = [
+            row["raw"]["profile_match"]["website_improvement_score"]
+            for row in reranked
+        ]
+        assert reranked_scores[0] == 50.0
+        assert reranked_scores[1] < reranked_scores[0]
+
+
 def test_profile_matches_google_operational_business_with_no_listed_website() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

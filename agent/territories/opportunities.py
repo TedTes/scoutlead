@@ -26,8 +26,8 @@ OPPORTUNITY_CRITERIA: tuple[OpportunityCriterion, ...] = (
         key="website_upgrade",
         label="Website needs improvement",
         description=(
-            "Find businesses whose website has a measured, below-threshold "
-            "website quality grade."
+            "Find businesses with a website and rank them by the current "
+            "website-quality evidence available."
         ),
         attribute_key="website_quality_score",
     ),

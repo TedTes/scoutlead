@@ -51,6 +51,21 @@ SIGNAL_FACTS = {
 # website grade only.
 WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset({"website_quality_score"})
 FALLBACK_MINIMUM_OPPORTUNITY_SCORE = 0.001
+WEBSITE_UPGRADE_UNKNOWN_SCORE = 50.0
+WEBSITE_UPGRADE_COMPONENTS = (
+    ("website_status", 0.75),
+    ("http_status", 1.0),
+    ("mobile_viewport_present", 1.0),
+    ("title_and_meta_present", 0.75),
+    ("local_business_schema_present", 0.75),
+    ("service_area_content_present", 0.75),
+)
+WEBSITE_UPGRADE_QUALITY_COMPONENTS = (
+    ("performance_score", 1.0),
+    ("accessibility_score", 1.0),
+    ("best_practices_score", 1.0),
+    ("seo_score", 1.0),
+)
 LEGACY_UNBOUNDED_REVIEW_COUNT = 500
 RETIRED_WEBSITE_UPGRADE_SIGNAL_KEYS = frozenset(
     {
@@ -214,6 +229,16 @@ class ProfileMatchService:
             statement = statement.where(or_(field.is_(False), field.is_(None)))
 
         selected_signals = _selected_profile_signals(profile)
+        website_upgrade_selected = "website_upgrade" in set(profile.service_keys or [])
+        website_candidate_condition = (
+            _website_exists_condition(
+                business_id=BusinessModel.id,
+                website_url=BusinessModel.website_url,
+                cutoff=cutoff,
+            )
+            if website_upgrade_selected
+            else None
+        )
         signal_specs = self._signal_specs(selected_signals)
         service_specs = self._service_specs(profile.service_keys or [])
         signal_weights: dict[str, float] = {}
@@ -236,7 +261,16 @@ class ProfileMatchService:
                     or_(fact.expires_at.is_(None), fact.expires_at >= utcnow()),
                 ),
             )
-            condition = _signal_condition(spec, fact)
+            confirmed_condition = _signal_condition(spec, fact)
+            condition = _signal_condition(
+                spec,
+                fact,
+                website_candidate_condition=(
+                    website_candidate_condition
+                    if spec.attribute_key == "website_quality_score"
+                    else None
+                ),
+            )
             preferred_condition = _preferred_signal_condition(spec, fact)
             signal_conditions.append(condition)
             matched_signal_count += case((condition, 1), else_=0)
@@ -244,7 +278,12 @@ class ProfileMatchService:
             candidate_opportunity_score += case(
                 (
                     condition,
-                    func.coalesce(fact.attribute_score, 100.0),
+                    func.coalesce(
+                        fact.attribute_score,
+                        WEBSITE_UPGRADE_UNKNOWN_SCORE
+                        if spec.attribute_key == "website_quality_score"
+                        else 100.0,
+                    ),
                 ),
                 else_=0.0,
             )
@@ -252,7 +291,7 @@ class ProfileMatchService:
                 (condition, signal_weights.get(spec.key, 1.0)),
                 else_=0.0,
             )
-            confirmed_signal_count += case((condition, 1), else_=0)
+            confirmed_signal_count += case((confirmed_condition, 1), else_=0)
 
         if selected_signals:
             statement = statement.where(
@@ -480,6 +519,8 @@ class ProfileMatchService:
             )
             if not observation_is_quarantined(self.session, candidate)
         ]
+        website_upgrade_selected = "website_upgrade" in set(profile.service_keys or [])
+        website_upgrade_assessment = _website_upgrade_assessment(business, facts)
         contact = next(
             (
                 candidate
@@ -522,9 +563,18 @@ class ProfileMatchService:
                 fact,
                 supported_listing_gap=supported_listing_gap,
             )
+            website_candidate = bool(
+                website_upgrade_selected
+                and spec.attribute_key == "website_quality_score"
+                and website_upgrade_assessment["candidate"]
+            )
+            if match_confidence is None and website_candidate:
+                match_confidence = "possible"
             effective_score = (
                 100.0
                 if supported_listing_gap
+                else website_upgrade_assessment["score"]
+                if website_candidate
                 else fact.attribute_score
                 if fact is not None
                 else None
@@ -533,7 +583,7 @@ class ProfileMatchService:
                 spec.config.get("audience_min_score", 50.001)
             )
             meets_preferred_threshold = bool(
-                match_confidence is not None
+                match_confidence == "confirmed"
                 and effective_score is not None
                 and effective_score >= preferred_threshold
             )
@@ -552,11 +602,22 @@ class ProfileMatchService:
                 "match_tier": (
                     "preferred"
                     if meets_preferred_threshold
+                    else "candidate"
+                    if match_confidence == "possible"
                     else "fallback"
                     if match_confidence is not None
                     else None
                 ),
             }
+            if website_candidate:
+                evidence.update(
+                    {
+                        "candidate": True,
+                        "evidence_coverage": website_upgrade_assessment["coverage"],
+                        "measured_check_count": website_upgrade_assessment["measured_count"],
+                        "ranking_components": website_upgrade_assessment["components"],
+                    }
+                )
             if fact_observation is not None:
                 pitch_eligible, pitch_reason = pitch_scope_decision(
                     spec.attribute_key,
@@ -590,6 +651,7 @@ class ProfileMatchService:
                 "evidence_confidence": evidence["evidence_confidence"],
                 "opportunity_score": evidence["opportunity_score"],
                 "match_tier": evidence["match_tier"],
+                "candidate": evidence.get("candidate", False),
                 "pitch_eligible": evidence["pitch_eligible"],
                 "pitch_reason": evidence["pitch_reason"],
                 **(
@@ -646,6 +708,10 @@ class ProfileMatchService:
                 and signal_evidence[signal_key]["matched"] is True
             ]
             if supporting_evidence:
+                service_is_website_candidate = bool(
+                    service.key == "website_upgrade"
+                    and website_upgrade_assessment["candidate"]
+                )
                 matched_services.append(
                     {
                         "service_key": service.key,
@@ -655,16 +721,26 @@ class ProfileMatchService:
                             3,
                         ),
                         "composite_score": round(
-                            weighted_opportunity / total_weight,
+                            float(website_upgrade_assessment["score"])
+                            if service_is_website_candidate
+                            else weighted_opportunity / total_weight,
                             1,
                         ) if total_weight else 0.0,
-                        "measured_score": round(
-                            weighted_opportunity / evaluated_weight,
-                            1,
+                        "measured_score": (
+                            round(float(website_upgrade_assessment["score"]), 1)
+                            if service_is_website_candidate
+                            and website_upgrade_assessment["measured_count"]
+                            else round(weighted_opportunity / evaluated_weight, 1)
+                            if evaluated_weight
+                            else None
                         ),
-                        "coverage": round(evaluated_weight / total_weight, 3)
-                        if total_weight
-                        else 0.0,
+                        "coverage": (
+                            float(website_upgrade_assessment["coverage"])
+                            if service_is_website_candidate
+                            else round(evaluated_weight / total_weight, 3)
+                            if total_weight
+                            else 0.0
+                        ),
                         "matched_weight": round(
                             sum(float(item["weight"]) for item in supporting_evidence),
                             3,
@@ -676,6 +752,11 @@ class ProfileMatchService:
             (float(item["composite_score"]) for item in matched_services),
             default=0.0,
         )
+        if website_upgrade_selected and website_upgrade_assessment["candidate"]:
+            composite_service_score = max(
+                composite_service_score,
+                float(website_upgrade_assessment["score"]),
+            )
         classifications = {
             "customer_kind": business.customer_kind,
             "is_chain": business.is_chain,
@@ -714,6 +795,8 @@ class ProfileMatchService:
                 "attribute_key": spec.attribute_key,
                 "state": (
                     "verified"
+                    if signal_evidence[spec.key]["confidence"] == "confirmed"
+                    else "candidate"
                     if signal_evidence[spec.key]["matched"]
                     else "not_evaluated"
                     if facts.get(spec.attribute_key) is None
@@ -727,7 +810,7 @@ class ProfileMatchService:
             for spec in signal_specs
         ]
         evaluated_count = sum(
-            item["state"] != "not_evaluated" for item in opportunity_checks
+            item["state"] in {"verified", "no_gap"} for item in opportunity_checks
         )
         lead_assessment = {
             "lead_state": "qualified",
@@ -764,6 +847,7 @@ class ProfileMatchService:
                 "score": matched_signal_count,
                 "service_score": round(weighted_match_score, 3),
                 "website_improvement_score": round(composite_service_score, 1),
+                "website_improvement_assessment": website_upgrade_assessment,
                 "opportunity_score": opportunity_score,
                 "score_breakdown": score_breakdown,
                 "lead_assessment": lead_assessment,
@@ -785,7 +869,7 @@ class ProfileMatchService:
             "search_match": {
                 "status": "matched",
                 "reason": (
-                    "Eligible target business with at least one verified selected opportunity."
+                    "Eligible target business matched the selected website opportunity lane."
                 ),
             },
         }
@@ -839,7 +923,12 @@ def _selected_profile_signals(profile) -> list[str]:
     return [*retained, *WEBSITE_UPGRADE_SIGNAL_KEYS]
 
 
-def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
+def _signal_condition(
+    spec: SignalMatchSpec,
+    fact,
+    *,
+    website_candidate_condition: Any | None = None,
+) -> Any:
     """Match any positive, usable opportunity score.
 
     The configured audience threshold defines the preferred tier, not a hard
@@ -868,10 +957,13 @@ def _signal_condition(spec: SignalMatchSpec, fact) -> Any:
             ),
         )
         return and_(evidence, or_(scored_opportunity, supported_listing_gap))
-    return and_(
+    scored_condition = and_(
         evidence,
         scored_opportunity,
     )
+    if website_candidate_condition is not None:
+        return or_(scored_condition, website_candidate_condition)
+    return scored_condition
 
 
 def _preferred_signal_condition(spec: SignalMatchSpec, fact) -> Any:
@@ -914,6 +1006,136 @@ def _usable_evidence_condition(
         # row here duplicated that decision and hid otherwise publishable facts.
         require_validation=False,
     )
+
+
+def _website_exists_condition(*, business_id, website_url, cutoff: datetime) -> Any:
+    """Admit any target business with a known website to the upgrade lane.
+
+    Website measurements rank these candidates later; they are deliberately
+    not an admission requirement.
+    """
+
+    website_attribute = aliased(
+        BusinessAttributeModel,
+        name="upgrade_candidate_website_url",
+    )
+    status_attribute = aliased(
+        BusinessAttributeModel,
+        name="upgrade_candidate_website_status",
+    )
+    canonical_url_present = and_(
+        website_url.is_not(None),
+        func.trim(website_url) != "",
+    )
+    attribute_url_present = exists(
+        select(website_attribute.id).where(
+            website_attribute.business_id == business_id,
+            website_attribute.attribute_key == "website_url",
+            website_attribute.observed_at >= cutoff,
+            eligible_fact_condition(
+                website_attribute,
+                minimum_confidence=DEFAULT_MINIMUM_FACT_CONFIDENCE,
+                require_provenance=True,
+                require_validation=False,
+            ),
+        )
+    )
+    status_present = exists(
+        select(status_attribute.id).where(
+            status_attribute.business_id == business_id,
+            status_attribute.attribute_key == "website_status",
+            status_attribute.value_type == "text",
+            func.lower(func.trim(status_attribute.value_text)).in_(
+                ("present", "available", "thin", "unreachable", "parked")
+            ),
+            status_attribute.observed_at >= cutoff,
+            eligible_fact_condition(
+                status_attribute,
+                minimum_confidence=DEFAULT_MINIMUM_FACT_CONFIDENCE,
+                require_provenance=True,
+                require_validation=False,
+            ),
+        )
+    )
+    return or_(canonical_url_present, attribute_url_present, status_present)
+
+
+def _website_upgrade_assessment(
+    business: BusinessModel,
+    facts: dict[str, BusinessAttributeModel],
+) -> dict[str, Any]:
+    """Rank a known website from whatever current website evidence exists.
+
+    Missing measurements contribute a neutral review priority instead of
+    excluding the business. Confidence blends each observed score back toward
+    that neutral value, so weak evidence cannot dominate the ordering.
+    """
+
+    website_attribute = facts.get("website_url")
+    website_status = str(attribute_value(facts.get("website_status")) or "").lower()
+    website_url_value = attribute_value(website_attribute)
+    candidate = bool(
+        str(business.website_url or "").strip()
+        or (isinstance(website_url_value, str) and website_url_value.strip())
+        or website_status in {"present", "available", "thin", "unreachable", "parked"}
+    )
+    if not candidate:
+        return {
+            "candidate": False,
+            "score": 0.0,
+            "coverage": 0.0,
+            "measured_count": 0,
+            "components": [],
+        }
+
+    composite_quality = facts.get("website_quality_score")
+    quality_checks = (
+        (("website_quality_score", 4.0),)
+        if composite_quality is not None and composite_quality.attribute_score is not None
+        else WEBSITE_UPGRADE_QUALITY_COMPONENTS
+    )
+    checks = (*quality_checks, *WEBSITE_UPGRADE_COMPONENTS)
+    total_weight = sum(weight for _, weight in checks)
+    weighted_score = 0.0
+    effective_coverage_weight = 0.0
+    components: list[dict[str, Any]] = []
+
+    for key, weight in checks:
+        fact = facts.get(key)
+        if fact is None or fact.attribute_score is None:
+            weighted_score += WEBSITE_UPGRADE_UNKNOWN_SCORE * weight
+            continue
+        confidence = max(0.0, min(100.0, float(fact.confidence or 0.0))) / 100.0
+        observed_score = max(0.0, min(100.0, float(fact.attribute_score)))
+        adjusted_score = (
+            observed_score * confidence
+            + WEBSITE_UPGRADE_UNKNOWN_SCORE * (1.0 - confidence)
+        )
+        weighted_score += adjusted_score * weight
+        effective_coverage_weight += confidence * weight
+        components.append(
+            {
+                "attribute_key": key,
+                "value": attribute_value(fact),
+                "opportunity_score": round(observed_score, 1),
+                "confidence": int(fact.confidence or 0),
+                "weight": weight,
+                "source": fact.source_provider or fact.source,
+                "observed_at": fact.observed_at.isoformat(),
+            }
+        )
+
+    return {
+        "candidate": True,
+        "score": round(weighted_score / total_weight, 1)
+        if total_weight
+        else WEBSITE_UPGRADE_UNKNOWN_SCORE,
+        "coverage": round(effective_coverage_weight / total_weight, 3)
+        if total_weight
+        else 0.0,
+        "measured_count": len(components),
+        "components": components,
+    }
 
 
 def _numeric_fact_exists(
