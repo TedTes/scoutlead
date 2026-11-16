@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
 import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
@@ -453,11 +455,17 @@ function AppShell({
                       </button>
                       <div className="audience-folder-actions"><button aria-expanded={folderMenuId === folder.id} aria-label={`Actions for ${folder.name}`} type="button" onClick={() => { setAudienceMenuId(""); setFolderMenuId((current) => current === folder.id ? "" : folder.id); }}><MoreVertical size={15} /></button>{folderMenuId === folder.id ? <div className="audience-sidebar-menu"><button type="button" onClick={() => { setFolderMenuId(""); startNewAudience(folder.id); }}><Plus size={13} />New search</button><button type="button" onClick={() => { setFolderMenuId(""); setEditFolder(folder); }}><Pencil size={13} />Rename</button><button className="is-danger" type="button" onClick={() => { setFolderMenuId(""); setDeleteFolder(folder); }}><Trash2 size={13} />Delete</button></div> : null}</div>
                     </div>
-                    <div className={open ? "audience-folder-children is-open" : "audience-folder-children"}><div className="audience-folder-children-inner">{profiles.length ? profiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />) : <small className="audience-folder-empty">No saved searches</small>}</div></div>
+                    <div className={open ? "audience-folder-children is-open" : "audience-folder-children"}><div className="audience-folder-children-inner">{profiles.length ? profiles.map((profile) => {
+                      const menuKey = `folder:${folder.id}:${profile.id}`;
+                      return <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === menuKey} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === menuKey ? "" : menuKey); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />;
+                    }) : <small className="audience-folder-empty">No saved searches</small>}</div></div>
                   </section>;
                 })}
                 {recentProfiles.length ? <div className="audience-recents-heading"><span>Recents</span><em>{recentProfiles.length}</em></div> : null}
-                {recentProfiles.map((profile) => <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === profile.id} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === profile.id ? "" : profile.id); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />)}
+                {recentProfiles.map((profile) => {
+                  const menuKey = `recent:${profile.id}`;
+                  return <AudienceSidebarRow key={profile.id} menuOpen={audienceMenuId === menuKey} profile={profile} selected={profile.id === selectedProfileId} switching={switchingProfileId === profile.id} onDelete={() => { setAudienceMenuId(""); setDeleteAudience(profile); }} onMenuToggle={() => { setFolderMenuId(""); setAudienceMenuId((current) => current === menuKey ? "" : menuKey); }} onMove={() => { setAudienceMenuId(""); setMoveAudience(profile); }} onOpen={() => openAudienceProfile(profile)} onRename={() => { setAudienceMenuId(""); setRenameAudience(profile); }} />;
+                })}
             </>
             {productProfiles.length > 5 ? (
               <button
@@ -694,14 +702,65 @@ function AudienceSidebarRow({
   selected: boolean;
   switching: boolean;
 }) {
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return undefined;
+    const positionMenu = () => {
+      const button = menuButtonRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      const viewportGutter = 8;
+      const menuGap = 4;
+      const menuWidth = menuRef.current?.offsetWidth || 150;
+      const menuHeight = menuRef.current?.offsetHeight || 110;
+      const spaceBelow = window.innerHeight - rect.bottom - viewportGutter;
+      const openAbove = spaceBelow < menuHeight + menuGap && rect.top > spaceBelow;
+      const preferredTop = openAbove
+        ? rect.top - menuHeight - menuGap
+        : rect.bottom + menuGap;
+      setMenuStyle({
+        position: "fixed",
+        top: Math.min(
+          Math.max(viewportGutter, preferredTop),
+          Math.max(viewportGutter, window.innerHeight - menuHeight - viewportGutter),
+        ),
+        left: Math.min(
+          Math.max(viewportGutter, rect.right - menuWidth),
+          Math.max(viewportGutter, window.innerWidth - menuWidth - viewportGutter),
+        ),
+        right: "auto",
+      });
+    };
+    positionMenu();
+    // A fixed-position portal does not scroll with the row it belongs to;
+    // closing on scroll avoids the menu visually detaching from its button.
+    const scrollParent = menuButtonRef.current?.closest(".lead-workspace-list");
+    scrollParent?.addEventListener("scroll", onMenuToggle, { passive: true });
+    window.addEventListener("resize", positionMenu);
+    return () => {
+      scrollParent?.removeEventListener("scroll", onMenuToggle);
+      window.removeEventListener("resize", positionMenu);
+    };
+  }, [menuOpen, onMenuToggle]);
+
   return <div className="audience-list-row">
     <button className={`audience-list-main ${selected ? "active" : ""}`} aria-label={profile.label} title={profile.label} type="button" onClick={onOpen}>
       {switching ? <LoaderCircle className="lead-workspace-icon sl-spin-icon" size={15} /> : <Users className="lead-workspace-icon" size={15} />}
       <span className="audience-list-copy"><strong>{profile.label}</strong><small>{profile.locations?.length ? (profile.locations.length === 1 ? profile.locations[0].label : `${profile.locations.length} cities`) : `${profile.place_label || profile.city} · ${profile.radius_km} km`}</small></span>
     </button>
     <div className="audience-row-actions">
-      <button aria-expanded={menuOpen} aria-label={`Actions for ${profile.label}`} type="button" onClick={onMenuToggle}><MoreVertical size={15} /></button>
-      {menuOpen ? <div className="audience-sidebar-menu"><button aria-label={`Move ${profile.label}`} type="button" onClick={onMove}><Folder size={13} />Move</button><button aria-label={`Rename ${profile.label}`} type="button" onClick={onRename}><Pencil size={13} />Rename</button><button aria-label={`Delete ${profile.label}`} className="is-danger" type="button" onClick={onDelete}><Trash2 size={13} />Delete</button></div> : null}
+      <button ref={menuButtonRef} aria-expanded={menuOpen} aria-label={`Actions for ${profile.label}`} type="button" onClick={onMenuToggle}><MoreVertical size={15} /></button>
+      {menuOpen ? createPortal(
+        <div ref={menuRef} className="audience-sidebar-menu" style={menuStyle}>
+          <button aria-label={`Move ${profile.label}`} type="button" onClick={onMove}><Folder size={13} />Move</button>
+          <button aria-label={`Rename ${profile.label}`} type="button" onClick={onRename}><Pencil size={13} />Rename</button>
+          <button aria-label={`Delete ${profile.label}`} className="is-danger" type="button" onClick={onDelete}><Trash2 size={13} />Delete</button>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   </div>;
 }

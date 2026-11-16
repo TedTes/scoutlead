@@ -7001,8 +7001,10 @@ a {
   z-index: 20;
 }
 
-.lead-workspace-list .audience-sidebar-menu button {
+.audience-sidebar-menu button {
   align-items: center;
+  background: transparent;
+  border: 0;
   border-radius: 5px;
   color: var(--muted);
   display: flex;
@@ -7015,8 +7017,8 @@ a {
   width: 100%;
 }
 
-.lead-workspace-list .audience-sidebar-menu button:hover { background: var(--panel-muted); color: var(--text); }
-.lead-workspace-list .audience-sidebar-menu button.is-danger { color: var(--red); }
+.audience-sidebar-menu button:hover { background: var(--panel-muted); color: var(--text); }
+.audience-sidebar-menu button.is-danger { color: var(--red); }
 
 .audience-dialog-form,
 .audience-delete-dialog {
