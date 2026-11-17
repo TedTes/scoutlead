@@ -48,6 +48,7 @@ class TerritoryRepository:
                 existing.locations = data.locations
                 existing.customer_kind = data.customer_kind.value
                 existing.min_google_rating = data.min_google_rating
+                existing.max_google_rating = data.max_google_rating
                 existing.min_review_count = data.min_review_count
                 existing.max_review_count = data.max_review_count
                 existing.service_keys = data.service_keys
@@ -95,6 +96,7 @@ class TerritoryRepository:
             locations=data.locations,
             customer_kind=data.customer_kind.value,
             min_google_rating=data.min_google_rating,
+            max_google_rating=data.max_google_rating,
             min_review_count=data.min_review_count,
             max_review_count=data.max_review_count,
             service_keys=data.service_keys,

@@ -1208,6 +1208,7 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
                 customer_kind="residential",
                 market={"city": "Toronto", "radius_km": 25},
                 min_google_rating=4.5,
+                max_google_rating=4.85,
                 min_review_count=10,
                 max_review_count=40,
                 signals=[],
@@ -1223,6 +1224,7 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
 
         assert [row["title"] for row in rows] == [businesses[0].display_name]
         assert profile.min_google_rating == 4.5
+        assert profile.max_google_rating == 4.85
         assert profile.min_review_count == 10
         assert profile.max_review_count == 40
 
@@ -1237,6 +1239,7 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
                 customer_kind="both",
                 market={"city": "Toronto", "radius_km": 25},
                 min_google_rating=4.5,
+                max_google_rating=4.85,
                 min_review_count=10,
                 max_review_count=40,
                 signals=[],
@@ -1250,10 +1253,8 @@ def test_profile_filters_by_customer_kind_rating_and_review_range() -> None:
             limit=25,
         )
 
-        # HVAC 2 is outside the review range but passes the rating criterion.
-        assert {row["title"] for row in broad_rows} == {
-            business.display_name for business in businesses
-        }
+        # HVAC 2 falls outside both the rating and review ranges.
+        assert [row["title"] for row in broad_rows] == [businesses[0].display_name]
 
 
 def test_zero_google_minimums_do_not_require_google_attributes() -> None:
@@ -1306,6 +1307,7 @@ def test_zero_google_minimums_do_not_require_google_attributes() -> None:
                 customer_kind="both",
                 market={"city": "Toronto", "radius_km": 25},
                 min_google_rating=0,
+                max_google_rating=5,
                 min_review_count=0,
                 max_review_count=500,
                 services=["website_availability"],
@@ -1320,6 +1322,7 @@ def test_zero_google_minimums_do_not_require_google_attributes() -> None:
         )
 
         assert profile.min_google_rating is None
+        assert profile.max_google_rating is None
         assert profile.min_review_count is None
         assert profile.max_review_count is None
         assert {row["title"] for row in rows} == {

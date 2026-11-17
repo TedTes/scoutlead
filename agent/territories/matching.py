@@ -170,6 +170,12 @@ class ProfileMatchService:
             and float(profile.min_google_rating) > 0
             else None
         )
+        maximum_rating = (
+            float(profile.max_google_rating)
+            if profile.max_google_rating is not None
+            and float(profile.max_google_rating) < 5
+            else None
+        )
         minimum_reviews = (
             float(profile.min_review_count)
             if profile.min_review_count is not None
@@ -194,8 +200,9 @@ class ProfileMatchService:
                 attribute_key="google_rating",
                 cutoff=cutoff,
                 minimum=minimum_rating,
+                maximum=maximum_rating,
             )
-            if minimum_rating is not None
+            if minimum_rating is not None or maximum_rating is not None
             else None
         )
         review_condition = (

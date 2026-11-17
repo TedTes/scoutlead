@@ -11,6 +11,7 @@ from job_queue.schemas import QueueJobRead
 
 
 UNBOUNDED_REVIEW_COUNT_SENTINEL = 500
+UNBOUNDED_GOOGLE_RATING_SENTINEL = 5
 
 
 class TerritoryStatus(StrEnum):
@@ -105,6 +106,7 @@ class TerritoryCreate(BaseModel):
     locations: list[dict] = Field(default_factory=list, max_length=5)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
+    max_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
     max_review_count: int | None = Field(default=None, ge=0)
     service_keys: list[str] = Field(default_factory=list)
@@ -129,6 +131,11 @@ class TerritoryCreate(BaseModel):
         """A zero lower bound is equivalent to not enabling the filter."""
         return None if value == 0 else value
 
+    @field_validator("max_google_rating", mode="after")
+    @classmethod
+    def normalize_unbounded_maximum_rating(cls, value):
+        return None if value == UNBOUNDED_GOOGLE_RATING_SENTINEL else value
+
     @model_validator(mode="after")
     def require_complete_coordinate_pair(self):
         if (self.latitude is None) != (self.longitude is None):
@@ -142,6 +149,12 @@ class TerritoryCreate(BaseModel):
             # neutral representation so missing Google metrics do not become
             # an accidental eligibility requirement.
             self.max_review_count = None
+        if (
+            self.min_google_rating is not None
+            and self.max_google_rating is not None
+            and self.min_google_rating > self.max_google_rating
+        ):
+            raise ValueError("minimum Google rating cannot exceed maximum Google rating")
         if (
             self.min_review_count is not None
             and self.max_review_count is not None
@@ -169,6 +182,7 @@ class TerritoryUpdate(BaseModel):
     locations: list[dict] | None = Field(default=None, max_length=5)
     customer_kind: ProfileCustomerKind | None = None
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
+    max_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
     max_review_count: int | None = Field(default=None, ge=0)
     service_keys: list[str] | None = None
@@ -182,9 +196,22 @@ class TerritoryUpdate(BaseModel):
         """A zero lower bound is equivalent to clearing the filter."""
         return None if value == 0 else value
 
+    @field_validator("max_google_rating", mode="after")
+    @classmethod
+    def normalize_unbounded_maximum_rating(cls, value):
+        return None if value == UNBOUNDED_GOOGLE_RATING_SENTINEL else value
+
     @model_validator(mode="after")
     def require_complete_coordinate_pair(self):
         provided = self.model_fields_set
+        if (
+            "min_google_rating" in provided
+            and "max_google_rating" in provided
+            and self.min_google_rating is not None
+            and self.max_google_rating is not None
+            and self.min_google_rating > self.max_google_rating
+        ):
+            raise ValueError("minimum Google rating cannot exceed maximum Google rating")
         if (
             "min_review_count" in provided
             and "max_review_count" in provided
@@ -222,6 +249,7 @@ class TerritoryRead(BaseModel):
     locations: list[dict] = Field(default_factory=list)
     customer_kind: ProfileCustomerKind = ProfileCustomerKind.RESIDENTIAL
     min_google_rating: float | None = None
+    max_google_rating: float | None = None
     min_review_count: int | None = None
     max_review_count: int | None = None
     service_keys: list[str] = Field(default_factory=list)
@@ -287,6 +315,7 @@ class ProfileCreate(BaseModel):
     niche_id: str = Field(min_length=1)
     customer_kind: ProfileCustomerKind
     min_google_rating: float | None = Field(default=None, ge=0, le=5)
+    max_google_rating: float | None = Field(default=None, ge=0, le=5)
     min_review_count: int | None = Field(default=None, ge=0)
     max_review_count: int | None = Field(default=None, ge=0)
     market: ProfileMarket | None = None
@@ -301,10 +330,26 @@ class ProfileCreate(BaseModel):
     exclude_already_delivered: Literal[True] = True
     clone_from_id: str | None = Field(default=None, min_length=1)
 
+    @field_validator("min_google_rating", "min_review_count", mode="after")
+    @classmethod
+    def normalize_zero_minimum_filters(cls, value):
+        return None if value == 0 else value
+
+    @field_validator("max_google_rating", mode="after")
+    @classmethod
+    def normalize_unbounded_maximum_rating(cls, value):
+        return None if value == UNBOUNDED_GOOGLE_RATING_SENTINEL else value
+
     @model_validator(mode="after")
     def require_valid_review_range(self):
         if self.market is None and not self.markets:
             raise ValueError("at least one city is required")
+        if (
+            self.min_google_rating is not None
+            and self.max_google_rating is not None
+            and self.min_google_rating > self.max_google_rating
+        ):
+            raise ValueError("minimum Google rating cannot exceed maximum Google rating")
         if (
             self.min_review_count is not None
             and self.max_review_count is not None

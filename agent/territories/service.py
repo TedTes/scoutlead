@@ -287,6 +287,7 @@ class TerritoryService:
             "niche_id": niche.id,
             "customer_kind": customer_kind,
             "min_google_rating": data.min_google_rating,
+            "max_google_rating": data.max_google_rating,
             "min_review_count": data.min_review_count,
             "max_review_count": data.max_review_count,
             "city": semantic_key(city),
@@ -318,6 +319,7 @@ class TerritoryService:
                 locations=locations,
                 customer_kind=data.customer_kind,
                 min_google_rating=data.min_google_rating,
+                max_google_rating=data.max_google_rating,
                 min_review_count=data.min_review_count,
                 max_review_count=data.max_review_count,
                 service_keys=service_keys,
@@ -684,6 +686,7 @@ class TerritoryService:
             "locations",
             "customer_kind",
             "min_google_rating",
+            "max_google_rating",
             "min_review_count",
             "max_review_count",
             "service_keys",
@@ -693,6 +696,20 @@ class TerritoryService:
             "min_fit",
         }
         criteria_changed = bool(criteria_fields & values.keys())
+        prospective_min_rating = values.get("min_google_rating", model.min_google_rating)
+        prospective_max_rating = values.get("max_google_rating", model.max_google_rating)
+        if (
+            prospective_min_rating is not None
+            and prospective_max_rating is not None
+            and prospective_min_rating > prospective_max_rating
+        ):
+            raise ValidationError(
+                "minimum Google rating cannot exceed maximum Google rating",
+                {
+                    "min_google_rating": prospective_min_rating,
+                    "max_google_rating": prospective_max_rating,
+                },
+            )
         prospective_min_reviews = values.get("min_review_count", model.min_review_count)
         prospective_max_reviews = values.get("max_review_count", model.max_review_count)
         if (
@@ -722,6 +739,7 @@ class TerritoryService:
                 "locations": [location.get("id") for location in (model.locations or [])],
                 "customer_kind": model.customer_kind,
                 "min_google_rating": model.min_google_rating,
+                "max_google_rating": model.max_google_rating,
                 "min_review_count": model.min_review_count,
                 "max_review_count": model.max_review_count,
                 "service_keys": model.service_keys,
@@ -877,6 +895,7 @@ def _structured_profile_criteria(data: TerritoryCreate) -> dict:
         "niche_id": data.niche_id,
         "customer_kind": data.customer_kind.value,
         "min_google_rating": data.min_google_rating,
+        "max_google_rating": data.max_google_rating,
         "min_review_count": data.min_review_count,
         "max_review_count": data.max_review_count,
         "city": semantic_key(data.city or data.market_key),

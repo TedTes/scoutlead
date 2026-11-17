@@ -356,6 +356,7 @@ export type Territory = {
   }>;
   customer_kind: ProfileCustomerKind;
   min_google_rating?: number | null;
+  max_google_rating?: number | null;
   min_review_count?: number | null;
   max_review_count?: number | null;
   service_keys: string[];
@@ -508,6 +509,7 @@ export type ProfileCreateInput = {
   niche_id: string;
   customer_kind: ProfileCustomerKind;
   min_google_rating?: number | null;
+  max_google_rating?: number | null;
   min_review_count?: number | null;
   max_review_count?: number | null;
   market?: {
