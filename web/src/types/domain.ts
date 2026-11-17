@@ -572,6 +572,7 @@ export type ProfileQueued = {
   audience: Territory;
   audience_run_id: string;
   job?: QueueJob | null;
+  batch?: ProfileBatch | null;
 };
 
 export type ProfileBatch = {
@@ -583,6 +584,9 @@ export type ProfileBatch = {
   requested_count: number;
   result_count: number;
   remaining_count: number;
+  page_size?: number;
+  has_more?: boolean;
+  next_cursor?: number | null;
   location_count?: number;
   locations_completed?: number;
   failure_class?: "rate_limit" | "quota" | "other" | null;

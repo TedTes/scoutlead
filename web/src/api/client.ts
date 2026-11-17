@@ -382,8 +382,12 @@ export class ApiClient {
     return this.request<ProfileQueued>(`/audiences/${id}/refill`, { method: "POST" });
   }
 
-  getProfileBatch(id: string) {
-    return this.request<ProfileBatch>(`/audiences/${id}/current-batch`);
+  getProfileBatch(id: string, options?: { pageSize?: number; cursor?: number | null }) {
+    const params = new URLSearchParams();
+    if (options?.pageSize) params.set("page_size", String(options.pageSize));
+    if (options?.cursor != null) params.set("cursor", String(options.cursor));
+    const query = params.size ? `?${params.toString()}` : "";
+    return this.request<ProfileBatch>(`/audiences/${id}/current-batch${query}`);
   }
 
   getOutreachPackage(resultId: string) {

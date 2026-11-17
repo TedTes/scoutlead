@@ -603,8 +603,16 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
             created!.audience,
             ...current.filter((profile) => profile.id !== created!.audience.id),
           ]);
-          setAudienceFolders(await api.getAudienceFolders(input.product_id));
-          await refreshProfileBatch(created.audience.id);
+          if (created.batch) {
+            setProfileBatch(created.batch);
+            persistSelectedDiscoveryRunId(created.batch.outreach_campaign_id || "");
+            setSnapshot({ ...emptySnapshot, results: created.batch.leads });
+          } else {
+            await refreshProfileBatch(created.audience.id);
+          }
+          void api.getAudienceFolders(input.product_id)
+            .then(setAudienceFolders)
+            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
           throw err;
@@ -687,7 +695,12 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         setError("");
         try {
           const queued = await api.refillProfile(profileId);
-          await refreshProfileBatch(profileId);
+          if (queued.batch) {
+            setProfileBatch(queued.batch);
+            setSnapshot({ ...emptySnapshot, results: queued.batch.leads });
+          } else {
+            await refreshProfileBatch(profileId);
+          }
           return queued;
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
