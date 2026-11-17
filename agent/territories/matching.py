@@ -121,6 +121,7 @@ class ProfileMatchService:
         profile,
         niche_ids: list[str],
         limit: int,
+        exclude_business_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         if not niche_ids or limit <= 0:
             return []
@@ -147,6 +148,8 @@ class ProfileMatchService:
             .where(active_membership_condition())
             .where(*searchable_business_conditions())
         )
+        if exclude_business_ids:
+            statement = statement.where(BusinessModel.id.not_in(exclude_business_ids))
         location_market_keys = _profile_location_market_keys(profile)
         if location_market_keys:
             statement = statement.where(
@@ -374,10 +377,10 @@ class ProfileMatchService:
             statement = statement.add_columns(distance_km_expression.label("distance_km"))
         else:
             statement = statement.add_columns(literal(None).label("distance_km"))
-        # Fetch a bounded candidate pool before applying the evidence score in
-        # Python. Freshness is intentionally evaluated against the stored fact
-        # timestamps, rather than approximated in database-specific SQL.
-        candidate_limit = min(max(limit * 4, 100), 400)
+        # SQL already applies the eligibility and opportunity ordering.  Only
+        # hydrate the requested page; the previous 4x/100-row minimum caused a
+        # first page of 25 leads to fully load as many as 400 businesses.
+        candidate_limit = limit
         statement = statement.group_by(*group_columns).order_by(
             preferred_signal_count.desc(),
             candidate_opportunity_score.desc(),
@@ -390,10 +393,17 @@ class ProfileMatchService:
         ).limit(candidate_limit)
 
         ranked = self.session.execute(statement).mappings().all()
+        business_ids = [str(item["id"]) for item in ranked]
+        businesses, facts_by_business, observations_by_business, contacts_by_business = (
+            self._load_result_context(business_ids=business_ids, cutoff=cutoff)
+        )
         results = [
             (
                 self._result_row(
-                    business_id=str(item["id"]),
+                    business=businesses[str(item["id"])],
+                    facts=facts_by_business.get(str(item["id"]), {}),
+                    observations=observations_by_business.get(str(item["id"]), []),
+                    contacts=contacts_by_business.get(str(item["id"]), []),
                     matched_signal_count=int(item["matched_signal_count"] or 0),
                     preferred_signal_count=int(item["preferred_signal_count"] or 0),
                     confirmed_signal_count=int(item["confirmed_signal_count"] or 0),
@@ -428,6 +438,82 @@ class ProfileMatchService:
         for rank_position, result in enumerate(final, start=1):
             result["raw"]["profile_match"]["rank_position"] = rank_position
         return final
+
+    def _load_result_context(
+        self,
+        *,
+        business_ids: list[str],
+        cutoff: datetime,
+    ) -> tuple[
+        dict[str, BusinessModel],
+        dict[str, dict[str, BusinessAttributeModel]],
+        dict[str, list[BusinessAttributeModel]],
+        dict[str, list[ContactModel]],
+    ]:
+        """Bulk-load everything needed to serialize one result page."""
+
+        if not business_ids:
+            return {}, {}, {}, {}
+
+        businesses = {
+            business.id: business
+            for business in self.session.scalars(
+                select(BusinessModel).where(BusinessModel.id.in_(business_ids))
+            )
+        }
+        facts_by_business: dict[str, dict[str, BusinessAttributeModel]] = {
+            business_id: {} for business_id in business_ids
+        }
+        for fact in self.session.scalars(
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.observed_at >= cutoff,
+                or_(
+                    BusinessAttributeModel.expires_at.is_(None),
+                    BusinessAttributeModel.expires_at >= utcnow(),
+                ),
+            )
+        ):
+            facts_by_business[fact.business_id][fact.attribute_key] = fact
+
+        observations_by_business: dict[str, list[BusinessAttributeModel]] = {
+            business_id: [] for business_id in business_ids
+        }
+        for observation in self.session.scalars(
+            select(BusinessAttributeModel)
+            .where(
+                BusinessAttributeModel.business_id.in_(business_ids),
+                BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
+            )
+            .order_by(
+                BusinessAttributeModel.business_id,
+                BusinessAttributeModel.observed_at.desc(),
+            )
+        ):
+            if not observation_is_quarantined(self.session, observation):
+                observations_by_business[observation.business_id].append(observation)
+
+        contacts_by_business: dict[str, list[ContactModel]] = {
+            business_id: [] for business_id in business_ids
+        }
+        for contact in self.session.scalars(
+            select(ContactModel)
+            .where(ContactModel.business_id.in_(business_ids))
+            .order_by(
+                ContactModel.business_id,
+                ContactModel.email.is_not(None).desc(),
+                ContactModel.phone.is_not(None).desc(),
+                ContactModel.last_seen_at.desc(),
+            )
+        ):
+            contacts_by_business[contact.business_id].append(contact)
+
+        return (
+            businesses,
+            facts_by_business,
+            observations_by_business,
+            contacts_by_business,
+        )
 
     def _signal_specs(self, selected_signals: list[str]) -> list[SignalMatchSpec]:
         if not selected_signals:
@@ -486,7 +572,10 @@ class ProfileMatchService:
     def _result_row(
         self,
         *,
-        business_id: str,
+        business: BusinessModel,
+        facts: dict[str, BusinessAttributeModel],
+        observations: list[BusinessAttributeModel],
+        contacts: list[ContactModel],
         matched_signal_count: int,
         preferred_signal_count: int,
         confirmed_signal_count: int,
@@ -498,48 +587,12 @@ class ProfileMatchService:
         signal_specs: list[SignalMatchSpec],
         service_specs: list[ServiceMatchSpec],
     ) -> dict[str, Any]:
-        business = self.session.get(BusinessModel, business_id)
-        if business is None:
-            raise ValueError(f"business not found during profile match: {business_id}")
-        facts = {
-            fact.attribute_key: fact
-            for fact in self.session.scalars(
-                select(BusinessAttributeModel).where(
-                    BusinessAttributeModel.business_id == business_id,
-                    BusinessAttributeModel.observed_at >= cutoff,
-                    or_(
-                        BusinessAttributeModel.expires_at.is_(None),
-                        BusinessAttributeModel.expires_at >= utcnow(),
-                    ),
-                )
-            )
-        }
-        observations = [
-            candidate
-            for candidate in self.session.scalars(
-                select(BusinessAttributeModel)
-                .where(
-                    BusinessAttributeModel.business_id == business_id,
-                    BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
-                )
-                .order_by(BusinessAttributeModel.observed_at.desc())
-            )
-            if not observation_is_quarantined(self.session, candidate)
-        ]
         website_upgrade_selected = "website_upgrade" in set(profile.service_keys or [])
         website_upgrade_assessment = _website_upgrade_assessment(business, facts)
         contact = next(
             (
                 candidate
-                for candidate in self.session.scalars(
-                    select(ContactModel)
-                    .where(ContactModel.business_id == business_id)
-                    .order_by(
-                        ContactModel.email.is_not(None).desc(),
-                        ContactModel.phone.is_not(None).desc(),
-                        ContactModel.last_seen_at.desc(),
-                    )
-                )
+                for candidate in contacts
                 if _contact_has_active_support(candidate, business, observations)
             ),
             None,

@@ -469,12 +469,6 @@ class LocationCityRead(BaseModel):
     population: int = 0
 
 
-class ProfileQueuedRead(BaseModel):
-    audience: TerritoryRead
-    audience_run_id: str
-    job: QueueJobRead | None = None
-
-
 class ProfileBatchRead(BaseModel):
     audience: TerritoryRead
     audience_run_id: str | None = None
@@ -484,7 +478,17 @@ class ProfileBatchRead(BaseModel):
     requested_count: int
     result_count: int
     remaining_count: int
+    page_size: int = 25
+    has_more: bool = False
+    next_cursor: int | None = None
     location_count: int = 1
     locations_completed: int = 0
     failure_class: Literal["rate_limit", "quota", "other"] | None = None
     retry_at: datetime | None = None
+
+
+class ProfileQueuedRead(BaseModel):
+    audience: TerritoryRead
+    audience_run_id: str
+    job: QueueJobRead | None = None
+    batch: ProfileBatchRead | None = None

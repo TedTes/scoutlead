@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 
 from audience_runs.service import AudienceRunService
@@ -213,6 +213,12 @@ def create_audience(
     return ProfileQueuedRead(
         audience=service.get_read(profile.id),
         audience_run_id=run.id,
+        batch=_profile_batch_read(
+            profile.id,
+            session=session,
+            auth=auth,
+            page_size=min(25, profile.batch_size),
+        ),
     )
 
 
@@ -368,32 +374,61 @@ def refill_audience(audience_id: str, session: DbSession, auth: CurrentAuth):
     return ProfileQueuedRead(
         audience=service.get_read(profile.id),
         audience_run_id=run.id,
+        batch=_profile_batch_read(
+            profile.id,
+            session=session,
+            auth=auth,
+            page_size=min(25, profile.batch_size),
+        ),
     )
 
 
 @audience_router.get("/{audience_id}/current-batch", response_model=ProfileBatchRead)
-def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAuth):
+def current_audience_batch(
+    audience_id: str,
+    session: DbSession,
+    auth: CurrentAuth,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+    cursor: Annotated[int | None, Query(ge=0)] = None,
+):
     """Return the latest stored match without starting or repairing background work."""
+    return _profile_batch_read(
+        audience_id,
+        session=session,
+        auth=auth,
+        page_size=page_size,
+        cursor=cursor,
+    )
+
+
+def _profile_batch_read(
+    audience_id: str,
+    *,
+    session: DbSession,
+    auth: CurrentAuth,
+    page_size: int = 25,
+    cursor: int | None = None,
+) -> ProfileBatchRead:
     service = _service(session, auth)
     profile = service.get(audience_id)
     run_service = AudienceRunService(session, workspace_id=auth.workspace_id)
     has_match = profile.match_started_at is not None
-    leads = run_service.latest_leads_for_audience(profile.id)
-    remaining = sum(
-        not lead.shortlisted_at
-        and not lead.last_contacted_at
-        and lead.review_status.value != "not_fit"
-        for lead in leads
+    leads, next_cursor = run_service.latest_lead_page(
+        profile.id,
+        page_size=page_size,
+        after_rank=cursor,
     )
+    remaining = run_service.remaining_lead_count(profile.id)
+    result_count = run_service.lead_count(profile.id)
     location_count = max(1, len(profile.locations or []))
     if not has_match:
         state = ProfileBatchState.SETUP
     elif profile.match_state == "failed":
         state = ProfileBatchState.FAILED
     elif profile.match_state == "ready":
-        state = ProfileBatchState.READY if leads else ProfileBatchState.EMPTY
+        state = ProfileBatchState.READY if result_count else ProfileBatchState.EMPTY
     elif profile.match_state == "partial":
-        state = ProfileBatchState.PARTIAL if leads else ProfileBatchState.EMPTY
+        state = ProfileBatchState.PARTIAL if result_count else ProfileBatchState.EMPTY
     else:
         state = ProfileBatchState.SCORING
     return ProfileBatchRead(
@@ -403,8 +438,11 @@ def current_audience_batch(audience_id: str, session: DbSession, auth: CurrentAu
         leads=leads,
         state=state,
         requested_count=profile.batch_size,
-        result_count=len(leads),
+        result_count=result_count,
         remaining_count=remaining,
+        page_size=page_size,
+        has_more=next_cursor is not None,
+        next_cursor=next_cursor,
         location_count=location_count,
         locations_completed=(location_count if has_match else 0),
         failure_class=(

@@ -1679,6 +1679,20 @@ def test_audience_run_returns_new_results_then_reuses_previous_results() -> None
             (4.8, 37),
             (None, None),
         }
+        first_page, next_cursor = service.latest_lead_page(
+            profile.id,
+            page_size=1,
+        )
+        assert len(first_page) == 1
+        assert next_cursor == 1
+        second_page, final_cursor = service.latest_lead_page(
+            profile.id,
+            page_size=1,
+            after_rank=next_cursor,
+        )
+        assert len(second_page) == 1
+        assert second_page[0].business_id != first_page[0].business_id
+        assert final_cursor is None
 
         second = service.create(profile.id)
         visible_during_refill = service.latest_leads_for_audience(profile.id)

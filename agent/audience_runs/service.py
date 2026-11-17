@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from audience_runs.schemas import (
@@ -14,7 +14,14 @@ from audience_runs.schemas import (
     AudienceRunState,
 )
 from canonical.normalization import normalize_domain, normalize_email, normalize_phone
-from db.models import AudienceResultModel, BusinessModel, LeadModel, NicheModel, TerritoryModel
+from db.models import (
+    AudienceResultModel,
+    BusinessModel,
+    ContactSuppressionModel,
+    LeadModel,
+    NicheModel,
+    TerritoryModel,
+)
 from leads.disposition import apply_business_review_status, dismissed_business_ids
 from leads.repository import LeadRepository
 from leads.schemas import ContactPolicyStatus, LeadContactPolicyUpdate, LeadReviewStatus, LeadUpdate
@@ -72,15 +79,17 @@ class AudienceRunService:
         self.session.flush()
 
         niches = _territory_niches(self.session, audience)
-        rows = ProfileMatchService(self.session).match(
-            profile=audience,
-            niche_ids=[niche.id for niche in niches],
-            limit=min(max(audience.match_requested_count * 8, 100), 500),
-        )
         dismissed = dismissed_business_ids(
             self.session, workspace_id=audience.workspace_id
         )
-        rows = [row for row in rows if _business_id(row) not in dismissed]
+        rows = ProfileMatchService(self.session).match(
+            profile=audience,
+            niche_ids=[niche.id for niche in niches],
+            # The saved search stores its first requested page.  Ranking and
+            # hydration must not expand that into an 8x candidate batch.
+            limit=audience.match_requested_count,
+            exclude_business_ids=dismissed,
+        )
 
         existing = {
             result.business_id: result
@@ -161,17 +170,162 @@ class AudienceRunService:
             ),
         )
 
-    def latest_leads_for_audience(self, audience_id: str) -> list[AudienceLeadRead]:
+    def latest_leads_for_audience(
+        self,
+        audience_id: str,
+        *,
+        page_size: int | None = None,
+        after_rank: int | None = None,
+    ) -> list[AudienceLeadRead]:
+        leads, _ = self.latest_lead_page(
+            audience_id,
+            page_size=page_size,
+            after_rank=after_rank,
+        )
+        return leads
+
+    def latest_lead_page(
+        self,
+        audience_id: str,
+        *,
+        page_size: int | None = 25,
+        after_rank: int | None = None,
+    ) -> tuple[list[AudienceLeadRead], int | None]:
         audience = self._audience(audience_id)
         dismissed = dismissed_business_ids(
             self.session, workspace_id=audience.workspace_id
         )
-        results = self.session.scalars(
-            select(AudienceResultModel)
-            .where(AudienceResultModel.audience_id == audience.id)
-            .order_by(AudienceResultModel.rank_position)
+        statement = select(AudienceResultModel).where(
+            AudienceResultModel.audience_id == audience.id
         )
-        return [self._lead_read(row) for row in results if row.business_id not in dismissed]
+        if dismissed:
+            statement = statement.where(
+                AudienceResultModel.business_id.not_in(dismissed)
+            )
+        if after_rank is not None:
+            statement = statement.where(
+                AudienceResultModel.rank_position > after_rank
+            )
+        statement = statement.order_by(AudienceResultModel.rank_position)
+        if page_size is not None:
+            statement = statement.limit(max(1, page_size) + 1)
+        rows = list(self.session.scalars(statement))
+        has_more = page_size is not None and len(rows) > page_size
+        page = rows[:page_size] if page_size is not None else rows
+        if not page:
+            return [], None
+
+        business_ids = [row.business_id for row in page]
+        businesses = {
+            business.id: business
+            for business in self.session.scalars(
+                select(BusinessModel).where(BusinessModel.id.in_(business_ids))
+            )
+        }
+        lead_ids = [row.outreach_lead_id for row in page if row.outreach_lead_id]
+        leads = {
+            lead.id: lead
+            for lead in (
+                self.session.scalars(
+                    select(LeadModel).where(LeadModel.id.in_(lead_ids))
+                )
+                if lead_ids
+                else []
+            )
+        }
+        suppression_identifiers = {
+            identifier
+            for row in page
+            for identifier in self._suppression_identifiers(
+                row,
+                business=businesses.get(row.business_id),
+            )
+        }
+        suppression_conditions = [
+            and_(
+                ContactSuppressionModel.kind == kind,
+                ContactSuppressionModel.value == value,
+            )
+            for kind, value in suppression_identifiers
+        ]
+        suppressions = (
+            list(
+                self.session.scalars(
+                    select(ContactSuppressionModel)
+                    .where(or_(*suppression_conditions))
+                    .where(
+                        or_(
+                            ContactSuppressionModel.scope == "global",
+                            and_(
+                                ContactSuppressionModel.scope == "workspace",
+                                ContactSuppressionModel.workspace_id
+                                == audience.workspace_id,
+                            ),
+                            ContactSuppressionModel.product_id == audience.product_id,
+                        )
+                    )
+                    .order_by(ContactSuppressionModel.created_at.desc())
+                )
+            )
+            if suppression_conditions
+            else []
+        )
+        serialized = [
+            self._lead_read(
+                row,
+                audience=audience,
+                business=businesses.get(row.business_id),
+                lead=leads.get(row.outreach_lead_id),
+                suppressions=suppressions,
+                preloaded=True,
+            )
+            for row in page
+        ]
+        next_cursor = page[-1].rank_position if has_more else None
+        return serialized, next_cursor
+
+    def remaining_lead_count(self, audience_id: str) -> int:
+        audience = self._audience(audience_id)
+        dismissed = dismissed_business_ids(
+            self.session, workspace_id=audience.workspace_id
+        )
+        statement = (
+            select(func.count(AudienceResultModel.id))
+            .outerjoin(
+                LeadModel,
+                AudienceResultModel.outreach_lead_id == LeadModel.id,
+            )
+            .where(AudienceResultModel.audience_id == audience.id)
+            .where(
+                or_(
+                    LeadModel.id.is_(None),
+                    and_(
+                        LeadModel.shortlisted_at.is_(None),
+                        LeadModel.last_contacted_at.is_(None),
+                        LeadModel.review_status != LeadReviewStatus.NOT_FIT.value,
+                    ),
+                )
+            )
+        )
+        if dismissed:
+            statement = statement.where(
+                AudienceResultModel.business_id.not_in(dismissed)
+            )
+        return int(self.session.scalar(statement) or 0)
+
+    def lead_count(self, audience_id: str) -> int:
+        audience = self._audience(audience_id)
+        dismissed = dismissed_business_ids(
+            self.session, workspace_id=audience.workspace_id
+        )
+        statement = select(func.count(AudienceResultModel.id)).where(
+            AudienceResultModel.audience_id == audience.id
+        )
+        if dismissed:
+            statement = statement.where(
+                AudienceResultModel.business_id.not_in(dismissed)
+            )
+        return int(self.session.scalar(statement) or 0)
 
     def update_result(self, result_id: str, update: AudienceResultUpdate) -> AudienceLeadRead:
         result = self._result(result_id)
@@ -309,8 +463,17 @@ class AudienceRunService:
             updated_at=result.updated_at,
         )
 
-    def _lead_read(self, result: AudienceResultModel) -> AudienceLeadRead:
-        audience = self._audience(result.audience_id)
+    def _lead_read(
+        self,
+        result: AudienceResultModel,
+        *,
+        audience: TerritoryModel | None = None,
+        business: BusinessModel | None = None,
+        lead: LeadModel | None = None,
+        suppressions: list[ContactSuppressionModel] | None = None,
+        preloaded: bool = False,
+    ) -> AudienceLeadRead:
+        audience = audience or self._audience(result.audience_id)
         snapshot = result.match_snapshot or {}
         raw = snapshot.get("raw") if isinstance(snapshot.get("raw"), dict) else {}
         profile_match = raw.get("profile_match") if isinstance(raw.get("profile_match"), dict) else {}
@@ -323,14 +486,32 @@ class AudienceRunService:
         ]
         score = min(100, 80 + max(0, int(profile_match.get("confirmed_signal_count") or 0) - 1) * 5)
         contact_email = _optional_string(snapshot.get("contact_email"))
-        business = self.session.get(BusinessModel, result.business_id)
+        if not preloaded:
+            business = self.session.get(BusinessModel, result.business_id)
         attributes = _snapshot_attributes(raw)
-        lead = self.session.get(LeadModel, result.outreach_lead_id) if result.outreach_lead_id else None
-        suppression = ContactSuppressionRepository(self.session).find_match(
-            product_id=audience.product_id,
-            workspace_id=audience.workspace_id,
-            identifiers=self._suppression_identifiers(result),
-        )
+        if not preloaded:
+            lead = (
+                self.session.get(LeadModel, result.outreach_lead_id)
+                if result.outreach_lead_id
+                else None
+            )
+        identifiers = self._suppression_identifiers(result, business=business)
+        if suppressions is None:
+            suppression = ContactSuppressionRepository(self.session).find_match(
+                product_id=audience.product_id,
+                workspace_id=audience.workspace_id,
+                identifiers=identifiers,
+            )
+        else:
+            identifier_set = set(identifiers)
+            suppression = next(
+                (
+                    candidate
+                    for candidate in suppressions
+                    if (candidate.kind, candidate.value) in identifier_set
+                ),
+                None,
+            )
         return AudienceLeadRead(
             id=result.id,
             campaign_id=(lead.campaign_id if lead and lead.campaign_id else audience.id),
@@ -382,9 +563,15 @@ class AudienceRunService:
             updated_at=result.updated_at,
         )
 
-    def _suppression_identifiers(self, result: AudienceResultModel) -> list[tuple[str, str]]:
+    def _suppression_identifiers(
+        self,
+        result: AudienceResultModel,
+        *,
+        business: BusinessModel | None = None,
+    ) -> list[tuple[str, str]]:
         snapshot = result.match_snapshot or {}
-        business = self.session.get(BusinessModel, result.business_id)
+        if business is None:
+            business = self.session.get(BusinessModel, result.business_id)
         identifiers: set[tuple[str, str]] = {("business_id", result.business_id)}
         email = normalize_email(str(snapshot.get("contact_email") or ""))
         if email:
