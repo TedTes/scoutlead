@@ -157,6 +157,7 @@ export function ResultsScreen({
     selectedProduct,
     selectedProductId,
     selectedProfileId,
+    switchingProfileId,
     profileBatch,
     productContacts,
     workspaceLeadPage,
@@ -188,8 +189,9 @@ export function ResultsScreen({
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [outreachDraftDirty, setOutreachDraftDirty] = useState(false);
   const [leadSearch, setLeadSearch] = useState("");
-  const [workspaceLeadsLoading, setWorkspaceLeadsLoading] = useState(false);
+  const [workspaceLeadsLoading, setWorkspaceLeadsLoading] = useState(true);
   const [workspaceLeadsError, setWorkspaceLeadsError] = useState("");
+  const [loadedWorkspaceLeadRequest, setLoadedWorkspaceLeadRequest] = useState("");
   const [desktopSplitView, setDesktopSplitView] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1160px)").matches : false,
   );
@@ -236,6 +238,11 @@ export function ResultsScreen({
     activeProfile && (isProfileAggregate || (!selectedDiscoveryRun && selectedProfileId)),
   );
   const isGlobalView = !selectedProfileId && !selectedDiscoveryRunId;
+  const workspaceLeadRequest = `${workflowView}\u0000${leadSearch}\u0000${listRequestId}`;
+  const workspaceLeadsPending = isGlobalView
+    && (workspaceLeadsLoading || loadedWorkspaceLeadRequest !== workspaceLeadRequest);
+  const profileLeadsPending = Boolean(switchingProfileId);
+  const leadListPending = workspaceLeadsPending || profileLeadsPending;
   const sourceContacts = isGlobalView
     ? productContacts
     : visibleProfileBatch
@@ -360,17 +367,38 @@ export function ResultsScreen({
     const timer = window.setTimeout(() => {
       setWorkspaceLeadsLoading(true);
       setWorkspaceLeadsError("");
-      void loadWorkspaceLeads(workflowView, 0, leadSearch).catch((cause) => {
-        if (active) setWorkspaceLeadsError(cause instanceof Error ? cause.message : String(cause));
-      }).finally(() => {
-        if (active) setWorkspaceLeadsLoading(false);
-      });
+      void loadWorkspaceLeads(workflowView, 0, leadSearch)
+        .then(() => {
+          if (active) setLoadedWorkspaceLeadRequest(workspaceLeadRequest);
+        })
+        .catch((cause) => {
+          if (active) {
+            setLoadedWorkspaceLeadRequest(workspaceLeadRequest);
+            setWorkspaceLeadsError(cause instanceof Error ? cause.message : String(cause));
+          }
+        })
+        .finally(() => {
+          if (active) setWorkspaceLeadsLoading(false);
+        });
     }, leadSearch ? 250 : 0);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [isGlobalView, leadSearch, listRequestId, loadWorkspaceLeads, workflowView]);
+  }, [isGlobalView, leadSearch, listRequestId, loadWorkspaceLeads, workflowView, workspaceLeadRequest]);
+
+  const loadWorkspaceLeadPage = async (offset: number) => {
+    setWorkspaceLeadsLoading(true);
+    setWorkspaceLeadsError("");
+    try {
+      await loadWorkspaceLeads(workflowView, offset, leadSearch);
+      setLoadedWorkspaceLeadRequest(workspaceLeadRequest);
+    } catch (cause) {
+      setWorkspaceLeadsError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setWorkspaceLeadsLoading(false);
+    }
+  };
 
   useEffect(() => {
     setSelectedContactId("");
@@ -1045,7 +1073,7 @@ export function ResultsScreen({
                       : workflowViewLabel(workflowView)}
                   </strong>
                   <span>
-                    {workspaceLeadsLoading ? "Loading" : displayedLeadTotal}
+                    {leadListPending ? "Loading" : displayedLeadTotal}
                   </span>
                 </div>
               </div>
@@ -1168,7 +1196,17 @@ export function ResultsScreen({
               </div>
             </div>
           </header>
-          {visibleContacts.length ? (
+          {leadListPending ? (
+            <section className="lead-list-loading" aria-busy="true" aria-label="Loading leads">
+              {[0, 1, 2, 3].map((row) => (
+                <div className="lead-list-loading-row" key={row}>
+                  <span className="lead-list-loading-line lead-list-loading-line--name" />
+                  <span className="lead-list-loading-line lead-list-loading-line--detail" />
+                  <span className="lead-list-loading-line lead-list-loading-line--meta" />
+                </div>
+              ))}
+            </section>
+          ) : visibleContacts.length ? (
             <ul className="contact-card-list">
               {visibleContacts.map((contact) => (
                 <ContactCard
@@ -1284,10 +1322,8 @@ export function ResultsScreen({
               <button
                 disabled={workspaceLeadsLoading || workspaceLeadPage.offset === 0}
                 type="button"
-                onClick={() => void loadWorkspaceLeads(
-                  workflowView,
+                onClick={() => void loadWorkspaceLeadPage(
                   Math.max(0, workspaceLeadPage.offset - workspaceLeadPage.limit),
-                  leadSearch,
                 )}
               >Previous</button>
               <span>
@@ -1296,10 +1332,8 @@ export function ResultsScreen({
               <button
                 disabled={workspaceLeadsLoading || workspaceLeadPage.offset + workspaceLeadPage.limit >= workspaceLeadPage.total}
                 type="button"
-                onClick={() => void loadWorkspaceLeads(
-                  workflowView,
+                onClick={() => void loadWorkspaceLeadPage(
                   workspaceLeadPage.offset + workspaceLeadPage.limit,
-                  leadSearch,
                 )}
               >Next</button>
             </nav>

@@ -312,11 +312,8 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
       setSwitchingProfileId(profileId);
       try {
         const batch = await api.getProfileBatch(profileId);
-        const runId = batch.outreach_campaign_id || "";
-        const [run, nextSnapshot] = runId
-          ? await Promise.all([api.getDiscoveryRun(runId), fetchSnapshot(runId)])
-          : [null, emptySnapshot] as const;
         if (requestId !== profileSelectionRequestRef.current) return;
+        const runId = batch.outreach_campaign_id || "";
 
         localStorage.setItem("selectedProfileId", profileId);
         selectedProfileIdRef.current = profileId;
@@ -326,8 +323,28 @@ export function AppDataProvider({ approverLabel, children, getAuthToken }: AppDa
         localStorage.setItem("selectedDiscoveryRunId", runId);
         selectedDiscoveryRunIdRef.current = runId;
         setSelectedDiscoveryRunIdState(runId);
-        setSnapshot({ ...nextSnapshot, results: batch.leads });
-        if (run) setDiscoveryRuns((current) => upsertDiscoveryRun(current, run));
+        setSnapshot({ ...emptySnapshot, results: batch.leads });
+
+        // The current batch is the visible first page. Do not hold it behind
+        // the heavier campaign/source/message snapshot required by details.
+        if (runId) {
+          void fetchSnapshot(runId)
+            .then((nextSnapshot) => {
+              if (
+                requestId !== profileSelectionRequestRef.current
+                || profileId !== selectedProfileIdRef.current
+              ) return;
+              setSnapshot({ ...nextSnapshot, results: batch.leads });
+              if (nextSnapshot.run) {
+                setDiscoveryRuns((current) => upsertDiscoveryRun(current, nextSnapshot.run!));
+              }
+            })
+            .catch((err) => {
+              if (requestId === profileSelectionRequestRef.current) {
+                setError(err instanceof Error ? err.message : String(err));
+              }
+            });
+        }
       } catch (err) {
         if (requestId === profileSelectionRequestRef.current) {
           setError(err instanceof Error ? err.message : String(err));
