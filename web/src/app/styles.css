@@ -13516,47 +13516,14 @@ button.bulk-recipient-select:hover {
 }
 
 .lead-list-loading {
+  align-items: center;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 11px;
-  overflow: hidden;
-}
-
-.lead-list-loading-row {
-  display: grid;
-  gap: 8px;
-  min-height: 92px;
-  padding: 18px 20px;
-}
-
-.lead-list-loading-row + .lead-list-loading-row {
-  border-top: 1px solid var(--line);
-}
-
-.lead-list-loading-line {
-  animation: lead-list-loading-pulse 1.3s ease-in-out infinite;
-  background: var(--surface-soft);
-  border-radius: 999px;
-  display: block;
-  height: 9px;
-}
-
-.lead-list-loading-line--name {
-  height: 12px;
-  width: min(260px, 48%);
-}
-
-.lead-list-loading-line--detail {
-  width: min(390px, 68%);
-}
-
-.lead-list-loading-line--meta {
-  width: min(220px, 38%);
-}
-
-@keyframes lead-list-loading-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 0.9; }
+  display: flex;
+  justify-content: center;
+  min-height: 124px;
+  padding: 22px;
 }
 
 .result-empty-card strong {

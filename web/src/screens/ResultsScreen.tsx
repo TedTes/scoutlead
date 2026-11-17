@@ -1197,14 +1197,16 @@ export function ResultsScreen({
             </div>
           </header>
           {leadListPending ? (
-            <section className="lead-list-loading" aria-busy="true" aria-label="Loading leads">
-              {[0, 1, 2, 3].map((row) => (
-                <div className="lead-list-loading-row" key={row}>
-                  <span className="lead-list-loading-line lead-list-loading-line--name" />
-                  <span className="lead-list-loading-line lead-list-loading-line--detail" />
-                  <span className="lead-list-loading-line lead-list-loading-line--meta" />
-                </div>
-              ))}
+            <section
+              className="lead-list-loading"
+              aria-busy="true"
+              aria-label="Loading leads"
+              aria-live="polite"
+            >
+              <div className="loading-indicator">
+                <span className="sl-spin" aria-hidden="true" />
+                Loading {isGlobalView ? workflowViewLabel(workflowView).toLowerCase() : "results"}…
+              </div>
             </section>
           ) : visibleContacts.length ? (
             <ul className="contact-card-list">
