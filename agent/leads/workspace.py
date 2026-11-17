@@ -12,6 +12,8 @@ from audience_runs.schemas import AudienceLeadRead
 from audience_runs.service import AudienceRunService
 from db.models import (
     AudienceResultModel,
+    BusinessModel,
+    ContactSuppressionModel,
     LeadModel,
     ProductModel,
     TerritoryModel,
@@ -37,7 +39,7 @@ class WorkspaceLeadPage(BaseModel):
 @dataclass(frozen=True, slots=True)
 class _Candidate:
     kind: Literal["lead", "audience_result"]
-    model: LeadModel | AudienceResultModel
+    model_id: str
     key: str
     audience_result_id: str | None
     review_status: str
@@ -87,13 +89,118 @@ class WorkspaceLeadService:
             filtered = [item for item in filtered if needle in item.searchable]
         filtered.sort(key=lambda item: item.updated_at, reverse=True)
         selected = filtered[offset : offset + limit]
+        items = self._serialize(selected)
+        return WorkspaceLeadPage(
+            items=items,
+            total=len(filtered),
+            limit=limit,
+            offset=offset,
+            counts=self._counts(canonical),
+        )
+
+    def _serialize(self, selected: list[_Candidate]) -> list[LeadRead | AudienceLeadRead]:
+        if not selected:
+            return []
+        audience_result_ids = [
+            candidate.model_id
+            for candidate in selected
+            if candidate.kind == "audience_result"
+        ]
+        legacy_lead_ids = [
+            candidate.model_id for candidate in selected if candidate.kind == "lead"
+        ]
+        audience_results = {
+            result.id: result
+            for result in (
+                self.session.scalars(
+                    select(AudienceResultModel).where(
+                        AudienceResultModel.id.in_(audience_result_ids)
+                    )
+                )
+                if audience_result_ids
+                else []
+            )
+        }
+        audience_ids = {result.audience_id for result in audience_results.values()}
+        audiences = {
+            audience.id: audience
+            for audience in (
+                self.session.scalars(
+                    select(TerritoryModel).where(TerritoryModel.id.in_(audience_ids))
+                )
+                if audience_ids
+                else []
+            )
+        }
+        business_ids = {result.business_id for result in audience_results.values()}
+        businesses = {
+            business.id: business
+            for business in (
+                self.session.scalars(
+                    select(BusinessModel).where(BusinessModel.id.in_(business_ids))
+                )
+                if business_ids
+                else []
+            )
+        }
+        linked_lead_ids = {
+            result.outreach_lead_id
+            for result in audience_results.values()
+            if result.outreach_lead_id
+        }
+        all_lead_ids = set(legacy_lead_ids) | linked_lead_ids
+        leads = {
+            lead.id: lead
+            for lead in (
+                self.session.scalars(
+                    select(LeadModel).where(LeadModel.id.in_(all_lead_ids))
+                )
+                if all_lead_ids
+                else []
+            )
+        }
+        product_ids = {audience.product_id for audience in audiences.values()}
+        suppressions = (
+            list(
+                self.session.scalars(
+                    select(ContactSuppressionModel).where(
+                        or_(
+                            ContactSuppressionModel.scope == "global",
+                            ContactSuppressionModel.workspace_id == self.workspace_id,
+                            ContactSuppressionModel.product_id.in_(product_ids),
+                        )
+                    )
+                )
+            )
+            if audience_results
+            else []
+        )
         audience_service = AudienceRunService(self.session, workspace_id=self.workspace_id)
         items: list[LeadRead | AudienceLeadRead] = []
         for candidate in selected:
             if candidate.kind == "audience_result":
-                item = audience_service._lead_read(candidate.model).model_dump()
+                result = audience_results[candidate.model_id]
+                audience = audiences[result.audience_id]
+                applicable_suppressions = [
+                    suppression
+                    for suppression in suppressions
+                    if suppression.scope == "global"
+                    or (
+                        suppression.scope == "workspace"
+                        and suppression.workspace_id == self.workspace_id
+                    )
+                    or suppression.product_id == audience.product_id
+                ]
+                item = audience_service._lead_read(
+                    result,
+                    audience=audience,
+                    business=businesses.get(result.business_id),
+                    lead=leads.get(result.outreach_lead_id),
+                    suppressions=applicable_suppressions,
+                    preloaded=True,
+                ).model_dump()
             else:
-                item = LeadRead.model_validate(candidate.model).model_dump()
+                item = LeadRead.model_validate(leads[candidate.model_id]).model_dump()
             item["shortlisted_at"] = candidate.shortlisted_at
             item["last_contacted_at"] = candidate.contacted_at
             item["audience_result_id"] = candidate.audience_result_id
@@ -104,13 +211,7 @@ class WorkspaceLeadService:
                 if candidate.kind == "audience_result"
                 else LeadRead.model_validate(item)
             )
-        return WorkspaceLeadPage(
-            items=items,
-            total=len(filtered),
-            limit=limit,
-            offset=offset,
-            counts=self._counts(canonical),
-        )
+        return items
 
     def _canonical_candidates(self) -> list[_Candidate]:
         candidates = [*self._audience_candidates(), *self._legacy_candidates()]
@@ -164,42 +265,45 @@ class WorkspaceLeadService:
         )
         if not audience_ids:
             return []
-        selected = list(
-            self.session.scalars(
-                select(AudienceResultModel).where(
-                    AudienceResultModel.audience_id.in_(audience_ids)
-                )
+        selected = self.session.execute(
+            select(
+                AudienceResultModel.id,
+                AudienceResultModel.business_id,
+                AudienceResultModel.outreach_lead_id,
+                AudienceResultModel.created_at,
+                AudienceResultModel.updated_at,
+                AudienceResultModel.match_snapshot["title"].as_string().label("title"),
+                AudienceResultModel.match_snapshot["geography"].as_string().label("geography"),
+                AudienceResultModel.match_snapshot["snippet"].as_string().label("snippet"),
+                LeadModel.review_status,
+                LeadModel.shortlisted_at,
+                LeadModel.last_contacted_at,
+                LeadModel.latest_outcome_at,
+                LeadModel.contact_policy_status,
             )
-        )
-        outreach_lead_ids = [item.outreach_lead_id for item in selected if item.outreach_lead_id]
-        outreach_leads = {
-            lead.id: lead
-            for lead in self.session.scalars(
-                select(LeadModel).where(LeadModel.id.in_(outreach_lead_ids))
-            )
-        } if outreach_lead_ids else {}
+            .outerjoin(LeadModel, AudienceResultModel.outreach_lead_id == LeadModel.id)
+            .where(AudienceResultModel.audience_id.in_(audience_ids))
+        ).all()
         candidates: list[_Candidate] = []
         for item in selected:
-            snapshot = item.match_snapshot or {}
-            outreach_lead = outreach_leads.get(item.outreach_lead_id or "")
-            policy = outreach_lead.contact_policy_status if outreach_lead else "allowed"
-            contacted_at = outreach_lead.last_contacted_at if outreach_lead else None
+            policy = item.contact_policy_status or "allowed"
+            contacted_at = item.last_contacted_at or item.latest_outcome_at
             searchable = " ".join(
                 str(value or "")
                 for value in (
-                    snapshot.get("title"),
-                    snapshot.get("geography"),
-                    snapshot.get("snippet"),
+                    item.title,
+                    item.geography,
+                    item.snippet,
                 )
             ).casefold()
             candidates.append(
                 _Candidate(
                     kind="audience_result",
-                    model=item,
+                    model_id=item.id,
                     key=f"business:{item.business_id}",
                     audience_result_id=item.id,
-                    review_status=(outreach_lead.review_status if outreach_lead else "unreviewed"),
-                    shortlisted_at=(outreach_lead.shortlisted_at if outreach_lead else None),
+                    review_status=item.review_status or "unreviewed",
+                    shortlisted_at=item.shortlisted_at,
                     contacted_at=contacted_at,
                     contact_policy_status=policy,
                     created_at=item.created_at,
@@ -210,18 +314,34 @@ class WorkspaceLeadService:
         return candidates
 
     def _legacy_candidates(self) -> list[_Candidate]:
-        leads = list(
-            self.session.scalars(
-                select(LeadModel)
-                .join(ProductModel, ProductModel.id == LeadModel.product_id)
-                .where(ProductModel.workspace_id == self.workspace_id)
+        leads = self.session.execute(
+            select(
+                LeadModel.id,
+                LeadModel.business_id,
+                LeadModel.company_name,
+                LeadModel.geography,
+                LeadModel.description,
+                LeadModel.review_status,
+                LeadModel.shortlisted_at,
+                LeadModel.last_contacted_at,
+                LeadModel.latest_outcome_at,
+                LeadModel.contact_policy_status,
+                LeadModel.created_at,
+                LeadModel.updated_at,
             )
-        )
-        linked_results: dict[str, AudienceResultModel] = {}
+            .join(ProductModel, ProductModel.id == LeadModel.product_id)
+            .where(ProductModel.workspace_id == self.workspace_id)
+        ).all()
+        linked_results = {}
         lead_ids = [lead.id for lead in leads]
         if lead_ids:
-            rows = self.session.scalars(
-                select(AudienceResultModel)
+            rows = self.session.execute(
+                select(
+                    AudienceResultModel.outreach_lead_id,
+                    AudienceResultModel.business_id,
+                    AudienceResultModel.id,
+                    AudienceResultModel.updated_at,
+                )
                 .join(TerritoryModel, TerritoryModel.id == AudienceResultModel.audience_id)
                 .where(
                     TerritoryModel.workspace_id == self.workspace_id,
@@ -235,7 +355,7 @@ class WorkspaceLeadService:
         return [
             _Candidate(
                 kind="lead",
-                model=lead,
+                model_id=lead.id,
                 key=(
                     f"business:{lead.business_id or linked_results[lead.id].business_id}"
                     if lead.business_id or lead.id in linked_results
