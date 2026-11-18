@@ -129,6 +129,9 @@ class AudienceRunService:
             if business_id not in selected_ids:
                 self.session.delete(result)
 
+        if selected and audience.folder_id is None:
+            self._assign_trade_folder(audience)
+
         audience.match_result_count = len(selected)
         audience.match_new_result_count = new_count
         audience.match_state = (
@@ -141,6 +144,22 @@ class AudienceRunService:
         self.session.commit()
         self.session.refresh(audience)
         return audience, False
+
+    def _assign_trade_folder(self, audience: TerritoryModel) -> None:
+        """Group a saved search only after it has produced a usable result."""
+        niche = self.session.get(NicheModel, audience.niche_id)
+        if niche is None:
+            return
+
+        from territories.folders import AudienceFolderService
+
+        audience.folder_id = AudienceFolderService(
+            self.session,
+            workspace_id=audience.workspace_id,
+        ).get_or_create_for_niche(
+            product_id=audience.product_id,
+            niche=niche,
+        ).id
 
     def get_read(self, run_id: str) -> AudienceRunRead:
         audience = self._audience(run_id)

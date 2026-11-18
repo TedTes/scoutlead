@@ -203,13 +203,6 @@ class TerritoryService:
                     {"audience_id": data.clone_from_id},
                 )
         folder_id = data.folder_id
-        if folder_id is None:
-            from territories.folders import AudienceFolderService
-
-            folder_id = AudienceFolderService(
-                self.session,
-                workspace_id=self.workspace_id,
-            ).get_or_create_for_niche(product_id=data.product_id, niche=niche).id
         selected_markets = data.selected_markets()
         primary_market = selected_markets[0]
         place_label = normalize_text(primary_market.place_label)

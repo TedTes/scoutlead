@@ -190,7 +190,7 @@ def test_trade_preferences_are_workspace_specific_and_preserve_niches() -> None:
         assert session.get(NicheModel, restaurant["id"]) is not None
 
 
-def test_global_profiles_are_automatically_grouped_in_a_trade_folder() -> None:
+def test_empty_profiles_remain_in_recents_without_creating_trade_folders() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         offer = _offer(session, workspace_id="workspace:first")
@@ -215,12 +215,17 @@ def test_global_profiles_are_automatically_grouped_in_a_trade_folder() -> None:
             )
         )
 
-        assert toronto.folder_id is not None
-        assert scarborough.folder_id == toronto.folder_id
-        folder = session.get(AudienceFolderModel, toronto.folder_id)
-        assert folder is not None
-        assert folder.name == "Painting"
-        assert folder.niche_id == toronto.niche_id
+        assert toronto.folder_id is None
+        assert scarborough.folder_id is None
+        assert session.scalar(select(func.count()).select_from(AudienceFolderModel)) == 0
+
+        run_service = AudienceRunService(session, workspace_id="workspace:first")
+        run = run_service.create(toronto.id)
+        run, _needs_expansion = run_service.process(run.id)
+
+        assert run.match_result_count == 0
+        assert run.folder_id is None
+        assert session.scalar(select(func.count()).select_from(AudienceFolderModel)) == 0
 
 
 def test_explicit_folder_takes_priority_over_automatic_trade_mapping() -> None:
@@ -1909,6 +1914,11 @@ def test_audience_run_returns_partial_stored_results_without_collection() -> Non
         assert run.match_completed_at is not None
         assert needs_expansion is False
         assert len(service.latest_leads_for_audience(profile.id)) == 2
+        assert run.folder_id is not None
+        folder = session.get(AudienceFolderModel, run.folder_id)
+        assert folder is not None
+        assert folder.name == "HVAC"
+        assert folder.niche_id == profile.niche_id
         assert session.scalar(select(func.count()).select_from(QueueJobModel)) == 0
 
 
