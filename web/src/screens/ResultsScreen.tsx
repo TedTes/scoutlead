@@ -1652,6 +1652,7 @@ function OutreachWorkspace({
   const [channelCopied, setChannelCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [dismissing, setDismissing] = useState(false);
+  const [markingContacted, setMarkingContacted] = useState(false);
   const [contactHistory, setContactHistory] = useState<LeadOutcomeRecord[]>([]);
   const [contactLogOpen, setContactLogOpen] = useState(false);
   const [contactResult, setContactResult] = useState<LeadOutcomeValue>("no_answer");
@@ -1938,6 +1939,23 @@ function OutreachWorkspace({
     }
   };
 
+  const markContacted = async () => {
+    if (markingContacted || dirty || contextDirty || saveState === "saving") return;
+    setMarkingContacted(true);
+    setLoadError("");
+    try {
+      await onRecordAttempt("contacted", "other", null, null);
+      showToast({ title: "Moved to Contacted", tone: "green" });
+      onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      showToast({ title: "Could not mark contacted", message, tone: "red" });
+    } finally {
+      setMarkingContacted(false);
+    }
+  };
+
   const dismissBusiness = async () => {
     if (dismissing || contextSaving || dirty || saveState === "saving") return;
     if (!window.confirm(`Dismiss ${contact.company_name}? It will move to Dismissed.`)) return;
@@ -2089,6 +2107,15 @@ function OutreachWorkspace({
             >
               {dismissing ? <RotateCw className="spin" size={14} /> : <X size={14} />}
               {dismissing ? "Dismissing…" : "Dismiss"}
+            </button> : null}
+            {!isContactedHistory ? <button
+              className="outreach-mark-contacted"
+              disabled={markingContacted || dirty || contextDirty || saveState === "saving"}
+              type="button"
+              onClick={() => void markContacted()}
+            >
+              {markingContacted ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
+              {markingContacted ? "Updating…" : "Mark contacted"}
             </button> : null}
             <button aria-label="Close outreach" title="Close" type="button" onClick={closeWorkspace}><X size={17} /></button>
           </div>
