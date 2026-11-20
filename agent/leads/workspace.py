@@ -278,7 +278,6 @@ class WorkspaceLeadService:
                 LeadModel.review_status,
                 LeadModel.shortlisted_at,
                 LeadModel.last_contacted_at,
-                LeadModel.latest_outcome_at,
                 LeadModel.contact_policy_status,
             )
             .outerjoin(LeadModel, AudienceResultModel.outreach_lead_id == LeadModel.id)
@@ -287,7 +286,7 @@ class WorkspaceLeadService:
         candidates: list[_Candidate] = []
         for item in selected:
             policy = item.contact_policy_status or "allowed"
-            contacted_at = item.last_contacted_at or item.latest_outcome_at
+            contacted_at = item.last_contacted_at
             searchable = " ".join(
                 str(value or "")
                 for value in (
@@ -366,7 +365,7 @@ class WorkspaceLeadService:
                 ),
                 review_status=lead.review_status,
                 shortlisted_at=lead.shortlisted_at,
-                contacted_at=lead.last_contacted_at or lead.latest_outcome_at,
+                contacted_at=lead.last_contacted_at,
                 contact_policy_status=lead.contact_policy_status,
                 created_at=lead.created_at,
                 updated_at=lead.updated_at,

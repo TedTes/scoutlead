@@ -3350,6 +3350,35 @@ def test_workspace_contacted_lead_leaves_shortlisted_view() -> None:
         assert contacted.items[0].id == lead.id
 
 
+def test_workspace_contact_log_does_not_leave_shortlisted_view() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        offer = _offer(session, workspace_id="workspace:first")
+        campaign = CampaignRepository(session, workspace_id="workspace:first").create(
+            CampaignCreate(product_id=offer.id, name="Contact notes", max_leads=10)
+        )
+        repository = LeadRepository(session, workspace_id="workspace:first")
+        lead = repository.create_from_seed(
+            campaign.id,
+            offer.id,
+            LeadSeedInput(company_name="Logged Painting", geography="Toronto"),
+        )
+        repository.update(lead.id, LeadUpdate(shortlisted=True))
+
+        OutcomeService(session, workspace_id="workspace:first").record(
+            lead.id,
+            LeadOutcomeCreate(
+                outcome=LeadOutcome.NO_ANSWER,
+                channel=OutcomeChannel.PHONE,
+                note="No pickup. Try tomorrow.",
+            ),
+        )
+
+        service = WorkspaceLeadService(session, workspace_id="workspace:first")
+        assert service.page(view="shortlisted").total == 1
+        assert service.page(view="contacted").total == 0
+
+
 def test_territory_metrics_report_coverage_and_conversion() -> None:
     session_factory = _session_factory()
     with session_factory() as session:

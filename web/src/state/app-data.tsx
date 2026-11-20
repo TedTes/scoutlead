@@ -1074,7 +1074,7 @@ function contactKey(contact: DiscoveryResult) {
 function leadRecordPriority(contact: DiscoveryResult) {
   const updatedAt = new Date(contact.updated_at || contact.created_at).getTime();
   return Number(Boolean(contact.shortlisted_at)) * 10_000
-    + Number(Boolean(contact.last_contacted_at || contact.latest_outcome)) * 5_000
+    + Number(Boolean(contact.last_contacted_at)) * 5_000
     + Number(isActiveLead(contact)) * 2_000
     + Number(contact.id.startsWith("audience_result_")) * 1_000
     + (Number.isFinite(updatedAt) ? updatedAt / 1_000_000_000_000 : 0);

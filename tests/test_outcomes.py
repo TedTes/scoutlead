@@ -148,7 +148,7 @@ def test_outcomes_are_workspace_scoped() -> None:
             OutcomeService(session, workspace_id="workspace:other").list_for_lead(lead.id)
 
 
-def test_contact_attempt_moves_lead_to_contacted_and_preserves_follow_up() -> None:
+def test_contact_log_preserves_follow_up_without_moving_lead_to_contacted() -> None:
     session_factory = _session_factory()
     with session_factory() as session:
         lead, _ = _territory_lead(session, workspace_id="workspace:first")
@@ -166,7 +166,7 @@ def test_contact_attempt_moves_lead_to_contacted_and_preserves_follow_up() -> No
         )
 
         session.refresh(lead)
-        assert lead.last_contacted_at == outcome.occurred_at
+        assert lead.last_contacted_at is None
         assert lead.latest_outcome == LeadOutcome.NO_ANSWER.value
         assert outcome.note == "No pickup. Try again tomorrow."
         assert outcome.follow_up_at == follow_up_at.replace(tzinfo=None)
@@ -189,6 +189,9 @@ def test_due_no_response_is_added_only_after_window() -> None:
                 occurred_at=contacted_at,
             ),
         )
+
+        session.refresh(lead)
+        assert lead.last_contacted_at == contacted_at.replace(tzinfo=None)
 
         assert no_response_due(
             contacted_at=contacted_at,

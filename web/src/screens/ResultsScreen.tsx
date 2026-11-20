@@ -262,7 +262,7 @@ export function ResultsScreen({
       .map((message) => message.lead_id),
   );
   const shortlistedContactRows = contacts.filter(
-    (contact) => contact.shortlisted_at && !contact.last_contacted_at && !contact.latest_outcome,
+    (contact) => contact.shortlisted_at && !contact.last_contacted_at,
   );
   const shortlistedContacts = shortlistedContactRows.length;
   const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
@@ -4423,7 +4423,7 @@ function ContactDrawer({
   const activityItems = contactActivityItems(contact, message);
   const opportunity = contactOpportunityAssessment(contact);
   const opportunityReasons = opportunity.signals;
-  const contacted = Boolean(contact.last_contacted_at || contact.latest_outcome === "contacted");
+  const contacted = Boolean(contact.last_contacted_at);
   const evidenceCount = new Set([
     ...signals,
     ...evidenceNotes,
@@ -6016,7 +6016,6 @@ function matchesWorkflowView(
     return Boolean(
       !contact.shortlisted_at
       && !contact.last_contacted_at
-      && !contact.latest_outcome
       && (context.includeAllLeads || reviewStatus(contact) === "unreviewed"),
     );
   }
@@ -6029,10 +6028,9 @@ function matchesWorkflowView(
     return Boolean(
       contact.shortlisted_at
       && !contact.last_contacted_at
-      && !contact.latest_outcome,
     );
   }
-  if (view === "contacted") return Boolean(contact.last_contacted_at || contact.latest_outcome);
+  if (view === "contacted") return Boolean(contact.last_contacted_at);
   return true;
 }
 

@@ -13,7 +13,7 @@ from db.models import (
     ProductModel,
     TerritoryModel,
 )
-from outcomes.policy import CONTACT_ATTEMPT_OUTCOMES, no_response_due
+from outcomes.policy import no_response_due
 from outcomes.repository import OutcomeRepository
 from outcomes.schemas import (
     LeadOutcome,
@@ -75,7 +75,7 @@ class OutcomeService:
         if lead.latest_outcome_at is None or occurred_at >= _aware(lead.latest_outcome_at):
             lead.latest_outcome = data.outcome.value
             lead.latest_outcome_at = occurred_at
-        if data.outcome in CONTACT_ATTEMPT_OUTCOMES:
+        if data.outcome == LeadOutcome.CONTACTED:
             lead.last_contacted_at = occurred_at
         self._apply_objective_quality_update(lead, data.outcome, occurred_at)
         self.session.commit()
