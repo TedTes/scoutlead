@@ -34,7 +34,7 @@ from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
 from website_capture.playwright_provider import PlaywrightBrowserCapture
 from website_capture.service import WebsiteCaptureService
-from website_capture.storage import LocalArtifactStore
+from website_capture.storage import artifact_store_from_settings
 
 logger = get_logger(__name__)
 _last_territory_scheduler_tick = 0.0
@@ -203,9 +203,7 @@ def _execute_job(
                 timeout_seconds=services.settings.website_capture_timeout_seconds,
                 max_screenshot_height=services.settings.website_capture_max_height,
             ),
-            artifacts=LocalArtifactStore(
-                services.settings.website_capture_artifact_root,
-            ),
+            artifacts=artifact_store_from_settings(services.settings),
             freshness_days=services.settings.website_capture_freshness_days,
         ).capture(str(job.payload["business_id"]))
     else:

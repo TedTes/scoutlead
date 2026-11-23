@@ -21,7 +21,7 @@ from website_assessments.service import (
 from website_assessments.training import TrainingExample, train_logistic_baseline
 from website_capture.contracts import ViewportCapture, WebsiteCaptureResult
 from website_capture.service import CAPTURE_ATTRIBUTE_KEY, WebsiteCaptureService
-from website_capture.storage import LocalArtifactStore
+from website_capture.storage import LocalArtifactStore, S3ArtifactStore
 
 
 def _session_factory():
@@ -217,3 +217,74 @@ def test_capture_service_reuses_fresh_capture_unless_forced(tmp_path) -> None:
         assert cached["cached"] is True
         assert forced["cached"] is False
         assert browser.calls == 2
+
+
+class _FakeS3Client:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def put_object(self, **request) -> None:
+        self.requests.append(request)
+
+
+def test_s3_artifact_store_uploads_private_object_and_returns_stable_uri() -> None:
+    client = _FakeS3Client()
+    store = S3ArtifactStore(
+        bucket="capture-bucket",
+        prefix="scoutlead/captures/",
+        client=client,
+    )
+
+    stored = store.put(
+        business_id="business/123",
+        name="desktop capture.png",
+        content=b"png-bytes",
+        content_type="image/png",
+    )
+
+    assert stored.uri == (
+        "s3://capture-bucket/scoutlead/captures/business-123/desktop-capture.png"
+    )
+    assert stored.size_bytes == 9
+    assert client.requests == [
+        {
+            "Bucket": "capture-bucket",
+            "Key": "scoutlead/captures/business-123/desktop-capture.png",
+            "Body": b"png-bytes",
+            "ContentType": "image/png",
+        }
+    ]
+
+
+def test_capture_service_persists_s3_references_in_attributes() -> None:
+    with _session_factory()() as session:
+        business = _business(session)
+        client = _FakeS3Client()
+        result = WebsiteCaptureService(
+            session,
+            browser=_FakeBrowserCapture(),
+            artifacts=S3ArtifactStore(
+                bucket="capture-bucket",
+                prefix="website-captures",
+                client=client,
+            ),
+        ).capture(business.id)
+
+        capture_row = session.scalar(
+            select(BusinessAttributeModel).where(
+                BusinessAttributeModel.business_id == business.id,
+                BusinessAttributeModel.attribute_key == CAPTURE_ATTRIBUTE_KEY,
+            )
+        )
+        capture = attribute_value(capture_row)
+
+        assert result["cached"] is False
+        assert capture["artifact_store"] == "s3"
+        assert capture["artifacts"]["desktop"]["uri"].startswith(
+            f"s3://capture-bucket/website-captures/{business.id}/"
+        )
+        assert capture["artifacts"]["mobile"]["uri"].startswith(
+            f"s3://capture-bucket/website-captures/{business.id}/"
+        )
+        assert "screenshot" not in capture["viewports"][0]
+        assert len(client.requests) == 2

@@ -43,6 +43,24 @@ def test_settings_accepts_gmail_email_provider(monkeypatch) -> None:
     ]
 
 
+def test_settings_requires_bucket_for_s3_capture_storage(monkeypatch) -> None:
+    monkeypatch.setenv("WEBSITE_CAPTURE_STORAGE_BACKEND", "s3")
+    monkeypatch.delenv("WEBSITE_CAPTURE_S3_BUCKET", raising=False)
+
+    with pytest.raises(ValidationError, match="WEBSITE_CAPTURE_S3_BUCKET is required"):
+        Settings(_env_file=None)
+
+
+def test_settings_accepts_s3_capture_storage(monkeypatch) -> None:
+    monkeypatch.setenv("WEBSITE_CAPTURE_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("WEBSITE_CAPTURE_S3_BUCKET", "capture-bucket")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.website_capture_storage_backend == "s3"
+    assert settings.website_capture_s3_bucket == "capture-bucket"
+
+
 def test_settings_ignores_retired_kijiji_and_accepts_active_apify_sources(monkeypatch) -> None:
     monkeypatch.setenv("APIFY_API_TOKEN", "global-token")
     monkeypatch.setenv(

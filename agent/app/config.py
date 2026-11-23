@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from source_providers.catalog import source_provider_is_retired
@@ -134,12 +134,31 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=20.0, gt=0)
     browser_render_endpoint: str | None = None
     browser_render_api_key: str | None = None
+    website_capture_storage_backend: Literal["local", "s3"] = "local"
     website_capture_artifact_root: str = "artifacts/website-captures"
+    website_capture_s3_bucket: str | None = None
+    website_capture_s3_prefix: str = "website-captures"
+    website_capture_s3_endpoint_url: str | None = None
+    website_capture_s3_region: str | None = None
+    website_capture_s3_access_key_id: str | None = None
+    website_capture_s3_secret_access_key: str | None = None
     website_capture_timeout_seconds: float = Field(default=25.0, gt=0, le=120)
     website_capture_max_height: int = Field(default=8000, ge=844, le=30000)
     website_capture_freshness_days: int = Field(default=7, ge=0, le=90)
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_attempts: int = Field(default=3, ge=1, le=6)
+
+    @model_validator(mode="after")
+    def validate_website_capture_storage(self) -> "Settings":
+        if (
+            self.website_capture_storage_backend == "s3"
+            and not str(self.website_capture_s3_bucket or "").strip()
+        ):
+            raise ValueError(
+                "WEBSITE_CAPTURE_S3_BUCKET is required when "
+                "WEBSITE_CAPTURE_STORAGE_BACKEND=s3"
+            )
+        return self
 
     @property
     def strict_external_providers(self) -> bool:

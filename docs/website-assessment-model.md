@@ -50,17 +50,23 @@ The capture worker:
 - blocks private/local network destinations;
 - captures desktop and mobile screenshots;
 - measures layout overflow, tap-target size, broken images, headings, and basic page structure;
-- stores binary artifacts on the local filesystem;
+- stores binary artifacts on the local filesystem in development or private S3-compatible storage
+  in deployed environments;
 - stores only a compact manifest in `business_attributes`;
 - reruns the model-independent shadow assessment after capture.
 
 Admin can enqueue the same `website.capture` job from the **Website model** tab.
-`ArtifactStore`, `BrowserCaptureProvider`, and `WebsiteVisionModel` are protocols,
-so R2/S3 and a hosted vision model can be added later without changing the queue,
-admin API, or assessment service.
+`ArtifactStore`, `BrowserCaptureProvider`, and `WebsiteVisionModel` are protocols, so a hosted
+vision model can be added later without changing the queue, admin API, or assessment service.
 
-For a deployed worker, packaging Chromium and replacing the local artifact store
-with persistent object storage are intentionally separate infrastructure steps.
+The API, worker, and web runtime images are separate. `Dockerfile.worker` installs Playwright and
+Chromium; the API and web images do not carry browser dependencies. The worker is sequential and
+must remain at one Railway replica during the initial capture rollout.
+
+Configure persistent storage on the worker with `WEBSITE_CAPTURE_STORAGE_BACKEND=s3` and the
+`WEBSITE_CAPTURE_S3_*` variables documented in `deploy/railway/worker.env.example`. The adapter is
+compatible with AWS S3, R2, and other S3-compatible object stores. Bucket creation, credentials,
+deployment, and the first production capture are intentionally not automated by this repository.
 
 ## Dataset and training
 
