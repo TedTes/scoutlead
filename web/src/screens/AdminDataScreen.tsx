@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  LoaderCircle,
   Plus,
   RefreshCw,
   Search,
@@ -53,6 +54,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
   const [selectedBusinesses, setSelectedBusinesses] = useState<Record<string, AdminBusinessSummary>>({});
   const [detail, setDetail] = useState<AdminBusinessDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<"add" | "edit" | "bulk-delete" | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -87,6 +89,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         return next;
       });
       setTotal(businessPage.total);
+      setHasLoaded(true);
       setSelectedId((current) => (
         businessPage.items.some((row) => row.id === current)
           ? current
@@ -184,6 +187,27 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
         <ShieldAlert size={28} />
         <h1>Administrator access required</h1>
         <p>This data stewardship area is not available to your account.</p>
+      </section>
+    );
+  }
+
+  if (!hasLoaded) {
+    return (
+      <section className="admin-initial-loading" role="status" aria-live="polite">
+        {error ? (
+          <>
+            <CircleAlert size={24} />
+            <h1>Could not load businesses</h1>
+            <p>{error}</p>
+            <button type="button" onClick={() => void load()}>Try again</button>
+          </>
+        ) : (
+          <>
+            <LoaderCircle className="admin-loading-spinner" size={24} />
+            <h1>Loading businesses</h1>
+            <p>Reading the current business inventory and attributes.</p>
+          </>
+        )}
       </section>
     );
   }

@@ -1,3 +1,51 @@
+.admin-initial-loading {
+  min-height: calc(100vh - 58px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #667085;
+  text-align: center;
+}
+
+.admin-initial-loading h1,
+.admin-initial-loading p {
+  margin: 0;
+}
+
+.admin-initial-loading h1 {
+  color: #20242a;
+  font-size: 15px;
+}
+
+.admin-initial-loading p {
+  max-width: 360px;
+  font-size: 10px;
+}
+
+.admin-initial-loading button {
+  margin-top: 5px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  background: #fff;
+  color: #20242a;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.admin-loading-spinner {
+  color: #109a68;
+  animation: admin-loading-spin .8s linear infinite;
+}
+
+@keyframes admin-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 .admin-attribute-coverage {
   flex: 0 0 auto;
   padding: 5px 8px;

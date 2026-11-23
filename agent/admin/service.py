@@ -620,14 +620,29 @@ class AdminDataService:
         return self._data_job_summary(root, include_samples=True)
 
     def overview(self) -> dict[str, Any]:
-        all_businesses = list(self.session.scalars(select(BusinessModel)))
-        businesses = [business for business in all_businesses if business.status == "active"]
-        states = self._validation_states(
-            [business.id for business in businesses],
-            include_quality=False,
+        status_counts = Counter(
+            {
+                status: count
+                for status, count in self.session.execute(
+                    select(BusinessModel.status, func.count(BusinessModel.id)).group_by(
+                        BusinessModel.status
+                    )
+                )
+            }
         )
-        status_counts = Counter(business.status for business in all_businesses)
-        validation_counts = Counter(states[business.id]["state"] for business in businesses)
+        active_count = status_counts["active"]
+        evaluated_count = self.session.scalar(
+            select(func.count(func.distinct(BusinessAttributeModel.business_id)))
+            .select_from(BusinessAttributeModel)
+            .join(
+                BusinessModel,
+                BusinessModel.id == BusinessAttributeModel.business_id,
+            )
+            .where(
+                BusinessModel.status == "active",
+                ~BusinessAttributeModel.attribute_key.startswith(SOURCE_PAYLOAD_PREFIX),
+            )
+        ) or 0
         trade_rows = list(
             self.session.execute(
                 select(
@@ -657,13 +672,13 @@ class AdminDataService:
             )
         )
         return {
-            "total": len(businesses),
+            "total": active_count,
             "active": status_counts["active"],
             "quarantined": status_counts["quarantined"],
             "archived": status_counts["archived"],
-            "fully_validated": validation_counts["passed"],
-            "needs_attention": validation_counts["attention"],
-            "incomplete": validation_counts["incomplete"],
+            "fully_validated": evaluated_count,
+            "needs_attention": 0,
+            "incomplete": max(active_count - evaluated_count, 0),
             "searchable": self.session.scalar(
                 select(func.count(func.distinct(BusinessModel.id)))
                 .select_from(BusinessModel)
