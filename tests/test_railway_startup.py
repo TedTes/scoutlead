@@ -45,3 +45,29 @@ def test_trade_catalog_changes_trigger_backend_release() -> None:
     assert "data/seeds/canonical-trade-catalog\\.json" in workflow
     assert "seed_trade_catalog" in workflow
     assert workflow.count("\\.gitignore") >= 2
+
+
+def test_railway_services_use_dedicated_runtime_images() -> None:
+    root = Path(__file__).parents[1]
+    api_config = json.loads(
+        (root / "deploy" / "railway" / "api.railway.json").read_text()
+    )
+    worker_config = json.loads(
+        (root / "deploy" / "railway" / "worker.railway.json").read_text()
+    )
+    web_config = json.loads(
+        (root / "deploy" / "railway" / "web.railway.json").read_text()
+    )
+
+    assert api_config["build"]["dockerfilePath"] == "Dockerfile.api"
+    assert worker_config["build"]["dockerfilePath"] == "Dockerfile.worker"
+    assert web_config["build"]["dockerfilePath"] == "Dockerfile"
+
+    api_dockerfile = (root / "Dockerfile.api").read_text()
+    worker_dockerfile = (root / "Dockerfile.worker").read_text()
+    web_dockerfile = (root / "web" / "Dockerfile").read_text()
+
+    assert "playwright install" not in api_dockerfile
+    assert "playwright install --with-deps chromium" in worker_dockerfile
+    assert "[website-capture]" in worker_dockerfile
+    assert "FROM node:24-slim" in web_dockerfile

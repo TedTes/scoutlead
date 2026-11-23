@@ -2,15 +2,14 @@
 
 Railway has three deployable ScoutLead services:
 
-- API: Python app from the repo root using the root `Dockerfile`.
-- Worker: Python background worker from the repo root using the root `Dockerfile`.
-- Web: Vite app deployed from `./web --path-as-root`.
+- API: Python app from the repo root using `Dockerfile.api`.
+- Worker: Python background worker using `Dockerfile.worker`, which alone contains
+  Playwright, Chromium, and the S3 client.
+- Web: Vite app deployed from `./web --path-as-root` using `web/Dockerfile`.
 
 The release workflow applies service settings from this directory before running `railway up`.
-The root Dockerfile is service-aware. It starts the API, worker, or web static server based on
-`SCOUTLEAD_SERVICE` / `SERVICE_TYPE`, or Railway's `RAILWAY_SERVICE_NAME` fallback. This is
-intentional: if Railway's repo auto-deploy path ever points the web service at the repo root, the
-container serves the frontend instead of silently starting the API in the web service.
+The legacy root Dockerfile remains as a local/backward-compatible image. Railway service manifests
+select the dedicated images through `build.dockerfilePath`.
 
 Changes in this directory intentionally trigger the full Railway release path.
 
@@ -28,6 +27,10 @@ Worker:
 python scripts/start_railway_service.py
 ```
 
+The worker loop claims and executes one queue job at a time. Keep the Railway worker service at one
+replica while browser capture is enabled; horizontal worker scaling would allow separate capture
+jobs to run concurrently.
+
 Web:
 
 ```sh
@@ -42,6 +45,25 @@ server not intended for production hosting.
 The startup script uses `SCOUTLEAD_SERVICE` or `SERVICE_TYPE` when present. Otherwise it falls back
 to Railway's `RAILWAY_SERVICE_NAME`; service names containing `worker` run the worker, service
 names containing `web` or `front` serve the built frontend, and all other names run the API.
+
+## Website capture storage
+
+Local development defaults to `WEBSITE_CAPTURE_STORAGE_BACKEND=local`. A deployed worker should
+use a private S3-compatible bucket:
+
+```text
+WEBSITE_CAPTURE_STORAGE_BACKEND=s3
+WEBSITE_CAPTURE_S3_BUCKET=<bucket>
+WEBSITE_CAPTURE_S3_PREFIX=website-captures
+WEBSITE_CAPTURE_S3_ENDPOINT_URL=<provider endpoint, when required>
+WEBSITE_CAPTURE_S3_REGION=<region, when required>
+WEBSITE_CAPTURE_S3_ACCESS_KEY_ID=<secret>
+WEBSITE_CAPTURE_S3_SECRET_ACCESS_KEY=<secret>
+```
+
+Only the worker needs these credentials. PostgreSQL stores `s3://` object references and compact
+capture metrics, never screenshot bytes. Creating the bucket and configuring secrets remain manual
+deployment steps.
 
 The web workflow uses `--path-as-root`, so the uploaded archive root is the `web` directory itself.
 For that reason the web service root directory is `/`, not `/web`.
