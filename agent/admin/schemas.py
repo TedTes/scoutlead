@@ -49,6 +49,14 @@ class AdminBusinessExportRequest(BaseModel):
     business_ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class AdminWebsiteAssessmentLabel(BaseModel):
+    label: Literal["strong", "acceptable", "upgrade_candidate", "broken"]
+    reasons: list[str] = Field(default_factory=list, max_length=20)
+    notes: str | None = Field(default=None, max_length=4000)
+    desktop_screenshot_url: str | None = Field(default=None, max_length=2000)
+    mobile_screenshot_url: str | None = Field(default=None, max_length=2000)
+
+
 class AdminDeleteRequest(BaseModel):
     confirmation: str
     reason: str = Field(min_length=3, max_length=1000)

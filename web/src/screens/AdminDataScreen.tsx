@@ -301,7 +301,7 @@ export function AdminDataScreen({ api }: { api: ApiClient }) {
           </footer>
         </div>
 
-        <BusinessInspector api={api} detail={detail} />
+        <BusinessInspector api={api} detail={detail} onDetailChange={setDetail} />
       </div>
 
       {dialog === "add" ? <BusinessForm api={api} mode="add" onClose={() => setDialog(null)} onSaved={(value) => { setDialog(null); void refreshDetail(value); }} /> : null}
@@ -374,15 +374,17 @@ function downloadJson(payload: unknown, filename: string) {
 function BusinessInspector({
   api,
   detail,
+  onDetailChange,
 }: {
   api: ApiClient;
   detail: AdminBusinessDetail | null;
+  onDetailChange: (detail: AdminBusinessDetail) => void;
 }) {
   const [lineage, setLineage] = useState<AdminAttributeLineage | null>(null);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [lineageError, setLineageError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"attributes" | "json">("attributes");
+  const [activeTab, setActiveTab] = useState<"attributes" | "assessment" | "json">("attributes");
   const loadLineage = useCallback(async () => {
     if (!detail?.id) {
       setLineage(null);
@@ -428,6 +430,7 @@ function BusinessInspector({
       <LeadAssessmentPanel detail={detail} />
       <nav className="admin-inspector-tabs" aria-label="Business detail views">
         <button className={activeTab === "attributes" ? "is-active" : ""} type="button" onClick={() => setActiveTab("attributes")}>Attributes</button>
+        <button className={activeTab === "assessment" ? "is-active" : ""} type="button" onClick={() => setActiveTab("assessment")}>Website model</button>
         <button className={activeTab === "json" ? "is-active" : ""} type="button" onClick={() => setActiveTab("json")}>JSON</button>
         {activeTab === "json" ? <button className="admin-json-copy" disabled={!jsonPayload} type="button" onClick={() => void copyJson()}>
           <Copy size={12} /> {copied ? "Copied" : "Copy JSON"}
@@ -435,6 +438,8 @@ function BusinessInspector({
       </nav>
       {activeTab === "attributes" ? (
         <BusinessAttributeRecord detail={detail} error={lineageError} lineage={lineage} loading={lineageLoading} />
+      ) : activeTab === "assessment" ? (
+        <WebsiteAssessmentEditor api={api} detail={detail} onDetailChange={onDetailChange} />
       ) : (
         <div className="admin-inspector-content admin-json-inspector">
           {lineageLoading && !jsonPayload ? <p className="admin-record-empty">Preparing JSON…</p> : null}
@@ -444,6 +449,117 @@ function BusinessInspector({
       )}
     </aside>
   );
+}
+
+const WEBSITE_LABEL_REASONS = [
+  "Visual design looks dated",
+  "Mobile layout needs work",
+  "Content hierarchy is unclear",
+  "Navigation is difficult",
+  "Performance is poor",
+  "Trust signals are weak",
+];
+
+function WebsiteAssessmentEditor({
+  api,
+  detail,
+  onDetailChange,
+}: {
+  api: ApiClient;
+  detail: AdminBusinessDetail;
+  onDetailChange: (detail: AdminBusinessDetail) => void;
+}) {
+  const assessment = attributeJson(detail, "website_upgrade_assessment");
+  const capture = attributeJson(detail, "website_visual_capture");
+  const savedLabel = attributeJson(detail, "website_upgrade_training_label");
+  const [label, setLabel] = useState(String(savedLabel?.label || "upgrade_candidate"));
+  const [reasons, setReasons] = useState<string[]>(Array.isArray(savedLabel?.reasons) ? savedLabel.reasons.map(String) : []);
+  const [notes, setNotes] = useState(String(savedLabel?.notes || ""));
+  const [desktopScreenshotUrl, setDesktopScreenshotUrl] = useState(String(savedLabel?.desktop_screenshot_url || ""));
+  const [mobileScreenshotUrl, setMobileScreenshotUrl] = useState(String(savedLabel?.mobile_screenshot_url || ""));
+  const [busy, setBusy] = useState<"capture" | "assess" | "save" | "">("");
+  const [captureStatus, setCaptureStatus] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const next = attributeJson(detail, "website_upgrade_training_label");
+    setLabel(String(next?.label || "upgrade_candidate"));
+    setReasons(Array.isArray(next?.reasons) ? next.reasons.map(String) : []);
+    setNotes(String(next?.notes || ""));
+    setDesktopScreenshotUrl(String(next?.desktop_screenshot_url || ""));
+    setMobileScreenshotUrl(String(next?.mobile_screenshot_url || ""));
+  }, [detail.id, detail.attributes]);
+
+  const assess = async () => {
+    setBusy("assess"); setError("");
+    try { onDetailChange(await api.assessAdminBusinessWebsite(detail.id)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(""); }
+  };
+  const queueCapture = async () => {
+    setBusy("capture"); setError(""); setCaptureStatus("");
+    try {
+      const job = await api.captureAdminBusinessWebsite(detail.id);
+      setCaptureStatus(`Capture ${job.status}. The worker will store desktop and mobile artifacts.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(""); }
+  };
+  const save = async () => {
+    setBusy("save"); setError("");
+    try {
+      onDetailChange(await api.labelAdminBusinessWebsite(detail.id, {
+        label,
+        reasons,
+        notes: notes || null,
+        desktop_screenshot_url: desktopScreenshotUrl || null,
+        mobile_screenshot_url: mobileScreenshotUrl || null,
+      }));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(""); }
+  };
+  const toggleReason = (reason: string) => setReasons((current) => (
+    current.includes(reason) ? current.filter((item) => item !== reason) : [...current, reason]
+  ));
+
+  return <div className="admin-inspector-content admin-website-assessment-editor">
+    <section className="admin-model-result">
+      <div><strong>Browser capture</strong><span>{capture ? "Captured" : "Not captured"}</span></div>
+      {capture ? <>
+        <p>{String(capture.final_url || "Website captured")} · {Array.isArray(capture.viewports) ? capture.viewports.length : 0} viewports</p>
+        <small>{String(capture.capture_provider || "browser")} · {String(capture.artifact_store || "artifact store")}</small>
+      </> : <p>Capture desktop/mobile screenshots and measurable page-layout evidence locally.</p>}
+      {captureStatus ? <small>{captureStatus}</small> : null}
+      <button disabled={Boolean(busy) || !detail.website_url} type="button" onClick={() => void queueCapture()}>{busy === "capture" ? "Queueing…" : "Queue capture"}</button>
+    </section>
+    <section className="admin-model-result">
+      <div><strong>Shadow assessment</strong><span>{assessment ? `${Math.round(Number(assessment.upgrade_probability || 0) * 100)} / 100` : "Not run"}</span></div>
+      {assessment ? <>
+        <p>{String(assessment.label || "").replace(/_/g, " ")} · {Math.round(Number(assessment.confidence || 0) * 100)}% evidence confidence</p>
+        <ul>{(Array.isArray(assessment.reasons) ? assessment.reasons : []).map((reason) => <li key={String(reason)}>{String(reason)}</li>)}</ul>
+        <small>{String(assessment.model_key || "model")} · {String(assessment.model_version || "unknown version")} · shadow mode</small>
+      </> : <p>Run the local baseline from stored evidence. It will not fetch a website or call a paid API.</p>}
+      <button disabled={Boolean(busy)} type="button" onClick={() => void assess()}>{busy === "assess" ? "Assessing…" : "Run assessment"}</button>
+    </section>
+    <section className="admin-training-label">
+      <h3>Human training label</h3>
+      <label>Website class<select value={label} onChange={(event) => setLabel(event.target.value)}>
+        <option value="strong">Strong</option><option value="acceptable">Acceptable</option><option value="upgrade_candidate">Upgrade candidate</option><option value="broken">Broken</option>
+      </select></label>
+      <div className="admin-label-reasons">{WEBSITE_LABEL_REASONS.map((reason) => <button className={reasons.includes(reason) ? "is-selected" : ""} key={reason} type="button" onClick={() => toggleReason(reason)}>{reason}</button>)}</div>
+      <label>Notes<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="What did you observe?" /></label>
+      <label>Desktop screenshot URL<input value={desktopScreenshotUrl} onChange={(event) => setDesktopScreenshotUrl(event.target.value)} placeholder="Optional" /></label>
+      <label>Mobile screenshot URL<input value={mobileScreenshotUrl} onChange={(event) => setMobileScreenshotUrl(event.target.value)} placeholder="Optional" /></label>
+      {error ? <p className="admin-candidate-warning">{error}</p> : null}
+      <button disabled={Boolean(busy)} type="button" onClick={() => void save()}>{busy === "save" ? "Saving…" : "Save label"}</button>
+    </section>
+  </div>;
+}
+
+function attributeJson(detail: AdminBusinessDetail, key: string): Record<string, unknown> | null {
+  const row = detail.attributes.find((item) => item.key === key);
+  return row && typeof row.value === "object" && row.value !== null && !Array.isArray(row.value)
+    ? row.value as Record<string, unknown>
+    : null;
 }
 
 function LeadAssessmentPanel({ detail }: { detail: AdminBusinessDetail }) {

@@ -48,6 +48,7 @@ import type {
   LeadOutcomeRecord,
   LeadOutcomeValue,
   SenderProfile,
+  QueueJob,
 } from "../types/domain";
 
 type ApiOptions = {
@@ -97,6 +98,25 @@ export class ApiClient {
 
   getAdminBusinessJson(id: string) {
     return this.request<Record<string, unknown>>(`/admin/businesses/${id}/json`);
+  }
+
+  assessAdminBusinessWebsite(id: string) {
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}/website-assessment`, {
+      method: "POST",
+    });
+  }
+
+  captureAdminBusinessWebsite(id: string) {
+    return this.request<QueueJob>(`/admin/businesses/${id}/website-capture`, {
+      method: "POST",
+    });
+  }
+
+  labelAdminBusinessWebsite(id: string, body: Record<string, unknown>) {
+    return this.request<AdminBusinessDetail>(`/admin/businesses/${id}/website-assessment-label`, {
+      method: "PUT",
+      body,
+    });
   }
 
   exportAdminBusinessesJson(businessIds: string[]) {

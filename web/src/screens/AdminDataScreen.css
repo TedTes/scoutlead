@@ -222,6 +222,20 @@
   border-top: 1px solid #e3e8ee;
 }
 
+.admin-website-assessment-editor { display: grid; gap: 14px; padding: 14px; }
+.admin-website-assessment-editor section { display: grid; gap: 10px; padding: 12px; border: 1px solid #dbe2ea; border-radius: 8px; background: #fff; }
+.admin-model-result > div { display: flex; justify-content: space-between; gap: 12px; }
+.admin-model-result > div span { color: #087a55; font-weight: 700; }
+.admin-model-result p, .admin-model-result ul, .admin-model-result small { margin: 0; color: #667085; }
+.admin-model-result ul { padding-left: 18px; }
+.admin-training-label h3 { margin: 0; font-size: 13px; }
+.admin-training-label label { display: grid; gap: 5px; color: #667085; font-size: 11px; font-weight: 600; }
+.admin-training-label input, .admin-training-label select, .admin-training-label textarea { width: 100%; border: 1px solid #cfd6df; border-radius: 6px; padding: 8px; background: #fff; color: #20262e; font: inherit; font-weight: 400; }
+.admin-label-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+.admin-label-reasons button { border: 1px solid #cfd6df; border-radius: 999px; padding: 5px 8px; background: #fff; color: #596579; font-size: 10px; }
+.admin-label-reasons button.is-selected { border-color: #18a66a; background: #eaf8f1; color: #087a55; }
+.admin-model-result > button, .admin-training-label > button { justify-self: end; border: 0; border-radius: 6px; padding: 8px 11px; background: #20262e; color: #fff; font-weight: 700; }
+
 .admin-candidate-component {
   padding: 7px 0;
   border-bottom: 1px solid #e8edf1;

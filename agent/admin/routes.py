@@ -15,9 +15,11 @@ from admin.schemas import (
     AdminSignalDefinitionStateChange,
     AdminSignalDefinitionUpdate,
     AdminSignalValidationRequest,
+    AdminWebsiteAssessmentLabel,
 )
 from admin.service import AdminDataService
 from app.dependencies import AdminAuth, DbSession
+from job_queue.schemas import QueueJobRead
 from outreach_packages.schemas import (
     PlaybookAdminRead,
     PlaybookAdminStateChange,
@@ -315,6 +317,29 @@ def business_attribute_lineage(business_id: str, session: DbSession, auth: Admin
 @router.get("/businesses/{business_id}/json")
 def business_json(business_id: str, session: DbSession, auth: AdminAuth):
     return _service(session, auth).business_json(business_id)
+
+
+@router.post("/businesses/{business_id}/website-assessment")
+def assess_business_website(business_id: str, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).assess_website(business_id)
+
+
+@router.post(
+    "/businesses/{business_id}/website-capture",
+    response_model=QueueJobRead,
+)
+def capture_business_website(business_id: str, session: DbSession, auth: AdminAuth):
+    return _service(session, auth).enqueue_website_capture(business_id)
+
+
+@router.put("/businesses/{business_id}/website-assessment-label")
+def label_business_website(
+    business_id: str,
+    data: AdminWebsiteAssessmentLabel,
+    session: DbSession,
+    auth: AdminAuth,
+):
+    return _service(session, auth).label_website(business_id, data)
 
 
 @router.patch("/businesses/{business_id}")

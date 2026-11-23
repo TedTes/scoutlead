@@ -13,6 +13,7 @@ from admin.schemas import (
     AdminDataJobCreate,
     AdminSignalDefinitionCreate,
     AdminSignalDefinitionUpdate,
+    AdminWebsiteAssessmentLabel,
 )
 from auth.context import AuthContext
 from business_attributes.catalog import (
@@ -60,6 +61,7 @@ from territories.opportunities import (
     OPPORTUNITY_ATTRIBUTE_KEYS,
     OPPORTUNITY_BY_ATTRIBUTE,
 )
+from website_assessments.service import WebsiteAssessmentService
 
 
 SOURCE_PRIORITY = {
@@ -1224,6 +1226,34 @@ class AdminDataService:
                 primary_phone=detail.get("phone"),
             ),
         }
+
+    def assess_website(self, business_id: str) -> dict[str, Any]:
+        WebsiteAssessmentService(self.session).assess(business_id)
+        return self.detail(business_id)
+
+    def enqueue_website_capture(self, business_id: str) -> QueueJobModel:
+        if self.session.get(BusinessModel, business_id) is None:
+            raise NotFoundError("business not found", {"business_id": business_id})
+        return QueueService(self.session).enqueue_website_capture(
+            business_id=business_id,
+            requested_by=self.auth.email or self.auth.user_id,
+        )
+
+    def label_website(
+        self,
+        business_id: str,
+        data: AdminWebsiteAssessmentLabel,
+    ) -> dict[str, Any]:
+        WebsiteAssessmentService(self.session).save_label(
+            business_id,
+            label=data.label,
+            reasons=data.reasons,
+            notes=data.notes,
+            desktop_screenshot_url=data.desktop_screenshot_url,
+            mobile_screenshot_url=data.mobile_screenshot_url,
+            labeled_by=self.auth.email or self.auth.user_id,
+        )
+        return self.detail(business_id)
 
     def export_businesses_json(self, business_ids: list[str]) -> dict[str, Any]:
         unique_ids = list(dict.fromkeys(business_ids))
@@ -2725,6 +2755,8 @@ def _attribute_value(fact: BusinessAttributeModel) -> Any:
         return fact.value_boolean
     if fact.value_type == "number":
         return fact.value_number
+    if fact.value_type == "json":
+        return fact.value_json
     return fact.value_text
 
 
