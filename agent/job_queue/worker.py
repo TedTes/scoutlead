@@ -32,6 +32,9 @@ from source_requests.service import SourceRequestService
 from outcomes.maintenance import run_outcome_maintenance
 from shared.logger import configure_logging, get_logger
 from territories.scheduler import enqueue_due_territories
+from website_capture.playwright_provider import PlaywrightBrowserCapture
+from website_capture.service import WebsiteCaptureService
+from website_capture.storage import LocalArtifactStore
 
 logger = get_logger(__name__)
 _last_territory_scheduler_tick = 0.0
@@ -193,6 +196,18 @@ def _execute_job(
             expected_version=int(job.payload["signal_version"]),
             business_ids=_job_business_ids(job),
         )
+    elif job.type == JobType.WEBSITE_CAPTURE.value:
+        WebsiteCaptureService(
+            session,
+            browser=PlaywrightBrowserCapture(
+                timeout_seconds=services.settings.website_capture_timeout_seconds,
+                max_screenshot_height=services.settings.website_capture_max_height,
+            ),
+            artifacts=LocalArtifactStore(
+                services.settings.website_capture_artifact_root,
+            ),
+            freshness_days=services.settings.website_capture_freshness_days,
+        ).capture(str(job.payload["business_id"]))
     else:
         raise ValueError(f"unknown job type: {job.type}")
 

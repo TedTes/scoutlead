@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=20.0, gt=0)
     browser_render_endpoint: str | None = None
     browser_render_api_key: str | None = None
+    website_capture_artifact_root: str = "artifacts/website-captures"
+    website_capture_timeout_seconds: float = Field(default=25.0, gt=0, le=120)
+    website_capture_max_height: int = Field(default=8000, ge=844, le=30000)
+    website_capture_freshness_days: int = Field(default=7, ge=0, le=90)
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_attempts: int = Field(default=3, ge=1, le=6)
 

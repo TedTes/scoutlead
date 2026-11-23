@@ -141,3 +141,21 @@ class QueueService:
             max_attempts=3,
             commit=commit,
         )
+
+    def enqueue_website_capture(
+        self,
+        *,
+        business_id: str,
+        requested_by: str | None,
+        commit: bool = True,
+    ):
+        return self.queue.enqueue_once(
+            JobType.WEBSITE_CAPTURE,
+            {
+                "business_id": business_id,
+                "requested_by": requested_by,
+            },
+            dedupe_key=business_id,
+            max_attempts=2,
+            commit=commit,
+        )

@@ -106,7 +106,10 @@ class QueueRepository:
                 0,
             ),
             (
-                QueueJobModel.type == JobType.SIGNAL_COLLECTION.value,
+                QueueJobModel.type.in_([
+                    JobType.SIGNAL_COLLECTION.value,
+                    JobType.WEBSITE_CAPTURE.value,
+                ]),
                 20,
             ),
             else_=10,

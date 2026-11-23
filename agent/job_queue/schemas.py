@@ -12,6 +12,7 @@ class JobType(StrEnum):
     BUSINESS_IDENTITY_RESOLVE = "business.identity_resolve"
     BUSINESS_OPPORTUNITY_AUDIT = "business.opportunity_audit"
     SIGNAL_COLLECTION = "signal.collection"
+    WEBSITE_CAPTURE = "website.capture"
 
 
 class JobStatus(StrEnum):

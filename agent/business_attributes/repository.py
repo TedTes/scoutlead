@@ -32,7 +32,7 @@ class BusinessAttributeKey(StrEnum):
 @dataclass(frozen=True)
 class BusinessAttributeValue:
     key: BusinessAttributeKey | str
-    value: str | float | bool
+    value: str | float | bool | dict[str, Any] | list[Any]
     observed_at: datetime
     source_evidence_id: str | None = None
     confidence: int = 100
@@ -88,7 +88,9 @@ class BusinessAttributeRepository:
             return existing, False
         previous_value = attribute_value(existing)
         value_changed = existing is None or previous_value != fact.value
-        value_type, value_text, value_number, value_boolean = _typed_value(fact.value)
+        value_type, value_text, value_number, value_boolean, value_json = _typed_value(
+            fact.value
+        )
         definition = self._attribute_definition(attribute_key)
         scored = score_attribute(
             attribute_key,
@@ -130,6 +132,7 @@ class BusinessAttributeRepository:
                 value_text=value_text,
                 value_number=value_number,
                 value_boolean=value_boolean,
+                value_json=value_json,
                 confidence=fact.confidence,
                 opportunity_score=scored.score,
                 score_version=scored.version,
@@ -151,6 +154,7 @@ class BusinessAttributeRepository:
             existing.value_text = value_text
             existing.value_number = value_number
             existing.value_boolean = value_boolean
+            existing.value_json = value_json
             existing.confidence = fact.confidence
             existing.opportunity_score = scored.score
             existing.score_version = scored.version
@@ -213,6 +217,8 @@ def attribute_value(fact: BusinessAttributeModel | None) -> Any:
         return fact.value_boolean
     if fact.value_type == "number":
         return fact.value_number
+    if fact.value_type == "json":
+        return fact.value_json
     return fact.value_text
 
 
@@ -220,12 +226,16 @@ def _fact_key(key: BusinessAttributeKey | str) -> str:
     return key.value if isinstance(key, BusinessAttributeKey) else key
 
 
-def _typed_value(value: str | float | bool) -> tuple[str, str | None, float | None, bool | None]:
+def _typed_value(
+    value: str | float | bool | dict[str, Any] | list[Any],
+) -> tuple[str, str | None, float | None, bool | None, Any | None]:
     if isinstance(value, bool):
-        return "boolean", None, None, value
+        return "boolean", None, None, value, None
     if isinstance(value, (int, float)):
-        return "number", None, float(value), None
-    return "text", str(value), None, None
+        return "number", None, float(value), None, None
+    if isinstance(value, (dict, list)):
+        return "json", None, None, None, value
+    return "text", str(value), None, None, None
 
 
 def _aware(value: datetime) -> datetime:
