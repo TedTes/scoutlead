@@ -106,7 +106,7 @@ function useRevealOnScroll<T extends HTMLElement>(rootMargin = "0px") {
   return [ref, active] as const;
 }
 
-const HERO_HIGHLIGHT_TEXT = "real evidence";
+const HERO_HIGHLIGHT_TEXT = "a better website";
 
 function TypewriterHighlight({ active }: { active: boolean }) {
   const [typed, setTyped] = useState(() => (prefersReducedMotion() ? HERO_HIGHLIGHT_TEXT.length : 0));
@@ -200,13 +200,13 @@ function LandingPage({ authEnabled }: { authEnabled: boolean }) {
           <div className="landing-hero-inner">
             <div className="landing-hero-head">
               <div className="landing-copy">
-                <p className="landing-eyebrow">Evidence-backed local business discovery</p>
+                <p className="landing-eyebrow">Local business website leads</p>
                 <h1>
-                  Find the right local businesses, backed by <TypewriterHighlight active={heroActive} />
+                  Find local businesses that need <TypewriterHighlight active={heroActive} />
                 </h1>
                 <p className="landing-lede">
-                  Define an audience once — trade, market, the signals that mean opportunity. ScoutLead returns
-                  matching businesses with the evidence behind each.
+                  Search by trade and city, review why each business matched, then shortlist and prepare
+                  personalized outreach.
                 </p>
               </div>
             </div>
@@ -606,27 +606,8 @@ function AnimatedPreview() {
     return () => timers.forEach(clearTimeout);
   }, [cycle]);
 
-  const heroStep =
-    screen === "loading" || (screen === "builder" && criteriaStep >= 3) || createCursor || createPressed
-      ? 2
-      : screen === "builder"
-        ? (criteriaStep >= 1 ? 1 : 0)
-        : criteriaStep >= 3
-          ? 3
-          : 0;
-
   return (
-    <>
-      <div className="landing-hero-chips" aria-label="Lead search creation steps">
-        <HeroStepChip active={heroStep === 0} number="01" label="Find leads" />
-        <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
-        <HeroStepChip active={heroStep === 1} number="02" label="Set criteria" />
-        <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
-        <HeroStepChip active={heroStep === 2} number="03" label="Start search" />
-        <span className="landing-hero-chip-arrow" aria-hidden="true">→</span>
-        <HeroStepChip active={heroStep === 3} number="04" label="Leads" />
-      </div>
-      <div className={`landing-preview preview-app landing-workspace-preview is-${screen}`} aria-label="ScoutLead saved-search workspace preview">
+    <div className={`landing-preview preview-app landing-workspace-preview is-${screen}`} aria-label="ScoutLead saved-search workspace preview">
       <PreviewRail activeManage="" activeRun="Toronto HVAC Low Reviews" shortlistedCount={shortlisted ? 1 : 0} />
       <div className="preview-main-panel">
         <div className="preview-audience-bar">
@@ -685,16 +666,7 @@ function AnimatedPreview() {
           </div>
         </div>
       </div>
-      </div>
-    </>
-  );
-}
-
-function HeroStepChip({ active, label, number }: { active: boolean; label: string; number: string }) {
-  return (
-    <span className={`landing-hero-chip${active ? " is-active" : ""}`}>
-      <b>{number}</b> {label}
-    </span>
+    </div>
   );
 }
 
