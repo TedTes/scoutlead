@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import worldMapTextureUrl from "../assets/world-map-equirectangular.svg";
-import { getClerkPublishableKey, isAuthDisabled } from "../config/env";
+import { getApiBaseUrl, getClerkPublishableKey, isAuthDisabled } from "../config/env";
 import { AuthLoadingScreen } from "./AuthLoadingScreen";
 
 const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
@@ -59,6 +59,13 @@ function RootAppContent({ authEnabled }: { authEnabled: boolean }) {
 
   if (path === "/app/admin") return <LegacyAdminRedirect />;
   if (!isProtectedRoute(path)) return <LandingPage authEnabled={authEnabled} />;
+  if (!getApiBaseUrl()) {
+    return (
+      <main className="auth-loading-screen">
+        <p role="alert">ScoutLead is unavailable because the service connection is missing.</p>
+      </main>
+    );
+  }
 
   return (
     <Suspense fallback={<AuthLoadingScreen />}>

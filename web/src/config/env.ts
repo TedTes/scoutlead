@@ -1,5 +1,6 @@
 export function getApiBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  return configuredUrl || (import.meta.env.DEV ? "http://localhost:8000" : "");
 }
 
 export function getStaticApiToken() {
