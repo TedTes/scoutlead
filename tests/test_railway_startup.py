@@ -71,3 +71,13 @@ def test_railway_services_use_dedicated_runtime_images() -> None:
     assert "playwright install --with-deps chromium" in worker_dockerfile
     assert "[website-capture]" in worker_dockerfile
     assert "FROM node:24-slim" in web_dockerfile
+
+
+def test_railway_web_image_requires_frontend_build_variables() -> None:
+    dockerfile = (Path(__file__).parents[1] / "web" / "Dockerfile").read_text()
+    builder = dockerfile.split("\nFROM ", maxsplit=1)[0]
+    build_setup = builder.split("npm run build", maxsplit=1)[0]
+
+    for variable in ("VITE_API_BASE_URL", "VITE_CLERK_PUBLISHABLE_KEY"):
+        assert f"ARG {variable}\n" in build_setup
+        assert "${" + variable + ":?" in build_setup

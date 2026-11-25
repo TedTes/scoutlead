@@ -135,7 +135,7 @@ Expected runtime commands after config sync:
 
 Do not use the API or worker start command on the web service. If a Railway service already has stale Build, Watch, Root Directory, or Start Command settings from earlier manual setup, clear them or let the workflow sync the values from `deploy/railway/`.
 
-Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in shared environments once Alembic migrations are running. Set `API_AUTH_TOKEN` on the API and the same value as `VITE_API_TOKEN` on the web service. For user auth, set `VITE_CLERK_PUBLISHABLE_KEY` on the web service and set `REQUIRE_USER_AUTH=true` plus `CLERK_JWT_ISSUER` or `CLERK_JWKS_URL` on the API service.
+Use the examples in `deploy/railway/` for service variables. Set `AUTO_CREATE_TABLES=false` in shared environments once Alembic migrations are running. The web image build requires `VITE_API_BASE_URL` and `VITE_CLERK_PUBLISHABLE_KEY` on the web service. Set `REQUIRE_USER_AUTH=true` plus `CLERK_JWT_ISSUER` or `CLERK_JWKS_URL` on the API service. Keep `API_AUTH_TOKEN` on the server for service clients.
 
 ### GitHub Actions Release Pipeline
 
