@@ -33,7 +33,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AudienceProfileScreen } from "./AudienceProfileScreen";
 import { searchIntentFromRun } from "../components/SearchIntentChips";
-import { ExportBusinessesDialog, Modal, useToast } from "../shared-ui";
+import { BusinessSelectionList, ExportBusinessesDialog, Modal, useBusinessSelection, useToast } from "../shared-ui";
 import { dedupeContacts, useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
@@ -89,13 +89,13 @@ type ContactActivityItem = {
   tone: ContactActivityTone;
 };
 type PendingBusinessExport = {
-  businessCount: number;
   scope: string;
   suggestedName: string;
   loadBusinesses: () => Promise<DiscoveryResult[]>;
 };
+type BulkLeadAction = "shortlist" | "remove";
 type BulkReview = {
-  action: "drafts" | "remove";
+  action: "drafts" | BulkLeadAction;
   allMatching: boolean;
   contacts: DiscoveryResult[] | null;
   error?: string;
@@ -205,7 +205,7 @@ export function ResultsScreen({
   const [bulkReview, setBulkReview] = useState<BulkReview | null>(null);
   const [generatingBulkDrafts, setGeneratingBulkDrafts] = useState(false);
   const [bulkSelectedContactIds, setBulkSelectedContactIds] = useState<string[]>([]);
-  const [bulkLeadAction, setBulkLeadAction] = useState<"shortlist" | "remove" | "">("");
+  const [bulkLeadAction, setBulkLeadAction] = useState<BulkLeadAction | "">("");
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [profileDetailsOpen, setProfileDetailsOpen] = useState(false);
@@ -424,7 +424,7 @@ export function ResultsScreen({
   };
 
   const closeBulkReview = () => {
-    if (!generatingBulkDrafts && bulkLeadAction !== "remove") setBulkReview(null);
+    if (!generatingBulkDrafts && !bulkLeadAction) setBulkReview(null);
   };
 
   const openBulkReview = async (action: BulkReview["action"]) => {
@@ -440,13 +440,10 @@ export function ResultsScreen({
     }
   };
 
-  const updateSelectedLeads = async (action: "shortlist" | "remove", reviewedContacts?: DiscoveryResult[]) => {
-    if (!(["inbox", "shortlisted"] as LeadWorkflowView[]).includes(workflowView) || bulkLeadAction) return;
+  const updateSelectedLeads = async (action: BulkLeadAction, selected: DiscoveryResult[]) => {
+    if (!canRemoveSelection || bulkLeadAction || !selected.length) return;
     setBulkLeadAction(action);
     try {
-      const selected = reviewedContacts ?? await loadBusinessesInScope(true);
-      if (!selected.length) return;
-
       let cursor = 0;
       const results: PromiseSettledResult<DiscoveryResult>[] = [];
       const worker = async () => {
@@ -474,7 +471,7 @@ export function ResultsScreen({
           await loadWorkspaceLeads(workflowView, Math.max(0, Math.ceil(page.total / page.limit) - 1) * page.limit, leadSearch);
         }
       }
-      if (action === "remove") setBulkReview(null);
+      setBulkReview(null);
       setBulkSelectedContactIds([]);
       showToast({
         title: action === "shortlist"
@@ -774,7 +771,6 @@ export function ResultsScreen({
   const openBusinessExport = () => {
     const viewLabel = workflowViewLabel(workflowView);
     setPendingExport({
-      businessCount: actionScopeCount,
       scope: bulkSelecting ? `Selected in ${viewLabel}` : `${viewLabel} · ${leadSearch.trim() ? "Search results" : "All pages"}`,
       suggestedName: defaultExportFileName(isGlobalView ? viewLabel : exportName),
       loadBusinesses: () => loadBusinessesInScope(bulkSelecting),
@@ -812,6 +808,7 @@ export function ResultsScreen({
           <div className="results-header-actions" role="group" aria-label="Lead actions">
             <button
               aria-label="Export"
+              aria-haspopup="dialog"
               className="results-header-action"
               data-tooltip="Export businesses"
               disabled={leadListPending || Boolean(workspaceLeadsError) || !actionScopeCount}
@@ -834,7 +831,7 @@ export function ResultsScreen({
               </button>
             ) : null}
             {workflowView === "inbox" && bulkSelecting ? (
-              <button className="results-header-action" aria-label="Shortlist" data-tooltip="Add to Shortlisted" disabled={!canReviewBusinesses} type="button" onClick={() => void updateSelectedLeads("shortlist")}>
+              <button className="results-header-action" aria-label="Shortlist" aria-haspopup="dialog" data-tooltip="Add to Shortlisted" disabled={!canReviewBusinesses} type="button" onClick={() => void openBulkReview("shortlist")}>
                 {bulkLeadAction === "shortlist" ? <RotateCw className="spin" size={18} aria-hidden="true" /> : <Star size={18} aria-hidden="true" />}
               </button>
             ) : null}
@@ -1074,9 +1071,9 @@ export function ResultsScreen({
         <BulkReviewDialog
           review={bulkReview}
           shortlisted={workflowView === "shortlisted"}
-          removing={bulkLeadAction === "remove"}
+          busy={Boolean(bulkLeadAction)}
           onClose={closeBulkReview}
-          onConfirm={(reviewedContacts) => void updateSelectedLeads("remove", reviewedContacts)}
+          onConfirm={(action, reviewedContacts) => void updateSelectedLeads(action, reviewedContacts)}
         />,
         document.body,
       ) : null}
@@ -1132,7 +1129,6 @@ export function ResultsScreen({
                     onClick={() => {
                       setProfileDetailsOpen(false);
                       setPendingExport({
-                        businessCount: approvedShortlistContacts.length,
                         scope: "Approved shortlist",
                         suggestedName: defaultExportFileName(exportName, "approved-shortlist"),
                         loadBusinesses: async () => approvedShortlistContacts,
@@ -3048,59 +3044,45 @@ function ScheduleSearchDialog({
   );
 }
 
-function ReviewBusinessList({ contacts, label, status }: {
-  contacts: DiscoveryResult[];
-  label: string;
-  status?: (contact: DiscoveryResult) => string | undefined;
-}) {
-  return (
-    <ul className="bulk-review-list" aria-label={label} tabIndex={0}>
-      {contacts.map((contact) => {
-        const note = status?.(contact);
-        return (
-          <li key={contact.id}>
-            <div>
-              <strong>{contact.company_name}</strong>
-              {contact.geography ? <small>{contact.geography}</small> : null}
-            </div>
-            {note ? <small className="bulk-review-status">{note}</small> : null}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function BulkReviewDialog({ review, shortlisted, removing, onClose, onConfirm }: {
+function BulkReviewDialog({ review, shortlisted, busy, onClose, onConfirm }: {
   review: BulkReview;
   shortlisted: boolean;
-  removing: boolean;
+  busy: boolean;
   onClose: () => void;
-  onConfirm: (contacts: DiscoveryResult[]) => void;
+  onConfirm: (action: BulkLeadAction, contacts: DiscoveryResult[]) => void;
 }) {
   const { contacts, error, action, allMatching } = review;
+  const selection = useBusinessSelection(contacts);
   const scope = allMatching ? "All matching businesses" : "Selected businesses";
-  const title = action === "drafts" ? "Generate drafts" : shortlisted ? "Remove from Shortlisted" : "Remove leads";
+  const title = action === "drafts" ? "Generate drafts"
+    : action === "shortlist" ? "Add to Shortlisted"
+    : shortlisted ? "Remove from Shortlisted" : "Remove leads";
+  const actionLabel = action === "shortlist" ? "Shortlist" : "Remove";
+  const destination = action === "shortlist" ? "Shortlisted" : shortlisted ? "Leads" : "Dismissed";
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal title={title} className="bulk-review-modal" onClose={onClose}>
       {error ? <p role="alert">{error}</p> : !contacts ? (
         <div className="loading-indicator" aria-live="polite"><span className="sl-spin" aria-hidden="true" /> Loading selection…</div>
       ) : contacts.length === 0 ? <p>No selected businesses are available in this view.</p> : (
         <>
-          <p>{scope} will {shortlisted ? "return to Leads." : "move to Dismissed."}</p>
-          <ReviewBusinessList contacts={contacts} label={scope} />
+          <p>Checked businesses will move to {destination}.</p>
+          <BusinessSelectionList contacts={contacts} label={scope} selection={selection} disabled={busy} />
         </>
       )}
       <div className="dialog-actions">
-        <button className="secondary" type="button" disabled={removing} onClick={onClose}>Cancel</button>
-        {action === "remove" && contacts?.length ? (
-          <button className="runbtn" type="button" disabled={removing} onClick={() => onConfirm(contacts)}>
-            {removing ? "Removing…" : `Remove ${contacts.length}`}
+        <button className="secondary" type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        {action !== "drafts" && contacts?.length ? (
+          <button className="runbtn" type="button" disabled={busy || !selection.selected.length} onClick={() => onConfirm(action, selection.selected)}>
+            {busy ? "Updating…" : `${actionLabel} ${selection.selected.length}`}
           </button>
         ) : null}
       </div>
     </Modal>
   );
+}
+
+function canGenerateDraft(contact: DiscoveryResult) {
+  return Boolean(contact.audience_result_id || contact.id.startsWith("audience_result_"));
 }
 
 function PersonalizedBulkOutreachPanel({
@@ -3145,11 +3127,8 @@ function PersonalizedBulkOutreachPanel({
     return () => { active = false; };
   }, [territoryApi, showToast]);
 
-  const targetContacts = useMemo(
-    () => contacts.filter((contact) => Boolean(contact.audience_result_id || contact.id.startsWith("audience_result_"))),
-    [contacts],
-  );
-  const targetIds = new Set(targetContacts.map((contact) => contact.id));
+  const selection = useBusinessSelection(contacts, canGenerateDraft);
+  const targetContacts = selection.selected;
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const generatedCount = Object.values(generationState).filter((state) => state === "generated").length;
@@ -3353,7 +3332,6 @@ function PersonalizedBulkOutreachPanel({
           <p>One structure, personalized per business from its verified evidence.</p>
         </div>
         <div className="personalized-outreach-header-actions">
-          <span className="personalized-outreach-count">{contacts.length} {contacts.length === 1 ? "business" : "businesses"}</span>
           <button className="link-button" type="button" aria-label="Close bulk outreach" disabled={generating} onClick={onClose}><X size={17} /></button>
         </div>
       </header>
@@ -3361,8 +3339,8 @@ function PersonalizedBulkOutreachPanel({
       <div className="personalized-outreach-body">
         <section className="personalized-outreach-section">
           <div className="personalized-section-heading"><span>{scope}</span></div>
-          <ReviewBusinessList contacts={contacts} label={scope} status={(contact) => {
-            if (!targetIds.has(contact.id)) return "Drafts unavailable for this business";
+          <BusinessSelectionList contacts={contacts} label={scope} selection={selection} disabled={generating} status={(contact) => {
+            if (!selection.selectableIds.has(contact.id)) return "Drafts unavailable for this business";
             if (generationErrors[contact.id]) return generationErrors[contact.id];
             if (generationState[contact.id] === "working") return "Generating…";
             if (generationState[contact.id] === "generated") return "Drafts ready";

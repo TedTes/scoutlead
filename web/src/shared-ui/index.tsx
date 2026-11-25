@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import type { DiscoveryResult } from "../types/domain";
@@ -104,14 +104,91 @@ export function Modal({
   );
 }
 
+export function useBusinessSelection(
+  contacts: DiscoveryResult[] | null,
+  canSelect?: (contact: DiscoveryResult) => boolean,
+) {
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(() => new Set());
+  const selectable = useMemo(() => canSelect ? contacts?.filter(canSelect) ?? [] : contacts ?? [], [contacts, canSelect]);
+  const selectableIds = useMemo(() => new Set(selectable.map((contact) => contact.id)), [selectable]);
+  const selected = useMemo(() => selectable.filter((contact) => !excludedIds.has(contact.id)), [selectable, excludedIds]);
+  const selectedIds = useMemo(() => new Set(selected.map((contact) => contact.id)), [selected]);
+
+  return {
+    selectableIds,
+    selected,
+    selectedIds,
+    setAll(checked: boolean) {
+      setExcludedIds(checked ? new Set() : selectableIds);
+    },
+    toggle(id: string) {
+      setExcludedIds((current) => {
+        const next = new Set(current);
+        if (!next.delete(id)) next.add(id);
+        return next;
+      });
+    },
+  };
+}
+
+export function BusinessSelectionList({ contacts, label, selection, disabled, status }: {
+  contacts: DiscoveryResult[];
+  label: string;
+  selection: ReturnType<typeof useBusinessSelection>;
+  disabled?: boolean;
+  status?: (contact: DiscoveryResult) => string | undefined;
+}) {
+  const { selectedIds, selectableIds } = selection;
+  const allChecked = selectableIds.size > 0 && selectedIds.size === selectableIds.size;
+
+  return (
+    <div className="bulk-review-selection">
+      <div className="bulk-review-select-all">
+        <label>
+          <input
+            type="checkbox"
+            checked={allChecked}
+            disabled={disabled || !selectableIds.size}
+            ref={(input) => { if (input) input.indeterminate = selectedIds.size > 0 && !allChecked; }}
+            onChange={(event) => selection.setAll(event.currentTarget.checked)}
+          />
+          Select all
+        </label>
+        <small aria-live="polite">{selectedIds.size} of {contacts.length} selected</small>
+      </div>
+      <ul className="bulk-review-list" aria-label={label} tabIndex={0}>
+        {contacts.map((contact) => {
+          const note = status?.(contact);
+          return (
+            <li key={contact.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${contact.company_name}`}
+                  checked={selectedIds.has(contact.id)}
+                  disabled={disabled || !selectableIds.has(contact.id)}
+                  onChange={() => selection.toggle(contact.id)}
+                />
+                <span>
+                  <strong>{contact.company_name}</strong>
+                  {contact.geography ? <small>{contact.geography}</small> : null}
+                </span>
+              </label>
+              {note ? <small className="bulk-review-status">{note}</small> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function ExportBusinessesDialog({
-  businessCount,
   suggestedName,
   scope,
   loadBusinesses,
   onClose,
 }: {
-  businessCount: number;
   suggestedName: string;
   scope: string;
   loadBusinesses: () => Promise<DiscoveryResult[]>;
@@ -120,44 +197,50 @@ export function ExportBusinessesDialog({
   const { showToast } = useToast();
   const [fileName, setFileName] = useState(suggestedName);
   const [format, setFormat] = useState<BusinessExportFormat>("csv");
-  const [exporting, setExporting] = useState(false);
+  const [businesses, setBusinesses] = useState<DiscoveryResult[] | null>(null);
   const [error, setError] = useState("");
+  const selection = useBusinessSelection(businesses);
   const hasFileName = Boolean(baseExportFileName(fileName));
   const downloadName = normalizeExportFileName(fileName, format);
+  const canDownload = hasFileName && selection.selected.length > 0;
 
-  const download = async () => {
-    if (!hasFileName || exporting) return;
-    setError("");
-    setExporting(true);
+  useEffect(() => {
+    let active = true;
+    void loadBusinesses().then((rows) => {
+      if (active) setBusinesses(rows);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : "Could not load businesses for export.");
+    });
+    return () => { active = false; };
+  }, [loadBusinesses]);
+
+  const download = () => {
+    if (!canDownload) return;
     try {
-      const businesses = await loadBusinesses();
-      if (!businesses.length) {
-        setError("There are no businesses to export in this selection.");
-        return;
-      }
-      exportBusinesses(businesses, downloadName, format);
+      exportBusinesses(selection.selected, downloadName, format);
       showToast({ title: "Export downloaded", message: downloadName, tone: "green" });
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load businesses for export.");
-    } finally {
-      setExporting(false);
+      setError(cause instanceof Error ? cause.message : "Could not download the export.");
     }
   };
 
   return (
-    <Modal title="Export businesses" onClose={exporting ? () => undefined : onClose}>
+    <Modal title="Export businesses" className="bulk-review-modal" onClose={onClose}>
       <form
         className="export-contacts-form"
         onSubmit={(event) => {
           event.preventDefault();
-          void download();
+          download();
         }}
       >
-        <p>{scope} · {businessCount} {businessCount === 1 ? "business" : "businesses"}</p>
+        <p>{scope}</p>
+        {businesses?.length ? <BusinessSelectionList contacts={businesses} label={scope} selection={selection} />
+          : businesses ? <p>No businesses to export in this view.</p>
+          : !error ? <div className="loading-indicator" aria-live="polite"><span className="sl-spin" aria-hidden="true" /> Loading businesses…</div> : null}
         <label className="field">
           <span>Format</span>
-          <select value={format} disabled={exporting} onChange={(event) => setFormat(event.target.value === "json" ? "json" : "csv")}>
+          <select value={format} onChange={(event) => setFormat(event.target.value === "json" ? "json" : "csv")}>
             <option value="csv">CSV</option>
             <option value="json">JSON</option>
           </select>
@@ -166,7 +249,6 @@ export function ExportBusinessesDialog({
           <span>File name</span>
           <input
             autoFocus
-            disabled={exporting}
             placeholder={suggestedName}
             value={fileName}
             onChange={(event) => setFileName(event.target.value)}
@@ -178,11 +260,11 @@ export function ExportBusinessesDialog({
         </p>
         {error ? <p role="alert">{error}</p> : null}
         <div className="dialog-actions">
-          <button className="secondary" disabled={exporting} type="button" onClick={onClose}>
+          <button className="secondary" type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="runbtn" disabled={!hasFileName || exporting} type="submit">
-            {exporting ? "Preparing…" : `Download ${format.toUpperCase()}`}
+          <button className="runbtn" disabled={!canDownload} type="submit">
+            Download {format.toUpperCase()}
           </button>
         </div>
       </form>

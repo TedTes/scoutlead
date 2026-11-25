@@ -22,6 +22,7 @@ import {
   Users,
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -279,6 +280,13 @@ function AppShell({
 
   const workspaceExportCount = workflowCounts.inbox + workflowCounts.shortlisted
     + workflowCounts.contacted + workflowCounts.dismissed;
+  const loadWorkspaceBusinessesForExport = useCallback(async () => {
+    const [active, dismissed] = await Promise.all([
+      territoryApi.getAllWorkspaceLeads({ view: "all" }),
+      territoryApi.getAllWorkspaceLeads({ view: "dismissed" }),
+    ]);
+    return [...active, ...dismissed];
+  }, [territoryApi]);
 
   useEffect(() => {
     if (!error) return;
@@ -596,16 +604,9 @@ function AppShell({
       ) : null}
       {exportDialogOpen ? (
         <ExportBusinessesDialog
-          businessCount={workspaceExportCount}
           suggestedName={defaultExportFileName("ScoutLead workspace")}
           scope="Leads, Shortlisted, Contacted, and Dismissed"
-          loadBusinesses={async () => {
-            const [active, dismissed] = await Promise.all([
-              territoryApi.getAllWorkspaceLeads({ view: "all" }),
-              territoryApi.getAllWorkspaceLeads({ view: "dismissed" }),
-            ]);
-            return [...active, ...dismissed];
-          }}
+          loadBusinesses={loadWorkspaceBusinessesForExport}
           onClose={() => setExportDialogOpen(false)}
         />
       ) : null}
