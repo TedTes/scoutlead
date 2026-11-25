@@ -35,7 +35,7 @@ import {
 import { createPortal } from "react-dom";
 import { renderScreen } from "../routes/screen-router";
 import { TraceDebugScreen } from "../screens/TraceDebugScreen";
-import { ExportContactsDialog, Modal, ToastProvider, useToast } from "../shared-ui";
+import { ExportBusinessesDialog, Modal, ToastProvider, useToast } from "../shared-ui";
 import { AppDataProvider, isActiveLead, useAppData } from "../state/app-data";
 import type {
   AudienceFolder,
@@ -44,18 +44,15 @@ import type {
   Territory,
 } from "../types/domain";
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
-import {
-  baseExportFileName,
-  defaultExportFileName,
-  exportContactsCsv,
-  normalizeExportFileName,
-} from "../utils/export-file";
+import { defaultExportFileName } from "../utils/export-file";
 import { formatDate } from "../utils/format";
 
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
   accountSlot?: ReactNode;
   accountId?: string;
+  accountEmail?: string;
+  accountName?: string;
   approverLabel?: string;
 };
 
@@ -65,11 +62,11 @@ const RAIL_WIDTH_DEFAULT = 244;
 const RAIL_WIDTH_MIN = 220;
 const RAIL_WIDTH_MAX = 420;
 
-export function App({ getAuthToken, accountSlot, accountId, approverLabel }: AppProps = {}) {
+export function App({ getAuthToken, accountSlot, accountId, accountEmail, accountName, approverLabel }: AppProps = {}) {
   return (
     <ToastProvider>
       <AppDataProvider getAuthToken={getAuthToken} approverLabel={approverLabel}>
-        <AppShell accountId={accountId} accountName={approverLabel} accountSlot={accountSlot} />
+        <AppShell accountId={accountId} accountEmail={accountEmail} accountName={accountName || approverLabel} accountSlot={accountSlot} />
       </AppDataProvider>
     </ToastProvider>
   );
@@ -77,10 +74,12 @@ export function App({ getAuthToken, accountSlot, accountId, approverLabel }: App
 
 function AppShell({
   accountId,
+  accountEmail,
   accountName,
   accountSlot,
 }: {
   accountId?: string;
+  accountEmail?: string;
   accountName?: string;
   accountSlot?: ReactNode;
 }) {
@@ -102,7 +101,6 @@ function AppShell({
   const [audienceMenuId, setAudienceMenuId] = useState("");
   const [folderMenuId, setFolderMenuId] = useState("");
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [exportFileName, setExportFileName] = useState("");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [railWidth, setRailWidth] = useState(() =>
@@ -125,6 +123,7 @@ function AppShell({
     profileBatch,
     productDiscoveryRuns,
     productContacts,
+    territoryApi,
     workspaceOverview,
     territories,
     audienceFolders,
@@ -138,7 +137,6 @@ function AppShell({
     updateProfile,
   } = useAppData();
   const selectedProduct = products.find((product) => product.id === selectedProductId);
-  const selectedProductName = selectedProduct ? displayProductName(selectedProduct) : "No product";
   const isTraceRoute =
     routePath === "/trace" ||
     routePath === "/debug/trace" ||
@@ -150,6 +148,7 @@ function AppShell({
     selectedProfileId && selectedRun?.territory_id === selectedProfileId,
   );
   const activeScreen = resolveActiveScreen(viewMode, selectedRunExists || Boolean(selectedProfileId));
+  const resultsAccountLabel = accountEmail || accountName;
   const recentProductContacts = productContacts.filter((contact) => isWithinLastSevenDays(contact.created_at));
   const activeProductContacts = productContacts.filter(isActiveLead);
   const overviewCounts = workspaceOverview?.counts;
@@ -277,42 +276,8 @@ function AppShell({
     });
   };
 
-  const handleExportProductContacts = () => {
-    if (!productContacts.length) {
-      showToast({
-        title: "No contacts to export",
-        message: "Run a search before exporting contacts.",
-        tone: "amber",
-      });
-      return;
-    }
-    setExportFileName(defaultExportFileName(selectedProductName));
-    setExportDialogOpen(true);
-  };
-
-  const confirmExportProductContacts = () => {
-    if (!productContacts.length) {
-      setExportDialogOpen(false);
-      showToast({
-        title: "No contacts to export",
-        message: "Run a search before exporting contacts.",
-        tone: "amber",
-      });
-      return;
-    }
-    if (!baseExportFileName(exportFileName)) {
-      showToast({ title: "Name the export file", message: "Enter a filename before exporting.", tone: "amber" });
-      return;
-    }
-    const downloadName = normalizeExportFileName(exportFileName);
-    exportContactsCsv(productContacts, downloadName);
-    setExportDialogOpen(false);
-    showToast({
-      title: "Contacts exported",
-      message: `${productContacts.length} contacts downloaded as ${downloadName}.`,
-      tone: "green",
-    });
-  };
+  const workspaceExportCount = workflowCounts.inbox + workflowCounts.shortlisted
+    + workflowCounts.contacted + workflowCounts.dismissed;
 
   useEffect(() => {
     if (!error) return;
@@ -355,6 +320,17 @@ function AppShell({
   const railStyle = {
     "--rail-width": `${railWidth}px`,
   } as CSSProperties;
+  const isGlobalShortlist = activeScreen === "results" && !isTraceRoute && products.length > 0
+    && !selectedProfileId && !selectedDiscoveryRunId && leadWorkflowView === "shortlisted";
+  const mobileAccountLabel = accountName || accountEmail;
+  const resultsAccountControl = (
+    <div className="account-identity results-account-control">
+      {resultsAccountLabel ? (
+        <span title={resultsAccountLabel}>{resultsAccountLabel}</span>
+      ) : null}
+      <AccountControl accountSlot={accountSlot} placement="desktop" />
+    </div>
+  );
 
   return (
     <div className={mobileRailOpen ? "console rail-open" : "console"}>
@@ -369,9 +345,14 @@ function AppShell({
         </button>
         <div className="mobile-brand">
           <span className="brand-mark">S</span>
-          <strong>ScoutLead</strong>
+          <strong className={isGlobalShortlist ? "shortlist-title" : undefined}>
+            {isGlobalShortlist ? "All shortlisted" : "ScoutLead"}
+          </strong>
         </div>
-        <AccountControl accountSlot={accountSlot} placement="mobile" />
+        <div className="account-identity mobile-account-control">
+          {mobileAccountLabel ? <span title={mobileAccountLabel}>{mobileAccountLabel}</span> : null}
+          <AccountControl accountSlot={accountSlot} placement="mobile" />
+        </div>
       </header>
 
       {mobileRailOpen ? (
@@ -484,8 +465,8 @@ function AppShell({
           activeScreen={activeScreen}
           integrationCount={getEnabledIntegrationCount(selectedProduct, Boolean(gmailConnectionStatus?.connected))}
           hasProduct={Boolean(selectedProduct)}
-          hasContacts={productContacts.length > 0}
-          onExport={handleExportProductContacts}
+          hasBusinesses={workspaceExportCount > 0}
+          onExport={() => setExportDialogOpen(true)}
           onIntegrations={() => selectScreen("integrations")}
           onProductSettings={() => selectScreen("product")}
         />
@@ -504,7 +485,14 @@ function AppShell({
       <section
         className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
       >
-        {activeScreen !== "results" ? (
+        {isGlobalShortlist ? (
+          <header className="desktop-account-bar shortlist-account-bar">
+            <nav aria-label="Lead context" className="results-breadcrumb">
+              <strong className="shortlist-title">All shortlisted</strong>
+            </nav>
+            {resultsAccountControl}
+          </header>
+        ) : activeScreen !== "results" ? (
           <header className={activeScreen === "product" ? "desktop-account-bar has-summary" : "desktop-account-bar"}>
             {activeScreen === "overview" || activeScreen === "audiences" ? (
               activeScreen === "audiences" ? (
@@ -563,13 +551,7 @@ function AppShell({
                 listRequestId: leadListRequestId,
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
-                onCreateAudience: startNewAudience,
-                accountControl: (
-                  <div className="results-account-control">
-                    {accountName ? <span title={accountName}>{accountName}</span> : null}
-                    <AccountControl accountSlot={accountSlot} placement="desktop" />
-                  </div>
-                ),
+                accountControl: isGlobalShortlist ? undefined : resultsAccountControl,
               },
               {
                 defaultFolderId: newAudienceFolderId,
@@ -611,16 +593,18 @@ function AppShell({
         />
       ) : null}
       {exportDialogOpen ? (
-        <ExportContactsDialog
-          contactCount={productContacts.length}
-          fileName={exportFileName}
-          placeholder={defaultExportFileName(selectedProductName)}
-          previewFileName={
-            baseExportFileName(exportFileName) ? normalizeExportFileName(exportFileName) : "filename.csv"
-          }
-          onChange={setExportFileName}
+        <ExportBusinessesDialog
+          businessCount={workspaceExportCount}
+          suggestedName={defaultExportFileName("ScoutLead workspace")}
+          scope="Leads, Shortlisted, Contacted, and Dismissed"
+          loadBusinesses={async () => {
+            const [active, dismissed] = await Promise.all([
+              territoryApi.getAllWorkspaceLeads({ view: "all" }),
+              territoryApi.getAllWorkspaceLeads({ view: "dismissed" }),
+            ]);
+            return [...active, ...dismissed];
+          }}
           onClose={() => setExportDialogOpen(false)}
-          onExport={confirmExportProductContacts}
         />
       ) : null}
       {renameAudience ? (
@@ -899,7 +883,7 @@ function AccountControl({ accountSlot, placement }: { accountSlot?: ReactNode; p
 
 function ProductManagementSection({
   activeScreen,
-  hasContacts,
+  hasBusinesses,
   hasProduct,
   integrationCount,
   onExport,
@@ -907,7 +891,7 @@ function ProductManagementSection({
   onProductSettings,
 }: {
   activeScreen: Screen;
-  hasContacts: boolean;
+  hasBusinesses: boolean;
   hasProduct: boolean;
   integrationCount: number;
   onExport: () => void;
@@ -945,17 +929,17 @@ function ProductManagementSection({
         {integrationCount > 0 ? <span className="mng-badge">{integrationCount} on</span> : null}
       </button>
       <button
-        className={hasContacts ? "mng-item" : "mng-item is-disabled"}
-        disabled={!hasContacts}
-        aria-label="Export all contacts"
-        title="Export all contacts"
+        className={hasBusinesses ? "mng-item" : "mng-item is-disabled"}
+        disabled={!hasBusinesses}
+        aria-label="Export workspace"
+        title="Export workspace"
         type="button"
         onClick={onExport}
       >
         <span className="mng-icon">
           <Download size={13} />
         </span>
-        <span className="mng-label-text">Export all contacts</span>
+        <span className="mng-label-text">Export workspace</span>
       </button>
     </section>
   );
@@ -1271,20 +1255,6 @@ function parseProfileValues(value: string) {
       .map((item) => item.trim())
       .filter(Boolean),
   )];
-}
-
-function displayProductName(product: Product) {
-  const savedName = product.product_name.trim();
-  if (savedName && !/^(new product|untitled product|product)$/i.test(savedName)) return savedName;
-  const text = (product.offer_summary || product.product_description || "").trim();
-  const labeledName = text.match(
-    /(?:one-liner|short(?:\s*\([^)]*\))?|headline)\s*:\s*([A-Z][A-Za-z0-9._-]{1,60})\b/i,
-  );
-  if (labeledName?.[1]) return labeledName[1];
-  const sentenceStartName = text.match(
-    /^([A-Z][A-Za-z0-9._-]{1,60})\s+(?:is|helps|turns|lets|allows|enables|gives|provides)\b/,
-  );
-  return sentenceStartName?.[1] || savedName || "Unnamed product";
 }
 
 function readStoredDimension(key: string, fallback: number, min: number, max: number) {

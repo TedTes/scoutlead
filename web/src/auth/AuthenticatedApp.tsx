@@ -61,6 +61,8 @@ function ClerkGate({ adminRoute }: { adminRoute: boolean }) {
       getAuthToken={getAuthToken}
       accountSlot={accountSlot}
       accountId={user?.id}
+      accountEmail={user?.primaryEmailAddress?.emailAddress || undefined}
+      accountName={user?.fullName || user?.username || undefined}
       approverLabel={approverLabel}
     />
   );

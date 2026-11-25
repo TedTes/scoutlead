@@ -1155,7 +1155,7 @@ function PreviewRail({
         <span>Manage</span>
         <PreviewManageRow icon={<Settings size={13} />} active={activeManage === "Settings"} label="Settings" />
         <PreviewManageRow icon={<Plug size={13} />} active={activeManage === "Integrations"} label="Integrations" />
-        <PreviewManageRow icon={<Download size={13} />} active={false} label="Export all contacts" />
+        <PreviewManageRow icon={<Download size={13} />} active={false} label="Export workspace" />
       </div>
       <div className="preview-account-row">
         <span />

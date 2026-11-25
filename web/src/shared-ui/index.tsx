@@ -1,7 +1,10 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
+import type { DiscoveryResult } from "../types/domain";
 import type { Tone } from "../types/navigation";
+import { baseExportFileName, exportBusinesses, normalizeExportFileName } from "../utils/export-file";
+import type { BusinessExportFormat } from "../utils/export-file";
 
 type ToastInput = {
   title: string;
@@ -101,55 +104,85 @@ export function Modal({
   );
 }
 
-export function ExportContactsDialog({
-  contactCount,
-  fileName,
-  placeholder = "contacts",
-  previewFileName,
-  onChange,
+export function ExportBusinessesDialog({
+  businessCount,
+  suggestedName,
+  scope,
+  loadBusinesses,
   onClose,
-  onExport,
 }: {
-  contactCount: number;
-  fileName: string;
-  placeholder?: string;
-  previewFileName: string;
-  onChange: (value: string) => void;
+  businessCount: number;
+  suggestedName: string;
+  scope: string;
+  loadBusinesses: () => Promise<DiscoveryResult[]>;
   onClose: () => void;
-  onExport: () => void;
 }) {
-  const hasFileName = Boolean(fileName.trim().replace(/\.csv$/i, "").trim());
+  const { showToast } = useToast();
+  const [fileName, setFileName] = useState(suggestedName);
+  const [format, setFormat] = useState<BusinessExportFormat>("csv");
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  const hasFileName = Boolean(baseExportFileName(fileName));
+  const downloadName = normalizeExportFileName(fileName, format);
+
+  const download = async () => {
+    if (!hasFileName || exporting) return;
+    setError("");
+    setExporting(true);
+    try {
+      const businesses = await loadBusinesses();
+      if (!businesses.length) {
+        setError("There are no businesses to export in this selection.");
+        return;
+      }
+      exportBusinesses(businesses, downloadName, format);
+      showToast({ title: "Export downloaded", message: downloadName, tone: "green" });
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load businesses for export.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
-    <Modal title="Export contacts" onClose={onClose}>
+    <Modal title="Export businesses" onClose={exporting ? () => undefined : onClose}>
       <form
         className="export-contacts-form"
         onSubmit={(event) => {
           event.preventDefault();
-          onExport();
+          void download();
         }}
       >
-        <p>Choose a filename for this CSV export.</p>
+        <p>{scope} · {businessCount} {businessCount === 1 ? "business" : "businesses"}</p>
+        <label className="field">
+          <span>Format</span>
+          <select value={format} disabled={exporting} onChange={(event) => setFormat(event.target.value === "json" ? "json" : "csv")}>
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+          </select>
+        </label>
         <label className="field">
           <span>File name</span>
           <input
             autoFocus
-            placeholder={placeholder}
+            disabled={exporting}
+            placeholder={suggestedName}
             value={fileName}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => setFileName(event.target.value)}
           />
           {!hasFileName ? <em>Enter a filename.</em> : null}
         </label>
         <p className="export-file-preview">
-          {contactCount} {contactCount === 1 ? "contact" : "contacts"} ·{" "}
-          {hasFileName ? previewFileName : "filename.csv"}
+          {hasFileName ? downloadName : `filename.${format}`}
         </p>
+        {error ? <p role="alert">{error}</p> : null}
         <div className="dialog-actions">
-          <button className="secondary" type="button" onClick={onClose}>
+          <button className="secondary" disabled={exporting} type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="runbtn" disabled={!hasFileName} type="submit">
-            Export CSV
+          <button className="runbtn" disabled={!hasFileName || exporting} type="submit">
+            {exporting ? "Preparing…" : `Download ${format.toUpperCase()}`}
           </button>
         </div>
       </form>

@@ -12,7 +12,6 @@ export function renderScreen(
     listRequestId?: number;
     view: LeadWorkflowView;
     onViewChange: (view: LeadWorkflowView) => void;
-    onCreateAudience?: () => void;
     accountControl?: ReactNode;
   } = {
     listRequestId: 0,
@@ -36,7 +35,6 @@ export function renderScreen(
           listRequestId={resultsNavigation.listRequestId}
           workflowView={resultsNavigation.view}
           onWorkflowViewChange={resultsNavigation.onViewChange}
-          onCreateAudience={resultsNavigation.onCreateAudience}
           accountControl={resultsNavigation.accountControl}
         />
       );

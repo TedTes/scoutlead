@@ -3,6 +3,7 @@ import {
   ArrowRight,
   CalendarClock,
   Check,
+  CircleMinus,
   Copy,
   Download,
   ExternalLink,
@@ -12,7 +13,6 @@ import {
   Mail,
   MapPin,
   MessageCircle,
-  MoreVertical,
   Pause,
   Phone,
   Play,
@@ -33,7 +33,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AudienceProfileScreen } from "./AudienceProfileScreen";
 import { searchIntentFromRun } from "../components/SearchIntentChips";
-import { ExportContactsDialog, Modal, useToast } from "../shared-ui";
+import { ExportBusinessesDialog, Modal, useToast } from "../shared-ui";
 import { dedupeContacts, useAppData } from "../state/app-data";
 import type {
   AgentFitStatus,
@@ -60,15 +60,9 @@ import type {
   SenderProfile,
   SearchIntent,
   Territory,
-  TerritoryMetrics,
   TerritoryResolution,
 } from "../types/domain";
-import {
-  baseExportFileName,
-  defaultExportFileName,
-  exportContactsCsv,
-  normalizeExportFileName,
-} from "../utils/export-file";
+import { defaultExportFileName } from "../utils/export-file";
 import { formatDate } from "../utils/format";
 import {
   getAddress,
@@ -93,9 +87,17 @@ type ContactActivityItem = {
   complete: boolean;
   tone: ContactActivityTone;
 };
-type PendingContactsExport = {
-  contacts: DiscoveryResult[];
+type PendingBusinessExport = {
+  businessCount: number;
+  scope: string;
   suggestedName: string;
+  loadBusinesses: () => Promise<DiscoveryResult[]>;
+};
+type BulkReview = {
+  action: "drafts" | "remove";
+  allMatching: boolean;
+  contacts: DiscoveryResult[] | null;
+  error?: string;
 };
 const bulkOutreachDefaultSubject = "Quick question for {{business_name}}";
 const bulkOutreachDefaultBody = `Hello {{recipient_name}},
@@ -141,13 +143,11 @@ export function ResultsScreen({
   accountControl,
   listRequestId = 0,
   onWorkflowViewChange,
-  onCreateAudience,
   workflowView,
 }: {
   accountControl?: ReactNode;
   listRequestId?: number;
   onWorkflowViewChange: (view: LeadWorkflowView) => void;
-  onCreateAudience?: () => void;
   workflowView: LeadWorkflowView;
 }) {
   const {
@@ -201,25 +201,17 @@ export function ResultsScreen({
   const [draftingShortlist, setDraftingShortlist] = useState(false);
   const [sendingWebhook, setSendingWebhook] = useState(false);
   const [refreshingBatch, setRefreshingBatch] = useState(false);
-  const [runMenuOpen, setRunMenuOpen] = useState(false);
-  const [bulkOutreachOpen, setBulkOutreachOpen] = useState(false);
+  const [bulkReview, setBulkReview] = useState<BulkReview | null>(null);
+  const [generatingBulkDrafts, setGeneratingBulkDrafts] = useState(false);
   const [bulkSelectedContactIds, setBulkSelectedContactIds] = useState<string[]>([]);
-  const [bulkExcludedContactIds, setBulkExcludedContactIds] = useState<string[]>([]);
-  const [bulkSelectAll, setBulkSelectAll] = useState(false);
   const [bulkLeadAction, setBulkLeadAction] = useState<"shortlist" | "remove" | "">("");
   const [rerunPromptOpen, setRerunPromptOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [profileDetailsOpen, setProfileDetailsOpen] = useState(false);
   const [scheduleResolution, setScheduleResolution] = useState<TerritoryResolution | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
-  const [territoryMetrics, setTerritoryMetrics] = useState<TerritoryMetrics | null>(null);
-  const [pendingExport, setPendingExport] = useState<PendingContactsExport | null>(null);
-  const [exportFileName, setExportFileName] = useState("");
-  const [bulkPopoverStyle, setBulkPopoverStyle] = useState<CSSProperties>({});
-  const runMenuRef = useRef<HTMLDivElement | null>(null);
-  const bulkOutreachRef = useRef<HTMLDivElement | null>(null);
-  const bulkOutreachButtonRef = useRef<HTMLButtonElement | null>(null);
-  const bulkOutreachPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [pendingExport, setPendingExport] = useState<PendingBusinessExport | null>(null);
+  const [generatedPackages, setGeneratedPackages] = useState<Record<string, OutreachPackage>>({});
 
   const selectedTerritory = selectedDiscoveryRun?.territory_id
     ? territories.find((territory) => territory.id === selectedDiscoveryRun.territory_id)
@@ -250,7 +242,7 @@ export function ResultsScreen({
     : selectedRunMatchesActiveProfile && selectedDiscoveryRunId
       ? snapshot.results
       : [];
-  const contacts = useMemo(() => dedupeContacts(sourceContacts), [sourceContacts]);
+  const contacts = useMemo(() => isGlobalView ? sourceContacts : dedupeContacts(sourceContacts), [isGlobalView, sourceContacts]);
   const thisWeekCutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const runPrompt = getRunPrompt(selectedDiscoveryRun);
   const query = runPrompt;
@@ -261,10 +253,7 @@ export function ResultsScreen({
       .filter((message) => message.status === "approved" || message.status === "sent")
       .map((message) => message.lead_id),
   );
-  const shortlistedContactRows = contacts.filter(
-    (contact) => contact.shortlisted_at && !contact.last_contacted_at,
-  );
-  const shortlistedContacts = shortlistedContactRows.length;
+  const shortlistedContactRows = contacts.filter((contact) => contact.shortlisted_at && !contact.last_contacted_at);
   const draftedLeadIds = new Set(activeMessages.map((message) => message.lead_id));
   const approvedShortlistContacts = shortlistedContactRows.filter(
     (contact) => approvedLeadIds.has(contact.id),
@@ -286,13 +275,12 @@ export function ResultsScreen({
   const visibleContacts = workflowContacts
     .filter((contact) => {
       const needle = leadSearch.trim().toLowerCase();
-      if (!needle) return true;
+      if (isGlobalView || !needle) return true;
       return [
         contact.company_name,
         contactListCategoryLabel(contact),
         contact.geography,
         contact.research?.geography,
-        isGlobalView ? contactAudienceLabel(contact, territories, productDiscoveryRuns) : "",
         contactOpportunityReasons(contact).join(" "),
       ]
         .filter(Boolean)
@@ -309,10 +297,12 @@ export function ResultsScreen({
   const displayedLeadTotal = isGlobalView
     ? workspaceLeadPage?.total ?? workflowContacts.length
     : workflowContacts.length;
-  const bulkSelectionCount = bulkSelectAll
-    ? Math.max(0, displayedLeadTotal - bulkExcludedContactIds.length)
-    : bulkSelectedContactIds.length;
-  const bulkSelecting = bulkSelectAll || bulkSelectedContactIds.length > 0;
+  const exportableTotal = isGlobalView ? displayedLeadTotal : visibleContacts.length;
+  const bulkSelecting = bulkSelectedContactIds.length > 0;
+  const actionScopeCount = bulkSelecting ? bulkSelectedContactIds.length : exportableTotal;
+  const canReviewBusinesses = Boolean(actionScopeCount && !leadListPending && !workspaceLeadsError && !bulkLeadAction);
+  const canRemoveSelection = workflowView === "shortlisted" || workflowView === "inbox";
+  const bulkReviewOpen = Boolean(bulkReview);
   const exportName = selectedDiscoveryRun?.name || selectedProduct?.product_name || "contacts";
   const selectedContact = detailPanelOpen
     ? contacts.find((contact) => contact.id === selectedContactId)
@@ -358,7 +348,7 @@ export function ResultsScreen({
     setLeadSearch("");
     if (!isGlobalView) onWorkflowViewChange("this_week");
     setRerunPromptOpen(false);
-    setBulkOutreachOpen(false);
+    setBulkReview(null);
   }, [isGlobalView, onWorkflowViewChange, selectedDiscoveryRunId, runPrompt]);
 
   useEffect(() => {
@@ -407,64 +397,54 @@ export function ResultsScreen({
   }, [listRequestId]);
 
   useEffect(() => {
-    if (!selectedTerritory) {
-      setTerritoryMetrics(null);
-      return;
-    }
-    void territoryApi.getTerritoryMetrics(selectedTerritory.id)
-      .then(setTerritoryMetrics)
-      .catch(() => setTerritoryMetrics(null));
-  }, [selectedTerritory?.id, territoryApi]);
-
-  useEffect(() => {
-    setRunMenuOpen(false);
+    setProfileDetailsOpen(false);
   }, [selectedDiscoveryRunId]);
 
   useEffect(() => {
-    if (workflowView !== "shortlisted") setBulkOutreachOpen(false);
-  }, [workflowView]);
+    setBulkReview(null);
+    setGeneratingBulkDrafts(false);
+  }, [workflowView, listRequestId, selectedProfileId]);
 
   useEffect(() => {
     setBulkSelectedContactIds([]);
-    setBulkExcludedContactIds([]);
-    setBulkSelectAll(false);
-  }, [workflowView]);
+  }, [workflowView, listRequestId, selectedProfileId, selectedDiscoveryRunId, leadSearch]);
 
-  useEffect(() => {
-    if (!isGlobalView) return;
-    setBulkSelectedContactIds([]);
-    setBulkExcludedContactIds([]);
-    setBulkSelectAll(false);
-  }, [isGlobalView, workspaceLeadPage?.offset]);
+  const loadBusinessesInScope = async (selectedOnly: boolean) => {
+    const selectedIds = new Set(bulkSelectedContactIds);
+    if (selectedOnly) {
+      const selectedOnPage = visibleContacts.filter((contact) => selectedIds.has(contact.id));
+      if (!isGlobalView || selectedOnPage.length === selectedIds.size) return selectedOnPage;
+    }
+    const businesses = isGlobalView
+      ? await territoryApi.getAllWorkspaceLeads({ view: workflowView, search: leadSearch })
+      : visibleContacts;
+    if (!selectedOnly) return businesses;
+    return businesses.filter((contact) => selectedIds.has(contact.id));
+  };
 
-  const updateSelectedLeads = async (action: "shortlist" | "remove") => {
+  const closeBulkReview = () => {
+    if (!generatingBulkDrafts && bulkLeadAction !== "remove") setBulkReview(null);
+  };
+
+  const openBulkReview = async (action: BulkReview["action"]) => {
+    if (!canReviewBusinesses) return;
+    const pending: BulkReview = { action, allMatching: !bulkSelecting, contacts: null };
+    setBulkReview(pending);
+    try {
+      const businesses = await loadBusinessesInScope(bulkSelecting);
+      setBulkReview((current) => current === pending ? { ...pending, contacts: businesses } : current);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : "Please try again.";
+      setBulkReview((current) => current === pending ? { ...pending, error } : current);
+    }
+  };
+
+  const updateSelectedLeads = async (action: "shortlist" | "remove", reviewedContacts?: DiscoveryResult[]) => {
     if (!(["inbox", "shortlisted"] as LeadWorkflowView[]).includes(workflowView) || bulkLeadAction) return;
     setBulkLeadAction(action);
     try {
-      let selected = visibleContacts.filter((contact) => bulkSelectedContactIds.includes(contact.id));
-      if (bulkSelectAll) {
-        if (isGlobalView) {
-          const collected: DiscoveryResult[] = [];
-          let offset = 0;
-          let total = 0;
-          do {
-            const page = await territoryApi.getWorkspaceLeads({ view: workflowView, limit: 100, offset });
-            collected.push(...page.items);
-            total = page.total;
-            offset += page.items.length;
-            if (!page.items.length) break;
-          } while (offset < total);
-          selected = dedupeContacts(collected).filter((contact) => !bulkExcludedContactIds.includes(contact.id));
-        } else {
-          selected = workflowContacts.filter((contact) => !bulkExcludedContactIds.includes(contact.id));
-        }
-      }
+      const selected = reviewedContacts ?? await loadBusinessesInScope(true);
       if (!selected.length) return;
-      if (action === "remove" && !window.confirm(
-        workflowView === "shortlisted"
-          ? `Remove ${selected.length} ${selected.length === 1 ? "business" : "businesses"} from Shortlisted?`
-          : `Remove ${selected.length} ${selected.length === 1 ? "lead" : "leads"} from Leads? You can restore them from Dismissed.`,
-      )) return;
 
       let cursor = 0;
       const results: PromiseSettledResult<DiscoveryResult>[] = [];
@@ -488,15 +468,17 @@ export function ResultsScreen({
       const failed = results.filter((result) => result.status === "rejected").length;
       await refreshAll({ showLoading: false });
       if (isGlobalView) {
-        await loadWorkspaceLeads(workflowView, workspaceLeadPage?.offset || 0, leadSearch);
+        const page = await loadWorkspaceLeads(workflowView, workspaceLeadPage?.offset || 0, leadSearch);
+        if (page.offset && !page.items.length) {
+          await loadWorkspaceLeads(workflowView, Math.max(0, Math.ceil(page.total / page.limit) - 1) * page.limit, leadSearch);
+        }
       }
+      if (action === "remove") setBulkReview(null);
       setBulkSelectedContactIds([]);
-      setBulkExcludedContactIds([]);
-      setBulkSelectAll(false);
       showToast({
         title: action === "shortlist"
           ? "Leads shortlisted"
-          : workflowView === "shortlisted" ? "Removed from Shortlisted" : "Leads removed",
+          : workflowView === "shortlisted" ? "Removed from Shortlisted" : "Leads dismissed",
         message: `${selected.length - failed} updated${failed ? ` · ${failed} failed` : ""}`,
         tone: failed ? "amber" : "green",
       });
@@ -512,53 +494,11 @@ export function ResultsScreen({
   };
 
   useEffect(() => {
-    if (!runMenuOpen && !bulkOutreachOpen) return undefined;
-    const closeMenus = (event: MouseEvent) => {
-      if (!runMenuRef.current?.contains(event.target as Node)) {
-        setRunMenuOpen(false);
-      }
-      if (
-        !bulkOutreachRef.current?.contains(event.target as Node)
-        && !bulkOutreachPopoverRef.current?.contains(event.target as Node)
-      ) {
-        setBulkOutreachOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", closeMenus);
-    return () => document.removeEventListener("mousedown", closeMenus);
-  }, [bulkOutreachOpen, runMenuOpen]);
-
-  useEffect(() => {
-    // Freezes the underlying results list while the popup is open so it
-    // behaves like a centered modal layer instead of moving with the page.
-    if (!bulkOutreachOpen) return undefined;
+    if (!bulkReviewOpen) return undefined;
     const contentEl = document.querySelector(".content");
     contentEl?.classList.add("scroll-locked");
     return () => contentEl?.classList.remove("scroll-locked");
-  }, [bulkOutreachOpen]);
-
-  useLayoutEffect(() => {
-    if (!bulkOutreachOpen) return undefined;
-    const BULK_POPOVER_MAX_WIDTH = 780;
-    const positionPopover = () => {
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      const gutter = viewportWidth <= 680 ? 10 : 18;
-      const verticalInset = 2;
-      const maxWidth = Math.max(0, viewportWidth - gutter * 2);
-      const width = Math.min(BULK_POPOVER_MAX_WIDTH, maxWidth);
-      const maxHeight = Math.min(820, Math.max(240, viewportHeight - verticalInset * 2));
-      setBulkPopoverStyle({
-        left: Math.round((viewportWidth - width) / 2),
-        maxHeight: Math.round(maxHeight),
-        top: Math.max(verticalInset, Math.round((viewportHeight - maxHeight) / 2)),
-        width: Math.round(width),
-      });
-    };
-    positionPopover();
-    window.addEventListener("resize", positionPopover);
-    return () => window.removeEventListener("resize", positionPopover);
-  }, [bulkOutreachOpen]);
+  }, [bulkReviewOpen]);
 
   const updateSearch = async () => {
     const request = draftPrompt.trim() || runPrompt;
@@ -622,7 +562,7 @@ export function ResultsScreen({
     } else {
       await renameDiscoveryRun(selectedDiscoveryRun.id, nextName.trim());
     }
-    setRunMenuOpen(false);
+    setProfileDetailsOpen(false);
     showToast({ title: "Search renamed", tone: "green" });
   };
 
@@ -632,20 +572,20 @@ export function ResultsScreen({
     if (!confirmed) return;
     await deleteDiscoveryRuns([selectedDiscoveryRun.id]);
     setSelectedDiscoveryRunId("");
-    setRunMenuOpen(false);
+    setProfileDetailsOpen(false);
     showToast({ title: "Run deleted", message: "The saved contact list was removed.", tone: "green" });
   };
 
   const openRerunPrompt = () => {
     if (!selectedDiscoveryRun || running) return;
-    setRunMenuOpen(false);
+    setProfileDetailsOpen(false);
     setDraftPrompt(runPrompt);
     setRerunPromptOpen(true);
   };
 
   const openScheduleDialog = async () => {
     if (!selectedDiscoveryRun || !selectedProductId || scheduleBusy) return;
-    setRunMenuOpen(false);
+    setProfileDetailsOpen(false);
     if (selectedTerritory) {
       setScheduleResolution(null);
       setScheduleDialogOpen(true);
@@ -723,7 +663,7 @@ export function ResultsScreen({
       const status = selectedTerritory.status === "active" ? "paused" : "active";
       await territoryApi.updateTerritory(selectedTerritory.id, { status });
       await refreshAll({ showLoading: false });
-      setRunMenuOpen(false);
+      setProfileDetailsOpen(false);
       showToast({ title: status === "active" ? "Saved search resumed" : "Saved search paused", tone: "green" });
     } catch (err) {
       showToast({ title: "Schedule update failed", message: err instanceof Error ? err.message : String(err), tone: "red" });
@@ -737,7 +677,7 @@ export function ResultsScreen({
     setScheduleBusy(true);
     try {
       await territoryApi.refreshTerritory(selectedTerritory.id);
-      setRunMenuOpen(false);
+      setProfileDetailsOpen(false);
       showToast({
         title: "Batch queued",
         message: "Scoring runs in the background. New leads will appear when the batch is ready.",
@@ -759,9 +699,6 @@ export function ResultsScreen({
   ) => {
     await territoryApi.recordLeadOutcome(leadId, outcome, channel, note, followUpAt);
     await refreshAll({ showLoading: false });
-    if (selectedTerritory) {
-      await territoryApi.getTerritoryMetrics(selectedTerritory.id).then(setTerritoryMetrics);
-    }
   };
 
   const generateContactApproach = async (leadId: string) => {
@@ -774,7 +711,7 @@ export function ResultsScreen({
     setDraftingShortlist(true);
     try {
       const created = await draftShortlist(selectedDiscoveryRun.id);
-      setRunMenuOpen(false);
+      setProfileDetailsOpen(false);
       showToast({
         title: created.length ? "Drafts created" : "No new drafts",
         message: created.length
@@ -795,7 +732,7 @@ export function ResultsScreen({
     setSendingWebhook(true);
     try {
       await sendApprovedShortlistWebhook(selectedDiscoveryRun.id);
-      setRunMenuOpen(false);
+      setProfileDetailsOpen(false);
       showToast({
         title: "Webhook sent",
         message: `${approvedShortlistContacts.length} approved contact${
@@ -816,7 +753,7 @@ export function ResultsScreen({
     setScheduleBusy(true);
     try {
       await refillProfile(activeProfile.id);
-      setRunMenuOpen(false);
+      setProfileDetailsOpen(false);
       showToast({
         title: "Saved search queued",
         message: "ScoutLead is checking the published business index for the next batch.",
@@ -833,34 +770,13 @@ export function ResultsScreen({
     }
   };
 
-  const beginContactsExport = (contactsToExport: DiscoveryResult[], name: string, suffix = "contacts") => {
-    if (!contactsToExport.length) {
-      showToast({ title: "No contacts to export", message: "Change the view or run a search first.", tone: "amber" });
-      return;
-    }
-    const suggestedName = defaultExportFileName(name, suffix);
-    setRunMenuOpen(false);
-    setExportFileName(suggestedName);
-    setPendingExport({ contacts: contactsToExport, suggestedName });
-  };
-
-  const exportCurrentContacts = async () => {
-    beginContactsExport(contacts, exportName);
-  };
-
-  const confirmContactsExport = () => {
-    if (!pendingExport) return;
-    if (!baseExportFileName(exportFileName)) {
-      showToast({ title: "Name the export file", message: "Enter a filename before exporting.", tone: "amber" });
-      return;
-    }
-    const downloadName = normalizeExportFileName(exportFileName);
-    exportContactsCsv(pendingExport.contacts, downloadName);
-    setPendingExport(null);
-    showToast({
-      title: "Contacts exported",
-      message: `${pendingExport.contacts.length} contacts downloaded as ${downloadName}.`,
-      tone: "green",
+  const openBusinessExport = () => {
+    const viewLabel = workflowViewLabel(workflowView);
+    setPendingExport({
+      businessCount: actionScopeCount,
+      scope: bulkSelecting ? `Selected in ${viewLabel}` : `${viewLabel} · ${leadSearch.trim() ? "Search results" : "All pages"}`,
+      suggestedName: defaultExportFileName(isGlobalView ? viewLabel : exportName),
+      loadBusinesses: () => loadBusinessesInScope(bulkSelecting),
     });
   };
 
@@ -879,323 +795,71 @@ export function ResultsScreen({
               {activeProfile.label}
             </button>
           </nav>
-        ) : (
+        ) : workflowView === "shortlisted" && isGlobalView ? null : (
           <nav aria-label="Lead context" className="results-breadcrumb">
-            <strong>{workflowView === "shortlisted" ? "All shortlisted" : "All saved searches"}</strong>
+            <strong>{workflowViewLabel(workflowView)}</strong>
           </nav>
         )}
+        {accountControl}
         <div className="results-control-actions">
-          {onCreateAudience ? (
+          <label className="sl-search results-search">
+            <Search size={15} aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search leads"
+              placeholder="Search leads"
+              value={leadSearch}
+              onChange={(event) => setLeadSearch(event.target.value)}
+            />
+          </label>
+          <div className="results-header-actions" role="group" aria-label="Lead actions">
             <button
-              aria-label="Find leads"
-              className="secondary results-new-audience-button"
-              title="Find leads"
+              aria-label="Export"
+              className="results-header-action"
+              data-tooltip="Export businesses"
+              disabled={leadListPending || Boolean(workspaceLeadsError) || !actionScopeCount}
               type="button"
-              onClick={() => onCreateAudience()}
+              onClick={openBusinessExport}
             >
-              <Plus size={14} />
-              <span>Find leads</span>
+              <Download size={18} aria-hidden="true" />
             </button>
-          ) : null}
-          <div className="results-menu-control" ref={runMenuRef}>
-            <button
-              aria-expanded={runMenuOpen}
-              aria-label="Run actions"
-              className="menu-button"
-              type="button"
-              onClick={() => {
-                setBulkOutreachOpen(false);
-                setRunMenuOpen((open) => !open);
-              }}
-            >
-              <MoreVertical size={18} />
-            </button>
-            {runMenuOpen ? (
-              <div className="action-menu">
-                {isAudienceView && activeProfile ? (
-                  <div className="run-menu-summary">
-                    <strong>{refillPolicyLabel(activeProfile.refill_policy)} · {activeProfile.status}</strong>
-                    <span>{visibleProfileBatch?.result_count || 0} leads in the current batch</span>
-                  </div>
-                ) : selectedTerritory ? (
-                  <div className="run-menu-summary">
-                    <strong>{refillPolicyLabel(selectedTerritory.refill_policy)} · {selectedTerritory.status}</strong>
-                    <span>
-                      Next {formatCompactDate(selectedTerritory.next_run_at)}
-                      {territoryMetrics ? ` · ${territoryMetrics.totals.delivered} delivered · ${territoryMetrics.totals.meetings} meetings` : ""}
-                    </span>
-                  </div>
-                ) : null}
-                {isAudienceView && activeProfile ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={scheduleBusy || activeProfile.status !== "active"}
-                      onClick={() => void runActiveAudienceAgain()}
-                    >
-                      <RotateCw size={14} />
-                      {scheduleBusy ? "Queueing..." : "Run again"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRunMenuOpen(false);
-                        setProfileDetailsOpen(true);
-                      }}
-                    >
-                      <CalendarClock size={14} />
-                      Search details
-                    </button>
-                    <div className="action-menu-divider" />
-                  </>
-                ) : selectedTerritory ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={scheduleBusy || selectedTerritory.status !== "active"}
-                      onClick={() => void runScheduledSearchNow()}
-                    >
-                      <Play size={14} />
-                      {scheduleBusy ? "Queueing..." : "Refill now"}
-                    </button>
-                    <button type="button" disabled={scheduleBusy} onClick={() => void toggleSchedule()}>
-                      {selectedTerritory.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-                      {selectedTerritory.status === "active" ? "Pause search" : "Resume search"}
-                    </button>
-                    <button type="button" disabled={scheduleBusy} onClick={() => void openScheduleDialog()}>
-                      <CalendarClock size={14} />
-                      Search settings
-                    </button>
-                    <div className="action-menu-divider" />
-                  </>
-                ) : selectedDiscoveryRun ? (
-                  <>
-                    <button type="button" disabled={scheduleBusy || !runPrompt.trim()} onClick={() => void openScheduleDialog()}>
-                      <CalendarClock size={14} />
-                      {scheduleBusy ? "Checking search..." : "Save this search"}
-                    </button>
-                    <div className="action-menu-divider" />
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  disabled={!contacts.length}
-                  onClick={() => void exportCurrentContacts()}
-                >
-                  <Download size={14} />
-                  Export all contacts
-                </button>
-                <button
-                  type="button"
-                  disabled={!shortlistedContacts}
-                  onClick={() =>
-                    beginContactsExport(
-                      shortlistedContactRows,
-                      exportName,
-                      "shortlist",
-                    )
-                  }
-                >
-                  <Download size={14} />
-                  Export shortlist
-                </button>
-                {!isGlobalView ? <>
-                  <button
-                    type="button"
-                    disabled={!approvedShortlistContacts.length}
-                    onClick={() => beginContactsExport(approvedShortlistContacts, exportName, "approved-shortlist")}
-                  >
-                    <Download size={14} />
-                    Export approved shortlist
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!webhookReady || sendingWebhook}
-                    onClick={() => void sendCurrentApprovedShortlistWebhook()}
-                  >
-                    <PlugZap size={14} />
-                    {sendingWebhook ? "Sending webhook..." : "Send approved to webhook"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedDiscoveryRun || !draftableShortlistContacts.length || draftingShortlist}
-                    onClick={() => void draftCurrentShortlist()}
-                  >
-                    <Mail size={14} />
-                    Generate drafts for shortlist
-                  </button>
-                </> : null}
-                {selectedDiscoveryRun ? (
-                  <>
-                    <button type="button" onClick={() => void renameCurrentRun()}>
-                      Rename search
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRunMenuOpen(false);
-                        window.location.assign(`/trace?run=${encodeURIComponent(selectedDiscoveryRunId)}`);
-                      }}
-                    >
-                      <Workflow size={14} />
-                      Inspect run
-                    </button>
-                  </>
-                ) : null}
-                {!isGlobalView && !selectedTerritory && !isAudienceView ? (
-                  <button type="button" disabled={running} onClick={openRerunPrompt}>
-                    <RotateCw size={14} />
-                    Re-run search
-                  </button>
-                ) : null}
-                {!isGlobalView && !selectedTerritory && !isAudienceView ? (
-                  <button className="danger-item" type="button" onClick={() => void deleteCurrentRun()}>
-                    <Trash2 size={14} />
-                    Delete this search
-                  </button>
-                ) : null}
-              </div>
+            {workflowView === "shortlisted" ? (
+              <button
+                aria-haspopup="dialog"
+                aria-label="Drafts"
+                className="results-header-action"
+                data-tooltip="Generate drafts"
+                disabled={!canReviewBusinesses || outreachDraftDirty}
+                type="button"
+                onClick={() => void openBulkReview("drafts")}
+              >
+                <MessageCircle size={18} aria-hidden="true" />
+              </button>
+            ) : null}
+            {workflowView === "inbox" && bulkSelecting ? (
+              <button className="results-header-action" aria-label="Shortlist" data-tooltip="Add to Shortlisted" disabled={!canReviewBusinesses} type="button" onClick={() => void updateSelectedLeads("shortlist")}>
+                {bulkLeadAction === "shortlist" ? <RotateCw className="spin" size={18} aria-hidden="true" /> : <Star size={18} aria-hidden="true" />}
+              </button>
+            ) : null}
+            {canRemoveSelection ? (
+              <button
+                aria-haspopup="dialog"
+                aria-label="Remove"
+                className="results-header-action results-header-remove"
+                data-tooltip={workflowView === "shortlisted" ? "Remove from Shortlisted" : "Move to Dismissed"}
+                disabled={!canReviewBusinesses}
+                type="button"
+                onClick={() => void openBulkReview("remove")}
+              >
+                <CircleMinus size={18} aria-hidden="true" />
+              </button>
             ) : null}
           </div>
-          {accountControl}
         </div>
       </div>
 
       <div className={detailContact ? "results-body has-detail" : "results-body"}>
         <section className="lead-feed-pane" aria-label="Lead list">
-          <header className={["inbox", "shortlisted"].includes(workflowView) ? "lead-feed-header without-title" : "lead-feed-header"}>
-            {!(["inbox", "shortlisted"] as LeadWorkflowView[]).includes(workflowView) ? (
-              <div className="lead-feed-title-row">
-                <div>
-                  <strong>
-                    {isProfileAggregate && workflowView === "this_week"
-                      ? "Leads"
-                      : workflowViewLabel(workflowView)}
-                  </strong>
-                  <span>
-                    {leadListPending ? "Loading" : displayedLeadTotal}
-                  </span>
-                </div>
-              </div>
-            ) : null}
-            <div className="sl-toolbar" data-selecting={bulkSelecting ? "true" : "false"}>
-              <label className="sl-search">
-                <Search size={15} aria-hidden="true" />
-                <input
-                  type="search"
-                  aria-label="Search leads"
-                  placeholder="Search leads"
-                  value={leadSearch}
-                  onChange={(event) => setLeadSearch(event.target.value)}
-                />
-              </label>
-              <div className="sl-selbar" role="toolbar" aria-label="Selection actions">
-                <button
-                  aria-label="Clear selection"
-                  className="sl-clear"
-                  type="button"
-                  onClick={() => {
-                    setBulkSelectAll(false);
-                    setBulkSelectedContactIds([]);
-                    setBulkExcludedContactIds([]);
-                  }}
-                >
-                  <X size={15} />
-                </button>
-                <span className="sl-count" aria-live="polite">
-                  {bulkSelectionCount} selected
-                </span>
-                <button
-                  className="sl-selectall"
-                  type="button"
-                  onClick={() => {
-                    setBulkSelectAll((selected) => !selected);
-                    setBulkSelectedContactIds([]);
-                    setBulkExcludedContactIds([]);
-                  }}
-                >
-                  {bulkSelectAll ? "Deselect all" : "Select all"}
-                </button>
-                <div className="sl-actions">
-                {workflowView === "inbox" ? (
-                  <>
-                    <button
-                      className="sl-btn sl-btn--primary"
-                      disabled={!bulkSelectionCount || Boolean(bulkLeadAction)}
-                      type="button"
-                      onClick={() => void updateSelectedLeads("shortlist")}
-                    >
-                      <Star size={14} />
-                      {bulkLeadAction === "shortlist" ? "Adding…" : "Shortlist"}
-                    </button>
-                    <button
-                      className="sl-btn sl-btn--danger"
-                      disabled={!bulkSelectionCount || Boolean(bulkLeadAction)}
-                      title="Move selected leads to Dismissed"
-                      type="button"
-                      onClick={() => void updateSelectedLeads("remove")}
-                    >
-                      <Trash2 size={14} />
-                      {bulkLeadAction === "remove" ? "Removing…" : "Remove"}
-                    </button>
-                  </>
-                ) : null}
-                {workflowView === "shortlisted" && shortlistedContactRows.length ? (
-                  <>
-                  <div className="bulk-outreach-control" ref={bulkOutreachRef}>
-                    <button
-                      aria-expanded={bulkOutreachOpen}
-                      aria-haspopup="dialog"
-                      className={bulkOutreachOpen ? "sl-btn sl-btn--primary active" : "sl-btn sl-btn--primary"}
-                      disabled={!bulkSelectionCount}
-                      ref={bulkOutreachButtonRef}
-                      type="button"
-                      onClick={() => {
-                        setRunMenuOpen(false);
-                        setBulkOutreachOpen((open) => !open);
-                      }}
-                    >
-                      <Users size={14} />
-                      <span>Generate</span>
-                    </button>
-                    {bulkOutreachOpen
-                      ? createPortal(
-                          <>
-                            <div
-                              className="bulk-outreach-backdrop"
-                              role="presentation"
-                              onMouseDown={() => setBulkOutreachOpen(false)}
-                            />
-                            <div className="bulk-outreach-popover" ref={bulkOutreachPopoverRef} style={bulkPopoverStyle}>
-                              <PersonalizedBulkOutreachPanel
-                                contacts={shortlistedContactRows}
-                                globalView={isGlobalView}
-                                selectAll={bulkSelectAll}
-                                selectedContactIds={bulkSelectedContactIds}
-                                excludedContactIds={bulkExcludedContactIds}
-                                onClose={() => setBulkOutreachOpen(false)}
-                              />
-                            </div>
-                          </>,
-                          document.body,
-                        )
-                      : null}
-                  </div>
-                  <button
-                    className="sl-btn sl-btn--danger"
-                    disabled={!bulkSelectionCount || Boolean(bulkLeadAction)}
-                    type="button"
-                    onClick={() => void updateSelectedLeads("remove")}
-                  >
-                    <Trash2 size={14} />
-                    {bulkLeadAction === "remove" ? "Removing…" : "Remove"}
-                  </button>
-                  </>
-                ) : null}
-                </div>
-              </div>
-            </div>
-          </header>
           {leadListPending ? (
             <section
               className="lead-list-loading"
@@ -1215,10 +879,8 @@ export function ResultsScreen({
                   audienceLabel={isGlobalView ? contactAudienceLabel(contact, territories, productDiscoveryRuns) : ""}
                   contact={contact}
                   key={contact.id}
-                  selectionChecked={bulkSelectAll
-                    ? !bulkExcludedContactIds.includes(contact.id)
-                    : bulkSelectedContactIds.includes(contact.id)}
-                  selectionEnabled={workflowView === "shortlisted" || workflowView === "inbox"}
+                  selectionChecked={bulkSelectedContactIds.includes(contact.id)}
+                  selectionEnabled
                   selected={contact.id === detailContact?.id}
                   onOpen={() => {
                     if (
@@ -1231,12 +893,6 @@ export function ResultsScreen({
                     setDetailPanelOpen(true);
                   }}
                   onToggleSelection={() => {
-                    if (bulkSelectAll) {
-                      setBulkExcludedContactIds((current) => current.includes(contact.id)
-                        ? current.filter((id) => id !== contact.id)
-                        : [...current, contact.id]);
-                      return;
-                    }
                     setBulkSelectedContactIds((current) => current.includes(contact.id)
                       ? current.filter((id) => id !== contact.id)
                       : [...current, contact.id]);
@@ -1346,14 +1002,15 @@ export function ResultsScreen({
         && (workflowView === "shortlisted" || workflowView === "contacted")
         && detailAudienceResultId ? (
           <OutreachWorkspace
+            key={`${workflowView}:${detailContact.id}`}
             contact={detailContact}
+            bulkGeneratedPackage={generatedPackages[detailAudienceResultId]}
             mode={workflowView === "contacted" ? "contacted" : "shortlisted"}
             persistent={desktopSplitView}
             onClose={() => setDetailPanelOpen(false)}
             onDirtyChange={setOutreachDraftDirty}
             onGetPackage={() => territoryApi.getOutreachPackage(detailAudienceResultId)}
-            onGetContactHistory={() => territoryApi.listLeadOutcomes(detailContact.id)}
-            onGeneratePackage={(input) => territoryApi.generateOutreachPackage(detailAudienceResultId, input)}
+            onGetContactHistory={() => territoryApi.listLeadOutcomes(detailContact.outreach_lead_id || detailContact.id)}
             onRecordAttempt={(outcome, channel, note, followUpAt) => recordContactOutcome(
               detailContact.id,
               outcome,
@@ -1397,17 +1054,34 @@ export function ResultsScreen({
       </div>
 
       {pendingExport ? (
-        <ExportContactsDialog
-          contactCount={pendingExport.contacts.length}
-          fileName={exportFileName}
-          placeholder={pendingExport.suggestedName}
-          previewFileName={
-            baseExportFileName(exportFileName) ? normalizeExportFileName(exportFileName) : "filename.csv"
-          }
-          onChange={setExportFileName}
+        <ExportBusinessesDialog
+          {...pendingExport}
           onClose={() => setPendingExport(null)}
-          onExport={confirmContactsExport}
         />
+      ) : null}
+      {bulkReview?.action === "drafts" && bulkReview.contacts?.length ? createPortal(
+        <>
+          <div className="bulk-outreach-backdrop" role="presentation" onMouseDown={closeBulkReview} />
+          <div className="bulk-outreach-popover">
+            <PersonalizedBulkOutreachPanel
+              contacts={bulkReview.contacts}
+              allMatching={bulkReview.allMatching}
+              onGenerated={(resultId, outreachPackage) => setGeneratedPackages((current) => ({ ...current, [resultId]: outreachPackage }))}
+              onGeneratingChange={setGeneratingBulkDrafts}
+              onClose={closeBulkReview}
+            />
+          </div>
+        </>,
+        document.body,
+      ) : bulkReview ? createPortal(
+        <BulkReviewDialog
+          review={bulkReview}
+          shortlisted={workflowView === "shortlisted"}
+          removing={bulkLeadAction === "remove"}
+          onClose={closeBulkReview}
+          onConfirm={(reviewedContacts) => void updateSelectedLeads("remove", reviewedContacts)}
+        />,
+        document.body,
       ) : null}
       {rerunPromptOpen ? (
         <RerunSearchDialog
@@ -1435,6 +1109,90 @@ export function ResultsScreen({
         <AudienceDetailsDialog
           profile={activeProfile}
           onClose={() => setProfileDetailsOpen(false)}
+          actions={
+            <div className="saved-search-detail-actions">
+              {isAudienceView ? <button className="secondary" type="button" disabled={scheduleBusy || activeProfile.status !== "active"} onClick={() => void runActiveAudienceAgain()}>
+                <RotateCw size={14} /> {scheduleBusy ? "Checking…" : "Run again"}
+              </button> : null}
+              {selectedTerritory && !isAudienceView ? (
+                <>
+                  <button className="secondary" type="button" disabled={scheduleBusy || selectedTerritory.status !== "active"} onClick={() => void runScheduledSearchNow()}>
+                    <Play size={14} /> Refill now
+                  </button>
+                  <button className="secondary" type="button" disabled={scheduleBusy} onClick={() => void toggleSchedule()}>
+                    {selectedTerritory.status === "active" ? <Pause size={14} /> : <Play size={14} />}
+                    {selectedTerritory.status === "active" ? "Pause search" : "Resume search"}
+                  </button>
+                  <button className="secondary" type="button" disabled={scheduleBusy} onClick={() => void openScheduleDialog()}>
+                    <CalendarClock size={14} /> Search settings
+                  </button>
+                </>
+              ) : null}
+                {!isGlobalView ? <>
+                  <button
+                    type="button"
+                    disabled={!approvedShortlistContacts.length}
+                    onClick={() => {
+                      setProfileDetailsOpen(false);
+                      setPendingExport({
+                        businessCount: approvedShortlistContacts.length,
+                        scope: "Approved shortlist",
+                        suggestedName: defaultExportFileName(exportName, "approved-shortlist"),
+                        loadBusinesses: async () => approvedShortlistContacts,
+                      });
+                    }}
+                  >
+                    <Download size={14} />
+                    Export approved shortlist
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!webhookReady || sendingWebhook}
+                    onClick={() => void sendCurrentApprovedShortlistWebhook()}
+                  >
+                    <PlugZap size={14} />
+                    {sendingWebhook ? "Sending webhook..." : "Send approved to webhook"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedDiscoveryRun || !draftableShortlistContacts.length || draftingShortlist}
+                    onClick={() => void draftCurrentShortlist()}
+                  >
+                    <Mail size={14} />
+                    Generate drafts for shortlist
+                  </button>
+                </> : null}
+                {selectedDiscoveryRun ? (
+                  <>
+                    <button type="button" onClick={() => void renameCurrentRun()}>
+                      Rename search
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDetailsOpen(false);
+                        window.location.assign(`/trace?run=${encodeURIComponent(selectedDiscoveryRunId)}`);
+                      }}
+                    >
+                      <Workflow size={14} />
+                      Inspect run
+                    </button>
+                  </>
+                ) : null}
+                {!isGlobalView && !selectedTerritory && !isAudienceView ? (
+                  <button type="button" disabled={running} onClick={openRerunPrompt}>
+                    <RotateCw size={14} />
+                    Re-run search
+                  </button>
+                ) : null}
+                {!isGlobalView && !selectedTerritory && !isAudienceView ? (
+                  <button className="danger-item" type="button" onClick={() => void deleteCurrentRun()}>
+                    <Trash2 size={14} />
+                    Delete this search
+                  </button>
+                ) : null}
+            </div>
+          }
         />
       ) : null}
     </section>
@@ -1609,9 +1367,9 @@ function generatedChannelPreview(outreachPackage: OutreachPackage | null | undef
 
 function OutreachWorkspace({
   contact,
+  bulkGeneratedPackage,
   mode = "shortlisted",
   onClose,
-  onGeneratePackage,
   onGetPackage,
   onGetContactHistory,
   onDismiss,
@@ -1622,9 +1380,9 @@ function OutreachWorkspace({
   persistent = false,
 }: {
   contact: DiscoveryResult;
+  bulkGeneratedPackage?: OutreachPackage;
   mode?: "shortlisted" | "contacted";
   onClose: () => void;
-  onGeneratePackage: (input: OutreachGenerationInput) => Promise<OutreachPackage>;
   onGetPackage: () => Promise<OutreachPackage | null>;
   onGetContactHistory: () => Promise<LeadOutcomeRecord[]>;
   onDismiss: () => Promise<void>;
@@ -1645,24 +1403,25 @@ function OutreachWorkspace({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const draftEditVersion = useRef(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [contextDirty, setContextDirty] = useState(false);
   const [contextSaving, setContextSaving] = useState(false);
   const [contextCopied, setContextCopied] = useState(false);
   const [channelCopied, setChannelCopied] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [markingContacted, setMarkingContacted] = useState(false);
   const [contactHistory, setContactHistory] = useState<LeadOutcomeRecord[]>([]);
+  const [historyLoadError, setHistoryLoadError] = useState("");
   const [contactLogOpen, setContactLogOpen] = useState(false);
   const [contactResult, setContactResult] = useState<LeadOutcomeValue>("no_answer");
   const [contactChannel, setContactChannel] = useState<LeadOutcomeChannel>("phone");
   const [contactNote, setContactNote] = useState("");
   const [followUpAt, setFollowUpAt] = useState(() => tomorrowDateTimeLocal());
   const [savingAttempt, setSavingAttempt] = useState(false);
-  const [editingInputs, setEditingInputs] = useState(false);
   const [activeGeneratedChannel, setActiveGeneratedChannel] = useState<OutreachDraftChannel>("instagram");
-  const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "json" | "history">("outreach");
+  const [workspaceTab, setWorkspaceTab] = useState<"outreach" | "drafts" | "json" | "history">("outreach");
+  const lastBulkGeneratedPackage = useRef(bulkGeneratedPackage);
   const [outreachInput, setOutreachInput] = useState<OutreachGenerationInput>({ channels: ["instagram"], concept_features: [], persuasion_style: "friendly_adviser" });
   const isContactedHistory = mode === "contacted";
 
@@ -1708,12 +1467,12 @@ function OutreachWorkspace({
   const loadPackage = async () => {
     setLoading(true);
     setLoadError("");
+    setHistoryLoadError("");
+    void onGetContactHistory()
+      .then(setContactHistory)
+      .catch(() => setHistoryLoadError("Contact history could not be loaded."));
     try {
-      const [existing, history] = await Promise.all([
-        onGetPackage(),
-        onGetContactHistory(),
-      ]);
-      setContactHistory(history);
+      const existing = await onGetPackage();
       setOutreachPackage(existing);
       setDraft(existing ? withTemplate(existing.content) : null);
       const savedInput = existing?.content.outreach_input;
@@ -1732,35 +1491,15 @@ function OutreachWorkspace({
         (channel) => Boolean(existing?.content.generated_outreach?.channels[channel]),
       );
       setActiveGeneratedChannel(firstSentChannel || firstGeneratedChannel || "instagram");
+      if (!isContactedHistory && firstGeneratedChannel && existing?.provider !== "template") {
+        setWorkspaceTab("drafts");
+      }
       setDirty(false);
       setContextDirty(false);
-      onDirtyChange(false);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const generateOutreach = async (channels: OutreachDraftChannel[] = outreachInput.channels) => {
-    if (generating || !channels.length) return;
-    setGenerating(true);
-    setLoadError("");
-    const input = {
-      ...outreachInput,
-      channels,
-    };
-    try {
-      const generated = await onGeneratePackage(input);
-      setOutreachPackage(generated);
-      setDraft(withTemplate(generated.content));
-      setOutreachInput(generated.content.outreach_input || input);
-      setActiveGeneratedChannel(channels[0]);
-      setEditingInputs(false);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setGenerating(false);
     }
   };
 
@@ -1773,24 +1512,47 @@ function OutreachWorkspace({
   }, [contact.id]);
 
   useEffect(() => {
-    if (!dirty || !draft || !outreachPackage) return;
+    onDirtyChange(dirty || contextDirty);
+  }, [dirty, contextDirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (loading || dirty || contextSaving || !bulkGeneratedPackage || bulkGeneratedPackage === lastBulkGeneratedPackage.current) return;
+    lastBulkGeneratedPackage.current = bulkGeneratedPackage;
+    setOutreachPackage(bulkGeneratedPackage);
+    setDraft(withTemplate(bulkGeneratedPackage.content));
+    const firstChannel = OUTREACH_DRAFT_CHANNELS.find(
+      (channel) => Boolean(bulkGeneratedPackage.content.generated_outreach?.channels[channel]),
+    );
+    if (firstChannel) setActiveGeneratedChannel(firstChannel);
+    setLoadError("");
+    if (!isContactedHistory) setWorkspaceTab("drafts");
+  // Only a successful bulk generation should replace the draft in an open panel.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkGeneratedPackage, loading, dirty, contextSaving, isContactedHistory]);
+
+  useEffect(() => {
+    if (!dirty || !draft || !outreachPackage || saveState === "saving" || saveState === "error") return;
     const timer = window.setTimeout(async () => {
+      const version = draftEditVersion.current;
       setSaveState("saving");
       try {
         const saved = await onSavePackage(outreachPackage.id, draft);
+        if (version !== draftEditVersion.current) {
+          setSaveState("idle");
+          return;
+        }
         setOutreachPackage(saved);
         setDraft(withTemplate(saved.content));
         setDirty(false);
-        onDirtyChange(false);
         setSaveState("saved");
       } catch {
-        setSaveState("error");
+        setSaveState(version === draftEditVersion.current ? "error" : "idle");
       }
     }, 700);
     return () => window.clearTimeout(timer);
   // withTemplate only supplies a compatibility fallback for older packages.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, draft, outreachPackage?.id]);
+  }, [dirty, draft, outreachPackage?.id, saveState]);
 
   const copyBusinessContext = async () => {
     try {
@@ -1841,11 +1603,10 @@ function OutreachWorkspace({
   const updateContextInput = (next: OutreachGenerationInput) => {
     setOutreachInput(next);
     setContextDirty(true);
-    onDirtyChange(true);
   };
 
   const saveContext = async () => {
-    if (contextSaving) return;
+    if (contextSaving || dirty) return;
     setContextSaving(true);
     setLoadError("");
     const input: OutreachGenerationInput = {
@@ -1858,7 +1619,6 @@ function OutreachWorkspace({
       setDraft(withTemplate(saved.content));
       setOutreachInput(saved.content.outreach_input || input);
       setContextDirty(false);
-      onDirtyChange(false);
       showToast({ title: "Context saved", tone: "green" });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1885,12 +1645,13 @@ function OutreachWorkspace({
     field: string,
     value: string,
   ) => {
-    if (!draft?.generated_outreach) return;
+    if (!draft?.generated_outreach || contextSaving) return;
     const current = draft.generated_outreach;
     const channelValue = current.channels[channel];
     const nextChannel = field === "talking_points"
       ? { ...channelValue, talking_points: value.split("\n").map((item) => item.trim()).filter(Boolean) }
       : { ...channelValue, [field]: value };
+    draftEditVersion.current += 1;
     setDraft({
       ...draft,
       generated_outreach: {
@@ -1899,8 +1660,7 @@ function OutreachWorkspace({
       },
     });
     setDirty(true);
-    setSaveState("idle");
-    onDirtyChange(true);
+    setSaveState((current) => current === "saving" ? current : "idle");
   };
 
   const closeWorkspace = () => {
@@ -1993,9 +1753,9 @@ function OutreachWorkspace({
     <section className="outreach-contact-log">
       <header>
         <div>
-          <span>{contactHistory.length
+          <span>{historyLoadError || (contactHistory.length
             ? `${contactHistory.length} recorded attempt${contactHistory.length === 1 ? "" : "s"}`
-            : "No outreach recorded yet"}</span>
+            : "No outreach recorded yet")}</span>
         </div>
         {!contactLogOpen ? <button type="button" onClick={() => setContactLogOpen(true)}>
           <Plus size={14} />Log
@@ -2068,6 +1828,9 @@ function OutreachWorkspace({
       <button className={workspaceTab === "outreach" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("outreach")}>
         {isContactedHistory ? "Outreach" : "Context"}
       </button>
+      {!isContactedHistory ? <button className={workspaceTab === "drafts" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("drafts")}>
+        Drafts
+      </button> : null}
       <button className={workspaceTab === "json" ? "active" : ""} type="button" onClick={() => setWorkspaceTab("json")}>
         Business JSON
       </button>
@@ -2164,7 +1927,7 @@ function OutreachWorkspace({
               )}
             </div>
           </div>
-        ) : isContactedHistory && generatedOutreach && !editingInputs ? (
+        ) : generatedOutreach && (isContactedHistory || workspaceTab === "drafts") ? (
           <div className="outreach-tab-layout">
             {workspaceTabs}
             <div className="generated-outreach-canvas">
@@ -2184,7 +1947,6 @@ function OutreachWorkspace({
                     {!generatedChannels.includes(channel) ? <small>Not generated</small> : null}
                   </button>
                 ))}
-                {!isContactedHistory ? <button className="generated-edit-inputs" type="button" onClick={() => setEditingInputs(true)}>Edit inputs</button> : null}
               </header>
 
               <div className="generated-channel-editor">
@@ -2218,11 +1980,7 @@ function OutreachWorkspace({
                 {!generatedOutreach.channels[activeGeneratedChannel] && !isContactedHistory ? (
                   <div className="generated-channel-empty">
                     <strong>{outreachDraftChannelLabel(activeGeneratedChannel)} has not been generated</strong>
-                    <p>Generate this message without replacing drafts from the other channels.</p>
-                    <button disabled={generating} type="button" onClick={() => void generateOutreach([activeGeneratedChannel])}>
-                      {generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}
-                      {generating ? "Generating…" : `Generate ${outreachDraftChannelLabel(activeGeneratedChannel)}`}
-                    </button>
+                    <p>Select this business and choose the channel in Generate drafts.</p>
                   </div>
                 ) : null}
                 {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
@@ -2235,11 +1993,21 @@ function OutreachWorkspace({
                     : "Contacted"
                   : `${outreachPackage?.provider}${outreachPackage?.model ? ` · ${outreachPackage.model}` : ""} · prompt ${generatedOutreach.prompt_version}`}</span>
                 {saveState !== "idle" ? <em className={`is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save failed"}</em> : null}
-                {generatedOutreach.channels[activeGeneratedChannel] && !isContactedHistory ? <button className="secondary" disabled={generating || dirty || saveState === "saving"} type="button" onClick={() => void generateOutreach([activeGeneratedChannel])}>{generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}{generating ? "Generating…" : "Regenerate"}</button> : null}
+                {saveState === "error" ? <button className="secondary" type="button" onClick={() => setSaveState("idle")}>Retry save</button> : null}
                 {channelCopy ? <button type="button" onClick={() => void copyChannel()}>{channelCopied ? <Check size={14} /> : <Copy size={14} />}{channelCopied ? "Copied" : "Copy"}</button> : null}
               </footer>
               </section>
             </>}
+            </div>
+          </div>
+        ) : workspaceTab === "drafts" ? (
+          <div className="outreach-tab-layout">
+            {workspaceTabs}
+            <div className="generated-outreach-canvas">
+              <div className="outreach-template-status">
+                <strong>{loadError ? "Could not load drafts" : "No drafts yet"}</strong>
+                <p>{loadError || "Select this business in Shortlisted and choose Generate drafts."}</p>
+              </div>
             </div>
           </div>
         ) : (
@@ -2251,8 +2019,8 @@ function OutreachWorkspace({
               <details className="outreach-context-drawer" open>
                 <summary><span>Add context</span><em>Business-specific notes used in outreach</em></summary>
                 <div>
-                  <label><span>Review notes <em>optional</em></span><textarea rows={5} value={outreachInput.review_notes || ""} onChange={(event) => updateContextInput({ ...outreachInput, review_notes: event.target.value || null })} placeholder="Note what you found on their website: strengths, issues, projects, or details worth referencing." /></label>
-                  <label><span>Concept or proof link <em>optional</em></span><input type="url" value={outreachInput.concept_url || ""} onChange={(event) => {
+                  <label><span>Review notes <em>optional</em></span><textarea disabled={contextSaving} rows={5} value={outreachInput.review_notes || ""} onChange={(event) => updateContextInput({ ...outreachInput, review_notes: event.target.value || null })} placeholder="Note what you found on their website: strengths, issues, projects, or details worth referencing." /></label>
+                  <label><span>Concept or proof link <em>optional</em></span><input disabled={contextSaving} type="url" value={outreachInput.concept_url || ""} onChange={(event) => {
                     const conceptUrl = event.target.value || null;
                     updateContextInput({
                       ...outreachInput,
@@ -2264,7 +2032,7 @@ function OutreachWorkspace({
               {loadError ? <p className="outreach-generation-error"><AlertTriangle size={14} />{loadError}</p> : null}
               <div className="outreach-context-actions">
                 <span>{contextDirty ? "Unsaved context" : outreachPackage ? "Context saved" : "No context saved"}</span>
-                <button disabled={contextSaving || !contextDirty} type="button" onClick={() => void saveContext()}>
+                <button disabled={contextSaving || dirty || !contextDirty} type="button" onClick={() => void saveContext()}>
                   {contextSaving ? <RotateCw className="spin" size={14} /> : <Check size={14} />}
                   {contextSaving ? "Saving…" : "Save context"}
                 </button>
@@ -3118,7 +2886,7 @@ function audienceSignalStatement(
   return null;
 }
 
-function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClose: () => void }) {
+function AudienceDetailsDialog({ profile, actions, onClose }: { profile: Territory; actions: ReactNode; onClose: () => void }) {
   const opportunityLabels = profile.service_keys.length
     ? profile.service_keys.map((key) => profileServiceLabel(key))
     : profile.signal_keys.map((key) => profileSignalLabel(key));
@@ -3145,6 +2913,7 @@ function AudienceDetailsDialog({ profile, onClose }: { profile: Territory; onClo
           <p>{exclusionLabels.join(", ") || "None"}</p>
         </section>
       </div>
+      {actions}
     </Modal>
   );
 }
@@ -3282,25 +3051,77 @@ function ScheduleSearchDialog({
   );
 }
 
+function ReviewBusinessList({ contacts, label, status }: {
+  contacts: DiscoveryResult[];
+  label: string;
+  status?: (contact: DiscoveryResult) => string | undefined;
+}) {
+  return (
+    <ul className="bulk-review-list" aria-label={label} tabIndex={0}>
+      {contacts.map((contact) => {
+        const note = status?.(contact);
+        return (
+          <li key={contact.id}>
+            <div>
+              <strong>{contact.company_name}</strong>
+              {contact.geography ? <small>{contact.geography}</small> : null}
+            </div>
+            {note ? <small className="bulk-review-status">{note}</small> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function BulkReviewDialog({ review, shortlisted, removing, onClose, onConfirm }: {
+  review: BulkReview;
+  shortlisted: boolean;
+  removing: boolean;
+  onClose: () => void;
+  onConfirm: (contacts: DiscoveryResult[]) => void;
+}) {
+  const { contacts, error, action, allMatching } = review;
+  const scope = allMatching ? "All matching businesses" : "Selected businesses";
+  const title = action === "drafts" ? "Generate drafts" : shortlisted ? "Remove from Shortlisted" : "Remove leads";
+  return (
+    <Modal title={title} onClose={onClose}>
+      {error ? <p role="alert">{error}</p> : !contacts ? (
+        <div className="loading-indicator" aria-live="polite"><span className="sl-spin" aria-hidden="true" /> Loading selection…</div>
+      ) : contacts.length === 0 ? <p>No selected businesses are available in this view.</p> : (
+        <>
+          <p>{scope} will {shortlisted ? "return to Leads." : "move to Dismissed."}</p>
+          <ReviewBusinessList contacts={contacts} label={scope} />
+        </>
+      )}
+      <div className="dialog-actions">
+        <button className="secondary" type="button" disabled={removing} onClick={onClose}>Cancel</button>
+        {action === "remove" && contacts?.length ? (
+          <button className="runbtn" type="button" disabled={removing} onClick={() => onConfirm(contacts)}>
+            {removing ? "Removing…" : `Remove ${contacts.length}`}
+          </button>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
 function PersonalizedBulkOutreachPanel({
-  contacts: initialContacts,
-  excludedContactIds,
-  globalView,
-  selectAll,
-  selectedContactIds,
+  contacts,
+  allMatching,
+  onGenerated,
+  onGeneratingChange,
   onClose,
 }: {
   contacts: DiscoveryResult[];
-  excludedContactIds: string[];
-  globalView: boolean;
-  selectAll: boolean;
-  selectedContactIds: string[];
+  allMatching: boolean;
+  onGenerated: (resultId: string, outreachPackage: OutreachPackage) => void;
+  onGeneratingChange: (generating: boolean) => void;
   onClose: () => void;
 }) {
   const { showToast } = useToast();
   const { territoryApi } = useAppData();
-  const [contacts, setContacts] = useState(initialContacts);
-  const [loadingContacts, setLoadingContacts] = useState(globalView);
+  const scope = allMatching ? "All matching businesses" : "Selected businesses";
   const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("builtin");
   const [templateName, setTemplateName] = useState("");
@@ -3313,7 +3134,7 @@ function PersonalizedBulkOutreachPanel({
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationState, setGenerationState] = useState<Record<string, "pending" | "working" | "generated" | "failed">>({});
-  const [, setGenerationErrors] = useState<Record<string, string>>({});
+  const [generationErrors, setGenerationErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -3327,46 +3148,11 @@ function PersonalizedBulkOutreachPanel({
     return () => { active = false; };
   }, [territoryApi, showToast]);
 
-  useEffect(() => {
-    if (!globalView) {
-      setContacts(initialContacts);
-      return;
-    }
-    let active = true;
-    setLoadingContacts(true);
-    const loadAll = async () => {
-      const collected: DiscoveryResult[] = [];
-      let offset = 0;
-      let total = 0;
-      do {
-        const page = await territoryApi.getWorkspaceLeads({ view: "shortlisted", limit: 100, offset });
-        collected.push(...page.items);
-        total = page.total;
-        offset += page.items.length;
-        if (!page.items.length) break;
-      } while (offset < total);
-      return collected;
-    };
-    void loadAll()
-      .then((rows) => {
-        if (active) setContacts(dedupeContacts(rows));
-      })
-      .catch((error) => {
-        if (active) showToast({ title: "Could not load shortlist", message: error instanceof Error ? error.message : String(error), tone: "red" });
-      })
-      .finally(() => {
-        if (active) setLoadingContacts(false);
-      });
-    return () => { active = false; };
-  }, [globalView, initialContacts, territoryApi, showToast]);
-
-  const generatableContacts = useMemo(
+  const targetContacts = useMemo(
     () => contacts.filter((contact) => Boolean(contact.audience_result_id || contact.id.startsWith("audience_result_"))),
     [contacts],
   );
-  const targetContacts = selectAll
-    ? generatableContacts.filter((contact) => !excludedContactIds.includes(contact.id))
-    : generatableContacts.filter((contact) => selectedContactIds.includes(contact.id));
+  const targetIds = new Set(targetContacts.map((contact) => contact.id));
 
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const generatedCount = Object.values(generationState).filter((state) => state === "generated").length;
@@ -3508,6 +3294,7 @@ function PersonalizedBulkOutreachPanel({
     const selected = targetContacts;
     if (!selected.length || !selectedChannels.length || generating) return;
     setGenerating(true);
+    onGeneratingChange(true);
     setGenerationErrors({});
     setGenerationState(Object.fromEntries(selected.map((contact) => [contact.id, "pending"])));
 
@@ -3534,6 +3321,7 @@ function PersonalizedBulkOutreachPanel({
             example_message: null,
           });
           setGeneratedPackages((current) => ({ ...current, [contact.id]: generated }));
+          onGenerated(resultId, generated);
           setGenerationState((current) => ({ ...current, [contact.id]: "generated" }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -3543,8 +3331,12 @@ function PersonalizedBulkOutreachPanel({
       }
     };
 
-    await Promise.all(Array.from({ length: Math.min(2, selected.length) }, () => worker()));
-    setGenerating(false);
+    try {
+      await Promise.all(Array.from({ length: Math.min(2, selected.length) }, () => worker()));
+    } finally {
+      setGenerating(false);
+      onGeneratingChange(false);
+    }
   };
 
   useEffect(() => {
@@ -3557,19 +3349,29 @@ function PersonalizedBulkOutreachPanel({
   }, [completedCount, failedCount, generatedCount, generating, generationState, showToast]);
 
   return (
-    <section className="bulk-outreach-panel personalized-bulk-panel">
+    <section className="bulk-outreach-panel personalized-bulk-panel" role="dialog" aria-modal="true" aria-label="Generate drafts">
       <header className="bulk-outreach-header">
         <div>
-          <strong>Generate outreach</strong>
+          <strong>Generate drafts</strong>
           <p>One structure, personalized per business from its verified evidence.</p>
         </div>
         <div className="personalized-outreach-header-actions">
-          <span className="personalized-outreach-count">{targetContacts.length} businesses</span>
-          <button className="link-button" type="button" aria-label="Close bulk outreach" onClick={onClose}><X size={17} /></button>
+          <span className="personalized-outreach-count">{contacts.length} {contacts.length === 1 ? "business" : "businesses"}</span>
+          <button className="link-button" type="button" aria-label="Close bulk outreach" disabled={generating} onClick={onClose}><X size={17} /></button>
         </div>
       </header>
 
       <div className="personalized-outreach-body">
+        <section className="personalized-outreach-section">
+          <div className="personalized-section-heading"><span>{scope}</span></div>
+          <ReviewBusinessList contacts={contacts} label={scope} status={(contact) => {
+            if (!targetIds.has(contact.id)) return "Drafts unavailable for this business";
+            if (generationErrors[contact.id]) return generationErrors[contact.id];
+            if (generationState[contact.id] === "working") return "Generating…";
+            if (generationState[contact.id] === "generated") return "Drafts ready";
+            return undefined;
+          }} />
+        </section>
         <section className="personalized-outreach-section">
           <div className="personalized-section-heading">
             <span>Template</span>
@@ -3715,10 +3517,10 @@ function PersonalizedBulkOutreachPanel({
             ) : null}
           </div> : null}
         </div>
-        {failedCount ? <span className="bulk-warning">{failedCount} failed. Open each business for details.</span> : null}
-        <button className="runbtn bulk-send-selected" type="button" aria-label="Generate outreach" disabled={generating || loadingContacts || !targetContacts.length || !selectedChannels.length} onClick={() => void generateSelected()}>
+        {failedCount ? <span className="bulk-warning">{failedCount} failed</span> : null}
+        <button className="runbtn bulk-send-selected" type="button" disabled={generating || !targetContacts.length || !selectedChannels.length} onClick={() => void generateSelected()}>
           {generating ? <RotateCw className="spin" size={14} /> : <Sparkles size={14} />}
-          <span>{generating ? `${completedCount} of ${targetContacts.length}` : "Generate"}</span>
+          <span>{generating ? `${completedCount} of ${targetContacts.length}` : "Generate drafts"}</span>
         </button>
       </footer>
     </section>
@@ -4267,6 +4069,7 @@ function ContactCard({
         tabIndex={0}
         onClick={onOpen}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             onOpen();
@@ -5909,13 +5712,6 @@ function emptyBatchCopy(
     title: "No matching leads are available yet.",
     detail: "Try adjusting the cities, filters, or website opportunity.",
   };
-}
-
-function formatCompactDate(value?: string | null) {
-  if (!value) return "not scheduled";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "not scheduled";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function outcomeLabel(value: string) {
