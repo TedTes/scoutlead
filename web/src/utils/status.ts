@@ -1,4 +1,17 @@
-import type { Tone } from "../types/navigation";
+import type { LeadWorkflowView, Tone } from "../types/navigation";
+
+const LEAD_WORKFLOW_LABELS: Record<LeadWorkflowView, string> = {
+  inbox: "Leads",
+  this_week: "This week",
+  shortlisted: "Shortlisted",
+  contacted: "Contacted",
+  dismissed: "Dismissed",
+  all: "All leads",
+};
+
+export function workflowViewLabel(view: LeadWorkflowView): string {
+  return LEAD_WORKFLOW_LABELS[view];
+}
 
 export function statusTone(status: string): Tone {
   const value = status.toLowerCase();

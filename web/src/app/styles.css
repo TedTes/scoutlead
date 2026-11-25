@@ -7625,18 +7625,18 @@ body.is-resizing-navigation .rail {
   flex-basis: 68px;
 }
 
-.shortlist-account-bar {
+.workflow-account-bar {
   justify-content: space-between;
   padding-inline-start: max(26px, calc((100% - 960px) / 2));
 }
 
-.shortlist-account-bar .results-breadcrumb {
+.workflow-account-bar .results-breadcrumb {
   color: var(--text);
   font-size: 13px;
 }
 
-.shortlist-account-bar .shortlist-title,
-.mobile-topbar .shortlist-title {
+.workflow-account-bar .workflow-title,
+.mobile-topbar .workflow-title {
   font-weight: 500;
 }
 
@@ -13519,7 +13519,7 @@ button.bulk-recipient-select:hover {
     padding: 0;
   }
 
-  body.has-contact-detail .shortlist-account-bar {
+  body.has-contact-detail .workflow-account-bar {
     padding-inline-start: 18px;
   }
 

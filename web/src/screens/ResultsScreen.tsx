@@ -64,6 +64,7 @@ import type {
 } from "../types/domain";
 import { defaultExportFileName } from "../utils/export-file";
 import { formatDate } from "../utils/format";
+import { workflowViewLabel } from "../utils/status";
 import {
   getAddress,
   getContactName,
@@ -795,11 +796,7 @@ export function ResultsScreen({
               {activeProfile.label}
             </button>
           </nav>
-        ) : workflowView === "shortlisted" && isGlobalView ? null : (
-          <nav aria-label="Lead context" className="results-breadcrumb">
-            <strong>{workflowViewLabel(workflowView)}</strong>
-          </nav>
-        )}
+        ) : null}
         {accountControl}
         <div className="results-control-actions">
           <label className="sl-search results-search">
@@ -5753,15 +5750,6 @@ function formatContactDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function workflowViewLabel(view: LeadWorkflowView) {
-  if (view === "inbox") return "Leads";
-  if (view === "this_week") return "This week";
-  if (view === "shortlisted") return "Shortlisted";
-  if (view === "contacted") return "Contacted";
-  if (view === "dismissed") return "Dismissed";
-  return "All leads";
 }
 
 function refillPolicyLabel(value: Territory["refill_policy"]) {

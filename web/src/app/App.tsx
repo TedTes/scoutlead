@@ -46,6 +46,7 @@ import type {
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 import { defaultExportFileName } from "../utils/export-file";
 import { formatDate } from "../utils/format";
+import { workflowViewLabel } from "../utils/status";
 
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
@@ -320,8 +321,9 @@ function AppShell({
   const railStyle = {
     "--rail-width": `${railWidth}px`,
   } as CSSProperties;
-  const isGlobalShortlist = activeScreen === "results" && !isTraceRoute && products.length > 0
-    && !selectedProfileId && !selectedDiscoveryRunId && leadWorkflowView === "shortlisted";
+  const isGlobalResultsView = activeScreen === "results" && !isTraceRoute && products.length > 0
+    && !selectedProfileId && !selectedDiscoveryRunId;
+  const workflowTitle = leadWorkflowView === "shortlisted" ? "All shortlisted" : workflowViewLabel(leadWorkflowView);
   const mobileAccountLabel = accountName || accountEmail;
   const resultsAccountControl = (
     <div className="account-identity results-account-control">
@@ -345,8 +347,8 @@ function AppShell({
         </button>
         <div className="mobile-brand">
           <span className="brand-mark">S</span>
-          <strong className={isGlobalShortlist ? "shortlist-title" : undefined}>
-            {isGlobalShortlist ? "All shortlisted" : "ScoutLead"}
+          <strong className={isGlobalResultsView ? "workflow-title" : undefined}>
+            {isGlobalResultsView ? workflowTitle : "ScoutLead"}
           </strong>
         </div>
         <div className="account-identity mobile-account-control">
@@ -485,10 +487,10 @@ function AppShell({
       <section
         className={["product", "integrations"].includes(activeScreen) ? "main main-settings-screen" : "main"}
       >
-        {isGlobalShortlist ? (
-          <header className="desktop-account-bar shortlist-account-bar">
+        {isGlobalResultsView ? (
+          <header className="desktop-account-bar workflow-account-bar">
             <nav aria-label="Lead context" className="results-breadcrumb">
-              <strong className="shortlist-title">All shortlisted</strong>
+              <strong className="workflow-title">{workflowTitle}</strong>
             </nav>
             {resultsAccountControl}
           </header>
@@ -551,7 +553,7 @@ function AppShell({
                 listRequestId: leadListRequestId,
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
-                accountControl: isGlobalShortlist ? undefined : resultsAccountControl,
+                accountControl: isGlobalResultsView ? undefined : resultsAccountControl,
               },
               {
                 defaultFolderId: newAudienceFolderId,
