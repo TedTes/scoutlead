@@ -144,11 +144,13 @@ export function ResultsScreen({
   accountControl,
   listRequestId = 0,
   onWorkflowViewChange,
+  toolbarHost,
   workflowView,
 }: {
   accountControl?: ReactNode;
   listRequestId?: number;
   onWorkflowViewChange: (view: LeadWorkflowView) => void;
+  toolbarHost?: HTMLDivElement | null;
   workflowView: LeadWorkflowView;
 }) {
   const {
@@ -781,76 +783,82 @@ export function ResultsScreen({
     return <AudienceProfileScreen />;
   }
 
+  const toolbar = (
+    <div className="results-control-actions">
+      <label className="sl-search results-search">
+        <Search size={15} aria-hidden="true" />
+        <input
+          type="search"
+          aria-label="Search leads"
+          placeholder="Search leads"
+          value={leadSearch}
+          onChange={(event) => setLeadSearch(event.target.value)}
+        />
+      </label>
+      <div className="results-header-actions" role="group" aria-label="Lead actions">
+        <button
+          aria-label="Export"
+          aria-haspopup="dialog"
+          className="results-header-action"
+          data-tooltip="Export businesses"
+          disabled={leadListPending || Boolean(workspaceLeadsError) || !actionScopeCount}
+          type="button"
+          onClick={openBusinessExport}
+        >
+          <Download size={18} aria-hidden="true" />
+        </button>
+        {workflowView === "shortlisted" ? (
+          <button
+            aria-haspopup="dialog"
+            aria-label="Drafts"
+            className="results-header-action"
+            data-tooltip="Generate drafts"
+            disabled={!canReviewBusinesses || outreachDraftDirty}
+            type="button"
+            onClick={() => void openBulkReview("drafts")}
+          >
+            <MessageCircle size={18} aria-hidden="true" />
+          </button>
+        ) : null}
+        {workflowView === "inbox" && bulkSelecting ? (
+          <button className="results-header-action" aria-label="Shortlist" aria-haspopup="dialog" data-tooltip="Add to Shortlisted" disabled={!canReviewBusinesses} type="button" onClick={() => void openBulkReview("shortlist")}>
+            {bulkLeadAction === "shortlist" ? <RotateCw className="spin" size={18} aria-hidden="true" /> : <Star size={18} aria-hidden="true" />}
+          </button>
+        ) : null}
+        {canRemoveSelection ? (
+          <button
+            aria-haspopup="dialog"
+            aria-label="Remove"
+            className="results-header-action results-header-remove"
+            data-tooltip={workflowView === "shortlisted" ? "Remove from Shortlisted" : "Move to Dismissed"}
+            disabled={!canReviewBusinesses}
+            type="button"
+            onClick={() => void openBulkReview("remove")}
+          >
+            <CircleMinus size={18} aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <section className={detailContact ? "results-workspace has-detail" : "results-workspace"}>
-      <div className="results-controlbar">
-        {activeProfile ? (
-          <nav aria-label="Saved search context" className="results-breadcrumb">
-            <span>Saved searches</span>
-            <span aria-hidden="true">/</span>
-            <button type="button" onClick={() => setProfileDetailsOpen(true)}>
-              {activeProfile.label}
-            </button>
-          </nav>
-        ) : null}
-        {accountControl}
-        <div className="results-control-actions">
-          <label className="sl-search results-search">
-            <Search size={15} aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search leads"
-              placeholder="Search leads"
-              value={leadSearch}
-              onChange={(event) => setLeadSearch(event.target.value)}
-            />
-          </label>
-          <div className="results-header-actions" role="group" aria-label="Lead actions">
-            <button
-              aria-label="Export"
-              aria-haspopup="dialog"
-              className="results-header-action"
-              data-tooltip="Export businesses"
-              disabled={leadListPending || Boolean(workspaceLeadsError) || !actionScopeCount}
-              type="button"
-              onClick={openBusinessExport}
-            >
-              <Download size={18} aria-hidden="true" />
-            </button>
-            {workflowView === "shortlisted" ? (
-              <button
-                aria-haspopup="dialog"
-                aria-label="Drafts"
-                className="results-header-action"
-                data-tooltip="Generate drafts"
-                disabled={!canReviewBusinesses || outreachDraftDirty}
-                type="button"
-                onClick={() => void openBulkReview("drafts")}
-              >
-                <MessageCircle size={18} aria-hidden="true" />
+      {toolbarHost ? createPortal(toolbar, toolbarHost) : (
+        <div className="results-controlbar">
+          {activeProfile ? (
+            <nav aria-label="Saved search context" className="results-breadcrumb">
+              <span>Saved searches</span>
+              <span aria-hidden="true">/</span>
+              <button type="button" onClick={() => setProfileDetailsOpen(true)}>
+                {activeProfile.label}
               </button>
-            ) : null}
-            {workflowView === "inbox" && bulkSelecting ? (
-              <button className="results-header-action" aria-label="Shortlist" aria-haspopup="dialog" data-tooltip="Add to Shortlisted" disabled={!canReviewBusinesses} type="button" onClick={() => void openBulkReview("shortlist")}>
-                {bulkLeadAction === "shortlist" ? <RotateCw className="spin" size={18} aria-hidden="true" /> : <Star size={18} aria-hidden="true" />}
-              </button>
-            ) : null}
-            {canRemoveSelection ? (
-              <button
-                aria-haspopup="dialog"
-                aria-label="Remove"
-                className="results-header-action results-header-remove"
-                data-tooltip={workflowView === "shortlisted" ? "Remove from Shortlisted" : "Move to Dismissed"}
-                disabled={!canReviewBusinesses}
-                type="button"
-                onClick={() => void openBulkReview("remove")}
-              >
-                <CircleMinus size={18} aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
+            </nav>
+          ) : null}
+          {accountControl}
+          {toolbar}
         </div>
-      </div>
+      )}
 
       <div className={detailContact ? "results-body has-detail" : "results-body"}>
         <section className="lead-feed-pane" aria-label="Lead list">

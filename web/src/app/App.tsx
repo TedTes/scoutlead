@@ -47,7 +47,6 @@ import type {
 import type { LeadWorkflowCounts, LeadWorkflowView, Screen } from "../types/navigation";
 import { defaultExportFileName } from "../utils/export-file";
 import { formatDate } from "../utils/format";
-import { workflowViewLabel } from "../utils/status";
 
 type AppProps = {
   getAuthToken?: () => Promise<string | null>;
@@ -103,6 +102,7 @@ function AppShell({
   const [audienceMenuId, setAudienceMenuId] = useState("");
   const [folderMenuId, setFolderMenuId] = useState("");
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const [workflowToolbarHost, setWorkflowToolbarHost] = useState<HTMLDivElement | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [railWidth, setRailWidth] = useState(() =>
@@ -331,7 +331,6 @@ function AppShell({
   } as CSSProperties;
   const isGlobalResultsView = activeScreen === "results" && !isTraceRoute && products.length > 0
     && !selectedProfileId && !selectedDiscoveryRunId;
-  const workflowTitle = leadWorkflowView === "shortlisted" ? "All shortlisted" : workflowViewLabel(leadWorkflowView);
   const mobileAccountLabel = accountName || accountEmail;
   const resultsAccountControl = (
     <div className="account-identity results-account-control">
@@ -355,9 +354,7 @@ function AppShell({
         </button>
         <div className="mobile-brand">
           <span className="brand-mark">S</span>
-          <strong className={isGlobalResultsView ? "workflow-title" : undefined}>
-            {isGlobalResultsView ? workflowTitle : "ScoutLead"}
-          </strong>
+          <strong>ScoutLead</strong>
         </div>
         <div className="account-identity mobile-account-control">
           {mobileAccountLabel ? <span title={mobileAccountLabel}>{mobileAccountLabel}</span> : null}
@@ -415,6 +412,7 @@ function AppShell({
                 className={activeScreen === "results" && leadWorkflowView === item.id ? "active" : ""}
                 key={item.id}
                 aria-label={`${item.label}, ${item.count}`}
+                aria-current={activeScreen === "results" && leadWorkflowView === item.id ? "page" : undefined}
                 title={`${item.label} (${item.count})`}
                 type="button"
                 onClick={() => openWorkflowView(item.id)}
@@ -497,9 +495,7 @@ function AppShell({
       >
         {isGlobalResultsView ? (
           <header className="desktop-account-bar workflow-account-bar">
-            <nav aria-label="Lead context" className="results-breadcrumb">
-              <strong className="workflow-title">{workflowTitle}</strong>
-            </nav>
+            <div className="workflow-toolbar-slot" ref={setWorkflowToolbarHost} />
             {resultsAccountControl}
           </header>
         ) : activeScreen !== "results" ? (
@@ -562,6 +558,7 @@ function AppShell({
                 view: leadWorkflowView,
                 onViewChange: setLeadWorkflowView,
                 accountControl: isGlobalResultsView ? undefined : resultsAccountControl,
+                toolbarHost: isGlobalResultsView ? workflowToolbarHost : undefined,
               },
               {
                 defaultFolderId: newAudienceFolderId,

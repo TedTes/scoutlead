@@ -7626,18 +7626,25 @@ body.is-resizing-navigation .rail {
 }
 
 .workflow-account-bar {
-  justify-content: space-between;
+  gap: 18px;
   padding-inline-start: max(26px, calc((100% - 960px) / 2));
+  position: relative;
+  z-index: 45;
 }
 
-.workflow-account-bar .results-breadcrumb {
-  color: var(--text);
-  font-size: 13px;
+.workflow-toolbar-slot {
+  flex: 1;
+  min-width: 0;
 }
 
-.workflow-account-bar .workflow-title,
-.mobile-topbar .workflow-title {
-  font-weight: 500;
+.workflow-account-bar .results-account-control {
+  border-inline-start: 1px solid var(--line);
+  flex: 0 0 auto;
+  padding-inline-start: 14px;
+}
+
+.workflow-account-bar .results-account-control > span {
+  max-width: min(14vw, 180px);
 }
 
 .desktop-account-bar.has-summary .desktop-settings-context {
@@ -11316,7 +11323,6 @@ body.is-resizing-navigation .rail {
 }
 
 .results-controlbar {
-  --results-control-height: 34px;
   align-items: center;
   border-bottom: 1px solid var(--line);
   display: grid;
@@ -11431,6 +11437,7 @@ body.is-resizing-navigation .rail {
 }
 
 .results-control-actions {
+  --results-control-height: 34px;
   align-items: center;
   display: flex;
   gap: 10px;
@@ -17011,6 +17018,15 @@ button.bulk-recipient-select:hover {
   }
 
   .desktop-account-bar {
+    display: none;
+  }
+
+  .workflow-account-bar.desktop-account-bar {
+    display: flex;
+    padding-inline: 14px;
+  }
+
+  .workflow-account-bar .results-account-control {
     display: none;
   }
 

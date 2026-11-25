@@ -13,6 +13,7 @@ export function renderScreen(
     view: LeadWorkflowView;
     onViewChange: (view: LeadWorkflowView) => void;
     accountControl?: ReactNode;
+    toolbarHost?: HTMLDivElement | null;
   } = {
     listRequestId: 0,
     view: "this_week",
@@ -36,6 +37,7 @@ export function renderScreen(
           workflowView={resultsNavigation.view}
           onWorkflowViewChange={resultsNavigation.onViewChange}
           accountControl={resultsNavigation.accountControl}
+          toolbarHost={resultsNavigation.toolbarHost}
         />
       );
     default:
