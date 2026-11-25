@@ -350,6 +350,17 @@ export class ApiClient {
     );
   }
 
+  async getAllWorkspaceLeads(input: { view: string; search?: string }) {
+    const leads = new Map<string, DiscoveryResult>();
+    let offset = 0;
+    while (true) {
+      const page = await this.getWorkspaceLeads({ ...input, limit: 100, offset });
+      for (const lead of page.items) leads.set(lead.id, lead);
+      offset += page.limit;
+      if (!page.items.length || offset >= page.total) return [...leads.values()];
+    }
+  }
+
   getProfileOptions() {
     return this.request<ProfileOptions>("/audiences/options");
   }

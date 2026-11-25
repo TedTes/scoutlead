@@ -87,7 +87,7 @@ class WorkspaceLeadService:
         needle = (search or "").strip().casefold()
         if needle:
             filtered = [item for item in filtered if needle in item.searchable]
-        filtered.sort(key=lambda item: item.updated_at, reverse=True)
+        filtered.sort(key=lambda item: (item.updated_at, item.model_id), reverse=True)
         selected = filtered[offset : offset + limit]
         items = self._serialize(selected)
         return WorkspaceLeadPage(
